@@ -692,6 +692,7 @@
     "data/Object:fileAccessDelegate",
     "data/Object:highlightFields",
     "data/Object:icon",
+    "data/Object:imageField",
     "data/Object:indexes",
     "data/Object:isSystem",
     "data/Object:label",

@@ -242,7 +242,7 @@ export function assertAudienceConfig(
   if (rawPosture !== undefined && !isAudiencePosture(rawPosture)) {
     fail(
       `posture ${describeAudiencePosture(rawPosture)} is not a recognized audience posture — ` +
-      `expected one of: ${AUDIENCE_POSTURES.join(', ')}. Refused, never coerced (#5205 fail-open precedent).`,
+      `expected one of: ${AUDIENCE_POSTURES.join(', ')}. Refused, never coerced: an unrecognised value must not fall through to a more permissive posture than the one intended.`,
     );
   }
   const posture: AudiencePosture = (rawPosture as AudiencePosture | undefined) ?? 'invite_only';

@@ -25,7 +25,12 @@ import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spe
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import { createStdioDataBridge, enforceApiExposure, GATED_ACTIONS } from './stdio-data-bridge.js';
+import {
+  createStdioDataBridge,
+  enforceApiExposure,
+  GATED_ACTIONS,
+  serveStoredMetadataRow,
+} from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
 
@@ -601,7 +606,12 @@ export class MCPServerPlugin implements Plugin {
         })) as unknown;
         const rows = res && (res as { value?: unknown }).value ? (res as { value: unknown }).value : res;
         const row = Array.isArray(rows) ? rows[0] : rows;
-        return (row ?? null) as Record<string, unknown> | null;
+        // [#21207] The stored-metadata-body family's one projection, applied by
+        // the same helper `bridge.get` serves through: a `sys_metadata` /
+        // `sys_metadata_history` row's body reaches this resource as its type's
+        // read projection, never as the stored bytes — so the tool and the
+        // resource cannot disagree about what a stored credential is.
+        return serveStoredMetadataRow(objectName, (row ?? null) as Record<string, unknown> | null);
       };
       ctx.logger.info(
         `[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity ${initial.userId} (RLS/FLS/tenant applied)`,

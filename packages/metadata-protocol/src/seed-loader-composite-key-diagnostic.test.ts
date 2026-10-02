@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #16488 — a composite `externalId`'s NUL joiner must never reach a diagnostic.
+ * Commit 460d4b807 — a composite `externalId`'s NUL joiner must never reach a diagnostic.
  *
  * ## The ruling this file protects on BOTH sides
  *

@@ -103,9 +103,12 @@
 //
 // [#20176] …and, where the column's CLASS is known, every temporal comparand is
 // compared by that column's storage rule — the rule the drivers apply to the
-// same comparand in a `where`, `@objectstack/core`'s `temporalStorageForm`,
-// with ADR-0053 D-D's whole-day reading of a bare-day upper bound on a
-// `datetime` column. The class comes from the object's declaration for the
+// same comparand in a `where`, `@objectstack/core`'s `temporalStorageForm`.
+// [ADR-0053 D-D1 item 5, as amended] The whole-day reading of a bare-day upper
+// bound on a `datetime` column is not applied here: the engine's seam lowers
+// both positions before this walker sees them (`lowerFilterCondition`), and a
+// caller that reaches it without a seam gets the comparison it wrote. The class
+// comes from the object's declaration for the
 // per-aggregation `filter` (`declaredFieldClasses`) and from the query for
 // `having` (`aggregatedRowColumnClasses`, #20127's rule). See
 // {@link checkCondition}. Before, both positions compared a temporal comparand
@@ -130,6 +133,27 @@
 // `{ owners: { $in: ['u1'] } }` counted 0 and `{ owners: { $nin: ['u1'] } }`
 // counted the very rows holding `u1`, where the same `where` is a 400 on every
 // SQL dialect. See {@link assertAggregationFilterSparesJsonStoredFields}.
+//
+// [#20981] …and on BOTH positions a non-boolean `$exists` / `$null` is refused
+// `INVALID_FILTER` / 400 in the words every driver's `where` refuses it in,
+// judged once before any row and per row as the floor, beside `$empty`'s gate.
+// Before, `$exists` was read by truthiness (`"false"` kept the valued rows) and
+// a third `$null` value constrained nothing. See
+// {@link nonBooleanFlagComparandError}.
+//
+// [#21255] …and on BOTH positions the class rule `where` applies to EVERY
+// `{ $field }` comparison, not only to an `addDays` pair: two columns are
+// comparable only within one of the spec's `CROSS_FIELD_COMPARISON_CLASSES`,
+// asked of the spec's own verdict (`crossFieldComparisonVerdict`). A plain
+// reference across two classes — a `datetime` against a `date`, a text against
+// a number — is refused `INVALID_FILTER` / 400 in the words `where` refuses the
+// same pair in. Before, only an `addDays` pair was judged, so a plain one
+// reached `@objectstack/formula`, which answered a `datetime` against a bare
+// day by its whole-day reading of the day: measured on `SqlDriver` over
+// better-sqlite3 through `engine.aggregate`, a per-aggregation
+// `{ closed_at: { $lte: { $field: 'due_on' } } }` counted 4 of 6 rows and a
+// `having` of `max(closed_at)` against a `day` bucket kept 4 of 6 groups, where
+// the `where` twin was a 400. See {@link crossClassReferenceViolation}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -149,6 +173,14 @@ import {
   INSTANT_TYPES,
   NUMERIC_VALUE_TYPES,
 } from '@objectstack/spec/data';
+// [#21255] The cross-field comparison CLASS — the spec's one classification,
+// which `driver-sql`'s `where` compiler reads too — so a plain `{ $field }` here
+// is judged by the table that judges it there, never by a copy of it.
+import {
+  crossFieldComparisonVerdict,
+  type CrossFieldComparisonClass,
+  type CrossFieldComparisonFieldMeta,
+} from '@objectstack/spec/data';
 // [#5702] The retired operators and the prescription a refusal prints. HAVING is
 // the fifth of the five refusal sites `RETIRED_FILTER_OPERATORS`' own doc names,
 // and reads the table for the same reason the four driver sites do: one
@@ -166,11 +198,8 @@ import { utcInstantMs } from '@objectstack/spec/data';
 // stored value counts as empty for a face that judges by value.
 import { isEmptyFilterValue } from '@objectstack/spec/data';
 // [#20176] The storage rule a temporal column puts a value in — ONE function,
-// shared with `driver-sql`'s and `driver-memory`'s `where` — and the whole-day
-// reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
-// the spec, where that rule is declared.
+// shared with `driver-sql`'s and `driver-memory`'s `where`.
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
-import { nextUtcCalendarDay, UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 // [#20873] The JSON-stored population — the declared fields on which `$contains`
 // asks MEMBERSHIP — from the spec's value-shape classes, the same two
 // `driver-sql`'s JSON-column registry is built from.
@@ -258,7 +287,8 @@ const CONDITION_OPERATORS = [
  * positions the SQL family compiles one in. Every other position (a list
  * member, a text pattern, `$exists` / `$null`) is refused by
  * {@link assertHavingIsEvaluable} rather than compared against the reference
- * OBJECT, which matched nothing.
+ * OBJECT, which matched nothing. [#20981] The two flags' slot is refused as a
+ * non-boolean first ({@link nonBooleanFlagComparandError}), as `$empty`'s is.
  */
 const REFERENCE_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
@@ -361,8 +391,9 @@ function unknownOperator(
  * `FieldOperatorsSchema` declares `$empty: z.boolean()`: `true` asks for the
  * empty rows, `false` for their exact complement. A third value is refused
  * rather than read — this face refuses the malformations it can see, where a
- * two-branch reading would silently constrain nothing (the lenient `$null`
- * arm's standing hazard).
+ * two-branch reading would silently constrain nothing (the hazard the `$null`
+ * arm carried until [#20981] refused its third value too — see
+ * {@link nonBooleanFlagComparandError}).
  */
 function emptyFlagComparandError(field: string, value: unknown, path: string): Error {
   const shown = JSON.stringify(value) ?? String(value);
@@ -371,6 +402,94 @@ function emptyFlagComparandError(field: string, value: unknown, path: string): E
     + `received ${shown}. @objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true `
     + `asks for the empty rows, false for their exact complement.`,
   );
+}
+
+/**
+ * [#20981] `$exists` or `$null` received a comparand that is not a boolean.
+ *
+ * `FieldOperatorsSchema` declares both flags `z.boolean()`, and every driver's
+ * `where` refuses a third value — the #5347 ruling for `$null`, applied to
+ * `$exists` by the 2026-08-06 ruling on #5298: `driver-sql` (with
+ * `driver-sqlite-wasm` and Turso local), Turso's remote transport,
+ * `driver-memory`, `driver-mongodb` and `service-analytics`. This face read one
+ * anyway, and the engine evaluates it itself, so the answer was the same on
+ * every driver. Measured through `engine.aggregate` on driver-memory and
+ * driver-sql (better-sqlite3), `origin/main` `7a606a9a3`, over a text column
+ * holding `'won'` on one row and no value on two:
+ *
+ * | comparand | `$exists` (the old `!!target` read) | `$null` (the old two-branch read) |
+ * |:--|:--|:--|
+ * | `"yes"`, `1`, `"false"` | the VALUED rows / the `won` group | every row and every group |
+ * | `0`, `null` | the no-value rows / the null group | every row and every group |
+ *
+ * So `$exists` answered by truthiness — `"false"` the string kept the valued
+ * side — and `$null` constrained nothing at all: the widening direction.
+ *
+ * ## The words are the comparand doors', not this face's
+ *
+ * Verbatim the diagnostic `driver-sql`'s `nonBooleanExistsComparandError` /
+ * `nonBooleanNullComparandError` build — the text `driver-memory` and
+ * `driver-mongodb` give on the wire — with its "this driver" clause re-aimed
+ * at the backend it names, as `driver-memory`'s copy re-aims it. One condition,
+ * one wording (#5240). The text has no importable home: each face spells it,
+ * this package cannot depend on a driver, and neither `@objectstack/core` nor
+ * the spec exports it — so this is a declared verbatim copy, the drivers'
+ * `describeFilterOperand` / `safeShapePreview` rendering of the received value
+ * included ({@link describeFlagOperand}), held to the drivers' first sentence
+ * by `packages/rest`'s `aggregation-flag-comparand-refusal.test.ts` beside the
+ * `where` twin rather than by an import.
+ *
+ * Unlike `driver-sql`'s `where`, the message is not withheld: no read scope is
+ * merged into a per-aggregation `filter` or a `having`, and this face's other
+ * comparand refusals (`$empty`, `$icontains`) name the field and the value too.
+ */
+function nonBooleanFlagComparandError(op: '$exists' | '$null', field: string, value: unknown, path: string): Error {
+  const head = `Operator "${op}" on field "${field}" requires a boolean comparand (true or false). `
+    + `Received ${describeFlagOperand(value)} at ${path}. `
+    + `@objectstack/spec FieldOperatorsSchema declares ${op} as a boolean. `;
+  if (op === '$exists') {
+    return invalidFilterError(
+      head
+      + `It is refused rather than coerced for the same reason $null is: a non-boolean lands on whichever side `
+      + `the backend's two-branch conditional happens to default to, and those defaults point in `
+      + `OPPOSITE directions — driver-sql's \`=== false\` test compiles IS NOT NULL for anything `
+      + `but false, a \`=== true\` test compiles IS NULL for anything but true. Note "false" the `
+      + `STRING is truthy, so it lands on the side opposite the false it was written to mean.`,
+    );
+  }
+  return invalidFilterError(
+    head
+    + `It is refused rather than coerced because the backends read a non-boolean in OPPOSITE directions — `
+    + `driver-sql compiled IS NULL (anything but false), driver-memory's query path and driver-mongodb `
+    + `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the `
+    + `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite `
+    + `the false it was written to mean.`,
+  );
+}
+
+/**
+ * [#20981] The drivers' rendering of a received comparand — `describeFilterOperand`
+ * then `safeShapePreview` in parentheses (`string ("yes")`, `number (1)`,
+ * `null (null)`), verbatim, so {@link nonBooleanFlagComparandError} reads byte
+ * for byte as the `where` refusal of the same flag does.
+ */
+function describeFlagOperand(value: unknown): string {
+  let kind: string;
+  if (value === null) kind = 'null';
+  else if (Array.isArray(value)) kind = 'array';
+  else if (typeof value !== 'object') kind = typeof value;
+  else {
+    const ctor = (value as { constructor?: { name?: string } }).constructor;
+    kind = ctor?.name && ctor.name !== 'Object' ? ctor.name : 'object';
+  }
+  let shown: string;
+  try {
+    const json = JSON.stringify(value);
+    shown = typeof json !== 'string' ? typeof value : json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    shown = typeof value;
+  }
+  return `${kind} (${shown})`;
 }
 
 /**
@@ -470,7 +589,9 @@ function bareFieldReferenceError(field: string, spec: Record<string, unknown>, p
 
 /**
  * [#20099] A `{ $field }` reference outside the six scalar comparisons — a
- * `$in` / `$nin` member, a text pattern, an `$exists` / `$null` operand.
+ * `$in` / `$nin` member, a text pattern. [#20981] An `$exists` / `$null`
+ * operand no longer gets here: the flag gate refuses it as a non-boolean first
+ * ({@link nonBooleanFlagComparandError}), as `$empty`'s gate always did.
  * Before this, the walker compared the reference OBJECT itself and matched
  * nothing (`$nin` kept everything). `$between` endpoints never get here: the
  * shared comparand-shape face refuses them first, in its own words.
@@ -567,11 +688,24 @@ function unknownHavingColumnError(
  * "is" — an aggregated column is computed, not stored. Unlike `driver-sql`'s,
  * this diagnostic is not withheld: every column it names is the author's own
  * projection, as in {@link unresolvedFieldReferenceError}.
+ *
+ * [#21255] …and the refusal of a PLAIN reference across two classes
+ * ({@link assertSameClassReference}), in the same words: `withAddDays` says
+ * which of the two the author wrote, and the rest of the sentence — how an
+ * aggregated column's class is read — is the same for both.
  */
-function offsetPairError(field: string, op: string, ref: string, path: string, reason: string): Error {
+function columnPairError(
+  field: string,
+  op: string,
+  ref: string,
+  path: string,
+  reason: string,
+  withAddDays: boolean,
+): Error {
+  const written = withAddDays ? `{ "$field": "${ref}" } with addDays` : `{ "$field": "${ref}" }`;
   return invalidFilterError(
     `Operator "${op}" on field "${field}" at ${path} compares against another column `
-    + `({ "$field": "${ref}" } with addDays), which cannot be evaluated here: ${reason} An aggregated `
+    + `(${written}), which cannot be evaluated here: ${reason} An aggregated `
     + `column's class is read off the query: a groupBy projection takes its field's declared type (a `
     + `"day" date bucket is a date, a coarser bucket a text label), count / count_distinct / sum / avg `
     + `are numeric, and min / max take the type of the field they read.`,
@@ -591,7 +725,7 @@ function assertOffsetPairIsTemporal(
   classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): void {
   const reason = offsetPairViolation(field, reference, classes);
-  if (reason !== undefined) throw offsetPairError(field, op, String(reference.$field), path, reason);
+  if (reason !== undefined) throw columnPairError(field, op, String(reference.$field), path, reason, true);
 }
 
 /**
@@ -612,9 +746,7 @@ function offsetPairViolation(
   const refClass = classes.get(ref);
   const targetClass = classes.get(field);
   if (refClass !== undefined && targetClass !== undefined && refClass !== targetClass) {
-    return `"${field}" is ${targetClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
-      + `differently in SQL (storage-class ordering) than in memory (JS coercion) — compare same-class `
-      + `columns.`;
+    return crossClassReason(field, targetClass, ref, refClass);
   }
   if (refClass !== undefined && refClass !== 'date' && refClass !== 'datetime') {
     return `addDays adds whole days to a date or datetime column, and "${ref}" is ${refClass} — an offset `
@@ -629,6 +761,89 @@ function offsetPairViolation(
       + `must be a number of days.`;
   }
   return undefined;
+}
+
+/**
+ * [#20127] `driver-sql`'s sentence for two columns of different classes on
+ * `where` (`applyCrossFieldComparison`), with "is stored as" read as "is".
+ * [#21255] Written once, here, for the two rules that print it — the `addDays`
+ * pair's ({@link offsetPairViolation}) and a plain reference's
+ * ({@link crossClassReferenceViolation}).
+ */
+function crossClassReason(
+  field: string,
+  fieldClass: CrossFieldComparisonClass,
+  ref: string,
+  refClass: CrossFieldComparisonClass,
+): string {
+  return `"${field}" is ${fieldClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
+    + `differently in SQL (storage-class ordering) than in memory (JS coercion) — compare same-class `
+    + `columns.`;
+}
+
+/**
+ * [#21255] The class rule `where` applies to EVERY `{ $field }` comparison —
+ * "Two columns are comparable only within one of" the spec's
+ * `CROSS_FIELD_COMPARISON_CLASSES` — returned as the reason a plain reference
+ * breaks it, or `undefined` when it holds or is not this rule's to judge.
+ *
+ * The verdict is the spec's `crossFieldComparisonVerdict`, the classification
+ * `driver-sql`'s `crossFieldComparisonClass` delegates to, so a pair this
+ * position refuses is a pair `where` refuses, in the same class names. Only its
+ * `cross-class` answer is refused here:
+ *
+ * - `comparable` — one class on both sides — answers as before;
+ * - `no-class` (a list or an object, a file field, a formula) and `unjudged` (a
+ *   type outside `FieldType`) are not this rule's: the first is a different
+ *   refusal on `where` (the column has no scalar stored form), and the second
+ *   names no class at all;
+ * - a side with no declaration — a registry-less host, a column the map does
+ *   not list (`id`), a column whose type the query cannot tell — is not
+ *   judged: the fail-open direction every declared-type door of the engine
+ *   takes, and the posture an `addDays` pair already has there.
+ *
+ * An `addDays` pair is judged by {@link offsetPairViolation} instead, unchanged.
+ */
+function crossClassReferenceViolation(
+  field: string,
+  ref: string,
+  target: CrossFieldComparisonFieldMeta | undefined,
+  referent: CrossFieldComparisonFieldMeta | undefined,
+): string | undefined {
+  if (target === undefined || referent === undefined) return undefined;
+  const verdict = crossFieldComparisonVerdict(target, referent);
+  if (verdict.verdict !== 'cross-class') return undefined;
+  return crossClassReason(field, verdict.left, ref, verdict.right);
+}
+
+/**
+ * [#21255] The plain-reference half of the class rule on `having`, judged
+ * against each aggregated column's TYPE ({@link aggregatedRowColumnTypes}): a
+ * `count` is a `number`, a `day` bucket a `date`, `min` / `max` the type of the
+ * field they read — the same reading {@link aggregatedRowColumnClasses}
+ * classes. The type, not that class, is what the spec's verdict is asked of,
+ * because the class lumps a file field's projection in with text, where the
+ * spec gives it no class.
+ */
+function assertSameClassReference(
+  field: string,
+  op: string,
+  reference: Record<string, unknown>,
+  path: string,
+  types: ReadonlyMap<string, string | undefined>,
+): void {
+  const ref = String(reference.$field);
+  const reason = crossClassReferenceViolation(field, ref, columnTypeMeta(types, field), columnTypeMeta(types, ref));
+  if (reason !== undefined) throw columnPairError(field, op, ref, path, reason, false);
+}
+
+/** [#21255] An aggregated column's type, in the shape the spec's verdict reads. */
+function columnTypeMeta(
+  types: ReadonlyMap<string, string | undefined>,
+  name: string,
+): CrossFieldComparisonFieldMeta | undefined {
+  const type = types.get(name);
+  return type === undefined ? undefined : { type };
 }
 
 /**
@@ -681,8 +896,16 @@ export function aggregatedRowColumns(groupBy: unknown, aggregations: unknown): s
  * [#20127] An aggregated column's comparison class — `driver-sql`'s
  * cross-field vocabulary (`crossFieldComparisonClass`), so the words a `having`
  * refusal prints are the words the same pair gets on `where`.
+ *
+ * [#21255] Named by the spec's `CROSS_FIELD_COMPARISON_CLASSES` rather than
+ * spelled again here: the six names are one list. What this face derives per
+ * column is the class of its TYPE by the value-class sets
+ * ({@link classOfDeclaredType}), and it is NOT the spec's verdict on the no-class
+ * families: a structured-JSON, multi-option or file type reads as `text` here
+ * (the spec: no class), so the plain-reference rule asks the spec's verdict of
+ * the type instead ({@link crossClassReferenceViolation}).
  */
-export type AggregatedColumnClass = 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time';
+export type AggregatedColumnClass = CrossFieldComparisonClass;
 
 /** The aggregation functions whose result is a number whatever they read. */
 const NUMERIC_RESULT_FUNCTIONS: ReadonlySet<string> = new Set(['count', 'count_distinct', 'sum', 'avg']);
@@ -922,6 +1145,9 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  *   own {@link unknownOperator} words;
  * - an `$icontains` comparand that is not a non-empty string —
  *   {@link icontainsComparandError};
+ * - [#20444] an `$empty` comparand that is not a boolean —
+ *   {@link emptyFlagComparandError}; [#20981] and an `$exists` / `$null` one,
+ *   in the drivers' words — {@link nonBooleanFlagComparandError};
  * - a bare `{ field: { $field } }` — {@link bareFieldReferenceError};
  * - a reference outside the six scalar comparisons —
  *   {@link fieldReferencePositionError};
@@ -930,7 +1156,11 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  * - [#20127] a reference whose `addDays` pairs columns the offset has no
  *   meaning on — not two temporal columns of one class, or an offset column
  *   that is not numeric — judged against `classes` when the caller passes it
- *   ({@link offsetPairError});
+ *   ({@link columnPairError});
+ * - [#21255] a PLAIN reference between columns of two comparison classes — a
+ *   `datetime` against a `date`, a text against a number — judged by the
+ *   spec's verdict against `types` ({@link aggregatedRowColumnTypes}) when the
+ *   caller passes it ({@link assertSameClassReference}), in the same words;
  * - [#20123] and, once the whole clause has passed those, a KEY naming no
  *   column of the aggregated row, at any depth —
  *   {@link unknownHavingColumnError}. Last on purpose: a condition on a column
@@ -946,9 +1176,10 @@ export function assertHavingIsEvaluable(
   having: unknown,
   columns: readonly string[],
   classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  types?: ReadonlyMap<string, string | undefined>,
 ): void {
   const unknownKeys: Array<{ key: string; path: string }> = [];
-  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns, classes, unknownKeys });
+  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns, classes, types, unknownKeys });
   if (unknownKeys.length > 0) throw unknownHavingColumnError(unknownKeys, columns);
 }
 
@@ -1139,7 +1370,11 @@ function declaredReferenceNames(fields: Record<string, unknown>): ReadonlySet<st
 /**
  * [#20148] A `{ $field }` in a per-aggregation filter that `where`'s
  * cross-field rules refuse — a referent the object does not declare, or an
- * `addDays` pair the offset has no meaning on.
+ * `addDays` pair the offset has no meaning on. [#21255] Or a plain reference
+ * between two fields of different comparison classes, which `where` refuses
+ * whether or not it carries an offset: the capability boundary below names the
+ * same-class rule beside the offset's, as `where`'s names "compared as the same
+ * type class".
  *
  * The WORDS follow `where`'s. `driver-sql` refuses the same comparison in a
  * `where` with the fields, the operator and the specific reason withheld from
@@ -1155,10 +1390,10 @@ function withheldAggregationReferenceError(root: string): Error {
   // the sentence saying where the withheld half went is never the part cut off.
   return invalidFilterError(
     `A { "$field" } reference in \`${root}\` cannot be evaluated. It must name a field the object `
-    + `declares, and an addDays offset applies only between two date or two datetime fields, read from `
-    + `an integer or a numeric field; evaluated anyway, its count would be silently wrong. The fields, the `
-    + `operator and the reason are withheld from the message, as for the same comparison in a `
-    + `\`where\`; the full diagnostic is in the server log.`,
+    + `declares, compared as the same type class, and an addDays offset applies only between two date `
+    + `or two datetime fields, read from an integer or a numeric field; evaluated anyway, its count would `
+    + `be silently wrong. The fields, the operator and the reason are withheld from the message, as for `
+    + `the same comparison in a \`where\`; the full diagnostic is in the server log.`,
   );
 }
 
@@ -1174,6 +1409,12 @@ function withheldAggregationReferenceError(root: string): Error {
  * declared, then the `addDays` pair rule. A filter KEY the object does not
  * declare (or a formula) has no class here, so the same-class half of the pair
  * rule does not judge it.
+ *
+ * [#21255] …and a reference with no offset takes the class rule `where` gives
+ * every `{ $field }` comparison, by the spec's verdict on the two declared
+ * fields ({@link crossClassReferenceViolation}): a `datetime` against a `date`
+ * counted by `@objectstack/formula`'s whole-day reading of the day, where the
+ * `where` twin is a 400. Same refusal, same withholding, same log line.
  */
 function assertAggregationFilterReferencesAreDeclared(
   filter: unknown,
@@ -1224,14 +1465,29 @@ function assertAggregationFilterReferencesAreDeclared(
             `the addDays offset "${String(offset.$field)}" is not a declared field of "${declared.object}" — `
             + `only declared fields can be referenced.`);
         }
-        if (offset !== undefined) {
-          const reason = offsetPairViolation(key, target, classes);
-          if (reason !== undefined) refuse(key, op, at, ref, reason);
-        }
+        const reason = offset !== undefined
+          ? offsetPairViolation(key, target, classes)
+          : crossClassReferenceViolation(key, ref, declaredFieldMeta(map, key), declaredFieldMeta(map, ref));
+        if (reason !== undefined) refuse(key, op, at, ref, reason);
       }
     }
   };
   walk(filter, root);
+}
+
+/**
+ * [#21255] A declared field in the shape the spec's cross-field verdict reads
+ * — its `type`, and its `multiple` flag, which moves a multi-capable type to
+ * the list-or-object family. `undefined` when the map does not declare it with
+ * a readable type.
+ */
+function declaredFieldMeta(
+  fields: Record<string, unknown>,
+  name: string,
+): CrossFieldComparisonFieldMeta | undefined {
+  const type = declaredFieldType(fields, name);
+  if (type === undefined) return undefined;
+  return { type, multiple: (fields[name] as { multiple?: unknown }).multiple === true };
 }
 
 /**
@@ -1252,6 +1508,12 @@ interface EvaluableScope {
    * it — what an `addDays` pair is judged against. `undefined` = not judged.
    */
   classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>;
+  /**
+   * [#21255] Each column's TYPE ({@link aggregatedRowColumnTypes}) — what a
+   * plain reference's class rule asks the spec's verdict of. `undefined` = not
+   * judged.
+   */
+  types?: ReadonlyMap<string, string | undefined>;
   /** [#20123] Keys naming none of `columns`, collected in walk order. */
   unknownKeys?: Array<{ key: string; path: string }>;
 }
@@ -1308,14 +1570,23 @@ function assertConditionIsEvaluable(
     if (op === '$empty' && typeof target !== 'boolean') {
       throw emptyFlagComparandError(field, target, `${path}.${op}`);
     }
+    // [#20981] …and its two siblings, by the same declaration and for the same
+    // reason. Before the reference-position check below as well, as `$empty`'s
+    // gate is: a `{ $field }` in a flag's slot is a non-boolean first.
+    if ((op === '$exists' || op === '$null') && typeof target !== 'boolean') {
+      throw nonBooleanFlagComparandError(op, field, target, `${path}.${op}`);
+    }
     if (!(CONDITION_OPERATORS as readonly string[]).includes(op)) {
       throw unknownOperator(op, 'condition', keys, scope.clause);
     }
     if (REFERENCE_COMPARISON_OPERATORS.has(op)) {
       if (isFieldReferenceShape(target)) {
         assertReferenceResolves(target, `${path}.${op}`, scope.columns);
-        if (scope.classes && target.addDays !== undefined) {
-          assertOffsetPairIsTemporal(field, op, target, `${path}.${op}`, scope.classes);
+        if (target.addDays !== undefined) {
+          if (scope.classes) assertOffsetPairIsTemporal(field, op, target, `${path}.${op}`, scope.classes);
+        } else if (scope.types) {
+          // [#21255] A plain reference: the class rule `where` applies to it too.
+          assertSameClassReference(field, op, target, `${path}.${op}`, scope.types);
         }
       }
       continue;
@@ -1556,31 +1827,6 @@ function listHolds(list: readonly unknown[], value: unknown): boolean {
 }
 
 /**
- * [#20176] ADR-0053 D-D: a bare `YYYY-MM-DD` as the UPPER bound of a
- * `datetime` column (`$lte`, a `$between` max) means that WHOLE day — the
- * exclusive bound at the next day's midnight, in the column's storage form.
- * `undefined` when the rule does not apply: another class, or a bound that is
- * not a bare calendar day (a full timestamp and a `Date` keep instant
- * semantics). The same decision both drivers' `where` emitters take
- * (`SqlDriver.calendarDayUpperBoundRewrite`, `driver-memory`'s `$lte` arm),
- * read from the spec's `nextUtcCalendarDay`.
- *
- * [#20600] `UNBOUNDED_ABOVE` for `9999-12-31`, the last supported day: every
- * supported value is inside its whole day, so the callers compare against NO
- * upper bound — `$lte` asks only for a value, a `$between` keeps its minimum.
- * The drivers compile the same (`IS NOT NULL`, `$ne: null`).
- */
-function wholeDayUpperBound(
-  bound: unknown,
-  kind: TemporalComparandKind | undefined,
-): unknown | UnboundedAbove {
-  if (kind !== 'datetime') return undefined;
-  const next = nextUtcCalendarDay(bound);
-  if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
-  return next === null ? undefined : temporalStorageForm(next, 'datetime');
-}
-
-/**
  * [#20873] The JSON NUMBER grammar, spelled out — the pattern `driver-sql`'s
  * `jsonMembershipCandidates` tests a `$contains` comparand against, for its
  * reason: `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none
@@ -1633,15 +1879,16 @@ function storedArrayHasMember(value: unknown, comparand: unknown): boolean {
  * its class and the class is `date`, `datetime` or `time`. Then the row's value
  * AND every comparand of `$eq` / `$ne` / the four orderings / `$between` /
  * `$in` / `$nin` / implicit equality are put in that rule's storage form
- * (`temporalStorageForm`) before they are compared, and a bare-day upper bound
- * on a `datetime` column reads as the whole day ({@link wholeDayUpperBound}) —
- * the reading the drivers give the same comparand in a `where`. So
- * `'2026-02-01T00:00:00.000Z'` against a `date` column is the day
- * `'2026-02-01'`, `'2026-02-01'` as a `datetime` `$lte` includes that day's
- * rows, epoch milliseconds are an instant, and a `Date` against a `date` or
- * `time` column is its UTC day or time of day. The value takes the form too
- * because that is the pairing the drivers compare (`driver-sql` wraps a legacy
- * SQLite column in the same canon); rows a driver returns are in it already.
+ * (`temporalStorageForm`) before they are compared — the reading the drivers
+ * give the same comparand in a `where`. So `'2026-02-01T00:00:00.000Z'` against
+ * a `date` column is the day `'2026-02-01'`, epoch milliseconds are an instant,
+ * and a `Date` against a `date` or `time` column is its UTC day or time of day.
+ * A bare-day `$lte` on a `datetime` column reaches this function already lowered
+ * to the next day's `$lt` by the engine's seam (ADR-0053 D-D1 item 5, as
+ * amended); this function applies no whole-day rule of its own. The value
+ * takes the form too because that is the pairing the drivers compare
+ * (`driver-sql` wraps a legacy SQLite column in the same canon); rows a driver
+ * returns are in it already.
  * Presence (`$exists`, `$null`), the text operators and a `{ $field }`
  * reference are not comparands of a value, and are read as before.
  *
@@ -1714,6 +1961,12 @@ function checkCondition(
     if (op === '$empty' && typeof target !== 'boolean') {
       throw emptyFlagComparandError(field, target, `${path}.${op}`);
     }
+    // [#20981] …and `$exists` / `$null` beside it: the floor under the one-time
+    // judgment (assertConditionIsEvaluable), for a caller evaluating rows
+    // directly. Above the no-value exit for the same reason.
+    if ((op === '$exists' || op === '$null') && typeof target !== 'boolean') {
+      throw nonBooleanFlagComparandError(op, field, target, `${path}.${op}`);
+    }
     // [#21007] A scalar comparison on a declared JSON-stored column — refused,
     // as `where` refuses it. The backstop under the one-time judgment
     // (assertAggregationFilterSparesJsonStoredFields), for a row that gets here.
@@ -1733,8 +1986,7 @@ function checkCondition(
     // [#20148] The comparison and list arms read a `Date` bound — or a `Date`
     // value — as an instant ({@link instantsOf}); every other pair compares
     // exactly as before. [#20176] On a temporal column both sides are in its
-    // storage form first (`form`), and a bare-day upper bound on a `datetime`
-    // column is the whole day ({@link wholeDayUpperBound}).
+    // storage form first (`form`).
     const stored = form(value);
     switch (op) {
       case '$eq': if (!comparandEquals(stored, form(target))) return false; break;
@@ -1742,41 +1994,32 @@ function checkCondition(
       case '$gt': if (!ordered(stored, form(target), (a, b) => a > b)) return false; break;
       case '$gte': if (!ordered(stored, form(target), (a, b) => a >= b)) return false; break;
       case '$lt': if (!ordered(stored, form(target), (a, b) => a < b)) return false; break;
-      case '$lte': {
-        const dayAfter = wholeDayUpperBound(target, kind);
-        if (isUnboundedAbove(dayAfter)) {
-          // [#20600] No upper bound: what `$lte` still asks is a value.
-          if (stored === null || stored === undefined) return false;
-          break;
-        }
-        if (dayAfter !== undefined
-          ? !ordered(stored, dayAfter, (a, b) => a < b)
-          : !ordered(stored, form(target), (a, b) => a <= b)) return false;
-        break;
-      }
+      // [ADR-0053 D-D1 items 5 and 9, as amended] Both upper bounds compare as
+      // written. The whole-day reading of a bare day on a `datetime` column,
+      // and the last supported day bounding nothing, are applied once by the
+      // engine's seam (`lowerFilterCondition`), which hands this arm a `$lt` the
+      // next day (or `$null: false`) and splits a literal `$between` into `$gte`
+      // and that bound. A caller evaluating rows without the seam gets the
+      // comparison it wrote.
+      case '$lte': if (!ordered(stored, form(target), (a, b) => a <= b)) return false; break;
       case '$between': {
         if (!Array.isArray(target)) break;
-        const dayAfter = wholeDayUpperBound(target[1], kind);
-        // [#20600] A max on the last supported day bounds nothing: the range
-        // keeps its minimum alone.
         if (ordered(stored, form(target[0]), (a, b) => a < b)
-          || (isUnboundedAbove(dayAfter)
-            ? false
-            : dayAfter !== undefined
-              ? ordered(stored, dayAfter, (a, b) => a >= b)
-              : ordered(stored, form(target[1]), (a, b) => a > b))) return false;
+          || ordered(stored, form(target[1]), (a, b) => a > b)) return false;
         break;
       }
       case '$in': if (!Array.isArray(target) || !listHolds(target.map(form), stored)) return false; break;
       case '$nin': if (Array.isArray(target) && listHolds(target.map(form), stored)) return false; break;
-      case '$exists': {
-        const exists = value !== undefined && value !== null;
-        if (exists !== !!target) return false;
+      // [#20981] Both flags are booleans here — the gate above refused every
+      // other comparand — so each arm reads the flag itself. `$exists` read
+      // `!!target` (truthiness: `"false"` asked for the valued rows), and `$null`
+      // tested `=== true` / `=== false` only, so a third value constrained
+      // nothing. `$exists` is "has a value" (#5298), the exact mirror of `$null`.
+      case '$exists':
+        if ((value !== undefined && value !== null) !== target) return false;
         break;
-      }
       case '$null':
-        if (target === true && value != null) return false;
-        if (target === false && value == null) return false;
+        if ((value === undefined || value === null) !== target) return false;
         break;
       // [#20444] The staged emptiness flag, judged BY VALUE — the aggregated
       // row carries no field declaration of its own, so this face takes the

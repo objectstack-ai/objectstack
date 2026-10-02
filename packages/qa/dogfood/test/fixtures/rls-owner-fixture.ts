@@ -54,7 +54,7 @@ export const rlsFixtureStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'RLS Owner Fixture',
-    description: 'Owner-isolated single-object app exercising the #1994 by-id-write invariant.',
+    description: 'Owner-isolated single-object app exercising the cross-owner by-id-write invariant: a caller that cannot read a record must not be able to write it.',
   },
   objects: [RlsNote],
 });
@@ -102,7 +102,7 @@ export const ownerScopedMemberSet: PermissionSet = PermissionSetSchema.parse({
  */
 export const readOnlyScopedMemberSet: PermissionSet = PermissionSetSchema.parse({
   name: FIXTURE_MEMBER_SET,
-  label: 'RLS Fixture Member — owner-scoped reads only (#1994 hole)',
+  label: 'RLS Fixture Member — owner-scoped reads only (no write policy: the by-id-write hole shape)',
   objects: noteCrud,
   rowLevelSecurity: [{ ...RLS.ownerPolicy('rls_note', 'created_by'), operation: 'select' }],
 });

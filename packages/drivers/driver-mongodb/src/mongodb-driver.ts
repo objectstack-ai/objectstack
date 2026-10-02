@@ -202,7 +202,9 @@ export class MongoDBDriver implements IDataDriver {
    * {@link syncSchema} beside {@link temporalFields} and for the same reason:
    * the `$empty` operator is answered by the field's DECLARED row, and a field
    * this map does not hold is refused rather than given a row guessed from the
-   * data.
+   * data. The same shape decides whether `$contains` asks membership (a
+   * JSON-stored field) or substring (anything else, a field it does not hold
+   * included).
    */
   private valueShapes = new Map<string, Map<string, ValueShapeFieldDef>>();
 
@@ -694,7 +696,8 @@ export class MongoDBDriver implements IDataDriver {
     // Learn which fields are temporal BEFORE any write can land, so the write
     // path and the filter path share one storage convention (#4047).
     this.temporalFields.set(object, indexTemporalFields(objectDef.fields));
-    // [#20444] …and each field's declared value shape, for `$empty`.
+    // [#20444] …and each field's declared value shape, for `$empty` and for
+    // the question `$contains` asks.
     this.valueShapes.set(object, indexValueShapes(objectDef.fields));
     await syncCollectionSchema(this.db, object, objectDef);
   }
@@ -833,8 +836,10 @@ export class MongoDBDriver implements IDataDriver {
 
   /**
    * [#20444] The declared-value-shape lookup for one object, handed to
-   * {@link translateFilter} so `$empty` translates the field's declared row.
-   * `undefined` for an undeclared object — `$empty` is then refused.
+   * {@link translateFilter} so `$empty` translates the field's declared row,
+   * and so `$contains` / `$notContains` ask MEMBERSHIP on a declared
+   * JSON-stored field. `undefined` for an undeclared object — `$empty` is then
+   * refused, and `$contains` keeps the substring reading.
    */
   private valueShapeFor(object: string): ValueShapeResolver | undefined {
     const shapes = this.valueShapes.get(object);

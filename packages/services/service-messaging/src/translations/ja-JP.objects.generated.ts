@@ -354,7 +354,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Headers JSON",
-        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path (#8118). The dispatcher recovers it through the engine's privileged accessor on the claim path."
+        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path. The dispatcher recovers it through the engine's privileged accessor on the claim path."
       },
       signature: {
         label: "HMAC Signature",
@@ -376,7 +376,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "Attempts",
-        help: "これまでの試行回数。終了状態の行で 0 の場合、その配信は PARKED — 一度も送信されず、再配信もできません(#8069);原因は `error` を参照してください。"
+        help: "これまでの試行回数。終了状態の行で 0 の場合、その配信は PARKED — 一度も送信されず、署名を持たないため再配信もできません;原因は `error` を参照してください。"
       },
       claimed_by: {
         label: "Claimed By"
@@ -398,7 +398,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       error: {
         label: "Error",
-        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069)."
+        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared."
       },
       created_at: {
         label: "Created At"

@@ -189,7 +189,7 @@ export function buildShapedArtifact(stack: Record<string, unknown>): BuildShaped
         `declares ${expected.length} (${expected.join(', ') || 'none'}). Either a callable was ` +
         `dropped, or \`lowerCallables\` grew a slot \`callableSlots\` in ` +
         `packages/qa/dogfood/test/build-shaped-artifact.ts does not know about — fix the walk, ` +
-        `never the assertion (#6293).`,
+        `never the assertion.`,
     );
   }
 
@@ -222,7 +222,7 @@ export function buildShapedArtifact(stack: Record<string, unknown>): BuildShaped
           `without a sound — ${dropped.join(', ')}. An entry it does not recognise is deleted ` +
           `rather than handed to the schema, so the artifact would parse green carrying nothing ` +
           `where these were. Most likely the entry is a headless husk (an object with an effect ` +
-          `and no handler), which is what a plain \`JSON.stringify\` of the stack leaves (#6293).`,
+          `and no handler), which is what a plain \`JSON.stringify\` of the stack leaves.`,
       );
     }
   }
@@ -262,7 +262,7 @@ export function buildShapedArtifact(stack: Record<string, unknown>): BuildShaped
   if (leftover.length > 0) {
     throw new Error(
       `build-shaped artifact: ${leftover.length} value(s) are still functions after lowering and ` +
-        `would be dropped by JSON.stringify without a sound: ${leftover.join(', ')} (#6293).`,
+        `would be dropped by JSON.stringify without a sound: ${leftover.join(', ')}.`,
     );
   }
 

@@ -30,7 +30,7 @@
  * instead. The MySQL arm runs against a real server in
  * \`seed-tenancy-backfill.live-mysql.test.ts\`; the SQLite arm end to end against
  * a real \`SqlDriver\` in \`packages/runtime\`'s
- * \`seed-tenancy-autonumber-split.integration.test.ts\`; and [#17621] the POSTGRES
+ * \`seed-tenancy-autonumber-split.integration.test.ts\`; and [commit 7e74af3df] the POSTGRES
  * arm — recorded here as NOT MEASURED anywhere for as long as that was true —
  * now runs in \`seed-tenancy-backfill.live-postgres.test.ts\`, on the postgres
  * service the \`Temporal Conformance\` job already provisions. All three arms are

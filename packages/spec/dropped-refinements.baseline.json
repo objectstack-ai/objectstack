@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 212,
-    "droppedRefinementSites": 617,
+    "droppedRefinementSites": 616,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -1215,27 +1215,15 @@
         "filter.element"
       ]
     },
-    "ui/FormField": {
-      "sites": [
-        "in.publicPicker.filter.element"
-      ]
-    },
-    "ui/FormFieldPublicPicker": {
-      "sites": [
-        "filter.element"
-      ]
-    },
     "ui/FormSection": {
       "sites": [
-        "in",
-        "in.fields.element.options[1].in.publicPicker.filter.element"
+        "in"
       ]
     },
     "ui/FormView": {
       "sites": [
         "",
         "sections.element.in",
-        "sections.element.in.fields.element.options[1].in.publicPicker.filter.element",
         "subforms.element.columns.element",
         "submitBehavior.options[1].url"
       ]
@@ -1354,6 +1342,11 @@
         "filter.element"
       ]
     },
+    "ui/ObjectMasterDetailFormProps": {
+      "sites": [
+        "details.element.columns.element"
+      ]
+    },
     "ui/ObjectMetricProps": {
       "sites": [
         "filter.element"
@@ -1392,6 +1385,12 @@
     "ui/RecordDetailsProps": {
       "sites": [
         "sections.element"
+      ]
+    },
+    "ui/RecordLineItemsProps": {
+      "sites": [
+        "columns.element",
+        "filter.element"
       ]
     },
     "ui/RecordRelatedListProps": {

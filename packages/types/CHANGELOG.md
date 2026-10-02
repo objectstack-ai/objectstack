@@ -1,5 +1,164 @@
 # @objectstack/types
 
+## 17.6.0
+
+### Minor Changes
+
+- 8368f1c: feat(types): the data-error classification table (`mapDataError` and its judgements) is exported from `@objectstack/types` (#20919)
+  
+  The classification half of `@objectstack/rest`'s error boundary — `mapDataError`
+  (a thrown error → the `{ status, body }` ADR-0112 answer, without emitting it),
+  `declaredHttpStatus`, `declaredServerFaultAnswer`, `sandboxBusinessMessage`,
+  `boundedDeclaredUserMessage`, `boundedDeclaredRefusalMessage` and
+  `isEngineDuplicateRecordEnvelope` — moved here unchanged, beside the primitives it
+  composes, so the bulk-import runner in `@objectstack/core` judges a failed row with
+  the same table the REST door answers with. `@objectstack/rest` keeps the emitters
+  and re-exports every name it exported before. The module also exports the eight
+  helpers the REST emitters compose (`truncateClientMessage`, `thrownCodeFields`,
+  `withoutDeclaredCodePrefix`, `withDeclaredUserMessage`, `isSandboxOrigin`,
+  `isSandboxCrash`, `fiveXxArmDisplacesDeclared4xx`, `structuredCodeAnswer`).
+
+### Patch Changes
+
+- b9087d7: CLI help, warnings and refusals no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Several lines the CLI prints sent the reader to an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `os build` / `os validate`: the provider preflight step now reads "Checking that every required capability has a provider installable in this edition...", and the undeclared-key header reads "Undeclared authoring keys (N) — dropped at load; reported here, never refused".
+  - `os doctor`: the retired `referenceFilters` row now says the key was removed from FieldSchema as a key no runtime read; the `NODE_ENV` and config-load rows drop their citations.
+  - `os serve`: the no-auth refusal says anonymous data access is always denied with no setting that turns that off; the organizations remedies drop their citations.
+  - `os meta resync`, `os db clean` and the `os migrate duplicates` / `multi-value-columns` / `recorded-by` / `summary-nulls` descriptions, the `os dev --restart` flag help, the `os storage orphans` closing line and the storage-driver refusals each say what was decided instead of citing it.
+  - `os serve`'s unknown-hostname 404 page spells its three short grey colours in six hex digits; they render the same.
+  - `@objectstack/types`: the host importer's undeclared-package message says the fallback resolves from the caller once `fallbackImport` is passed, and drops the citation beside "Being merely REACHABLE is not enough".
+  
+  Text only: no exit code, error code, flag, field or control flow moves. A script that matches the old CLI text (for example the "Checking capability providers" step line) needs the new spelling.
+- 00f045d: Provenance comments in `@objectstack/types` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no error code, refusal text, type, export or runtime behaviour changes.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [24d521e]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [1a75e39]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

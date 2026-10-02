@@ -1,7 +1,7 @@
 ---
 title: Component schema — UI Protocol reference
 navTitle: Component
-description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProps and 43 more — each property with its type, default and a TypeScript example."
+description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProps and 44 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProp
 ## TypeScript Usage
 
 ```typescript
-import { AIChatWindowProps, ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { AIChatWindowProps, ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AIChatWindowProps.parse(data);
@@ -179,7 +179,7 @@ const result = AIChatWindowProps.parse(data);
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
 | **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
 | **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
-| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message shown after the action succeeds. On a `type: 'api'` or `type: 'script'` action it may interpolate $`{result.*}` — the server response payload, the same scope `onSuccess.navigate` declares (e.g. $`{result.id}`). On a registered action that declares `outcomeMessages`, the entry named by the response's `outcome` is shown instead, and this message is the fallback. |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
@@ -724,7 +724,7 @@ Sort field and direction pair
 | **reorderableColumns** | `boolean` | optional | Allow column drag-reorder |
 | **frozenColumns** | `number` | optional | How many leading columns stay frozen (default 1) |
 | **showColumnTypeIcons** | `boolean` | optional | Show field-type icons in column headers |
-| **exportOptions** | `any` | optional | Export config (`{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract |
+| **exportOptions** | `{ formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }` |
 | **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
@@ -771,6 +771,16 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+
+### Nested Shape: `ObjectGridProps.exportOptions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **formats** | `Enum<'csv' \| 'xlsx' \| 'json'>[]` | optional | Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only. |
+| **maxRecords** | `integer` | optional | Maximum number of records to export; 0 or absent = unlimited |
+| **includeHeaders** | `boolean` | optional | Include column headers in the exported file (default true) |
+| **fileNamePrefix** | `string` | optional | Download file name prefix — replaces the object label and suppresses the view label in the generated file name |
+| **streaming** | `boolean` | optional | Set false to force the client-side export path (csv/json only) instead of the server stream |
 
 ### Nested Shape: `ObjectGridProps.data[provider='object']`
 
@@ -950,7 +960,7 @@ Sort field and direction pair
 | **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half |
 | **sections** | `any[]` | optional | Parent form sections |
 | **fields** | `any[]` | optional | Parent fields shown |
-| **details** | `any[]` | optional | Detail collections (`{ title, childObject, addLabel?, columns?, relationshipField? }` — FK and columns auto-derive from child metadata) |
+| **details** | `{ childObject: string; relationshipField?: string; columns?: object[]; formFields?: string[]; … }[]` | optional | Detail collections — each a strict entry (`{ childObject, title?, addLabel?, columns?, relationshipField?, … }`) whose `columns` are the inline grid columns a relationship field's `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted |
 | **title** | `string \| Record<string, string>` | optional | Form title |
 | **submitText** | `string \| Record<string, string>` | optional | Submit button label |
 | **cancelText** | `string \| Record<string, string>` | optional | Cancel button label |
@@ -958,6 +968,23 @@ Sort field and direction pair
 | **initialValues** | `Record<string, any>` | optional | Prefill values for the parent (create mode) |
 | **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
 | **taxRateField** | `string` | optional | Child field holding the per-line tax rate (line-items totals) |
+
+### Nested Shape: `ObjectMasterDetailFormProps.details[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **childObject** | `string` | ✅ | Child object whose records are entered inline |
+| **relationshipField** | `string` | optional | FK on the child pointing back to the parent (auto-detected from the child's master_detail/lookup field when omitted) |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **formFields** | `string[]` | optional | Child field names for the per-row expand form (derived from the child object's editable fields when omitted) |
+| **inlineMode** | `Enum<'grid' \| 'form'>` | optional | Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. Resolved from the relationship field's `inlineEdit` when omitted |
+| **amountField** | `string` | optional | Numeric child column summed for the running total |
+| **sortField** | `string` | optional | Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted) |
+| **totalField** | `string` | optional | Parent field to receive the rolled-up sum |
+| **title** | `string` | optional | Section title |
+| **minRows** | `number` | optional | Minimum number of rows |
+| **maxRows** | `number` | optional | Maximum number of rows |
+| **addLabel** | `string` | optional | Add-row button label |
 
 
 ---
@@ -1490,6 +1517,75 @@ Type: `string`
 | **limit** | `integer` | optional | Maximum history entries displayed, and the `$top` of the self-fetch query (renderer default: 50). |
 | **emptyText** | `string` | optional | Copy shown when the record has no history. Literal string rendered as-is in EVERY locale (no inline locale map — the timeline renders it as a raw React child; renderer default: "No history yet"). |
 | **unknownUserText** | `string` | optional | Copy substituted when an entry has no resolvable actor. Literal string, every locale (renderer default: "Unknown user"). |
+
+
+---
+
+## RecordLineItemsProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **childObject** | `string` | optional | Child object whose records this grid lists, edits and saves. Optional because the component-level `dataSource` binding can supply the object instead; with neither, the panel shows a configuration hint and fetches nothing |
+| **relationshipField** | `string` | ✅ | FK on the child object pointing back to the parent record — the rows are queried as `{ [relationshipField]: parentId }`. Required: this panel does not auto-detect it |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | ✅ | Editable grid columns, drawn exactly as declared. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, options?, … }` — objectui GridColumn); unknown keys and the retired `field` spelling are refused. Unlike the master-detail carriers, this block does NOT hydrate a column from the child object's field: declare `label`, `type` and `options` yourself — an identity-only `{ name }` column is a text cell headed by its name. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells |
+| **parentObject** | `string` | optional | Parent object the `totalField` rollup is written to (default: the object of the record on the page) |
+| **parentId** | `string` | optional | Parent record id the rows belong to (default: the record on the page). Wins over `recordId` |
+| **recordId** | `string` | optional | Alternate spelling of `parentId` the renderer also reads; `parentId` wins when both are set |
+| **amountField** | `string` | optional | Numeric child column summed for the running total and for the `totalField` rollup (default `amount` when only `totalField` is set) |
+| **totalField** | `string` | optional | Parent field to receive the rolled-up sum on save |
+| **title** | `string` | optional | Panel title. A literal string rendered as-is in every locale (no inline locale map — the panel renders it as a React child); renderer default: the localized "Line Items" |
+| **readonly** | `boolean` | optional | Render the grid read-only: cells locked, no Save button, and no adding or removing lines (renderer default: editable) |
+| **minRows** | `number` | optional | Minimum number of rows |
+| **maxRows** | `number` | optional | Maximum number of rows |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional criteria for the child rows — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the parent relationship condition, never substituted for it: it can only narrow this record's lines |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Load order for the child rows — the SortItem array form `[{ field, order }, ...]` (renderer default: storage order) |
+| **limit** | `integer` | optional | Row cap for the child fetch (renderer default: 500). The grid has no pagination, so this is the window of rows that are editable and saved together |
+
+### Nested Shape: `RecordLineItemsProps.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused. |
+| **label** | `string` | optional | Column header; defaults to the child field's label via hydration. |
+| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>` | optional | Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
+| **width** | `number` | optional | Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed). |
+| **required** | `boolean` | optional | Cell is flagged inline-invalid while empty. Computed columns are never required. |
+| **options** | `{ label: string; value: string }[]` | optional | Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`. |
+| **prefix** | `string` | optional | Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's. |
+| **step** | `number` | optional | Input step for numeric cells. |
+| **reference** | `string` | optional | Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`. |
+| **displayField** | `string` | optional | Label field shown for a picked lookup record. |
+| **idField** | `string` | optional | Id field stored for a picked lookup record. |
+| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, or multi-file upload cell. |
+| **accept** | `string[]` | optional | Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything. |
+| **defaultHidden** | `boolean` | optional | Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden. |
+| **computed** | `boolean` | optional | Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row. |
+| **expr** | `string` | optional | Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here. |
+| **scale** | `integer` | optional | Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: 'currency'` — delete it there: the currency's ISO 4217 minor unit decides. The upper bound is the renderer's: the grid rounds with `toFixed`, which throws a RangeError above 100. |
+| **autofill** | `boolean` | optional | For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`). |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD's own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing. |
+
+### Nested Shape: `RecordLineItemsProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `RecordLineItemsProps.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 
 ---

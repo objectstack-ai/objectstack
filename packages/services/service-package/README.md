@@ -75,7 +75,7 @@ await packages.delete('com.example.crm', '1.0.0');
 
 ## Storage Schema
 
-`service-package` creates (idempotently) the following table on `start()`:
+`service-package` creates (idempotently) the following table on `start()`, spelled for the dialect the default driver names (`SqlDriver.dialectName`). SQLite and PostgreSQL — and any driver that names no SQL dialect — get:
 
 ```sql
 CREATE TABLE IF NOT EXISTS sys_packages (
@@ -92,6 +92,26 @@ CREATE TABLE IF NOT EXISTS sys_packages (
 CREATE INDEX IF NOT EXISTS idx_packages_latest
   ON sys_packages(id, created_at DESC);
 ```
+
+MySQL (8.0.19 or later) gets the same key and columns in its own spelling. The index is created only after `information_schema.statistics` reports it absent, and publishes upsert with `INSERT … AS incoming ON DUPLICATE KEY UPDATE`:
+
+```sql
+CREATE TABLE IF NOT EXISTS sys_packages (
+  id         VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  version    VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  manifest   LONGTEXT NOT NULL,
+  metadata   LONGTEXT NOT NULL,
+  hash       TEXT NOT NULL,
+  created_at VARCHAR(32) NULL,   -- UTC 'YYYY-MM-DD HH:MM:SS', written by every statement
+  updated_at VARCHAR(32) NULL,
+  PRIMARY KEY (id, version)
+);
+
+CREATE INDEX idx_packages_latest
+  ON sys_packages (id, created_at DESC);
+```
+
+If the database refuses any of this DDL, `start()` fails with that refusal and logs it at `error`. It is never logged at `debug` as "may already exist". When that happens no `package` service is registered.
 
 ## Requirements
 

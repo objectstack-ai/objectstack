@@ -80,6 +80,9 @@ function fakeEngine(shape: EngineShape, opts: { withResolver?: boolean } = {}) {
       }
       return { rows: [] };
     },
+    // [#21080] The engine this double models answers which objects carry a
+    // middleware registered for them; none of this file's objects does.
+    hasObjectMiddleware: () => false,
     getObject: (name: string) => {
       const fields = shape.schema[name];
       if (!fields) return undefined;

@@ -878,7 +878,7 @@ interface ReadonlyWhenStripOptions {
  *
  * It once was, and this docblock said so. #14088 moved that one off value
  * equality onto a RECORD of the keys the before-phase hook chain actually
- * assigned (`options.hookWrittenKeys`), and #14472 did the same to the
+ * assigned (`options.hookWrittenKeys`), and commit 00ff228fe did the same to the
  * insert-side {@link stripRuntimeOwnedFields}. This predicate deliberately
  * stayed behind. The divergence is not drift, and it is not a port nobody got
  * to — it is decided by what each face GUARDS:

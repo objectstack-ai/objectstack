@@ -303,7 +303,7 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
       expect(DiscoverySchema.safeParse(discovery).success).toBe(true);
     });
 
-    // [#6287] `preview` left this list when it stopped being unrecognised: it is
+    // [commit 84c86fb45] `preview` left this list when it stopped being unrecognised: it is
     // a declared `EnvironmentTypeSchema` member and now has a stated fold
     // (`sandbox`), so asserting `development` for it here would assert the
     // opposite of the mapper's decision. The RULE these rows pin — an unknown

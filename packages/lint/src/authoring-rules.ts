@@ -105,6 +105,7 @@ import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
+import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
 import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
 import { validatePresetComparands } from './validate-preset-comparands.js';
@@ -735,6 +736,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateDashboardActionRefs(stack),
+  },
+  // A dashboard widget `options` key no renderer reads parses clean (the bag
+  // is `.passthrough()`) and styles nothing. `@objectstack/sdui-parser`'s
+  // `checkDashboardWidgetOptions` already says so for a `dashboard` node in an
+  // SDUI page; this entry runs that SAME check over dashboard metadata, at its
+  // same level (`warning`) and code (`unconsumed-widget-option`), reading the
+  // same `CONSUMED_WIDGET_OPTION_KEYS`. The rule file is an adapter that
+  // localizes the check's diagnostics; it holds no key list and no verdict.
+  {
+    name: 'validateDashboardWidgetOptions',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dashboard-widget-options.ts',
+    surfaces: CLI_ONLY,
+    // The judgement is dashboard-local, so the per-write `dashboard` snapshot
+    // `validateWidgetBindings` already runs on would carry everything it
+    // reads. What holds it at the CLI is scope, not input: crossing an
+    // advisory rule onto the Studio/REST/MCP door puts a warning on every
+    // dashboard save that writes such a key, which is a rollout decision over
+    // stored tenant rows the in-repo corpus does not measure.
+    surfaceReason:
+      'Advisory, dashboard-local: the per-write dashboard snapshot would carry its input. Held at the CLI ' +
+      'doors by scope: crossing an advisory rule onto the Studio/REST/MCP door adds a warning to dashboard ' +
+      'saves, a rollout decision over stored tenant rows the in-repo corpus does not measure.',
+    run: (stack) => validateDashboardWidgetOptions(stack),
   },
   // #3574 — a filter value like `{current_user}` resolves in no vocabulary,
   // reaches the data engine as a literal and matches nothing. The surface
@@ -1520,13 +1547,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // email_template.json` is 13 props / 0 warn keys and `mapping.json` was 7 /
     // 0 (lit control, same script, same dir: `tool.json` 6/1, `object.json`
     // 35/1), so these two writes dispatched this rule and it judged NOTHING.
-    // [#20919] `mapping.json` is 8 / 1 now: `connectorSource` (the connector
-    // sync binding) is `live` with `authorWarn`, because nothing schedules a
-    // pull until the `job` stage lands — so a `mapping` write that authors
-    // `connectorSource` is warned here, and one that does not is still judged
-    // silent. That is the ruled end state, not a half-landing: the ruling
-    // dispatched the wiring and ⛔ no ledger population («the empty warn maps
-    // stay empty until a real property needs a row — zero pull, the wiring is
+    // [#20919] `mapping.json` is 8 / 0 again: `connectorSource` (the connector
+    // sync binding) went `live` and, since #21127, carries no `authorWarn` — a
+    // warned `live` row made this rule throw instead of warn, so a `mapping`
+    // write authoring it got an `authoring-rule-threw` advisory and `os
+    // validate` / `os lint` exited 1. The scheduling caveat (nothing schedules
+    // a pull until the `job` stage lands) is on the key's description, and
+    // `check:liveness` refuses a warned `live` row. That is the ruled end
+    // state, not a half-landing: the ruling dispatched the wiring and ⛔ no
+    // ledger population («the empty warn maps stay empty until a real property needs a row — zero pull, the wiring is
     // the whole deliverable»). `runtime-gate.inert-type-writes.test.ts` pins
     // both halves — that the rule is dispatched, and that it is silent — so
     // the day a ledger row lands the door lights up with no second edit here.

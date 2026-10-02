@@ -354,7 +354,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Headers JSON",
-        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path (#8118). The dispatcher recovers it through the engine's privileged accessor on the claim path."
+        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path. The dispatcher recovers it through the engine's privileged accessor on the claim path."
       },
       signature: {
         label: "HMAC Signature",
@@ -376,7 +376,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "Attempts",
-        help: "Number of attempts made so far. 0 on a terminal row means the delivery was PARKED — never sent, and not redeliverable (#8069); see `error` for the cause."
+        help: "Number of attempts made so far. 0 on a terminal row means the delivery was PARKED — never sent, and not redeliverable, because it carries no signature; see `error` for the cause."
       },
       claimed_by: {
         label: "Claimed By"
@@ -398,7 +398,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       error: {
         label: "Error",
-        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069)."
+        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared."
       },
       created_at: {
         label: "Created At"

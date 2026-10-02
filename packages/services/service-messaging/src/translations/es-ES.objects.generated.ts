@@ -354,7 +354,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Headers JSON",
-        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path (#8118). The dispatcher recovers it through the engine's privileged accessor on the claim path."
+        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path. The dispatcher recovers it through the engine's privileged accessor on the claim path."
       },
       signature: {
         label: "HMAC Signature",
@@ -376,7 +376,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "Attempts",
-        help: "Número de intentos realizados hasta ahora. Un 0 en una fila en estado terminal significa que la entrega quedó en PARKED — nunca se envió y no admite reenvío (#8069); consulta `error` para ver la causa."
+        help: "Número de intentos realizados hasta ahora. Un 0 en una fila en estado terminal significa que la entrega quedó en PARKED — nunca se envió y no admite reenvío, porque no lleva firma; consulta `error` para ver la causa."
       },
       claimed_by: {
         label: "Claimed By"
@@ -398,7 +398,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       error: {
         label: "Error",
-        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069)."
+        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared."
       },
       created_at: {
         label: "Created At"

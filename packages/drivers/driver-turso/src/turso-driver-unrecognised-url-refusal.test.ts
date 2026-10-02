@@ -23,7 +23,7 @@
  * file:<tmp>/ctl.db (CONTROL)     -> local, 1 row, 1 after restart, file created
  * ```
  *
- * `@libsql/core@0.17.4` routes on `uri.scheme.toLowerCase()`
+ * `@libsql/core@0.18.0` routes on `uri.scheme.toLowerCase()`
  * (`lib-esm/config.js`), so the client reads `LIBSQL://` as `https` and
  * `FILE:` as `file`. The host's own url sniffers select this driver
  * case-insensitively too (`/^libsql:\/\//i` in the CLI's

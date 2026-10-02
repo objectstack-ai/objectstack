@@ -36,7 +36,7 @@
  * (`_objectstack_sequences`, `sys_organization`) that other live suites also
  * use.
  *
- * That database is DERIVED FROM THIS FILE's path (#10382) rather than named by
+ * That database is DERIVED FROM THIS FILE's path (commit ee09d2119) rather than named by
  * a constant. It used to be the literal `os_metadata_protocol_9381`, which was
  * distinct from the sibling suite's only because two authors happened to type
  * two different strings — and `afterAll` below issues `drop database`, so a

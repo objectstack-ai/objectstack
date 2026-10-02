@@ -18,7 +18,7 @@
  * `the generic line separates the two causes but still cannot name the loss`
  * block below pins why it does not satisfy the acceptance: it describes the
  * sub-read only — never the parent object, the fields left un-hydrated, or the
- * consequence. ⚠️ [#13273] That block was rewritten when the generic frame
+ * consequence. ⚠️ [commit 3a86a65e7] That block was rewritten when the generic frame
  * stopped being `error` for every cause: it is `debug` for the benign
  * "table was never provisioned" class now, and — [#17212], because `find`
  * rethrows and so tells its caller — `warn` for everything else.
@@ -296,7 +296,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
    * failed `sys_file` sub-read before rethrowing into this catch. That line is
    * real and this fix neither removes nor duplicates it.
    *
-   * ⚠️ [#13273] What HAS moved since #6116, and why this block was rewritten
+   * ⚠️ [commit 3a86a65e7] What HAS moved since #6116, and why this block was rewritten
    * rather than deleted. That generic frame used to be `error` for every cause
    * — which is what made it useless as a discriminator, and is the sentence
    * this block used to pin. `engine.ts` now asks `isMissingTableError` and puts
@@ -304,7 +304,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
    * line. The re-pinned facts below are therefore:
    *
    *   1. the generic frame DOES now separate the two causes by channel — the
-   *      benign read reaches `debug` only (#13273's own acceptance,
+   *      benign read reaches `debug` only (commit 3a86a65e7's own acceptance,
    *      re-measured from this file's fake driver), the outage the loud
    *      branch, which is `warn` since [#17212] (`find` rethrows into this
    *      seam's catch, so its caller was told) — and neither reaches `error`;

@@ -5368,6 +5368,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'selected and no walker can move that intent into the dataset.',
   },
   {
+    id: 'dataset-member-field-expression-refused',
+    order: 58,
+    text:
+      'It also holds an ADR-0021 dataset\'s `field` — `dimensions[].field` and `measures[].field` — to '
+      + 'the accept set the cube members it compiles to already hold, from one shared declaration: a '
+      + 'field of the dataset\'s object, a relationship path ending in one, and on a measure also '
+      + '`\'*\'` (ADR-0021 "zero raw SQL / zero raw expressions"; ADR-0049 enforce-or-remove). The '
+      + 'slot was a bare string that parsed any expression, while the analytics dataset door already '
+      + 'refused one on every query, so an expression could be saved and never answered. It is now '
+      + 'refused at parse with a prescription naming the ADR-0021 form — a measure with its own '
+      + 'structured `filter`, or `derived: { op, of: [...] }` over named measures — and so are an '
+      + 'empty string (a count omits `field` instead) and `\'*\'` on a dimension, which names no '
+      + 'axis. The one lossless repair is D2: `dataset-count-measure-empty-field-removed` drops a '
+      + '`count` measure\'s empty `field`, which still counts rows. An expression has no mechanical '
+      + 'rewrite into a column, so the semantic entry `dataset-member-field-expression-refused` '
+      + 'carries the rest.',
+  },
+  {
     id: 'duration-keys-unit-in-key',
     order: 24,
     text:
@@ -5501,6 +5519,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
       + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
       + 'the one-line fix where a node meant every branch.',
+  },
+  {
+    id: 'form-field-public-picker-retired',
+    order: 56,
+    text:
+      'Finally, it retires the form field\'s `publicPicker` block (ADR-0087 D2, immediate — the '
+      + 'maintainer\'s ruling E, which reverses the earlier ruling that had declared it): an '
+      + 'anonymous public form no longer offers record search. The block opted a lookup, '
+      + '`master_detail` or `user` field on a public form into a picker served by an '
+      + 'unauthenticated route; that route is deleted, and the public-form resolve route now '
+      + 'leaves those three field types off the anonymous rendering unconditionally. The schema '
+      + 'refuses the key with the prescription; the mechanical conversion '
+      + '`form-field-public-picker-removed` strips it from old sources and stored rows (lossless '
+      + 'in effect — its only reader was the deleted route), and the semantic entry asks the '
+      + 'author how a visitor should now choose: a `select` field with static `options`, or a '
+      + 'form behind sign-in.',
   },
   {
     id: 'form-view-option-default-retired',
@@ -5973,6 +6007,56 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
       + '`columns` untouched) on `object-form` page components, on every form payload a view '
       + 'carries, and on the assembled-manifest `viewItems` channel.',
+  },
+  {
+    id: 'ui-object-grid-export-options-closed',
+    order: 59,
+    text:
+      'It also closes the export options of an `object-grid` page block (#21229). `exportOptions` '
+      + 'was `z.unknown()`, so a bare format array — the list view\'s legacy spelling, which the list '
+      + 'view lifts to `{ formats }` — was accepted on the grid, whose renderer reads '
+      + '`exportOptions.formats` and lifts nothing: the export menu offered its csv/json default and '
+      + 'the author\'s list was dropped. The row now takes the list view\'s five-member export '
+      + 'options object by identity, not the list view\'s union, and refuses a bare array with the '
+      + 'object form named, a format outside the enum and an undeclared key. Page-component '
+      + '`properties` is read by the component-props gate, which reports these as advisory '
+      + 'findings, and is not parsed on the metadata save or load path, so a stored page still saves '
+      + 'and loads and no conversion is registered: the bare array never worked here, and lifting it '
+      + 'would change the menu a deployed grid shows. The authored census found nothing to respell. '
+      + 'Its D3 record is the semantic entry `ui-object-grid-export-options-closed`.',
+  },
+  {
+    id: 'ui-object-master-detail-form-details-closed',
+    order: 56,
+    text:
+      'It also closes the third carrier of the inline grid column: an '
+      + '`object-master-detail-form` page block\'s `details` was `z.array(z.unknown())`, so a key '
+      + 'its renderer does not read and `scale` on a currency column, which the other two carriers '
+      + 'refuse under the maintainer\'s rulings of 2026-09-23 (option B) and 2026-09-24 (option 乙), '
+      + 'went through `objectstack validate` green (#20928). '
+      + 'Each detail entry is now a strict shape of the twelve keys the renderer reads, and its '
+      + '`columns` references `InlineGridColumnSchema`. Page-component `properties` is read by the '
+      + 'component-props gate, which reports a failing entry or column as an advisory finding, '
+      + 'and is not parsed on the metadata save or load path, so a stored page still saves and '
+      + 'loads and no conversion is registered; the authored census found nothing to respell. '
+      + '`defineStack`\'s identity-only check reaches the block wherever a page carries it, with '
+      + 'the reach `inline-grid-column-identity-only-currency-scale-refused` records for the '
+      + 'other two carriers. Its D3 record is the semantic entry '
+      + '`ui-object-master-detail-form-details-closed`.',
+  },
+  {
+    id: 'ui-record-line-items-props-closed',
+    order: 57,
+    text:
+      'It closes the fourth carrier the same way: `record:line_items` had no `ComponentPropsMap` '
+      + 'row — it was the one entry on the string-arm registration ledger — so the component-props '
+      + 'gate skipped its props, and the showcase project page\'s five `field`-keyed columns published '
+      + 'green over a grid of empty cells (#21142). The row declares the fifteen keys the renderer '
+      + 'reads, requires `relationshipField` and at least one column, and its `columns` references '
+      + '`InlineGridColumnSchema`; the showcase columns are respelled `name` in the same change. The '
+      + 'panel draws its columns as authored, with no hydration from the child object\'s field, so '
+      + '`defineStack`\'s identity-only check does not reach it. Its D3 record is the semantic entry '
+      + '`ui-record-line-items-props-closed`.',
   },
   {
     id: 'ui-report-joined-chart-retired',
@@ -8168,8 +8252,8 @@ const step18: MigrationStep = {
         + 'instance it pulls from (`connector`), the action that reads the records (`action`, with a '
         + 'fixed `input` and a `recordsPath`) and, for a timestamp-incremental pull, a `watermark` '
         + '(`field` on the record, `param` on the request); a `job` sets the cadence. The pull executor '
-        + 'reads the binding when a `job` drives it; nothing schedules a pull yet, and authoring it '
-        + 'warns until a job can.',
+        + 'reads the binding when a `job` drives it; nothing schedules a pull yet, so the binding alone '
+        + 'moves no rows.',
       reason: 'The D2 conversion `connector-sync-keys-removed` deletes `syncConfig` and '
         + '`fieldMappings` from every connector, stack entry and stored connector row, one notice per '
         + 'key, and the delete is lossless: no engine ever ran a connector-attached sync or moved a '
@@ -9158,6 +9242,70 @@ const step18: MigrationStep = {
         + 'joined object. A measure column over such a pair also stops carrying a corrected '
         + '`fields[].type`, because the pair no longer produces a column at all.',
     },
+    // #21220 (ADR-0049 enforce-or-remove) — an ADR-0021 dataset dimension's and
+    // measure's `field` is a column reference, the accept set the cube members it
+    // compiles to hold since `cube-member-sql-expression-retired`, from one shared
+    // declaration. The D3 entry of the `dataset-count-measure-empty-field-removed`
+    // family: that D2 conversion carries the one lossless repair (a `count`
+    // measure's empty `field` is dropped, and the measure still counts rows); this
+    // entry carries the rest, which has no mechanical rewrite — an expression
+    // becomes a measure filter, a derived measure or a field of the object, and
+    // only the author knows which.
+    {
+      id: 'dataset-member-field-expression-refused',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'datasets[].dimensions[].field and datasets[].measures[].field (ui.DatasetDimensionSchema.field / '
+        + 'ui.DatasetMeasureSchema.field) authored as anything but a column reference — a SQL expression '
+        + '(an arithmetic, an aggregate, a CASE, a subquery, a function call), a quoted or $-prefixed '
+        + 'spelling, a padded or empty string, a broken path, or * on a dimension',
+      replacement:
+        'a column reference: a field of the dataset\'s object (`amount`), or a relationship path ending '
+        + 'in one (`account.amount`) whose relationships are declared in `include`; on a measure also '
+        + '`\'*\'` for a count, and a count may omit `field` altogether (never `field: \'\'`). A derived '
+        + 'value takes its ADR-0021 form: a conditional count or sum is a measure with its own structured '
+        + '`filter` (`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a '
+        + 'ratio, sum, difference or product of measures is `derived: { op, of: [...] }` over measures '
+        + 'named in the same dataset (`{ name: \'done_rate\', derived: { op: \'ratio\', of: '
+        + '[\'done_count\', \'task_count\'] }, format: \'0.0%\' }`). A dimension that bucketed a column '
+        + 'with an expression has no expression form: group by the column itself, or keep the bucket as a '
+        + 'field of the object and name that field',
+      reason:
+        'The dataset layer was declared to take no raw SQL (ADR-0021 "zero raw SQL / zero raw '
+        + 'expressions"), and its `field` was documented as a field or a relationship path, but the slot '
+        + 'was a bare string and parsed anything — declared, never enforced (ADR-0049). The runtime had '
+        + 'already closed the other end for an expression: the analytics dataset door refuses one with a '
+        + '403 refusal, inline or saved, because an expression names no single field and no platform '
+        + 'check can judge which fields it reads. So an expression could be saved and never answered. '
+        + 'That door never judged an empty `field` — it skips one. The cube members a dataset compiles '
+        + 'to were narrowed to the same accept set earlier (`cube-member-sql-expression-retired`); the '
+        + 'dataset compiler copies `field` '
+        + 'into the member\'s `sql` verbatim, so the two slots now share one declaration. A dimension '
+        + 'additionally refuses `\'*\'`: grouping by every column is no axis, and both analytics '
+        + 'strategies answered such a dimension with a 500 database fault. An empty string is refused on both: '
+        + 'a dimension groups by nothing, and a count spells "no field" by omitting the key. One empty '
+        + 'string had a working row and has a lossless repair: a `count` measure with `field: \'\'` (the '
+        + 'shape a blank Field box in Studio\'s dataset inspector stores) compiled to the row count on '
+        + 'SQLite\'s native-SQL path, and without the key it compiles to `COUNT(*)` — the D2 conversion '
+        + '`dataset-count-measure-empty-field-removed` drops it from stored rows and sources. Everything '
+        + 'else has no mechanical rewrite into a column: an expression becomes a measure filter, a derived '
+        + 'measure or a field of the object, and a ratio changes scale on the way (a `derived` ratio is a '
+        + '0–1 fraction, so an expression that multiplied by 100 returned percentage points). ADR-0021 / '
+        + 'ADR-0049 / ADR-0087',
+      acceptanceCriteria:
+        'Every dataset parses: `DatasetSchema`, the dataset write door and defineStack refuse a '
+        + 'non-column `field` at `dimensions.N.field` / `measures.N.field` with a prescription that names '
+        + 'the column-reference contract and the ADR-0021 form, so the sweep is mechanical — parse each '
+        + 'dataset, and each refusal is one member to change. A count measure that carried `field: \'\'` '
+        + 'loses the key by the D2 conversion, parses, and still counts rows; a non-count measure or a '
+        + 'dimension with an empty `field` is left as stored and refused until it names a column. For '
+        + 'each moved measure, a query over a fixture where the '
+        + 'condition excludes rows returns the figure the expression meant (a ratio: the same value '
+        + 'divided by 100 when the expression returned percentage points). A dimension or measure whose '
+        + '`field` is a column or a relationship path parses byte-identically to before.',
+      conversionIds: ['dataset-count-measure-empty-field-removed'],
+    },
     {
       id: 'datasource-config-mongo-options-credential-refused',
       surface: 'datasource.config.options.auth.password (mongodb) — a login credential written ' +
@@ -9461,6 +9609,55 @@ const step18: MigrationStep = {
         + 'the rename prescription naming `timeoutMs`; `{ timeoutMs: 5000 }` parses to the same '
         + 'number.',
     },
+    // #21226 — registered by the change that put the caller's tenant scope on the
+    // remote libSQL face's doors, not by a later reconciliation. A driver call is
+    // code, never stack metadata, so there is no authored source for the chain to
+    // rewrite and no schema tombstone: this entry is the migration channel beside
+    // the changeset's FROM → TO table, as for its sibling
+    // `driver-upsert-cross-organization-conflict-refused`.
+    {
+      id: 'driver-remote-doors-tenant-scoped',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'IDataDriver find, findOne, count, aggregate, update, delete, bulkUpdate, bulkDelete, '
+        + 'updateMany, deleteMany, create and bulkCreate on TursoDriver\'s remote (libSQL) face, '
+        + 'called with a tenant context',
+      replacement:
+        'a tenant-scoped call on the remote face reaches the rows the local face reaches for the '
+        + 'same options: the caller\'s organization, rows with no organization, and under the group '
+        + 'posture the caller\'s membership set. A by-id `update` outside that scope answers `null`, '
+        + 'a by-id `delete` answers `false`, and a predicate write counts only the rows in scope. '
+        + '`create` stamps the caller\'s organization on a row that names none. To reach rows of '
+        + 'every organization, call without `tenantId`, as on the local face',
+      reason:
+        'The engine hands every driver the caller\'s organization as `DriverOptions.tenantId`, and '
+        + 'the group posture\'s membership set as `tenantIds` (ADR-0131 D8, ADR-0105 D2). '
+        + 'TursoDriver\'s local face applies them through `SqlDriver.applyTenantScope` on every read '
+        + 'and on every update and delete predicate, and stamps the organization on insert. Its remote '
+        + 'face compiles its own statements, and its doors received no driver options: their '
+        + 'statements carried the caller\'s filter and nothing else, and a remote `create` wrote no '
+        + 'organization. Where the engine\'s Layer 0 wall composes a predicate above the driver, that '
+        + 'wall held other organizations\' rows back. Where it composes none (the posture in which '
+        + 'Layer 0 is inert, or an elevated caller that carries its organization), the driver scope '
+        + 'is the only fence, and on the remote face there was none. The remote doors now compile the '
+        + 'local face\'s own predicate, by asking the same chokepoint, and AND it onto each '
+        + 'statement, so the two faces answer the same rows by construction. The remote `create` '
+        + 'stamps the organization as the local `create` does. `distinct` still refuses a '
+        + 'tenant-scoped call on the remote face. The call signatures are unchanged, so nothing '
+        + 'reaches the compiler. Code that relied on a tenant-scoped remote call reaching another '
+        + 'organization\'s rows now gets the miss answer each door already declares, and a remote '
+        + '`create` that relied on landing a row with no organization now finds it under the '
+        + 'caller\'s. ADR-0131 D8 / ADR-0087.',
+      acceptanceCriteria:
+        'No caller of a remote-mode TursoDriver passes `tenantId` and expects to read, count, '
+        + 'aggregate, update or delete a row of another organization; a caller that means to reach '
+        + 'every organization calls without a tenant context, as on the local face. No caller relies '
+        + 'on a tenant-scoped remote `create` landing a row with no organization. Proven when a '
+        + 'tenant-scoped call on each door answers the same rows on the remote face as on the local '
+        + 'face for the same options: another organization\'s row excluded, `null`, `false` or '
+        + 'untouched, and the caller\'s own rows and rows with no organization answered as before.',
+    },
     // Registered by the change that removed the three methods (#20822, PR #20988),
     // not by a later reconciliation.
     {
@@ -9718,6 +9915,57 @@ const step18: MigrationStep = {
         + 'config that named its file only through `url` + `syncUrl` parses byte-identically to before, '
         + 'and every other declared key — `url`, `authToken`, `encryptionKey`, `concurrency`, `syncUrl`, '
         + '`sync`, `timeoutMs` — keeps its bound, default and optionality.',
+    },
+    // #21185 — registered by the change that fenced the merge leg (PR #21225), not by
+    // a later reconciliation. Executes the ruling record 5934879010 (letter A,
+    // refinements 1/2/3). A driver call is code, never stack metadata, so there is no
+    // authored source for the chain to rewrite and no schema tombstone: this entry is
+    // the migration channel beside the changeset's FROM → TO table.
+    {
+      id: 'driver-upsert-cross-organization-conflict-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'IDataDriver upsert on SqlDriver, SqliteWasmDriver and TursoDriver (both faces): a '
+        + 'tenant-scoped call whose conflict lands on a row of another organization, and the '
+        + 'tenant column on the merge leg',
+      replacement:
+        'a tenant-scoped upsert merges only into a row of the organization it writes under; a '
+        + 'conflict anywhere else answers `UNIQUE_VIOLATION` / 409 and writes nothing, so handle it '
+        + 'as the colliding insert it is from the caller\'s organization. To move a row between '
+        + 'organizations, call the driver\'s `update` door on that row: an upsert keeps the stored '
+        + 'row\'s organization on merge',
+      reason:
+        '`upsert` resolves its conflict against the whole table, and the primary key and a '
+        + '`unique: \'global\'` column are installation-wide (ADR-0120 D1). So the row a tenant-scoped '
+        + 'call (`options.tenantId` on an object with a tenant column) collided with could belong to '
+        + 'an organization the caller cannot read. The merge leg wrote every payload column except '
+        + 'the insert-only ones onto that row, and the tenant column was not insert-only: the other '
+        + 'organization\'s columns were overwritten and the row was re-parented to the caller\'s '
+        + 'organization, with no error. That was the one driver door the tenant predicate did not '
+        + 'reach (ADR-0131 D8). The merge leg is now fenced to rows whose stored tenant column equals '
+        + 'the written one, for any conflict target, the primary key included. A conflict anywhere '
+        + 'else, including a row with no organization, is refused with `UNIQUE_VIOLATION` / 409, the '
+        + 'registered code a colliding insert gets, and the refusal names no organization. The fence '
+        + 'is a predicate inside the merge statement on SQLite, PostgreSQL and the remote libSQL face. '
+        + 'MySQL\'s merge statement takes no predicate, so there the statement and a read of the '
+        + 'landed row run in one transaction (a savepoint inside a caller\'s transaction) and the '
+        + 'read\'s failure rolls the write back. The tenant column also joined '
+        + '`insertOnlyUpsertColumns`, so an upsert with no tenant context keeps the organization of '
+        + 'the row it merges into. Two things can break, and neither reaches the compiler, since the '
+        + 'call signature is unchanged. Code that let a tenant-scoped upsert land on another '
+        + 'organization\'s row now gets a refusal where it got a silent merge. Code that relied on '
+        + 'a payload\'s tenant value to move a row on merge now finds the row where it was. '
+        + 'ADR-0131 D8 / ADR-0087.',
+      acceptanceCriteria:
+        'Every caller that upserts with a tenant context handles `UNIQUE_VIOLATION` / 409 as a '
+        + 'colliding insert, and none expects a merge into a row its organization cannot read. No '
+        + 'caller relies on an upsert payload\'s tenant value to change which organization owns a '
+        + 'row; that move goes through the `update` door. Proven when a tenant-scoped upsert on a key '
+        + 'another organization\'s row holds answers `UNIQUE_VIOLATION` and that row reads back '
+        + 'unchanged, while the same call on a row of the caller\'s own organization merges as '
+        + 'before. An upsert with no tenant context that merges into a row leaves the row\'s '
+        + 'organization as it was.',
     },
     {
       id: 'element-data-source-and-object-block-filter-rule-array',
@@ -11744,14 +11992,31 @@ const step18: MigrationStep = {
         + 'refusals — each message names the filter key, the field\'s declared type and the '
         + 'operator, which is the whole repair list. A filter re-authored onto a typed '
         + 'operator returns the rows its author meant; one left as written keeps answering '
-        + '400, and NOTHING silently rewrites it. Filters over text-valued fields — '
-        + 'including `select` / `radio` codes, `multiselect` / `checkboxes` / `tags`, lookup '
-        + 'and `user` ids, `autonumber` and the file classes — are unaffected and must keep '
-        + 'answering exactly as before; that is the control which proves a repair pass did '
-        + 'not over-reach. A DIRECT driver call bypasses this door entirely and keeps '
+        + '400, and NOTHING silently rewrites it. This door judges a field by its declared '
+        + 'type alone, so it never refuses a text operator over a text-valued field — '
+        + '`select` / `radio` codes, `multiselect` / `checkboxes` / `tags`, lookup and `user` '
+        + 'ids, `autonumber` and the file classes. Over every such field that is not stored '
+        + 'as a JSON column (below), filters must keep answering exactly as before; that is '
+        + 'the control which proves a repair pass did not over-reach. A DIRECT driver call '
+        + 'bypasses this door entirely and keeps '
         + 'answering the `FILTER_TEXT_CASES` stored-value row (a stored value that is not a string '
         + 'never satisfies a positive text operator and satisfies `$notContains`), so a '
-        + 'driver-level test is not evidence about this migration in either direction.',
+        + 'driver-level test is not evidence about this migration in either direction. A '
+        + 'field stored as a JSON column is NOT that control, because a separate door judges '
+        + 'it by its storage rather than its declared type: `multiselect` / `checkboxes` / '
+        + '`tags`, any field declared `multiple: true` (a multi-valued lookup or `user` among '
+        + 'them) and, on a SQL deployment still inside the ADR-0104 dual-encoding window (its '
+        + 'media columns not yet moved), a single-value file-class field. That door refuses '
+        + 'every text operator there except the membership pair `$contains` / `$notContains` '
+        + '— `$startsWith`, `$endsWith`, `$icontains`, `$like` and `$ilike`, beside the '
+        + 'scalar comparisons it already refused — with an `INVALID_FILTER` 400 that names no '
+        + 'declared type, so a stored filter left on one of those operators there answers '
+        + 'that 400 after the upgrade and is outside this entry\'s repair list. On a multi-valued field its '
+        + 'repair is membership, which no rewrite chooses either: `$contains` for one member, '
+        + 'an `$or` of `$contains` for any-of. A single-value file-class field is not a '
+        + 'membership question: it answers text operators again once its deployment finishes '
+        + 'the media-column move (the column step of `objectstack migrate files-to-references '
+        + '--apply`).',
     },
     // The absent half of the decision-branch predicate rule. A SEPARATE entry from
     // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
@@ -12118,6 +12383,35 @@ const step18: MigrationStep = {
         + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
+    },
+    // #21180 — ADR-0087 D2, immediate retirement (the maintainer's ruling E on
+    // #21079, comment 5933054144, reversing the #7467 ruling) — the D3 entry of the
+    // `form-field-public-picker-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). Registered key:
+    // `ui/FormField:publicPicker`. The strip changes nothing a visitor sees — the
+    // resolve route already leaves the field off the anonymous rendering — but the
+    // visitor's way to choose a value is gone, and only the author can say what
+    // replaces it.
+    {
+      id: 'form-field-public-picker-retired',
+      surface: 'view.form.sections[].fields[].publicPicker — the anonymous public-form record-search picker',
+      replacement: 'No record search on an anonymous public form. For a choice from a fixed list, a '
+        + '`select` field with static `options`. For a choice of an existing record, the same form '
+        + 'behind sign-in, where the lookup field renders with the signed-in user\'s access.',
+      reason: 'The D2 conversion `form-field-public-picker-removed` deletes `publicPicker` from every '
+        + 'form field, and the delete is lossless in effect: the block\'s only reader was the '
+        + 'anonymous lookup route, which is gone, and the public-form resolve route now leaves '
+        + 'lookup, `master_detail` and `user` fields off the anonymous rendering whatever the row '
+        + 'carries. What the strip cannot decide is the visitor\'s path. A public form that used the '
+        + 'picker let an anonymous visitor search and pick a record; after the upgrade that field is '
+        + 'simply absent from the form, so a submission arrives without the value. Whether the '
+        + 'choice was really from a small fixed set (a `select` with static `options`), or needs a '
+        + 'real record and therefore a signed-in user, is a product decision only the author can make.',
+      acceptanceCriteria: 'No form field carries `publicPicker`; the parse refuses it. Every public '
+        + 'form that had carried one either replaces the lookup field with a `select` field whose '
+        + 'static `options` list the allowed choices, or is served behind sign-in, or the author has '
+        + 'confirmed the form works without the value. Fetching the public form anonymously '
+        + '(`GET /forms/:slug`) shows no lookup, `master_detail` or `user` field in its sections.',
     },
     // The D3 entry of the `form-view-option-default-removed` family, which landed
     // in commit c459da6bc: a maintainer-ruled narrowing on the objectui#6263
@@ -12909,13 +13203,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names '
+        + 'against, `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 9800 tracked files (0 across the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 9912 tracked files (0 across the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49 and to 15352 and 6024 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310 and to 15691 and 6206 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -13120,10 +13414,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c`, re-read from this tree — '
+        + '`.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '9800 tracked files, against lit controls timeout 1293, RuntimeConfig 273 and resourceLimits '
-        + '2 on the same corpus (0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '9912 tracked files, against lit controls timeout 1303, RuntimeConfig 273 and resourceLimits '
+        + '2 on the same corpus (0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -13359,10 +13653,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — spells '
+        + 'objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 9800 tracked files, against lit controls `useState` 2464 and `timeout` 1293 on '
-        + 'the same corpus (all four 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 9912 tracked files, against lit controls `useState` 2469 and `timeout` 1303 on '
+        + 'the same corpus (all four 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -17018,10 +17312,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 9800 tracked '
-        + 'files at that sha, against lit controls window 3873, timeout 1293, period 233, '
-        + 'interval 196 and metrics 352 on that same corpus and sha (0 across 9546, against 3772 / '
+        + '`.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9912 tracked '
+        + 'files at that sha, against lit controls window 3916, timeout 1303, period 234, '
+        + 'interval 196 and metrics 354 on that same corpus and sha (0 across 9800, against 3873 / '
+        + '1293 / 233 / 196 / 352, at e420df310, 0 across 9546, against 3772 / '
         + '1197 / 228 / 196 / 341, at db11afd49, 0 across 9283, against 3681 / 1172 / 183 / 176 / 340, at dd3f7e1be, 0 across 8512, against 3581 / '
         + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
         + '324, at 62597c588), so no pin bump is owed. '
@@ -17235,12 +17530,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9800 files '
+        + 'pinned objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9912 files '
         + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 15352 hits for the bare token objectstack, '
-        + 'and 6024 for the package specifier @objectstack/spec (at db11afd49: 0 across 9546, Span 486, '
+        + 'two lit controls on that same corpus and sha: 15691 hits for the bare token objectstack, '
+        + 'and 6206 for the package specifier @objectstack/spec (at e420df310: 0 across 9800, Span 486, '
+        + '15352 and 6024; at db11afd49: 0 across 9546, Span 486, '
         + '14704 and 5545; at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
         + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
@@ -17348,9 +17644,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — spells it 0 '
-        + 'times across 9800 tracked files, against lit controls `TTL` 181 and `tenant` 1235 on the '
-        + 'same corpus (0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — spells it 0 '
+        + 'times across 9912 tracked files, against lit controls `TTL` 181 and `tenant` 1237 on the '
+        + 'same corpus (0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
@@ -18419,6 +18715,56 @@ const step18: MigrationStep = {
         + 'group per value of that field, and a board that showed one swimlane shows one swimlane per value — '
         + 'check that this is the grouping you meant.',
     },
+    // #21229 — an `object-grid` page block's `exportOptions` was `z.unknown()`, so a
+    // bare format array (the list view's legacy spelling, which the list view lifts
+    // to `{ formats }`) was accepted on the grid, whose renderer reads
+    // `exportOptions.formats` and lifts nothing. The row now takes the list view's
+    // five-member export options OBJECT by identity, not the list view's union. D3
+    // only: page-component `properties` is not parsed on the metadata save or load
+    // path, so a stored page is never refused and there is no load-path refusal for
+    // a conversion to pre-empt; the bare array never worked here, and lifting it
+    // would change the export menu a deployed grid shows today; the authored census
+    // found nothing to respell.
+    {
+      id: 'ui-object-grid-export-options-closed',
+      surface: 'page `object-grid` components — `properties.exportOptions` (which used to accept any value)',
+      replacement: 'the export options object a list view\'s `exportOptions` declares: `{ formats?, '
+        + 'maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, with `formats` drawn from '
+        + '`csv`, `xlsx` and `json`, `maxRecords` a non-negative integer, and `includeHeaders` / '
+        + '`streaming` booleans. Where a bare format array was written, write `{ formats: [...] }` to '
+        + 'offer the formats you listed — the grid will now offer exactly those — or `{}` to keep the '
+        + 'csv/json default the grid has been offering. Delete `pdf` from `formats`, and any key the '
+        + 'object does not declare; delete an `exportOptions: null` (it never enabled the menu).',
+      reason: 'The grid reads one export options block — `exportOptions.formats`, `.maxRecords`, '
+        + '`.includeHeaders`, `.fileNamePrefix` and `.streaming` — the block a list view declares, '
+        + 'but the page-component row declared the key `z.unknown()`, so any value passed the '
+        + 'component-props gate. The trap was the list view\'s legacy spelling: a bare format array is '
+        + 'legal on a list view, which lifts it to `{ formats }` at parse, and was accepted on the grid, '
+        + 'which lifts nothing — the export menu appeared, offering the csv/json default, and the '
+        + 'author\'s list was dropped without a report. The row now takes the list view\'s export '
+        + 'options object itself rather than its union, so a legacy spelling does not spread to a '
+        + 'surface that never read it: a bare array is refused with the object form named, a format '
+        + 'outside the enum is refused at its index (`pdf` with its retirement text), and a key the '
+        + 'object does not declare is named. It is read where every page component\'s props are: the '
+        + 'component-props gate reports these as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and '
+        + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s '
+        + '`properties` is not parsed on the metadata save or load path. No conversion is registered: '
+        + 'nothing on the load path refuses the shape; a bare array has no rewrite that both keeps '
+        + 'what the grid shows today and honours what the author wrote, which is the judgment this '
+        + 'entry leaves to the upgrader; and the authored census found nothing to respell. Population '
+        + 'measured at the change, on origin/main f148852752: zero `object-grid` blocks authoring '
+        + '`exportOptions` in the examples, the package fixtures, the documentation and the published '
+        + 'skills, against ten authored `object-grid` blocks through the same matcher (nine in '
+        + 'TypeScript, one in a YAML documentation example) and four list-view `exportOptions` '
+        + 'authorings as the key\'s control. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-grid` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding on a '
+        + '`properties.exportOptions` path. Every `exportOptions` on an `object-grid` is an object '
+        + 'carrying only the five declared keys, with every `formats` entry `csv`, `xlsx` or `json`, '
+        + 'and the grid\'s export menu offers the declared formats the active export path delivers '
+        + '(`xlsx` on the server stream only).',
+    },
     {
       id: 'ui-object-grid-page-size-positive-integer-refused',
       surface: '`object-grid` page-component page sizes '
@@ -18463,6 +18809,68 @@ const step18: MigrationStep = {
         + '`pageSize` shorthand are reported the same way at their own paths. The author deletes '
         + 'the key or writes the page size they meant, and `os validate` then reports no '
         + '`component-props-invalid` finding for that node.',
+    },
+    // #20928 — the third carrier of the inline grid column. An
+    // `object-master-detail-form` page block's `details` was `z.array(z.unknown())`
+    // while the other two carriers — a relationship field's `inlineColumns` and a
+    // form view's `subforms[].columns` (#20901) — were the strict
+    // `InlineGridColumnSchema`; the entry is now a strict shape of the twelve keys
+    // objectui's `MasterDetailForm` reads, and its `columns` REFERENCES that schema.
+    // D3 only: page-component `properties` is not parsed on the metadata save or
+    // load path, so a stored page is never refused and there is no load-path
+    // refusal for a conversion to pre-empt; the authored census found no `field`
+    // spelling to respell. `defineStack`'s identity-only check reaches this carrier
+    // too, the reach `inline-grid-column-identity-only-currency-scale-refused`
+    // records for the other two.
+    {
+      id: 'ui-object-master-detail-form-details-closed',
+      surface: 'page `object-master-detail-form` components — `properties.details[]` (each detail '
+        + 'entry, which used to accept any value) and `properties.details[].columns[]` (its inline '
+        + 'grid columns), including `scale` on a column that declares no `type` and whose `name` is a '
+        + '`currency` field of the entry\'s `childObject`',
+      replacement: 'each entry is `{ childObject, relationshipField?, columns?, formFields?, '
+        + 'inlineMode?, amountField?, sortField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
+        + '— the keys the renderer reads — with `inlineMode` one of `grid` / `form`. Each column is the '
+        + 'strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes — '
+        + '`{ name, label?, type?, … }`, where `{ name }` alone hydrates the rest from the child '
+        + 'object\'s field. Write `childObject` on every entry; write `name` where a column said '
+        + '`field` (or `fieldName`, `key`) or was a bare field-name string; delete `scale` from a '
+        + 'column that renders as a currency column, whether it declares `type: \'currency\'` or takes '
+        + 'it from a `currency` child field — nothing replaces it, the currency\'s ISO 4217 minor unit '
+        + 'decides; delete any key neither shape declares.',
+      reason: 'The block draws one inline grid per detail entry, hydrating an authored column list '
+        + 'with the same rule and into the same grid as the other two carriers of the inline grid '
+        + 'column, but nothing judged its entries: a key the renderer does not read was ignored in '
+        + 'silence, and a column carrying a key the grid does not read, or `scale` on a currency '
+        + 'column — refused on the other carriers under the maintainer\'s rulings of 2026-09-23 '
+        + '(option B, `scale` retired from the currency type) and 2026-09-24 (option 乙 — a currency\'s '
+        + 'ISO 4217 minor unit decides its display) — went through `objectstack validate` green. The '
+        + 'entry is now a strict shape and its `columns` references the column schema, so every rule '
+        + 'that schema holds applies here too, with its own prescription. The entry half is read where '
+        + 'every page component\'s props are: the component-props gate reports a failing entry or '
+        + 'column as an advisory `component-props-unknown-key` / `component-props-invalid` finding on '
+        + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
+        + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save '
+        + 'or load path. The identity-only half is `defineStack`\'s cross-reference check, which already '
+        + 'judged the other two carriers: it now reaches the block wherever a page carries it and '
+        + 'refuses an identity-only column over a `currency` child field that carries `scale`, with the '
+        + 'column schema\'s own message; reach: the child object must be declared in the same stack, '
+        + 'and a column the column schema refuses on its own is left to the component-props gate. No '
+        + 'conversion is registered: nothing on the load path refuses the shape, and the authored '
+        + 'census found nothing to respell. Population measured at the change, on origin/main '
+        + 'ebdb6f2aca: one authored block in the examples (the showcase project workspace, one entry '
+        + '`{ title, childObject, addLabel }`, no columns), one documentation example whose three '
+        + 'columns were bare field-name strings (rewritten as `{ name }` columns in the same change), '
+        + 'and zero `field`-keyed detail columns, against one authored `inlineColumns` block as the '
+        + 'control. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-master-detail-form` node validates: `objectstack validate` '
+        + 'reports no `component-props-unknown-key` / `component-props-invalid` finding on a '
+        + '`properties.details` path and no cross-reference finding on a `details[].columns[].scale` '
+        + 'path. Every detail entry carries `childObject` and only keys the entry shape declares; every '
+        + 'column is an object carrying `name`, no column carries `field`, `fieldName` or `key`, and no '
+        + 'column that renders as a currency column carries `scale`. The block\'s showcase entry '
+        + '`{ title, childObject, addLabel }` parses unchanged, and the master-detail grid renders a '
+        + 'value — not a blank cell — in each authored column for a row that has one.',
     },
     {
       id: 'ui-react-list-view-binding-aliases-retired',
@@ -18536,6 +18944,62 @@ const step18: MigrationStep = {
         + '`component-props-unknown-key` / `component-props-invalid` finding for these types. The '
         + 'one parse-time normalization is `ExpressionInputSchema`\'s own: a bare-string `visible` '
         + 'becomes the canonical `{ dialect: \'cel\', source }` envelope.',
+    },
+    // #21142 — the fourth carrier of the inline grid column, and the last
+    // registered `record:*` renderer without a `ComponentPropsMap` row. The type sat
+    // on the string-arm registration ledger instead, so the component-props gate
+    // skipped its props bag: the showcase project page keyed all five of its
+    // columns `field` and published green over a grid of empty cells. The row
+    // declares the fifteen keys objectui's `LineItemsPanel` reads, and its
+    // `columns` REFERENCES `InlineGridColumnSchema`. D3 only: page-component
+    // `properties` is not parsed on the metadata save or load path, so a stored
+    // page is never refused and there is no load-path refusal for a conversion to
+    // pre-empt; the one `field`-keyed producer the census found is respelled in the
+    // same change.
+    {
+      id: 'ui-record-line-items-props-closed',
+      surface: 'page `record:line_items` components — `properties` (which used to accept any key) and '
+        + '`properties.columns[]` (its inline grid columns)',
+      replacement: 'the declared shape the renderer reads: `{ childObject?, relationshipField, columns, '
+        + 'parentObject?, parentId?, recordId?, amountField?, totalField?, title?, readonly?, minRows?, '
+        + 'maxRows?, filter?, sort?, limit? }`, with `filter` the ViewFilterRule array, `sort` the SortItem '
+        + 'array and `limit` a positive integer; `childObject` may come from the component-level '
+        + '`dataSource` binding instead. `columns` is required and holds at least one column, each the '
+        + 'strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes — '
+        + '`{ name, label?, type?, options?, … }`. Write `name` where a column said `field` (or '
+        + '`fieldName`, `key`); declare `label`, `type` and `options` on the column, because this block '
+        + 'draws a column exactly as declared and hydrates nothing from the child object\'s field; '
+        + 'delete `scale` from a column declaring `type: \'currency\'`; delete `addLabel`, `sortField`, '
+        + '`formFields` and `inlineMode`, which belong to an `object-master-detail-form` detail entry and '
+        + 'are not read here, and any other key the shape does not declare.',
+      reason: 'The block draws one inline grid of the record\'s child rows, through the same objectui '
+        + 'grid as the other three carriers of the inline grid column, but it had no `ComponentPropsMap` '
+        + 'row: it was the one entry on the string-arm registration ledger, so the component-props gate '
+        + 'skipped it as unregistered and every authored key rode through. The showcase project page '
+        + 'keyed all five of its columns `field`, the spelling the grid retired, and published green; the '
+        + 'grid binds a column by `name`, so every cell rendered empty. The row is measured from the '
+        + 'renderer\'s read points at the objectui pin, not from the registration\'s declared-input list, '
+        + 'and its `columns` references the column schema, so every rule that schema holds applies here '
+        + 'too, with its own prescription. It is read where every page component\'s props are: the '
+        + 'component-props gate reports a failing key or column as an advisory '
+        + '`component-props-unknown-key` / `component-props-invalid` finding on `objectstack validate`, '
+        + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a '
+        + 'page component\'s `properties` is not parsed on the metadata save or load path. `defineStack`\'s '
+        + 'identity-only column check does not reach this block: the panel hands its columns to the grid '
+        + 'as authored, so there is no hydrated type to judge. No conversion is registered: nothing on the '
+        + 'load path refuses the shape, and the one `field`-keyed producer was respelled in the same '
+        + 'change. Population measured at the change, on origin/main 1ecb871beb: one authored block in '
+        + 'the examples (the showcase project detail page, five `field`-keyed columns, respelled `name`), '
+        + 'zero in the documentation, against eight authored `record:*` blocks of other types through '
+        + 'the same matcher as the control. '
+        + 'Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `record:line_items` node validates: `objectstack validate` reports no '
+        + '`component-props-unknown-key` / `component-props-invalid` finding on its `properties` path. '
+        + 'Every node carries `relationshipField` and at least one column, every column is an object '
+        + 'carrying `name`, no column carries `field`, `fieldName` or `key`, and no key outside the '
+        + 'declared shape is present. The showcase project detail page\'s block parses with its five '
+        + '`name`-keyed columns, and its grid renders a value — not a blank cell — in each column for a '
+        + 'row that has one.',
     },
     {
       id: 'ui-reference-rail-unknown-keys-refused',
@@ -23084,6 +23548,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #21180 — ADR-0087 D2, immediate retirement, by the maintainer's ruling E on
+    // #21079 (comment 5933054144), which reverses the #7467 ruling that had
+    // declared the key. The block opted a lookup / `master_detail` / `user` field
+    // on an ANONYMOUS public form into a record-search picker served by an
+    // unauthenticated route (`GET /forms/:slug/lookup/:field`). The ruling retired
+    // the capability: the route is deleted, and the public-form resolve route now
+    // leaves those three field types off the anonymous rendering unconditionally.
+    // Zero producers measured before the ruling — no example, template, plugin or
+    // first-party UI caller declared one.
+    //
+    // `retiredKey()` on the form field's shape, for the prescription. Sources are
+    // rewritten by the D2 conversion `form-field-public-picker-removed`; the D3
+    // record is `form-field-public-picker-retired`.
+    //
+    // Registered under 18, not 17: the tombstone ships on the 17.x line
+    // (launch-window convention — accept-set narrowings ride minor releases) and
+    // the prescription lives at the major boundary where `migrate meta` users look.
+    'ui/FormField:publicPicker',
     // #20161 (ADR-0049 enforce-or-remove). `JoinedReportBlock.chart` declared an
     // inline chart on one block of a `joined` report, and no renderer ever drew it:
     // at the `.objectui-sha` pin `f8a9d0fb0596`, `DatasetReportRenderer`'s joined
@@ -25453,6 +25935,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/ColorPalette',
+    // `ui/FormFieldPublicPicker` (`displayFields`, `maxResults`, `filter`,
+    // `object`) leaves with its only carrier, `FormFieldBaseSchema.publicPicker`,
+    // tombstoned in this same major under ADR-0087 D2 by the maintainer's ruling E
+    // on #21079: anonymous public forms no longer offer record search, so nothing
+    // replaces the shape — a fixed choice is a `select` field with static
+    // `options`, and a record choice belongs on a form behind sign-in. See
+    // `retired-keys/18.ui__FormField__publicPicker.ts` for the retirement record.
+    'ui/FormFieldPublicPicker',
     // #11027 — `ui/ResponsiveConfig` (the per-breakpoint LAYOUT block: grid
     // columns / visibility / display order on the Tailwind `xs…2xl` axis). Its
     // last authorable carrier, `page.components[].responsive`, is tombstoned in

@@ -1,5 +1,34 @@
 # @objectstack/sdui-parser
 
+## 17.6.0
+
+### Minor Changes
+
+- a093ce3: The SDUI manifest now marks the html tier's intrinsic tags `tier: 'html'`, and this copy of the parser carries that marker the way the renderer's copy does.
+  
+  objectui's copy of `packages/sdui-parser` gained the marker when its registry started declaring the intrinsic HTML tags a `kind:'html'` page may author (`h1`–`h6`, `p`, `a`, `code`, `span`, `table`, the sectioning tags and the rest of the roster; never `div`). This copy still declared only `'public' | 'internal'` and dropped the key. The repo-root `sdui.manifest.json` is serialised through this copy, and `@objectstack/console` ships it in its `dist`, so the published manifest listed those tags with no marker. A reader could not tell them from curated blocks. The port is byte-faithful to objectui at the console pin `dd3f7e1be356`:
+  
+  - `RegistryConfigLike.tier` accepts `'html'`, the stamp objectui's `getPublicConfigs()` puts on the roster in its projection.
+  - `ManifestComponent.tier?: 'html'` is new. `manifestFromConfigs` writes exactly `'html'` or omits the key, so every other entry serialises byte-identically to before.
+  - `generateBlockList` counts only curated blocks in its title and lists the html tier in a section of its own.
+  
+  **What moved in the published manifest:** `"tier": "html"` on 48 entries, and nothing else. It still has the same 107 components in the same order, and no other field on any entry changed.
+  
+  **What did not move:** `compile()` and `validateTree()` read the manifest as a whitelist of keys and never read `tier`. So no page's verdict changes. Measured on the three shipped `kind:'html'` pages of `examples/app-showcase`: the full `compile()` result is identical against the old and the new manifest.
+- 5bed1f6: `@objectstack/sdui-parser` now reads one base-prop list, ported from objectui's `SDUI_BASE_PROPS` at the console pin `db11afd4967c` (objectui#11008, #11044). Both `validateTree` and the generated JSX types (`generateDts`'s `SduiBaseProps`) are driven by it.
+  
+  - On every node, whatever the component declares: `bind`, `hidden`, `visibleWhen`, `hiddenOn`, `testId` are newly accepted. They no longer draw `unknown-prop`, and the generated types accept them as attributes.
+  - Only on a type whose registration declares no input of that name: `name`, `label`, `description`, `placeholder`, `data`, `ariaLabel` are newly accepted. A type that declares one keeps its declared type check and its declared attribute type; its generated interface `Omit`s that key from `SduiBaseProps`.
+  
+  Effect for consumers: `os validate` stops warning `unknown-prop` on those keys, and a `.tsx` page that authors them now type-checks against `generateDts` output where it was a TypeScript error before. Measured on the tracked `sdui.manifest.json` (107 components), no component declares any of the five every-node keys, and every declared where-undeclared key is checked as before, so no diagnostic of error severity is removed for that manifest. The wider type surface is why this is a minor, not a patch.
+- b8191f7: fix(sdui-parser)!: the interim `inert-quick-add` diagnostic is retired, mirroring objectui `6f864cf62` (objectui#8285)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) This is the ObjectStack mirror of objectui `6f864cf62`, one of the five upstream declared-breaking entries the console pin bump to objectui `e420df310f5b` carries, and the port `check:sdui-lockstep` demands so both parser copies keep one diagnostic-code set. It removes no ObjectStack-authorable key: `@objectstack/spec` already refuses `quickAdd` on `object-kanban` by tombstone, registered as `page.component.object-kanban.quickAdd` (#17260), so no document changes shape and `objectstack migrate meta` has nothing to rewrite. What moves is this package's own TypeScript surface and diagnostic payload, stated below. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. The save-time parser stops emitting the interim `inert-quick-add` warning for an authored `quickAdd` on `<object-kanban>`. The prop walk's own `unknown-prop` warning replaces it, so severity is unchanged and no page that saves today stops saving. The package's barrel no longer exports `checkKanbanQuickAdd`, `INERT_QUICK_ADD`, `QUICK_ADD_HOST_TYPES` or `QUICK_ADD_KEY`. A caller that matched on the `inert-quick-add` code should match `unknown-prop` on the `quickAdd` key instead, and an importer of those four names should delete the import: nothing replaces them. On the authored side, delete the `quickAdd` key: the spec refuses it by name.
+
 ## 17.5.0
 
 ### Minor Changes

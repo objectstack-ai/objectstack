@@ -82,14 +82,14 @@ describe('leaves the declared vocabulary and the open arm alone', () => {
     'page:header',
     'record:details',
     // ComponentPropsMap rows that are NOT enum members: the measured
-    // string-arm registrations that earned a row.
+    // string-arm registrations that earned a row. `record:line_items` was the
+    // string-arm registration ledger's one entry until #21142 measured it into
+    // the map; the ledger is empty now.
     'element:metadata_viewer',
+    'record:line_items',
     // ⛔ The RETIRED types are deliberately NOT here — their kept
     // `ComponentPropsMap` row makes them `isKnownComponentType`, and this rule
     // used to read that as "accepted". They now have their own describe below.
-    // The string-arm registration ledger (registered in objectui, row-less by
-    // pinned decision).
-    'record:line_items',
     // Plugin namespaces — the open arm's declared story.
     'mcp:connect-agent',
     'cloud-connection:panel',

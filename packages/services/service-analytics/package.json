@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-analytics",
-  "version": "17.5.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "Analytics Service for ObjectStack — implements IAnalyticsService with multi-driver strategy pattern (NativeSQL, ObjectQL, InMemory)",
   "type": "module",
@@ -34,7 +34,7 @@
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.3",
     "@types/sql.js": "^1.4.11",
-    "sql.js": "^1.14.1",
+    "sql.js": "^1.14.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

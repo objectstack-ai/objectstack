@@ -490,9 +490,10 @@ describe('validateComponentProps — unregistered types are skipped', () => {
   // section header), so it is the family's own living proof the skip survives.
   // `record:quick_actions` left it at #8744 for the same reason — it has a row
   // now, and its dispatch is pinned in the #8744 suite at the end of this
-  // file. `record:line_items` stays: still row-less, still the corpus's own
-  // specimen.
-  it.each(['record:line_items', 'flex', 'object-chart'])(
+  // file. `record:line_items` left it at #21142, the last registered `record:*`
+  // renderer to get a row; its dispatch is pinned in the #21142 suite below.
+  // `flex` stays as the corpus's own row-less specimen.
+  it.each(['flex', 'object-chart'])(
     'says nothing about `%s`, whatever its props carry',
     (type) => {
       const findings = validateComponentProps(
@@ -936,6 +937,59 @@ describe('validateComponentProps — mcp:connect-agent is dispatched (#12344)', 
   it('stays silent on the empty bag the plugin-shipped page authors', () => {
     const findings = validateComponentProps(
       stackWith([{ type: 'mcp:connect-agent', properties: {} }]),
+    );
+    expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * #21142 — `record:line_items` gets its row, so the gate's dispatch reaches it.
+ *
+ * The pre-fix state this pins against: the type had no `ComponentPropsMap`
+ * row (it was the string-arm registration ledger's one entry), so the
+ * walker's unregistered-type skip swallowed the whole props bag — the
+ * showcase project page's five `field`-keyed columns produced ZERO findings
+ * while the grid drew every cell empty. Remove the map row and the first test
+ * here goes back to that silence.
+ */
+describe('validateComponentProps — record:line_items is dispatched (#21142)', () => {
+  /** The showcase project page's block as it was authored before the fix (copied, not imported). */
+  const fieldKeyed = {
+    type: 'record:line_items',
+    properties: {
+      childObject: 'showcase_task',
+      relationshipField: 'project',
+      amountField: 'estimate_hours',
+      title: 'Tasks',
+      columns: [
+        { field: 'title', label: 'Title', type: 'text', required: true },
+        { field: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
+      ],
+    },
+  };
+
+  it('reports a `field`-keyed column at its own path, with the rename to `name`', () => {
+    const findings = validateComponentProps(stackWith([fieldKeyed]));
+    const unknown = unknownKeys(findings);
+    expect(unknown.map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.columns.0.field',
+      'pages[0].regions[0].components[0].properties.columns.1.field',
+    ]);
+    for (const f of unknown) {
+      expect(f.where).toBe('page "probe_page" · record:line_items');
+      expect(f.message).toContain('`name`');
+    }
+    // The column's identity is missing too: the value half names it.
+    expect(invalid(findings).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.columns.0.name',
+      'pages[0].regions[0].components[0].properties.columns.1.name',
+    ]);
+  });
+
+  it('stays silent on the same block keyed by `name` — the fixed showcase shape', () => {
+    const columns = fieldKeyed.properties.columns.map(({ field, ...rest }) => ({ name: field, ...rest }));
+    const findings = validateComponentProps(
+      stackWith([{ ...fieldKeyed, properties: { ...fieldKeyed.properties, columns } }]),
     );
     expect(findings).toEqual([]);
   });

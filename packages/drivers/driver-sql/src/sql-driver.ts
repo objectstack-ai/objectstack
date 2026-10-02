@@ -25,6 +25,10 @@ import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data'
 // presenter its counts and totals take — defined once in core, for this
 // driver's `aggregate()` and the analytics native-SQL face alike.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
+// [#20387, #11635, #21042] What each aggregate function's operand ACCUMULATES
+// IN, the boolean-aggregand cast, and the one column-class predicate both read
+// — defined once in core too, for the same two faces.
+import { aggregandColumnClass, aggregandOperandSql, type AggregandColumnClass } from '@objectstack/core';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
@@ -154,7 +158,13 @@ import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observ
 // [#21007] The JSON-column gate's operator set and refusal text — shared with
 // `@objectstack/objectql`'s per-aggregation `filter`, which refuses the same
 // operators on the same declared fields. See {@link jsonColumnOperatorError}.
-import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
+// [#21236] And the class of JSON column the refusal words, which this driver
+// reads from its own registries — see {@link SqlDriver.jsonColumnFieldClass}.
+import {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS,
+  jsonColumnOperatorRefusalText,
+  type JsonColumnFieldClass,
+} from '@objectstack/core';
 
 /**
  * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
@@ -363,14 +373,11 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
   'integer', 'int', 'float',
 ]);
 
-/**
- * [#20387] Whether a numeric field type's column holds FRACTIONS rather than
- * integers: the exact-decimal members of `NUMERIC_COLUMN_REPRESENTATION` and
- * the driver's `float` alias. Read into {@link SqlDriver.fractionalNumericFields}.
- */
-function isFractionalNumericType(type: string): boolean {
-  return type === 'float' || numericColumnFor(type)?.kind === 'exact';
-}
+// [#20387, #21042] Whether a column holds FRACTIONS — the exact-decimal members
+// of `NUMERIC_COLUMN_REPRESENTATION` and this driver's `float` alias — is the
+// `'fractional'` class of `aggregandColumnClass` (`@objectstack/core`), the one
+// predicate the analytics native-SQL face asks too. Read into
+// {@link SqlDriver.fractionalNumericFields}.
 
 /**
  * The builtin audit-timestamp columns every managed object carries. They are
@@ -380,6 +387,31 @@ function isFractionalNumericType(type: string): boolean {
  * ([ADR-0053 D-F1], #13973).
  */
 const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
+
+/**
+ * [#21241] The fractional-seconds precision of every MySQL `DATETIME` column
+ * this driver creates, and therefore of every server-clock expression that
+ * defaults or stamps one. `DATETIME(3)` keeps the canonical instant's
+ * milliseconds (#3942).
+ *
+ * ONE source, read by every site that spells it: the declared `Field.datetime`
+ * column ({@link SqlDriver.createColumn}), the builtin audit columns
+ * ({@link SqlDriver.createAuditTimestampColumn}), the `NOW()` column default
+ * ({@link SqlDriver.nowColumnDefault}), the UPDATE stamp
+ * ({@link SqlDriver.updatedAtStamp}) and the legacy `TIMESTAMP` widening
+ * ({@link SqlDriver.migrateMysqlDatetimeColumns}).
+ *
+ * A column and its default cannot disagree, and that is not a style point:
+ * MySQL refuses a `CURRENT_TIMESTAMP` default whose precision differs from its
+ * `DATETIME` column's (`ER_INVALID_DEFAULT`, "Invalid default value for …"),
+ * so the whole `CREATE TABLE` fails. The audit columns carried `now(3)` beside
+ * their `DATETIME(3)` as a second literal, and the declared-field default fell
+ * through to a bare `knex.fn.now()` beside the same `DATETIME(3)` column.
+ * Measured on MySQL 8.0.46: every table declaring a `defaultValue: 'NOW()'`
+ * datetime field (`sys_activity.timestamp`, `sys_presence.last_seen`) was
+ * never created, and its data door answered `500`.
+ */
+const MYSQL_DATETIME_PRECISION = 3;
 
 /**
  * Read-side repair for the builtin audit timestamps on SQLite.
@@ -1109,6 +1141,45 @@ function rawStatementFaultError(cause: unknown): Error {
 }
 
 /**
+ * [#21227] The refusal {@link SqlDriver.readBackInsertedRows} raises when an
+ * INSERT was accepted but a row it wrote is not there to be read back.
+ *
+ * `create` and `bulkCreate` answer the stored record (`IDataDriver.create`).
+ * On a dialect whose INSERT returns no rows the driver reads what it wrote
+ * back by the id it wrote, and only a row removed between the two statements
+ * (a concurrent delete, a trigger) can be missing. There is then no stored
+ * record to answer. Answering the caller's payload in its place would look
+ * like a success while answering a row that is not stored, and would hide a
+ * read-back keyed on the wrong column for good, so the door refuses instead.
+ *
+ * `DATABASE_ERROR` / 500, the pair this file's other terminals declare for a
+ * fault the request did not cause. The message is composed and names only the
+ * object the caller passed. The ids, which are the driver's own values (the
+ * caller's `id` / `_id` or a minted nanoid, never a business column), travel
+ * under a non-enumerable `cause` for the server log, as in
+ * {@link backendStatementFaultError}.
+ */
+function insertedRowsNotReadBackError(object: string, missingIds: unknown[], writtenCount: number): Error {
+  const err = new Error(
+    `The database accepted the insert into object '${object}', but ${missingIds.length} of its ` +
+      `${writtenCount} row(s) could not be read back by the id this driver wrote, so the stored ` +
+      'record cannot be answered. This database returns no rows from an INSERT, so the driver ' +
+      'reads each written row back by its id, and a row removed between the two statements (a ' +
+      'concurrent delete or a trigger) leaves nothing to read. The write was not retried, because ' +
+      're-issuing it could duplicate a row that did land.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, 'cause', {
+    value: new Error(`no row carries the written id(s) ${JSON.stringify(missingIds)} after the insert`),
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return err;
+}
+
+/**
  * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
  *
  * Named for the seam it arrived on; since #9542 it governs BOTH callers of
@@ -1539,66 +1610,13 @@ const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new M
 // `'number'` presenter, so the analytics native-SQL face presents a count or a
 // total with this driver's own rule.
 
-/**
- * [#20387] What each declared aggregate function ACCUMULATES IN on PostgreSQL
- * and MySQL — the arithmetic half of the one-double policy
- * {@link AGGREGATE_ANSWER_KIND} states for the answer's type.
- *
- * - `'double'` — `avg`, over every declared numeric or boolean aggregand.
- * - `'double-over-fractional'` — `sum`, over a declared column whose values are
- *   fractions (`fractionalNumericFields`: the exact-decimal family and the
- *   driver's `float` alias). A `sum` over an integer-valued column (`rating`,
- *   the `integer` / `int` aliases, a boolean) stays the database's exact
- *   integer total, rounded once to the double by the presenter.
- * - `'as-stored'` — `count` / `count_distinct` (a count is an exact integer)
- *   and `min` / `max` (a value OF the column; no arithmetic happens).
- *
- * Why: the engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and
- * SQLite add JS doubles, while PostgreSQL's `numeric` and MySQL's `DECIMAL`
- * add exact decimals. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 over
- * a `number` column holding `0.1` and `0.2`: `sum` answered `0.3` natively and
- * `0.30000000000000004` on SQLite and every rows path, so
- * `having { s: { $eq: 0.3 } }` kept the group on those two native faces only.
- * `avg` over an INTEGER column diverged too, which is why `avg` is `'double'`
- * whatever the column holds: MySQL rounds a `DECIMAL` average to
- * `div_precision_increment` (4) places (`avg` of 1, 2, 2 answered `1.6667`),
- * and PostgreSQL's `numeric` average rounds to 16 places before the presenter
- * rounds again (`11 / 9` answered `1.2222222222222222`, JS
- * `1.2222222222222223`; 10 of 27,962 integer pairs measured).
- *
- * The operand is the column's TEXT, parsed as a double —
- * `cast(cast(x as text) as double precision)` on PostgreSQL,
- * `cast(cast(x as char) as double)` on MySQL — because that is the value the
- * SQL client hands `find()`, and so the value the rows path adds. For an
- * exact-decimal column it is the plain cast (both servers convert a decimal to
- * a double through its text); for a binary `real` / `FLOAT` column, which a
- * table created before the exact-decimal columns still carries, the plain cast
- * would widen the binary32 value (`0.1` → `0.10000000149011612`) where the
- * client reads `0.1`. MySQL's `CAST(… AS DOUBLE)` needs 8.0.17 or later.
- *
- * ⚠️ Residual, stated: on PostgreSQL and MySQL the double sums are added in
- * scan order, one after another, without compensation. SQLite (3.43+) adds with
- * compensated (Kahan-Babuska-Neumaier) summation, and since #20489 so does the
- * engine's rows path (`in-memory-aggregation.ts`, `compensatedSum`), so a group
- * of three or more fractions can still differ in the last place between the
- * PostgreSQL / MySQL native faces and those two (`0.1 + 0.2 + 0.3`: PostgreSQL /
- * MySQL `0.6000000000000001`, SQLite and the rows path `0.6`). Two addends
- * cannot differ, which is why the pin is `0.1 + 0.2`.
- *
- * A `Record` over `AggregationFunction` for the same reason as
- * {@link AGGREGATE_ANSWER_KIND}: a function added to the vocabulary without an
- * answer here fails `tsc`.
- */
-const AGGREGATE_ACCUMULATION: Readonly<
-  Record<AggregationFunction, 'double' | 'double-over-fractional' | 'as-stored'>
-> = {
-  count: 'as-stored',
-  count_distinct: 'as-stored',
-  sum: 'double-over-fractional',
-  avg: 'double',
-  min: 'as-stored',
-  max: 'as-stored',
-};
+// [#20387, #21042] `AGGREGATE_ACCUMULATION` — what each declared aggregate
+// function ACCUMULATES IN on PostgreSQL and MySQL, the arithmetic half of the
+// one-double policy — lives in `@objectstack/core` (`utils/aggregate-answer.ts`)
+// with its docblock, beside the boolean-aggregand cast and the column-class
+// predicate both read. {@link SqlDriver.aggregate} asks them through
+// `aggregandOperandSql`, so the analytics native-SQL face accumulates the same
+// operand with this driver's own rule.
 
 /**
  * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
@@ -2343,6 +2361,55 @@ function refuseCrossRowIdentityMerge(
       `can absorb a primary-key-targeted merge: ${named}`,
   );
   return err;
+}
+
+/**
+ * [#21185] The wire identity of an upsert refused because its conflict landed
+ * on a row outside the organization the row is written under: the registered
+ * `UNIQUE_VIOLATION` / 409, the answer a colliding insert gets.
+ *
+ * ⛔ No new code, by the ruling on #21185 (record 5934879010). From the
+ * caller's organization the conflicting row does not exist — the caller cannot
+ * read it — so the call IS an insert, and that insert collides on an
+ * installation-wide key (the primary key, or a `unique: 'global'` column under
+ * ADR-0120 D1). A dedicated answer would tell the caller something `create()`
+ * does not; this one tells it exactly what `create()` already does, which is the
+ * oracle ADR-0120 records as the accepted cost of a `'global'` key.
+ */
+const UPSERT_UNIQUE_VIOLATION_CODE = 'UNIQUE_VIOLATION';
+/** @see {@link UPSERT_UNIQUE_VIOLATION_CODE} */
+const UPSERT_UNIQUE_VIOLATION_STATUS = 409;
+
+/**
+ * [#21185] Build the refusal above. One constructor for both faces —
+ * {@link SqlDriver.upsert} and the remote face `driver-turso` builds over it —
+ * so the two cannot answer one condition with two sentences (#5240).
+ *
+ * The sentence is the engine's duplicate-record sentence (`DuplicateRecordError`
+ * in `@objectstack/objectql`), in both of its forms: a single conflict key is
+ * named, several are not. ⛔ It names no organization, no tenant column and no
+ * value of the row the conflict landed on, and it carries no `cause` — there is
+ * no server error to attach, and anything read off that row would be the
+ * cross-organization detail the refusal exists to withhold. It does not begin
+ * with a SQL verb (the importer's sanitiser replaces such messages wholesale).
+ */
+function refuseUpsertConflictOutsideWrittenOrganization(object: string, mergeKeys: string[]): Error {
+  const err = new Error(
+    `Duplicate record refused on '${object}': ` +
+      (mergeKeys.length === 1
+        ? `a unique constraint on '${mergeKeys[0]}' already holds this value. `
+        : 'a unique constraint already holds these values. ') +
+      'No record was written.',
+  ) as Error & { code?: string; status?: number };
+  err.code = UPSERT_UNIQUE_VIOLATION_CODE;
+  err.status = UPSERT_UNIQUE_VIOLATION_STATUS;
+  return err;
+}
+
+/** [#21185] Is this the refusal above? Read off the envelope pair, which no dialect error carries. */
+function isUpsertFenceRefusal(error: unknown): boolean {
+  const e = error as { code?: unknown; status?: unknown } | null | undefined;
+  return e?.code === UPSERT_UNIQUE_VIOLATION_CODE && e?.status === UPSERT_UNIQUE_VIOLATION_STATUS;
 }
 
 /**
@@ -3329,12 +3396,27 @@ function unrenderableTextComparandError(
  * administrator's. The prescription survives redaction with PLACEHOLDER names —
  * the SHAPE is the repair, and the shape names nothing.
  *
- * [#21007] The TEXT is `@objectstack/core`'s, byte for byte what this builder
- * spelled before the move; the CONSTRUCTOR stays here, because the #8220
- * provenance seam it goes through is this driver's.
+ * [#21007] The TEXT is `@objectstack/core`'s; the CONSTRUCTOR stays here,
+ * because the #8220 provenance seam it goes through is this driver's.
+ * [#21067] That text no longer names this driver's storage form, since the
+ * engine and `driver-memory` print it too; the measured SQL consequences above
+ * live in the builder's docblock.
+ *
+ * [#21236] The `$contains` prescription is the multi-value class's. A
+ * single-value file-class field inside the ADR-0104 window is a JSON column
+ * here too, but it holds one JSON string, and `$contains` with its exact id
+ * answered no rows. So `fieldClass`, which the gate reads from this driver's
+ * registries ({@link SqlDriver.jsonColumnFieldClass}), picks the words, and
+ * that class is told to finish the media-column move.
  */
-function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtree?: unknown): Error {
-  const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare);
+function jsonColumnOperatorError(
+  field: string,
+  op: string,
+  bare: boolean,
+  fieldClass: JsonColumnFieldClass,
+  subtree?: unknown,
+): Error {
+  const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare, fieldClass);
   return withheldFilterError(message, diagnostic, subtree);
 }
 
@@ -5433,6 +5515,21 @@ export class SqlDriver implements IDataDriver {
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
+   * [#21259] The builtin audit timestamps ({@link AUDIT_TIMESTAMP_COLUMNS}) a
+   * MANAGED object does not declare — the columns this driver provisions on
+   * every table it builds ({@link createAuditTimestampColumn}) that no
+   * declaration types. `formatInput` writes them in the `Field.datetime` form,
+   * the type their column was created with.
+   *
+   * Most objects declare both, because the engine's registry injects them as
+   * `Field.datetime`; a `managedBy: 'better-auth'` or `systemFields: false`
+   * object gets nothing injected, and the engine's audit hook stamps both
+   * anyway. A declared column keeps its declaration, whatever its type.
+   * Installed by {@link registerManagedObjectMetadata} only: an external object
+   * (ADR-0015) maps a remote table whose columns this driver did not create.
+   */
+  protected undeclaredAuditTimestampFields: Record<string, readonly string[]> = {};
+  /**
    * SQLite `Field.datetime` columns proven to hold ONLY canonical UTC text —
    * either backfilled by {@link backfillCanonicalDatetimes} or created empty in
    * this process. Read by {@link needsLegacyDatetimeRepair} to drop the repair
@@ -5878,6 +5975,38 @@ export class SqlDriver implements IDataDriver {
    */
   protected get isMysql(): boolean {
     return SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
+  }
+
+  /**
+   * [#21227] Whether this dialect's `INSERT … RETURNING *` answers the rows it
+   * STORED.
+   *
+   * `create` and `bulkCreate` answer the inserted record (`IDataDriver.create`).
+   * Where this is true they take it from the statement, in one round trip.
+   * Where it is false the statement answers no rows, and both doors read back
+   * what they wrote, by the ids they wrote ({@link readBackInsertedRows}).
+   *
+   * True for the SQLite and PostgreSQL families. knex compiles `RETURNING` for
+   * both, and the row it answers is the stored one, server-side column defaults
+   * included (measured on better-sqlite3 and on live PostgreSQL 16.14).
+   *
+   * False for the MySQL family, which has no `RETURNING`. knex's MySQL compiler
+   * drops the clause with a `.returning() is not supported by mysql` warning and
+   * answers `[insertId]`: ONE element whatever the row count, and `0` for this
+   * driver's string primary key. Measured on live MySQL 8.0.46 before this
+   * change: `create` answered `0`, a three-row `bulkCreate` answered `[0]`, and
+   * every row was stored. The auth adapter answers what `create` answers, so
+   * sign-up failed on MySQL with the user row stored and no account row.
+   *
+   * False, too, for a client this driver recognises as neither family (a Client
+   * constructor, a wire-only spelling such as `redshift`): reading back is
+   * correct on every dialect, and `RETURNING` is only the shortcut a dialect
+   * known to answer the stored row is given. The SQLite and PostgreSQL doors
+   * therefore pay no extra round trip, and the MySQL doors pay one SELECT per
+   * statement (per `create`, and per `bulkCreate` batch).
+   */
+  protected get insertReturnsStoredRows(): boolean {
+    return this.isSqlite || this.isPostgres;
   }
 
   /**
@@ -7192,10 +7321,15 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * [#15267] Declared as `IDataDriver.create()` declares it: the inserted
-   * record, `formatOutput(...)` over the `returning('*')` row. The annotation
+   * record, `formatOutput(...)` over the stored row. The annotation
    * used to be an explicit `Promise<any>`, so the published `.d.ts` let a
    * caller read any member off the result; it is the contract's type now,
    * pinned by `sql-driver-doors-declared-types.test.ts`.
+   *
+   * [#21227] The stored row comes from the statement's own `returning('*')`
+   * where the dialect answers one, and from {@link readBackInsertedRows}
+   * where it does not ({@link insertReturnsStoredRows}: the MySQL family). The
+   * type was the contract's all along; on MySQL the VALUE was the insert id.
    */
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
@@ -7236,8 +7370,11 @@ export class SqlDriver implements IDataDriver {
       this.stampInsertTimestamps(object, formatted);
 
       try {
-        const result = await builder.insert(formatted).returning('*');
-        return this.formatOutput(object, result[0]);
+        if (this.insertReturnsStoredRows) {
+          const result = await builder.insert(formatted).returning('*');
+          return this.formatOutput(object, result[0]);
+        }
+        await builder.insert(formatted);
       } catch (error) {
         // #11627: on a table whose UNIQUE index is carried by a hash shadow,
         // `ER_DUP_ENTRY` quotes a binary digest and names the shadow index, so
@@ -7262,8 +7399,106 @@ export class SqlDriver implements IDataDriver {
           // rather than burning a second number for nothing.
           delete toInsert[reservation.field];
         }
+        continue;
       }
+
+      // [#21227] Reached only when the INSERT landed and answered no rows. The
+      // read sits OUTSIDE the try on purpose: a fault in it is not an insert
+      // failure, so it must never reach the collision re-seed above, whose
+      // retry would re-issue a write that already landed.
+      const [stored] = await this.readBackInsertedRows(
+        object,
+        this.rotationWriteTarget(object) ?? object,
+        [toInsert],
+        options,
+      );
+      return stored;
     }
+  }
+
+  /**
+   * [#21227] Read back the rows an INSERT on this call just wrote, by the ids
+   * it wrote: what `create` and `bulkCreate` answer on a dialect whose INSERT
+   * answers no rows ({@link insertReturnsStoredRows}).
+   *
+   * One row per written row, in the written order (`IN (…)` promises no
+   * order), each through `formatOutput()`, the same presentation
+   * `returning('*')` gets on the other dialects and `update`'s own read-back
+   * gets on every dialect.
+   *
+   * # The read key: the written id, which this driver always holds
+   *
+   * Every row reaches the INSERT carrying the id this driver gave it: the
+   * caller's `id`, else its `_id`, else a nanoid minted in `create` /
+   * `bulkCreate` before the statement is built. The id is never asked of the
+   * database, so no insert id is read: the managed `id` column is a
+   * `varchar(255)` PRIMARY KEY with no AUTO_INCREMENT, and the insert id
+   * MySQL reports for it is `0`. The column is resolved through
+   * {@link remoteColumn}, so an external object whose `columnMap` renames
+   * `id` is read by its physical column, as its INSERT was written.
+   *
+   * # The table: the write target
+   *
+   * The table the statement wrote, a rotation shard included, so the read
+   * looks where the row landed rather than at the base name.
+   *
+   * # Tenant scope: the tenants the rows were WRITTEN under
+   *
+   * Routed through {@link applyTenantScope} like every read door in this class
+   * (`check:tenant-chokepoint`), scoped as `upsert`'s identity probe
+   * (`assertMergeLandedOnSuppliedIdentity`) scopes its own read: to the tenant
+   * each row was written under. On an ordinary tenanted call that is the
+   * caller's org, which `injectTenantOnInsert` stamped. On an admin write that
+   * names a tenant in the row data (a documented authority: explicit values
+   * are never overwritten), a read scoped to the caller's ACTIVE org would miss
+   * a row that really landed. A batch may name several tenants, so the scope is
+   * their union through `tenantIds`, which `applyTenantScope` already compiles
+   * as `IN (…) OR IS NULL`; the caller's own `tenantIds` membership set is
+   * replaced, not widened. With no tenant field, or no tenant on the rows and
+   * none on the call, `applyTenantScope` leaves the read unscoped by its own
+   * contract. The ids are this call's own and `id` is the PRIMARY KEY, so the
+   * read cannot answer a row this call did not write, in any organization.
+   *
+   * # A row that is not there
+   *
+   * Refused with {@link insertedRowsNotReadBackError}, never answered with the
+   * payload: see that function for why.
+   */
+  private async readBackInsertedRows(
+    object: string,
+    writeTable: string,
+    written: Record<string, any>[],
+    options?: DriverOptions,
+  ): Promise<Record<string, unknown>[]> {
+    if (written.length === 0) return [];
+    const idColumn = this.remoteColumn(object, 'id', 'id');
+    const tenantField = this.resolveTenantField(object);
+    const writtenTenants = tenantField
+      ? [
+          ...new Set(
+            written
+              .map((row) => row[tenantField])
+              .filter((value) => value !== undefined && value !== null && value !== '')
+              .map(String),
+          ),
+        ]
+      : [];
+    const scopeOptions: DriverOptions = {
+      ...options,
+      tenantId: writtenTenants[0] ?? options?.tenantId,
+      tenantIds: writtenTenants.length > 0 ? writtenTenants : undefined,
+    };
+    const builder = this.getBuilder(writeTable, options);
+    this.applyTenantScope(builder, object, scopeOptions);
+    const stored: Record<string, any>[] = await builder.whereIn(
+      idColumn,
+      written.map((row) => row.id),
+    );
+    const byId = new Map<string, Record<string, any>>();
+    for (const row of stored) byId.set(String(row[idColumn]), row);
+    const missing = written.filter((row) => !byId.has(String(row.id))).map((row) => row.id);
+    if (missing.length > 0) throw insertedRowsNotReadBackError(object, missing, written.length);
+    return written.map((row) => this.formatOutput(object, byId.get(String(row.id))));
   }
 
   /**
@@ -7347,6 +7582,56 @@ export class SqlDriver implements IDataDriver {
       .digest('hex');
   }
 
+  // ── The sequence semantics a second face shares, stated once ──────────────
+  //
+  // `TursoDriver`'s REMOTE face issues record numbers over `@libsql/client`
+  // rather than through this class's Knex transaction, and an embedded-replica
+  // face and a remote face can point at ONE database. Two faces computing a
+  // different counter key, a different tenant bucket or a different data-table
+  // bootstrap would hand out colliding numbers on that database, so each rule
+  // below is a `protected` member that face CALLS — never a copy it keeps. The
+  // members are small on purpose: they are the whole of what decides which
+  // counter a value is drawn from and where a cold counter starts.
+
+  /** The sequence-counter table's name, for a face that spells its own statements against it. */
+  protected get sequencesTableName(): string {
+    return SEQUENCES_TABLE;
+  }
+
+  /** How many times a write re-seeds and retries on a provable autonumber collision (#5495). */
+  protected get autoNumberCollisionRetries(): number {
+    return AUTONUMBER_COLLISION_RETRIES;
+  }
+
+  /**
+   * The tenant bucket a counter row is keyed by: the row's tenant when the
+   * object HAS a tenant column and the row carries one, else the platform
+   * bucket `GLOBAL_TENANT`. One spelling for the issue path, the re-seed path
+   * and the counter identity, which used to carry it three times.
+   */
+  protected resolveSequenceTenantId(tenantField: string | null, tenantId: string | null): string {
+    return tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+  }
+
+  /**
+   * The column definitions of the `key_hash`-keyed sequences table — the ONE
+   * place the shape is spelled. {@link createSequencesTable} runs it through a
+   * live connection; a face with no Knex connection compiles the same builder
+   * to text (`knex.schema.createTable(name, t => this.defineSequencesTable(t)).toSQL()`)
+   * and sends that, so both faces create byte-for-byte the same table.
+   */
+  protected defineSequencesTable(t: Knex.CreateTableBuilder): void {
+    t.string('key_hash', 64).notNullable().primary();
+    t.string('object').notNullable();
+    t.string('tenant_id').notNullable();
+    t.string('field').notNullable();
+    // Non-indexed, so it is free of the PK length limit — a long `{plan_no}`
+    // composite scope fits. 1024 is far above any realistic rendered prefix.
+    t.string('scope', 1024).notNullable().defaultTo('');
+    t.bigInteger('last_value').notNullable().defaultTo(0);
+    t.timestamp('updated_at').defaultTo(this.knex.fn.now());
+  }
+
   /**
    * Create the current `key_hash`-keyed sequences table shape. `runner` is the
    * connection the DDL runs on (a fresh pooled connection by default, or the
@@ -7356,17 +7641,7 @@ export class SqlDriver implements IDataDriver {
     table: string,
     runner: Knex | Knex.Transaction = this.knex,
   ): Promise<void> {
-    await runner.schema.createTable(table, (t) => {
-      t.string('key_hash', 64).notNullable().primary();
-      t.string('object').notNullable();
-      t.string('tenant_id').notNullable();
-      t.string('field').notNullable();
-      // Non-indexed, so it is free of the PK length limit — a long `{plan_no}`
-      // composite scope fits. 1024 is far above any realistic rendered prefix.
-      t.string('scope', 1024).notNullable().defaultTo('');
-      t.bigInteger('last_value').notNullable().defaultTo(0);
-      t.timestamp('updated_at').defaultTo(this.knex.fn.now());
-    });
+    await runner.schema.createTable(table, (t) => this.defineSequencesTable(t));
   }
 
   /**
@@ -7487,6 +7762,28 @@ export class SqlDriver implements IDataDriver {
    * duplicate-record-number harm, self-inflicted. The predicate therefore stays
    * `prefix%` and the suffix is applied per row, where a non-match simply means
    * "different suffix, same counter".
+   *
+   * ## The escape the prefix is escaped FOR is declared, on every dialect (#21163)
+   *
+   * {@link escapeLikePrefix} writes a backslash before each `\`, `%` and `_`,
+   * which only means "literally" under a `LIKE` whose escape character IS that
+   * backslash. SQLite's `LIKE` has no escape character unless one is declared,
+   * and Knex's `where(col, 'like', …)` declares none on any dialect. Measured on
+   * better-sqlite3 before this change: the pattern `SO\_%` without `ESCAPE`
+   * matched nothing against a stored `SO_0007`, so on every SQLite face a
+   * format whose rendered prefix carries `_`, `%` or `\` — from the format's
+   * literal text OR from a `{field}` value such as `north_east` — scanned an
+   * empty partition: the cold bootstrap seeded the counter from 0 and the
+   * #5495 re-seed could not move it. Postgres and MySQL read a backslash as the
+   * default `LIKE` escape, so they were right by default rather than by
+   * declaration.
+   *
+   * The character is BOUND, never written as a literal — the same
+   * {@link LIKE_ESCAPE_CHARACTER} the filter compiler binds, for the reason
+   * given there: MySQL applies C escape syntax inside string literals, so a
+   * literal backslash is spelled differently per dialect while a bound value
+   * has one spelling everywhere. Turso's remote face sends its own statement
+   * to a SQLite engine only, and declares the same backslash there.
    */
   protected async scanMaxNumericTail(
     queryRunner: Knex | Knex.Transaction,
@@ -7497,16 +7794,40 @@ export class SqlDriver implements IDataDriver {
     tenantId: string | null,
     suffix = '',
   ): Promise<number> {
-    const escapedPrefix = prefix.replace(/([\\%_])/g, '\\$1');
-    let builder = queryRunner(tableName).select(field).where(field, 'like', `${escapedPrefix}%`).whereNotNull(field);
+    let builder = queryRunner(tableName)
+      .select(field)
+      .whereRaw('?? like ? escape ?', [field, `${this.escapeLikePrefix(prefix)}%`, LIKE_ESCAPE_CHARACTER])
+      .whereNotNull(field);
     if (tenantField && tenantId !== null) {
       builder = builder.where(tenantField, tenantId);
     }
     const rows = await builder;
+    return this.maxAutonumberCounter((rows as any[]).map((r) => (r as any)[field]), prefix, suffix);
+  }
+
+  /**
+   * The rendered prefix as a `LIKE` anchor: `\`, `%` and `_` escaped with a
+   * backslash, so a prefix is matched literally — under a `LIKE` that declares
+   * that backslash as its `ESCAPE`, which every statement using this anchor
+   * must do (see {@link scanMaxNumericTail}; SQLite has no escape character
+   * otherwise). The predicate's pre-filter only — {@link maxAutonumberCounter}
+   * re-checks the prefix per row.
+   */
+  protected escapeLikePrefix(prefix: string): string {
+    return prefix.replace(/([\\%_])/g, '\\$1');
+  }
+
+  /**
+   * The bootstrap reading itself — the highest counter among the stored values
+   * of one counter's partition, under the anchored / unanchored rules the
+   * {@link scanMaxNumericTail} docblock states. Separated from the statement
+   * that fetches the values so a face that fetches them through another
+   * transport reads them by this one rule rather than by a copy of it.
+   */
+  protected maxAutonumberCounter(values: Iterable<unknown>, prefix: string, suffix: string): number {
     let maxN = 0;
     const anchored = prefix !== '' || suffix !== '';
-    for (const r of rows as any[]) {
-      const v: string = (r as any)[field];
+    for (const v of values) {
       if (typeof v !== 'string') continue;
       let n: number;
       if (anchored) {
@@ -7647,7 +7968,7 @@ export class SqlDriver implements IDataDriver {
     // locking on a second one (SQLite pool max=1). `initObjects` normally warms
     // this up front, making the call a no-op — this only bites the lazy path.
     await this.ensureSequencesTable(parentTrx);
-    const resolvedTenantId = tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
     if (scope !== '' && !this.sequencesHasKeyHash) {
       // The legacy sequences table could not be migrated to the key_hash shape,
       // so it cannot represent per-scope counters. Fail with a clear, actionable
@@ -7907,8 +8228,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
     await this.ensureSequencesTable();
-    const resolvedTenantId =
-      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
     const key = this.sequencesHasKeyHash
       ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
       : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
@@ -7942,8 +8262,7 @@ export class SqlDriver implements IDataDriver {
    * that drew from it. See {@link bulkCreate}.
    */
   protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
-    const resolvedTenantId =
-      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
     return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
   }
 
@@ -8088,7 +8407,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected updatedAtStamp(): string | Knex.Raw {
     if (this.isSqlite) return new Date().toISOString();
-    return this.isMysql ? this.knex.fn.now(3) : this.knex.fn.now();
+    return this.isMysql ? this.knex.fn.now(MYSQL_DATETIME_PRECISION) : this.knex.fn.now();
   }
 
   /**
@@ -8369,6 +8688,28 @@ export class SqlDriver implements IDataDriver {
    * be presented as a **gapless** series (an audit-grade invoice or contract
    * number). A customer with a compliance-grade gapless requirement is the
    * recorded restart condition for an opt-in gapless mode — it is not built.
+   *
+   * ## The tenant column, and why an upsert never re-parents a row (#21185)
+   *
+   * The object's tenant column ({@link resolveTenantField}) is on this list for
+   * `id`'s and `auto_number`'s argument: which organization owns a row is part
+   * of its identity, and an upsert that lands on an existing row keeps that
+   * row's organization — an explicit payload value does not move it on merge
+   * either. `update()` is the deliberate path that moves a row between
+   * organizations. Resolved through {@link remoteColumn} like the autonumber
+   * columns, so the name matches the write payload's physical keys.
+   *
+   * For a TENANT-SCOPED call this exclusion is a no-op, because the merge leg is
+   * fenced to rows of the written organization anyway (see {@link upsert} and
+   * {@link upsertTenantGuard}), where the stored and written values are equal.
+   * Its job is the call with NO tenant context — the lifecycle archiver's
+   * `cold.upsert(object, row, ['id'])`, a seed or a connector — which carries no
+   * organization fence: there, this entry is what keeps a payload's tenant value
+   * from re-parenting the row it merges into. Ruled on #21185 (record
+   * 5934879010, half 2), the #7011 / #8622 argument applied to the tenant column.
+   *
+   * The remote face (`driver-turso`) reads this same list, so the exclusion
+   * holds on both faces from one place.
    */
   protected insertOnlyUpsertColumns(object: string): Set<string> {
     // Same config resolution as `fillAutoNumberFields`: object name first,
@@ -8377,7 +8718,79 @@ export class SqlDriver implements IDataDriver {
     const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
     const columns = new Set<string>(['created_at', this.remoteColumn(object, 'id', 'id')]);
     for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
+    const tenantField = this.resolveTenantField(object);
+    if (tenantField) columns.add(this.remoteColumn(object, tenantField, tenantField));
     return columns;
+  }
+
+  /**
+   * [#21185] The organization fence for a tenant-scoped upsert, or `null` when
+   * the call carries none — read off the row AFTER `injectTenantOnInsert` has
+   * run, so `value` is the organization the row is WRITTEN under.
+   *
+   * A fence exists exactly when the call is tenant-scoped (a non-empty
+   * `options.tenantId`, the condition every tenant mechanism in this class keys
+   * on) on an object with a tenant column. Inside that set the merge leg may
+   * only land on a row whose stored tenant column equals the written one, for
+   * ANY conflict target — the primary key included, since `id` and a
+   * `unique: 'global'` column are both installation-wide (ADR-0120 D1). A
+   * conflict that lands anywhere else is refused with `UNIQUE_VIOLATION` and
+   * writes nothing.
+   *
+   * Why the WRITTEN organization and not the caller's active one: an admin may
+   * name another organization on the row ({@link injectTenantOnInsert}: explicit
+   * values are never overwritten), and that row really is written there — the
+   * reading #8807's identity probe already settled
+   * ({@link assertMergeLandedOnSuppliedIdentity}). On an ordinary call the two
+   * are the same value.
+   *
+   * Shared with the remote face (`driver-turso`), so both faces fence on one
+   * reading of "tenant-scoped".
+   */
+  protected upsertTenantGuard(
+    object: string,
+    row: Record<string, any>,
+    options?: DriverOptions,
+  ): { field: string; column: string; value: unknown } | null {
+    const tenantId = options?.tenantId;
+    if (tenantId === undefined || tenantId === null || tenantId === '') return null;
+    const field = this.resolveTenantField(object);
+    if (!field) return null;
+    const value = row[field];
+    // Unreachable after `injectTenantOnInsert`, which fills an empty slot from
+    // `tenantId` on exactly this condition; stated rather than assumed.
+    if (value === undefined || value === null || value === '') return null;
+    return { field, column: this.remoteColumn(object, field, field), value };
+  }
+
+  /**
+   * [#21185] The merge leg's organization predicate on the dialects whose
+   * `ON CONFLICT … DO UPDATE` takes a `WHERE`: the stored row's tenant column
+   * is NOT DISTINCT from the one the statement would have inserted
+   * (`excluded`). SQLite spells NULL-safe equality `IS`, PostgreSQL
+   * `IS NOT DISTINCT FROM` — the two dialects this is reached on (MySQL fences
+   * after the statement instead; see {@link upsert}).
+   *
+   * The target table is the write target's bare PHYSICAL name — the rotation
+   * shard when one is current, the federated remote table otherwise — because
+   * that is how both dialects name the INSERT target inside this clause.
+   */
+  private mergeLandsInWrittenOrganization(writeTable: string, column: string): Knex.Raw {
+    const table = this.physicalTableByObject[writeTable] ?? writeTable;
+    const notDistinct = this.isPostgres ? 'IS NOT DISTINCT FROM' : 'IS';
+    return this.knex.raw(`?? ${notDistinct} ??`, [`${table}.${column}`, `excluded.${column}`]);
+  }
+
+  /**
+   * [#21185] The refusal both faces throw when an upsert's conflict lands
+   * outside the written organization — `UNIQUE_VIOLATION` / 409. Protected so
+   * the remote face throws the one sentence this class builds.
+   */
+  protected upsertConflictRefusal(object: string, conflictKeys?: string[]): Error {
+    return refuseUpsertConflictOutsideWrittenOrganization(
+      object,
+      conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'],
+    );
   }
 
   /**
@@ -8706,6 +9119,19 @@ export class SqlDriver implements IDataDriver {
    * The verdict itself is tenant-independent regardless: `id` is the PRIMARY
    * KEY, so at most one row in the table can carry it.
    *
+   * ⚠️ [#21185] The first two bullets no longer reach this method: a
+   * tenant-scoped call on a tenanted object is fenced to its organization, and
+   * on MySQL {@link assertMergeLandedInWrittenOrganization} runs in this
+   * check's place, reading under the written tenant and carrying #8807's
+   * verdict with it. What still arrives here is the third bullet — and there
+   * the written tenant must NOT become a scope: the tenant column is now
+   * insert-only, so a payload naming another organization than the stored
+   * row's is a merge that keeps the row's organization (measured on MariaDB
+   * 10.11 before this guard: the read scoped to the payload's tenant missed the
+   * merged row and answered this method's cross-row refusal for a merge that
+   * landed on the supplied id). So the written tenant is used only under a
+   * tenant context, and a call without one reads unscoped.
+   *
    * # The write target, not the object
    *
    * A rotation-sharded write lands in the current shard, so that is where the
@@ -8726,9 +9152,11 @@ export class SqlDriver implements IDataDriver {
     // cross-tenant write, and a no-op when neither exists. `tenantIds` is
     // dropped deliberately — the group-union posture widens a READ to a
     // membership set, and this is an identity probe for ONE row, not a read.
+    const tenantContext = options?.tenantId !== undefined && options?.tenantId !== null && options?.tenantId !== '';
     const scopeOptions: DriverOptions = {
       ...options,
-      tenantId: typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
+      tenantId:
+        tenantContext && typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
       tenantIds: undefined,
     };
     this.applyTenantScope(builder, object, scopeOptions);
@@ -8736,6 +9164,99 @@ export class SqlDriver implements IDataDriver {
     if (landed) return;
     const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
+  }
+
+  /**
+   * [#21185] MySQL: after a tenant-scoped upsert's statement, did it land on a
+   * row of the organization the row is WRITTEN under? Runs inside the same
+   * transaction as the statement, so its throw rolls the write back.
+   *
+   * # Why MySQL needs a check where the other dialects need none
+   *
+   * SQLite and PostgreSQL fence the merge leg inside the statement
+   * (`ON CONFLICT … DO UPDATE SET … WHERE` the stored tenant column equals the
+   * written one — see {@link upsert}), so a row of another organization is
+   * never written at all. MySQL's `ON DUPLICATE KEY UPDATE` takes no `WHERE`
+   * (knex refuses to compile one: `.onConflict().merge().where() is not
+   * supported for mysql`). This is #8807's mechanism, reused as ruled: the
+   * statement and a read of the landed row run as one unit of work, and the
+   * read's failure undoes the write.
+   *
+   * # The read, and why its absence is exact
+   *
+   * The landed row is looked up by the values it matched on (`matchOn`, the
+   * conflict-key values the statement sent — or `id` when one of them is
+   * empty, the same choice the read-back makes), under the written tenant
+   * EXACTLY: {@link applyTenantScope} for the chokepoint, plus equality on the
+   * tenant column, which closes that scope's NULL-organization arm. The tenant
+   * column is insert-only ({@link insertOnlyUpsertColumns}), so a merge never
+   * writes the written tenant onto the row it lands on. Therefore a row
+   * matching those values under the written tenant exists exactly when the
+   * statement inserted there or merged into a row that was already there; its
+   * absence means the merge landed on a row of another organization, or on a
+   * row with none.
+   *
+   * # When #8807's check is owed too (`rivals` given)
+   *
+   * A primary-key target on a table carrying a rival UNIQUE key. `matchOn` is
+   * then the supplied `id`, so a found row is also #8807's verdict — the merge
+   * landed on the supplied identity — and that check is subsumed. A MISSING row
+   * has two causes the caller must be told apart, because they are two
+   * different refusals:
+   *
+   *  - the merge landed through a rival key on a row of the WRITTEN
+   *    organization — #8807's condition, answered with its own sentence
+   *    ({@link refuseCrossRowIdentityMerge}), exactly as before this card;
+   *  - it landed on a row of another organization — on the primary key (that
+   *    row wins a multi-key collision, measured for #8807) or through a rival
+   *    key — answered `UNIQUE_VIOLATION`.
+   *
+   * They are told apart by reading each rival key's sent values under the
+   * written tenant: a merge through that key left the row carrying them, in
+   * the written organization. Only a rival whose every column is in the
+   * payload can be read this way (a hash-shadow carrier's generated column is
+   * not); when none can, the answer is `UNIQUE_VIOLATION` — a refusal either
+   * way, and the write is rolled back either way.
+   *
+   * ⛔ Nothing read here reaches the caller: the refusal names no organization
+   * and no value of the row it landed on.
+   */
+  private async assertMergeLandedInWrittenOrganization(
+    object: string,
+    writeTable: string,
+    mergeKeys: string[],
+    matchOn: Record<string, unknown>,
+    sent: Record<string, unknown>,
+    guard: { column: string; value: unknown },
+    identity: { id: string | number; rivals: PhysicalIndex[] } | null,
+    options?: DriverOptions,
+  ): Promise<void> {
+    // The tenant scope of a ONE-row probe: the written tenant, with
+    // `tenantIds` dropped for #8807's reason (the group-union posture widens a
+    // READ to a membership set; this asks about one organization).
+    const scopeOptions: DriverOptions = { ...options, tenantId: String(guard.value), tenantIds: undefined };
+
+    const landedProbe = this.getBuilder(writeTable, options);
+    this.applyTenantScope(landedProbe, object, scopeOptions);
+    landedProbe.where(guard.column, guard.value as any);
+    for (const [column, value] of Object.entries(matchOn)) landedProbe.where(column, value as any);
+    if (await landedProbe.first('id')) return;
+
+    if (identity) {
+      for (const rival of identity.rivals) {
+        const probeable = rival.columns.length > 0 && rival.columns.every((c) => sent[c] !== undefined && sent[c] !== null);
+        if (!probeable) continue;
+        const rivalProbe = this.getBuilder(writeTable, options);
+        this.applyTenantScope(rivalProbe, object, scopeOptions);
+        rivalProbe.where(guard.column, guard.value as any);
+        for (const column of rival.columns) rivalProbe.where(column, sent[column] as any);
+        if (await rivalProbe.first('id')) {
+          const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+          throw refuseCrossRowIdentityMerge(object, tableName, identity.id, identity.rivals);
+        }
+      }
+    }
+    throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
   }
 
   // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
@@ -8759,6 +9280,20 @@ export class SqlDriver implements IDataDriver {
     this.injectTenantOnInsert(object, toUpsert, options);
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
+
+    // [#21185] The organization fence (ADR-0131 D8: the tenant predicate
+    // reaches every driver door, and the merge leg of an upsert was the one it
+    // did not). The conflict target is resolved against the WHOLE table — the
+    // primary key and a `unique: 'global'` column are installation-wide — so
+    // the row a tenant-scoped call collides with can belong to an organization
+    // the caller cannot read, and the merge leg used to write onto it, tenant
+    // column included. With a fence the merge may only land on a row whose
+    // stored tenant column equals the written one; a conflict anywhere else is
+    // refused with `UNIQUE_VIOLATION` and writes nothing. `null` for a call with
+    // no tenant context, which keeps the merge and relies on the tenant column
+    // being insert-only ({@link insertOnlyUpsertColumns}). See
+    // {@link upsertTenantGuard}.
+    const tenantGuard = this.upsertTenantGuard(object, toUpsert, options);
 
     // [#8621, #8755, #8807] Pre-flight the conflict target — see
     // {@link assertConflictTargetHonoured} for the mechanism and why it is
@@ -8797,6 +9332,13 @@ export class SqlDriver implements IDataDriver {
     // still carries it.
     const verifyIdentity = preflight.verifyIdentity === true;
 
+    // [#21185] MySQL's fence is a check after the statement, inside the same
+    // unit of work — `ON DUPLICATE KEY UPDATE` takes no `WHERE` — so it is owed
+    // whenever the call is fenced, not only when a rival UNIQUE key exists. See
+    // {@link assertMergeLandedInWrittenOrganization}.
+    const mysqlFence = this.isMysql && tenantGuard !== null;
+    const checkAfterStatement = verifyIdentity || mysqlFence;
+
     // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
     // single-row, so a stale counter costs it exactly one burned number per
     // call — the same shape `create()` had before #5495, for the same reason
@@ -8809,10 +9351,14 @@ export class SqlDriver implements IDataDriver {
     // transaction (inside one the sequence UPDATE rolls back with the refused
     // INSERT, so nothing is burned and there is nothing to repair — measured).
     const mayRetry = options?.transaction === undefined;
+    // The row the last attempt SENT, in storage form: the read-back below
+    // looks the landed row up by its conflict-key values.
+    let sent: Record<string, any> = {};
     for (let attempt = 0; ; attempt++) {
       const reservations = await this.fillAutoNumberFields(object, toUpsert, options);
 
       const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
+      sent = formatted;
       this.stampInsertTimestamps(object, formatted);
       // [#11176] …and the same slot filled on Postgres/MySQL, where the line
       // above returns early. Without it `updated_at` is not in `formatted`, so
@@ -8905,6 +9451,13 @@ export class SqlDriver implements IDataDriver {
       const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
       const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
 
+      // [#21185] The fence for THIS attempt: the tenant column, and the value
+      // the row is written under in storage form (what the statement sends).
+      const fence = tenantGuard && {
+        column: tenantGuard.column,
+        value: formatted[tenantGuard.column] ?? tenantGuard.value,
+      };
+
       // The statement, plus [#8807]'s identity check when one is owed. The
       // builder is built HERE rather than above the comment block so it can be
       // bound to whichever transaction this write runs on — the caller's, the
@@ -8920,8 +9473,37 @@ export class SqlDriver implements IDataDriver {
         // this one is deliberately not scoped.
         const builder = this.getBuilder(writeTable, writeOptions);
         const insertion = builder.insert(formatted).onConflict(mergeKeys);
-        await (columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge());
-        if (verifyIdentity) {
+        const merging = columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge();
+        // [#21185] SQLite and PostgreSQL: the fence is a predicate INSIDE the
+        // merge statement — `… DO UPDATE SET … WHERE` the stored tenant column
+        // equals the written one — so a conflict on a row of another
+        // organization (or of none) leaves that row untouched, atomically, with
+        // no added round trip. The read-back below then finds no row under the
+        // written organization, and that is where the call refuses. NULL-safe
+        // on both (`IS` on SQLite, `IS NOT DISTINCT FROM` on PostgreSQL); the
+        // written value is never NULL here, so a stored NULL is "distinct", and
+        // a platform row with no organization is fenced off too. The target
+        // table is named by its bare physical name, which both dialects accept
+        // for the INSERT target in this clause, schema-qualified or not.
+        // MySQL takes no `WHERE` here; its fence runs after the statement.
+        await (fence && !this.isMysql ? merging.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column)) : merging);
+        if (mysqlFence) {
+          // [#21185] One read, under the written tenant exactly; #8807's
+          // identity verdict rides on it when a rival key made one owed.
+          const matchOn: Record<string, unknown> = mergeKeys.every((k) => formatted[k] !== undefined && formatted[k] !== null)
+            ? Object.fromEntries(mergeKeys.map((k) => [k, formatted[k]]))
+            : { id: toUpsert.id };
+          await this.assertMergeLandedInWrittenOrganization(
+            object,
+            writeTable,
+            mergeKeys,
+            matchOn,
+            formatted,
+            fence!,
+            verifyIdentity ? { id: toUpsert.id, rivals: preflight.rivals ?? [] } : null,
+            writeOptions,
+          );
+        } else if (verifyIdentity) {
           // The tenant the row was WRITTEN under, read off the payload after
           // `injectTenantOnInsert` has run — the caller's org on an ordinary
           // call, an explicitly supplied one on an admin cross-tenant write.
@@ -8938,26 +9520,44 @@ export class SqlDriver implements IDataDriver {
       };
 
       try {
-        if (verifyIdentity && options?.transaction === undefined) {
+        if (checkAfterStatement && options?.transaction === undefined) {
           // [#8807] No caller transaction, so the driver opens one: the check
           // is only worth making if its failure can UNDO the write it judged,
           // and an autocommitted statement is already permanent by the time the
-          // row can be read back. Scoped to `verifyIdentity` so the ordinary
-          // upsert — every dialect but MySQL, and every MySQL table with no
-          // rival UNIQUE key — keeps its single autocommitted round trip.
+          // row can be read back. Scoped to the calls a check is owed on —
+          // `verifyIdentity`, and since #21185 every fenced MySQL call — so the
+          // ordinary upsert (SQLite, PostgreSQL, and a MySQL call with neither)
+          // keeps its single autocommitted round trip.
           //
-          // Inside a caller transaction the wrapper is deliberately NOT added:
-          // the statement is already transactional, and throwing hands the
-          // rollback decision to the owner of that transaction, exactly as the
-          // autonumber path above reasons about the same boundary.
+          // Inside a caller transaction #8807's wrapper is deliberately NOT
+          // added: the statement is already transactional, and throwing hands
+          // the rollback decision to the owner of that transaction, exactly as
+          // the autonumber path above reasons about the same boundary.
           await this.knex.transaction(async (trx) => {
             await runStatement({ ...options, transaction: trx });
+          });
+        } else if (mysqlFence) {
+          // [#21185] …but the organization fence does not hand that decision
+          // over. A cross-organization merge is never the caller's to keep, so
+          // inside a caller transaction the statement and its check run in a
+          // nested transaction — a SAVEPOINT on MySQL — and the check's throw
+          // rolls back to it: the other organization's row is restored before
+          // the refusal reaches the caller, whatever the caller then does with
+          // its own transaction.
+          await (options!.transaction as Knex.Transaction).transaction(async (savepoint) => {
+            await runStatement({ ...options, transaction: savepoint });
           });
         } else {
           await runStatement(options);
         }
         break;
       } catch (error) {
+        // [#21185] The fence's refusal is final: it is not the server's error,
+        // so neither the unbacked-target recogniser nor the autonumber re-seed
+        // below has anything to say about it, and a retry would be refused the
+        // same way. The pair is this driver's own envelope; no dialect error
+        // carries it.
+        if (isUpsertFenceRefusal(error)) throw error;
         // [#8445] Classified BEFORE the autonumber retry logic, for three
         // reasons that all point the same way. It is not an autonumber
         // collision — `collidingAutoNumberReservations` gates on
@@ -8996,7 +9596,41 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    const readback = this.getBuilder(object, options).where('id', toUpsert.id);
+    // [#21166] Read back the row the statement landed on, by the identity it
+    // MATCHED on: the conflict-key values. Reading it back by `toUpsert.id`
+    // answers the wrong row on exactly the call #8622 protects: a merge on a
+    // business key keeps the stored row's `id`, so the payload's `id` (or the
+    // nanoid minted above) names no row, the read finds nothing, and the
+    // fallback below answered the PAYLOAD. Measured on SQLite and live
+    // Postgres 16: the row stored as `row-a` answered `id: 'row-NEW'`, an id
+    // no stored row has. The conflict-key values name the landed row on both
+    // legs: the inserted row carries them, and the merged row is the one that
+    // matched them. A conflict key the row leaves empty cannot have matched
+    // (NULL never conflicts), so the statement inserted and the row carries
+    // `toUpsert.id`. On the default `['id']` target the two readings are the
+    // same query. The tenant scope is applied to either, as before.
+    const matchedOn = mergeKeys.every((k) => sent[k] !== undefined && sent[k] !== null);
+    const readback = this.getBuilder(object, options);
+    if (matchedOn) for (const k of mergeKeys) readback.where(k, sent[k]);
+    else readback.where('id', toUpsert.id);
+    if (tenantGuard) {
+      // [#21185] A fenced call reads back under the WRITTEN organization
+      // EXACTLY: the chokepoint scope for that tenant (`tenantIds` dropped, as
+      // for #8807's one-row probe), plus equality on the tenant column, which
+      // closes the scope's NULL-organization arm. A row the fence left alone —
+      // another organization's, or a platform row with none — is therefore not
+      // found, and that absence IS the refusal: the statement wrote nothing
+      // (SQLite / PostgreSQL), or rolled back (MySQL, where the same read ran
+      // inside the transaction first). Scoping to the caller's ACTIVE org
+      // instead would miss a row an admin really wrote under another
+      // organization and refuse a correct write.
+      const writtenTenant = sent[tenantGuard.column] ?? tenantGuard.value;
+      this.applyTenantScope(readback, object, { ...options, tenantId: String(writtenTenant), tenantIds: undefined });
+      readback.where(tenantGuard.column, writtenTenant);
+      const landed = await readback.first();
+      if (!landed) throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
+      return this.formatOutput(object, landed) || landed;
+    }
     this.applyTenantScope(readback, object, options);
     const result = await readback.first();
     return this.formatOutput(object, result) || toUpsert;
@@ -9131,13 +9765,16 @@ export class SqlDriver implements IDataDriver {
       const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
 
       try {
-        const result = await builder.insert(formattedRows).returning('*');
-        // Read-back parity with create(): JSON columns come back as their stored
-        // strings from `returning('*')` — decode them so batch callers see the
-        // same shapes single-insert callers do.
-        return Array.isArray(result)
-          ? result.map((r) => this.formatOutput(object, r))
-          : result;
+        if (this.insertReturnsStoredRows) {
+          const result = await builder.insert(formattedRows).returning('*');
+          // Read-back parity with create(): JSON columns come back as their stored
+          // strings from `returning('*')` — decode them so batch callers see the
+          // same shapes single-insert callers do.
+          return Array.isArray(result)
+            ? result.map((r) => this.formatOutput(object, r))
+            : result;
+        }
+        await builder.insert(formattedRows);
       } catch (error) {
         if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
         const colliding = await this.collidingAutoNumberReservations(error, reservationsPerRow.flat(), options);
@@ -9169,7 +9806,20 @@ export class SqlDriver implements IDataDriver {
             if (stale.has(this.autoNumberCounterKey(reservation))) delete rows[i][reservation.field];
           }
         }
+        continue;
       }
+
+      // [#21227] Reached only when the INSERT landed and answered no rows (the
+      // MySQL family answered `[insertId]`: one element for the whole batch,
+      // which the engine's one-result-per-row guard then refused after every
+      // row had been stored). ONE read for the batch, by the ids written, in
+      // the written order. Outside the try for the reason `create` gives.
+      return this.readBackInsertedRows(
+        object,
+        this.rotationWriteTarget(object) ?? object,
+        rows,
+        options,
+      );
     }
   }
 
@@ -9965,25 +10615,19 @@ export class SqlDriver implements IDataDriver {
         // #11249's `false`/`true` for the order statistics) pins ALL FOUR as
         // numbers: `sum`/`avg` arithmetic over 1/0, `min`/`max` the `0`/`1`
         // the cast computes, presented as-is (see the presentation note
-        // below). `cast(?? as int)` keeps the column in a knex identifier
-        // binding exactly as the uncast form does. `count`/`count_distinct`
-        // are deliberately NOT cast (both lower to `count`, defined over
-        // boolean everywhere — their answers were correct before this and
-        // must not move).
-        const castBooleanAggregand =
-          this.isPostgres &&
-          lowering.sql !== 'count' &&
-          fieldExpr !== '*' &&
-          table !== null &&
-          (this.booleanFields[table]?.includes(fieldExpr) ?? false);
-        const columnExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        // below). `count`/`count_distinct` are deliberately NOT cast (both
+        // lower to `count`, defined over boolean everywhere — their answers
+        // were correct before this and must not move).
         // [#20387] `sum` / `avg` accumulate in double on PostgreSQL and MySQL,
         // the arithmetic SQLite and the engine's rows path already use, so one
         // query answers one number on every face (`AGGREGATE_ACCUMULATION`).
-        // Still one `??` binding: the wrap is SQL text around it.
-        const argExpr = fieldExpr !== '*' && this.accumulatesInDouble(funcName, table, fieldExpr)
-          ? this.doubleAccumulationOperand(columnExpr)
-          : columnExpr;
+        // [#21042] Both policies, and the order they compose in, are
+        // `aggregandOperandSql` (`@objectstack/core`), read with this column's
+        // class from the registries below — the rule the analytics native-SQL
+        // face applies too. Still one `??` binding: the cast and the wrap are
+        // SQL text around it, so the column stays a knex identifier binding.
+        const aggregandClass = fieldExpr === '*' ? undefined : this.aggregandColumnClassOf(table, fieldExpr);
+        const argExpr = aggregandOperandSql(funcName, aggregandClass, this.dialectName, '??');
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;
@@ -10105,37 +10749,26 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#20387] Whether {@link aggregate} accumulates this aggregation's operand in
-   * double — `AGGREGATE_ACCUMULATION` read against the column's declaration.
+   * [#20387, #11635, #21042] The class {@link aggregate}'s operand policies read
+   * for one aggregated column (`aggregandColumnClass`, `@objectstack/core`),
+   * answered from this driver's registries of the column's declaration:
+   * `booleanFields` is the `'boolean'` class, `fractionalNumericFields` (filled
+   * by the predicate itself) the `'fractional'` one, and the rest of
+   * `numericFields` the `'integral'` one. Every other column — and an unknown
+   * table — is in no class, so it keeps the database's own arithmetic, as
+   * before.
    *
-   * PostgreSQL and MySQL only. SQLite stores the fractional family as REAL
+   * The policies apply on PostgreSQL and MySQL only (`aggregandOperandSql`
+   * reads the dialect). SQLite stores the fractional family as REAL
    * (`ColumnCompiler_SQLite3.prototype.decimal` is `'float'`), so its `sum` /
-   * `avg` already add doubles. A column this driver has no numeric or boolean
-   * declaration for keeps the database's own arithmetic, as before.
+   * `avg` already add doubles.
    */
-  protected accumulatesInDouble(func: AggregationFunction, table: string | null, field: string): boolean {
-    if (table === null || !(this.isPostgres || this.isMysql)) return false;
-    switch (AGGREGATE_ACCUMULATION[func]) {
-      case 'double':
-        return (this.numericFields[table]?.includes(field) ?? false)
-          || (this.booleanFields[table]?.includes(field) ?? false);
-      case 'double-over-fractional':
-        return this.fractionalNumericFields[table]?.includes(field) ?? false;
-      case 'as-stored':
-        return false;
-    }
-  }
-
-  /**
-   * [#20387] The operand of a double-accumulated `sum` / `avg`: the column's
-   * text, parsed as a double — the value the SQL client hands `find()`, and so
-   * the value the rows path adds. See `AGGREGATE_ACCUMULATION` for why the text
-   * and not a plain cast.
-   */
-  protected doubleAccumulationOperand(operand: string): string {
-    return this.isPostgres
-      ? `cast(cast(${operand} as text) as double precision)`
-      : `cast(cast(${operand} as char) as double)`;
+  protected aggregandColumnClassOf(table: string | null, field: string): AggregandColumnClass | undefined {
+    if (table === null) return undefined;
+    if (this.booleanFields[table]?.includes(field)) return 'boolean';
+    if (this.fractionalNumericFields[table]?.includes(field)) return 'fractional';
+    if (this.numericFields[table]?.includes(field)) return 'integral';
+    return undefined;
   }
 
   /**
@@ -11402,8 +12035,9 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericValueCols.push(name);
-        // [#20387] See {@link fractionalNumericFields}.
-        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) fractionalCols.push(name);
+        // [#20387, #21042] See {@link fractionalNumericFields}: the predicate's
+        // `'fractional'` class, scalar only by the predicate's own reading.
+        if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') fractionalCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -11450,6 +12084,11 @@ export class SqlDriver implements IDataDriver {
     // #2186: remember the authoritative metadata field set for this table so
     // drift detection / `os migrate` can diff the physical schema against it.
     this.managedObjectFields.set(tableName, obj.fields ?? {});
+    // [#21259] Recomputed on every registration, so a re-registration that now
+    // declares a column stops treating it as undeclared.
+    this.undeclaredAuditTimestampFields[tableName] = AUDIT_TIMESTAMP_COLUMNS.filter(
+      (col) => !Object.prototype.hasOwnProperty.call(obj.fields ?? {}, col),
+    );
     // Always overwrite — a metadata change that REMOVES `indexes` must clear
     // the previous entry, or drift detection keeps expecting an index nobody
     // declares any more (and never reports it as orphaned).
@@ -11507,8 +12146,9 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) {
           numericValueCols.push(name);
         }
-        // [#20387] See {@link fractionalNumericFields}.
-        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) {
+        // [#20387, #21042] See {@link fractionalNumericFields}: the predicate's
+        // `'fractional'` class, scalar only by the predicate's own reading.
+        if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') {
           fractionalCols.push(name);
         }
         if (type === 'date') {
@@ -12486,11 +13126,20 @@ export class SqlDriver implements IDataDriver {
         // The default is re-stated because MySQL drops a column's DEFAULT when
         // MODIFY does not repeat it, and an audit column without
         // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
+        //
+        // A declared `defaultValue: 'NOW()'` column is the same case (#21241),
+        // and the TIME twin ({@link migrateMysqlTimeColumns}) already restates
+        // it. Measured on MySQL 8.0.46 before this line: a legacy
+        // `timestamp null default current_timestamp` NOW() column came out of
+        // the widening as `datetime(3)` with NO default, and an insert omitting
+        // it answered `null`. Both take the expression a fresh column gets,
+        // from {@link nowColumnDefault}, so the widening cannot spell a third.
         const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
+        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
         const nullClause = col.nullable ? 'null' : 'not null';
-        const defaultClause = isAudit ? ' default current_timestamp(3)' : '';
+        const defaultClause = isAudit || isNowDefault ? ` default ${this.nowColumnDefault('datetime').toString()}` : '';
         return {
-          sql: `alter table ?? modify column ?? datetime(3) ${nullClause}${defaultClause}`,
+          sql: `alter table ?? modify column ?? datetime(${MYSQL_DATETIME_PRECISION}) ${nullClause}${defaultClause}`,
           bindings: [table, col.name] as unknown[],
         };
       });
@@ -15491,6 +16140,30 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#21236] Which class of JSON column `localField` is on `table`, or
+   * `undefined` when it is not a JSON column here ({@link isJsonColumn}). The
+   * JSON-column refusal's reason and repair turn on it
+   * (`JsonColumnFieldClass`, `@objectstack/core`).
+   *
+   * `'single-value-media'` is a field BOTH registries name: {@link mediaFields}
+   * (a single-value file-class field, on either arm of the ADR-0104 window) and
+   * `jsonFields`. {@link isJsonField} put such a field in `jsonFields` only
+   * because {@link mediaColumnIsJson} answered `true` when it registered, so
+   * the window is asked once, by the predicate that already asks it, and this
+   * method asks only the class. On a deployment whose columns have moved the
+   * field is not a JSON column, and this answers `undefined`. Every other JSON
+   * column (a multi-value field, a structured-JSON type) is
+   * `'multi-value-or-json'`.
+   *
+   * `driver-turso`'s remote transport asks the same question through this
+   * method, so both faces of one `TursoDriver` word one refusal.
+   */
+  protected jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
+    if (!table || !this.isJsonColumn(table, localField)) return undefined;
+    return this.mediaFields[table]?.includes(localField) === true ? 'single-value-media' : 'multi-value-or-json';
+  }
+
+  /**
    * [#14079/#15683/#17343] Is `localField` a column on `table` a text operator
    * must not be aimed at — a SCALAR column DECLARED numeric, boolean or
    * temporal?
@@ -15763,8 +16436,11 @@ export class SqlDriver implements IDataDriver {
     subtree?: unknown,
   ): void {
     if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
-    if (!this.isJsonColumn(table, localField)) return;
-    throw jsonColumnOperatorError(column, op, bare, subtree);
+    // [#21236] The same JSON-column question {@link isJsonColumn} answers, with
+    // the column's class beside it, so the refusal names the class's repair.
+    const fieldClass = this.jsonColumnFieldClass(table, localField);
+    if (fieldClass === undefined) return;
+    throw jsonColumnOperatorError(column, op, bare, fieldClass, subtree);
   }
 
   /**
@@ -17211,7 +17887,11 @@ export class SqlDriver implements IDataDriver {
    * The driver-native column DEFAULT for a `defaultValue: 'NOW()'` field.
    *
    * Postgres/MySQL use native `now()` — a real zone-aware TIMESTAMP that never
-   * had the ambiguity below. SQLite has no timestamp type and `knex.fn.now()`
+   * had the ambiguity below. On MySQL a `datetime` default carries the
+   * column's fractional-seconds precision ({@link MYSQL_DATETIME_PRECISION}),
+   * because MySQL refuses a mismatched one outright (#21241); it is also the
+   * expression the builtin audit columns default with, routed through here
+   * ({@link createAuditTimestampColumn}). SQLite has no timestamp type and `knex.fn.now()`
    * compiles to `CURRENT_TIMESTAMP`, which renders a timezone-NAIVE,
    * space-separated `'YYYY-MM-DD HH:MM:SS'` (no millis, no zone). `Date.parse`
    * reads such a zone-less string as LOCAL time, so a stored UTC wall-clock
@@ -17257,6 +17937,14 @@ export class SqlDriver implements IDataDriver {
         if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
         if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
       }
+      // `datetime` on MySQL (#21241): the column is `DATETIME(n)` (see
+      // `createColumn`), and MySQL REFUSES a `CURRENT_TIMESTAMP` default whose
+      // precision differs from its column's — the whole `CREATE TABLE` fails
+      // with "Invalid default value". The bare `knex.fn.now()` below is
+      // precision 0, so the default carries the column's precision from the
+      // one source both read. Postgres keeps the bare form: its `timestamptz`
+      // takes `CURRENT_TIMESTAMP` at microsecond precision, measured accepted.
+      if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
       return this.knex.fn.now();
     }
     switch (type) {
@@ -17285,7 +17973,8 @@ export class SqlDriver implements IDataDriver {
    * bucketed like one, and must take the same physical type or they inherit the
    * `TIMESTAMP` problems on MySQL: no milliseconds, and a 2038 ceiling on the
    * column every list view sorts by (#3942). `CURRENT_TIMESTAMP` has to carry
-   * matching precision for a `DATETIME(3)` default, hence `now(3)`.
+   * matching precision for a `DATETIME(3)` default, hence `now(3)` — spelled
+   * {@link MYSQL_DATETIME_PRECISION}, the one source (#21241, below).
    *
    * ## SQLite takes the SAME canonical default a declared field gets (#11321)
    *
@@ -17310,8 +17999,20 @@ export class SqlDriver implements IDataDriver {
    * does NOW() mean in DDL on this dialect".
    *
    * Postgres is deliberately untouched: `knex.fn.now()` there is a real
-   * zone-aware `TIMESTAMP` that never had the ambiguity. MySQL keeps `now(3)`
-   * (#11224) — a `DATETIME(3)` default must carry matching precision.
+   * zone-aware `TIMESTAMP` that never had the ambiguity.
+   *
+   * ## MySQL routes through the same source (#21241)
+   *
+   * A `DATETIME(3)` default must carry matching precision (#11224), and the
+   * declared-field default is the other half of that sentence too: this
+   * column carried its own `now(3)` while a declared `Field.datetime` NOW()
+   * column of the same `DATETIME(3)` type fell through to a bare
+   * `CURRENT_TIMESTAMP`, which MySQL refuses — so the table was never created.
+   * Both the column's precision and its default now read
+   * {@link MYSQL_DATETIME_PRECISION}, the default through
+   * {@link nowColumnDefault}, exactly as the SQLite branch does. The emitted
+   * DDL for this column is byte-identical (`datetime(3) default
+   * CURRENT_TIMESTAMP(3)`).
    *
    * ⚠️ Scope: a DDL default governs only NEWLY-created tables. A table already
    * on disk keeps its legacy `CURRENT_TIMESTAMP` default; `formatOutput`'s read
@@ -17325,7 +18026,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected createAuditTimestampColumn(table: Knex.CreateTableBuilder, name: string): void {
     if (this.isMysql) {
-      table.datetime(name, { precision: 3 }).defaultTo(this.knex.fn.now(3));
+      table.datetime(name, { precision: MYSQL_DATETIME_PRECISION }).defaultTo(this.nowColumnDefault('datetime'));
       return;
     }
     if (this.isSqlite) {
@@ -18857,7 +19558,7 @@ export class SqlDriver implements IDataDriver {
         // driver writes, exactly as ServiceNow stores its MySQL timestamps
         // (#3942). Postgres deliberately keeps `table.timestamp` → `timestamptz`:
         // asking for precision 3 there would REDUCE it from microseconds.
-        col = this.isMysql ? table.datetime(name, { precision: 3 }) : table.timestamp(name);
+        col = this.isMysql ? table.datetime(name, { precision: MYSQL_DATETIME_PRECISION }) : table.timestamp(name);
         break;
       case 'time':
         // MySQL's bare `TIME` is zero-precision and ROUNDS a fractional literal
@@ -19381,6 +20082,28 @@ export class SqlDriver implements IDataDriver {
         if (v == null) continue;
         // `NOW()` was already replaced with an ISO instant above; anything else
         // that is not interpretable as a time passes through untouched.
+        const normalized = this.storageDatetimeValue(v);
+        if (normalized !== v) {
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = normalized;
+        }
+      }
+    }
+
+    // [#21259] The same rule for a builtin audit timestamp the object does NOT
+    // declare (see {@link undeclaredAuditTimestampFields}). Its column is the
+    // `DATETIME(3)` / `timestamptz` / canonical-text column this driver created,
+    // and the engine's audit hook stamps it as `toISOString()` text, which
+    // MySQL refuses as a datetime literal. Measured on live MySQL 8.0.46: every
+    // insert into `sys_jwks` (declares `created_at` only) and `sys_member` was
+    // refused on `updated_at`, so no JWT signing key was ever stored. On SQLite
+    // and Postgres the hook's text is already the canonical form and is bound
+    // unchanged; a `Date` lands as that same text instead of an epoch INTEGER.
+    const undeclaredAudit = this.undeclaredAuditTimestampFields[object];
+    if (undeclaredAudit && undeclaredAudit.length > 0 && copy && typeof copy === 'object') {
+      for (const field of undeclaredAudit) {
+        const v = copy[field];
+        if (v == null) continue;
         const normalized = this.storageDatetimeValue(v);
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }

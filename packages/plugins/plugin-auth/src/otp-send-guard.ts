@@ -171,7 +171,7 @@ export function assertOtpCooldownSeconds(seconds: number | undefined): void {
     throw new RangeError(
       `phoneOtp.cooldownSeconds ${seconds} exceeds the supported maximum of ${MAX_COOLDOWN_SECONDS} seconds (24 hours). ` +
         'The per-number OTP send history is retained for the whole cooldown, so the cooldown is bounded rather than ' +
-        'silently truncated (#4808). If the value is in milliseconds, divide by 1000; a longer block than 24 hours is ' +
+        'silently truncated. If the value is in milliseconds, divide by 1000; a longer block than 24 hours is ' +
         'an account lockout, not a send throttle.',
     );
   }

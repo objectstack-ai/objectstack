@@ -8,7 +8,7 @@
  *
  * The refusal (ADR-0029 D3, single owner per object name) used to be a bare
  * `Error`. Measured while reverse-verifying the install-time
- * `DUPLICATE_ARTIFACT_OBJECT_NAME` check one layer up (#14163): with that
+ * `DUPLICATE_ARTIFACT_OBJECT_NAME` check one layer up (ADR-0130 D3, commit 1dcb995f2): with that
  * check ablated, `expect(refused).toBeDefined()` STAYED GREEN, because this
  * refusal fired one step later and looked, to a throw-shaped assertion,
  * exactly like the check that had just been deleted. Only the envelope

@@ -27,7 +27,7 @@
  *
  * The fork was real and pointed both ways — either the engine guarantees the
  * array, or `find()`'s declaration is wrong and the ~70 array-or-envelope
- * normalizer limbs the #15094 census counted are load-bearing rather than dead.
+ * normalizer limbs a census counted (commit 901773b21 records its band) are load-bearing rather than dead.
  * The maintainer ruled the first (2026-09-06): the protocol is the baseline and
  * the declaration IS the contract, so the seam that can break it is closed
  * rather than the contract widened. `packages/spec/src/data/hook.zod.ts` backs

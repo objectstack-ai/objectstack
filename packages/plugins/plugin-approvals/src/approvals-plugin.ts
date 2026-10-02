@@ -27,6 +27,7 @@ import {
   unbindAllHooks,
 } from './lifecycle-hooks.js';
 import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
+import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 
@@ -280,6 +281,10 @@ export class ApprovalsServicePlugin implements Plugin {
         // `payload-redaction-middleware.ts` on why one door covered alone is
         // worse than none.
         bindSnapshotRedactionMiddleware(engine as any, fieldVisibility, ctx.logger);
+        // [#21154] …and its query half: the redaction narrows only what a read
+        // hands back, so a filter or a group key over the snapshot would select
+        // on a value the reader is not served. See `payload-predicate-guard.ts`.
+        bindSnapshotPredicateGuard(engine as any, fieldVisibility, ctx.logger);
       } catch (err: any) {
         ctx.logger.warn?.('[approvals] failed to bind approval hooks', { error: err?.message });
       }

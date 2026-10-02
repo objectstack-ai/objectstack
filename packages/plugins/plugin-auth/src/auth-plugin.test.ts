@@ -1703,7 +1703,7 @@ describe('AuthPlugin', () => {
         // Bound → an info line and NO warning: the operator must be able to
         // tell "shared" from "degraded" without reading the code.
         const info = (ctx.logger.info as any).mock.calls.map((c: any[]) => String(c[0]));
-        expect(info.some((m: string) => m.includes('per-number OTP send budget (#2780) bound to the kernel cache service'))).toBe(true);
+        expect(info.some((m: string) => m.includes('per-number OTP send budget bound to the kernel cache service'))).toBe(true);
         expect((ctx.logger.warn as any).mock.calls
           .map((c: any[]) => String(c[0]))
           .filter((m: string) => m.includes('per-number OTP send budget'))).toEqual([]);

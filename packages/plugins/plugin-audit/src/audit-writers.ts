@@ -20,6 +20,23 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
 import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+// [#21120] The family-wide stored-metadata-body seam. `sys_metadata` /
+// `sys_metadata_history` rows carry a serialized metadata BODY in their
+// `metadata` column (a datasource body holds stored credential material), and
+// this writer COPIES the whole audited row into `sys_audit_log.new_value` /
+// `old_value` and `sys_activity.metadata` at write time — a second,
+// admin-readable, at-rest copy. The copy is projected through the one shared
+// redactor so the credential is withheld here exactly as it is on every read
+// exit; `collectMaskedReadFields` cannot reach it, because the credential is
+// nested inside the serialized column, not a top-level secret field of the
+// stored-metadata table. ⛔ No second redaction dialect — the credential
+// definition is `getMetadataTypeRedactor`'s, consumed through this seam.
+import {
+  isStoredMetadataBodyObject,
+  redactStoredMetadataBody,
+  STORED_METADATA_BODY_COLUMN,
+  STORED_METADATA_TYPE_COLUMN,
+} from '@objectstack/spec/kernel';
 // [commit 1408fe385 / #10101] The platform-row organization resolver, imported rather
 // than owned. It started life in THIS file (commit 1408fe385, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
@@ -39,6 +56,10 @@ import {
 // here would be a second de-facto vocabulary that disagrees with the shared one
 // the day a driver is added -- the same argument the imports above make.
 import { isMissingTableError } from '@objectstack/types';
+// [#21081] The name the activity row declares its text provenance under, owned
+// by the read side that redacts by it.
+import { ACTIVITY_TEXT_SOURCES_KEY, type ActivityTextSources } from './activity-field-redaction.js';
+import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -233,8 +254,15 @@ const NOISE_FIELDS = new Set<string>([
  */
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
-/** Action name produced from a HookContext.event string. */
-function actionFor(event: string): 'create' | 'update' | 'delete' | null {
+/**
+ * Action name produced from a HookContext.event string.
+ *
+ * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
+ * whose snapshots are a parent record's field map, and the read side
+ * (`audit-log-field-redaction.ts`) narrows exactly those. A new record-write
+ * action does not compile until that list names it.
+ */
+function actionFor(event: string): LedgerRecordWriteAction | null {
   if (event === 'afterInsert') return 'create';
   if (event === 'afterUpdate') return 'update';
   if (event === 'afterDelete') return 'delete';
@@ -249,15 +277,19 @@ function activityTypeFor(action: 'create' | 'update' | 'delete'): 'created' | 'u
 /**
  * Compute the human-readable record label from a record by trying common
  * label fields. Falls back to record id.
+ *
+ * [#21081] Also answers WHICH field the label was read from (`null` for the id
+ * fallback), so the activity row can declare it: the label is a field value,
+ * and the read side serves it only to a reader served that field.
  */
-function recordLabel(record: any, id: string): string {
-  if (!record || typeof record !== 'object') return id;
+function recordLabel(record: any, id: string): { text: string; field: string | null } {
+  if (!record || typeof record !== 'object') return { text: id, field: null };
   const candidates = ['name', 'subject', 'title', 'full_name', 'label', 'first_name', 'company', 'email'];
   for (const k of candidates) {
     const v = record[k];
-    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'string' && v.trim()) return { text: v.trim(), field: k };
   }
-  return id;
+  return { text: id, field: null };
 }
 
 /**
@@ -577,6 +609,10 @@ function planTrackedLookupReads(
  * option value was the single remaining untranslated token inside it
  * (`阶段: Proposal → Closed Won` on a zh-CN page). Filling it makes the string
  * uniformly localized instead of half-localized, which is the whole defect.
+ *
+ * [#21081] Returns the fields it rendered beside the text — the same loop
+ * answers both, so the activity row's declaration of where its summary came
+ * from cannot drift from what was rendered.
  */
 function renderTrackedChangeSummary(
   objectName: string,
@@ -585,9 +621,10 @@ function renderTrackedChangeSummary(
   newVals: Record<string, any> | null,
   translate: (key: string, params?: Record<string, unknown>) => string | undefined,
   lookupTitles?: Map<string, Map<string, string>>,
-): string | null {
+): { text: string; fields: string[] } | null {
   if (!fields || !newVals) return null;
   const parts: string[] = [];
+  const rendered: string[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
@@ -610,8 +647,9 @@ function renderTrackedChangeSummary(
     );
     const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
     parts.push(`${label}: ${from} → ${to}`);
+    rendered.push(key);
   }
-  return parts.length > 0 ? parts.join('; ') : null;
+  return parts.length > 0 ? { text: parts.join('; '), fields: rendered } : null;
 }
 
 /**
@@ -748,22 +786,29 @@ function planMilestoneTokenReads(
  * the fix. Pinned in `audit-option-label-summary.test.ts` as a WITH-LOCALE
  * milestone case, because the pre-existing seam case in
  * `audit-milestone-summary.test.ts` boots with no locale and cannot bite here.
+ *
+ * [#21081] Returns, beside the text, every key whose value a token actually
+ * interpolated — a token may name a field the update never changed, so the
+ * diff cannot answer where a milestone summary came from; only this can.
  */
 function renderMilestoneSummary(
   template: string,
   fields: Record<string, any> | undefined | null,
   after: Record<string, any> | null,
   lookupTitles?: Map<string, Map<string, string>>,
-): string {
-  return template.replace(milestoneTokenRe(), (_match: string, key: string) => {
+): { text: string; fields: string[] } {
+  const interpolated = new Set<string>();
+  const text = template.replace(milestoneTokenRe(), (_match: string, key: string) => {
     const v = after ? after[key] : undefined;
     if (v === null || v === undefined || v === '') return '';
+    interpolated.add(key);
     const field = fields ? fields[key] : undefined;
     if (!field) return String(v);
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     return displayFieldValue(field, v, titlesFor);
   });
+  return { text, fields: [...interpolated] };
 }
 
 /**
@@ -1202,7 +1247,7 @@ export function installAuditWriters(
   const ledgerView = (
     objectName: string,
     record: any,
-    { dropComputed }: { dropComputed: boolean },
+    { dropComputed, storedType }: { dropComputed: boolean; storedType?: string },
   ): Record<string, any> | null => {
     if (!record || typeof record !== 'object') return null;
     const out: Record<string, any> = { ...record };
@@ -1213,6 +1258,22 @@ export function installAuditWriters(
       // row does not carry is never invented.
       if (!(field in out)) continue;
       out[field] = out[field] == null ? null : SECRET_MASK;
+    }
+    // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
+    // is not a top-level secret field, so the mask above never touches it. The
+    // audit copy is a credential read exit exactly like `/meta`, so the body is
+    // projected through the one shared redactor before it is recorded. The
+    // `type` that selects the redactor is passed in from the FULL row
+    // (`storedType`), because an update diff carries only the changed keys and
+    // its subset may not include the `type` column. Fail CLOSED: a body the
+    // redactor cannot judge is DROPPED from the recorded view rather than
+    // copied raw — the ledger records a change without its credential, never
+    // the credential.
+    if (isStoredMetadataBodyObject(objectName) && STORED_METADATA_BODY_COLUMN in out) {
+      const type = storedType ?? out[STORED_METADATA_TYPE_COLUMN];
+      const outcome = redactStoredMetadataBody(type, out[STORED_METADATA_BODY_COLUMN]);
+      if (outcome.ok) out[STORED_METADATA_BODY_COLUMN] = outcome.body;
+      else delete out[STORED_METADATA_BODY_COLUMN];
     }
     if (dropComputed) {
       const defs = getFieldDefs(objectName);
@@ -1297,6 +1358,20 @@ export function installAuditWriters(
     // reason — #4434 / #4550, restated in the #6656 ruling).
     const after: any = ctx.result;
     const before: any = (ctx as any).previous ?? null;
+
+    // [#21120] The metadata TYPE off the full row, read once from whichever
+    // side the action carries (create/update: `after`; delete: `before`). An
+    // update `diff` keeps only the changed keys, so its subset may not include
+    // the `type` column that selects the body's redactor — `ledgerView` is
+    // handed this so it can still project the `metadata` body. Non-stored
+    // objects ignore it.
+    const storedBodyType: string | undefined = isStoredMetadataBodyObject(ctx.object)
+      ? ((typeof after === 'object' && typeof after?.[STORED_METADATA_TYPE_COLUMN] === 'string'
+          ? after[STORED_METADATA_TYPE_COLUMN]
+          : typeof before === 'object' && typeof before?.[STORED_METADATA_TYPE_COLUMN] === 'string'
+            ? before[STORED_METADATA_TYPE_COLUMN]
+            : undefined) as string | undefined)
+      : undefined;
 
     // Resolve record id from after (insert/update) or before (delete) or input.
     let recordId: string | undefined =
@@ -1409,7 +1484,7 @@ export function installAuditWriters(
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
     if (action === 'create') {
-      newValue = ledgerView(ctx.object, after, { dropComputed: true });
+      newValue = ledgerView(ctx.object, after, { dropComputed: true, storedType: storedBodyType });
     } else if (action === 'update') {
       // Detect on the raw values, record the masked ones — see the note on
       // `before`/`after` above. `diff` has already dropped computed fields, so
@@ -1417,10 +1492,10 @@ export function installAuditWriters(
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
       // If nothing meaningfully changed, skip the audit row to avoid noise.
       if (Object.keys(d.next).length === 0) return;
-      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false });
-      newValue = ledgerView(ctx.object, d.next, { dropComputed: false });
+      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false, storedType: storedBodyType });
+      newValue = ledgerView(ctx.object, d.next, { dropComputed: false, storedType: storedBodyType });
     } else if (action === 'delete') {
-      oldValue = ledgerView(ctx.object, before, { dropComputed: true });
+      oldValue = ledgerView(ctx.object, before, { dropComputed: true, storedType: storedBodyType });
     }
 
     const auditRow: Record<string, any> = {
@@ -1479,11 +1554,16 @@ export function installAuditWriters(
     // otherwise degrade to the bare id (#5504 names that exact symptom). The
     // mask still applies, so no credential value can reach a user-facing
     // activity summary through the label.
-    const label = recordLabel(
-      ledgerView(ctx.object, after, { dropComputed: false }) ??
-        ledgerView(ctx.object, before, { dropComputed: false }),
+    const { text: label, field: labelField } = recordLabel(
+      ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType }) ??
+        ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType }),
       recordId ?? '',
     );
+    // [#21081] Which parent fields each text column carries a value of — the
+    // declaration the read side redacts by (`activity-field-redaction.ts`). The
+    // label, and every summary that interpolates it, carry the label field.
+    const labelSources: string[] = labelField ? [labelField] : [];
+    let summarySources: string[] = labelSources;
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
     // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
@@ -1516,8 +1596,8 @@ export function installAuditWriters(
       // `value` is a secret's plaintext would be a leak in the metadata
       // itself, not a case worth preserving.
       const summaryFields = getFieldDefs(ctx.object);
-      const beforeView = ledgerView(ctx.object, before, { dropComputed: false });
-      const afterView = ledgerView(ctx.object, after, { dropComputed: false });
+      const beforeView = ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType });
+      const afterView = ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType });
       const milestone = matchMilestone(getObjectDef(ctx.object), beforeView, afterView);
       if (milestone) {
         // [#7290] The read is keyed on the tokens of the template that ACTUALLY
@@ -1536,7 +1616,9 @@ export function installAuditWriters(
           api,
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
         );
-        summary = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
+        const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
+        summary = rendered.text;
+        summarySources = rendered.fields;
         if (milestone.type) activityType = milestone.type;
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
@@ -1546,19 +1628,25 @@ export function installAuditWriters(
           api,
           planTrackedLookupReads(summaryFields, oldValue, newValue),
         );
-        summary =
-          renderTrackedChangeSummary(
-            ctx.object,
-            summaryFields,
-            oldValue,
-            newValue,
-            translate,
-            lookupTitles,
-          ) ??
-          translate('messages.activityUpdated', { object: objectDisplay, label }) ??
-          `Updated ${objectDisplay} "${label}"`;
+        const tracked = renderTrackedChangeSummary(
+          ctx.object,
+          summaryFields,
+          oldValue,
+          newValue,
+          translate,
+          lookupTitles,
+        );
+        if (tracked) {
+          summary = tracked.text;
+          summarySources = tracked.fields;
+        } else {
+          summary =
+            translate('messages.activityUpdated', { object: objectDisplay, label }) ??
+            `Updated ${objectDisplay} "${label}"`;
+        }
       }
     }
+    const textSources: ActivityTextSources = { summary: summarySources, record_label: labelSources };
 
     const activityRow: Record<string, any> = {
       type: activityType,
@@ -1571,7 +1659,9 @@ export function installAuditWriters(
       object_name: ctx.object,
       record_id: recordId ?? null,
       record_label: label,
-      metadata: newValue || oldValue ? safeStringify({ old: oldValue, new: newValue }) : null,
+      // [#21081] The change, plus the declaration of where the text columns
+      // came from. The read side strips the declaration before serving.
+      metadata: safeStringify({ old: oldValue, new: newValue, [ACTIVITY_TEXT_SOURCES_KEY]: textSources }),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)

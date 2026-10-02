@@ -354,7 +354,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "请求头 JSON",
-        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path (#8118). The dispatcher recovers it through the engine's privileged accessor on the claim path."
+        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path. The dispatcher recovers it through the engine's privileged accessor on the claim path."
       },
       signature: {
         label: "HMAC 签名",
@@ -376,7 +376,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "尝试次数",
-        help: "迄今已尝试的次数。终态行上为 0 表示该投递被 PARKED——从未发送,且不可重投(#8069);原因见 `error`。"
+        help: "迄今已尝试的次数。终态行上为 0 表示该投递被 PARKED——从未发送,且因不带签名而不可重投;原因见 `error`。"
       },
       claimed_by: {
         label: "认领节点"
@@ -398,7 +398,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       error: {
         label: "错误",
-        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069)."
+        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared."
       },
       created_at: {
         label: "创建时间"

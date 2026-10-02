@@ -185,4 +185,25 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * "Cannot answer, do not block".
    */
   judgeFilter?: ReadScopeFilterJudge;
+  /**
+   * [#21080] Does the data engine hold a middleware registered FOR
+   * `objectName` — `IObjectQLEngine.hasObjectMiddleware` — or `undefined` when
+   * the host cannot say (no data engine, or an engine without the member)?
+   *
+   * The engine's object-keyed middlewares include read gates (the comment,
+   * activity and attachment gates, the approval snapshot redaction). They run
+   * on every engine operation, and `NativeSQLStrategy` runs none: it executes
+   * raw SQL through the driver. So that strategy declines a query that reads
+   * an object this answers `true` for, and the engine path serves it with the
+   * caller's context. Unlike the hooks above, an `undefined` answer DECLINES
+   * too: a read gate this strategy cannot see is not a gate it may skip.
+   *
+   * `AnalyticsService` passes through `AnalyticsServiceConfig.hasObjectMiddleware`,
+   * which `AnalyticsServicePlugin` fills from the data engine. Declared HERE
+   * rather than on the spec's {@link StrategyContext} for the reason
+   * `getDatasetScope` is: nothing about it is an authorable surface. A context
+   * built without the hook asks nothing, and the strategy keeps the behaviour
+   * it had.
+   */
+  hasObjectMiddleware?(objectName: string): boolean | undefined;
 }

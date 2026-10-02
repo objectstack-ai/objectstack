@@ -47,13 +47,39 @@
  * and says which; it falls back to `direct` only when NO run appeared, never
  * from a run that failed (issue-create's rule, and dispatch.mjs's reasons).
  *
- * ## Read-back — the old URL redirects, the card answers at the new one
+ * ## Read-back — the TARGET decides; the old URL only corroborates
  *
- * `GET /repos/{source}/issues/{n}` WITHOUT following redirects must answer
- * 301 naming the new issue, and `GET /repos/{target}/issues/{m}` must answer
- * from the target with the title the pre-read saw. Both, or not confirmed.
- * Labels with no same-named label on the target are dropped by the platform
- * (the relay never asks it to create them); the read-back prints what stayed.
+ * The transfer is confirmed when the card answers from the target with the
+ * title the pre-read saw. The card is found by its number when one is in
+ * hand — the number the `transferIssue` answer carried (direct), else the
+ * number the old URL's 301 names — and otherwise (the relay, whose run prints
+ * the number only to a job log a seat container cannot read) by that title
+ * among the target's cards updated since the transfer was sent; two such
+ * cards are not a confirmation. `GET /repos/{source}/issues/{n}` WITHOUT
+ * following redirects is read first, and its answer is printed beside the
+ * verdict, never instead of it:
+ *
+ *   - a 301 naming the card corroborates it; one naming another card, or
+ *     another repository, is the board disagreeing;
+ *   - a 200 from the source is a PENDING REDIRECT, not "the card did not
+ *     move": GitHub serves a moved card's old URL for MINUTES before it turns
+ *     into the 301 (measured over five landed transfers in one shift — four
+ *     old URLs still answered 200 minutes after their cards stood on the
+ *     target), so the old URL is never waited for;
+ *   - a 301 naming no card is what an identity that cannot see the target
+ *     reads (a private target), and any other status is printed as itself —
+ *     neither is read as the move, and only a 301 ever supplies the number.
+ *
+ * The target is re-read on the bounded schedule
+ * `TRANSFER_READ_BACK_DELAYS_MS` names while it ANSWERS without the card,
+ * one printed line per re-read; ⛔ the transfer is never re-sent. Exit 4
+ * survives for a board that truly disagrees: after the last re-read the
+ * target still lacks the card AND the old URL, read again, still serves it
+ * from the source. A target that cannot be read at all — a cloud session
+ * reads only the repositories attached to it, and answers 403 for the rest —
+ * ends the wait at once, UNCONFIRMED. Labels with no same-named label on the
+ * target are dropped by the platform (the relay never asks it to create
+ * them); the read-back prints what stayed.
  *
  * ## When the platform refuses — fail closed, name the remedy
  *
@@ -69,17 +95,22 @@
  *
  * ## Exit codes — capture them BEFORE any pipe (issue-create's ladder)
  *
- *   0   transferred, and read back: the old URL redirects, the new one answers.
+ *   0   transferred, and confirmed on the target: the card answers there with
+ *       the title the pre-read saw, at the URL printed — whether the old URL
+ *       already redirects or is still a pending redirect.
  *   2   usage, or a refusal above. Nothing was transferred.
  *   3   PREREQUISITE NOT MET — no token, the platform unreachable, the
  *       credential rate-limit exhausted, or no route. Nothing was transferred.
  *   4   the platform answered, and the BOARD DISAGREES — the card sits on
- *       another repository, under another title, or the old URL still serves
- *       it. Every number seen is printed.
+ *       another repository or under another title, the old URL redirects to
+ *       another card than the mutation answered, or the target still lacks
+ *       the card after the bounded re-read while the old URL still serves it
+ *       from the source. Every number seen is printed.
  *   5   the platform refused, or the relay run FAILED. The remedy is printed.
  *   6   UNCONFIRMED — the dispatch was accepted and its run did not appear or
- *       complete within the ceiling, or the read-back could not be taken. The
- *       run URL is printed. Go READ the card; ⛔ never re-run blind.
+ *       complete within the ceiling, or the read-back could not be taken: the
+ *       target could not be read, or answered two cards for one. The run URL
+ *       is printed. Go READ the card; ⛔ never re-run blind.
  *  10   the write throttle refused. Nothing was sent.
  */
 
@@ -89,7 +120,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, READ_BACK_SLACK_MS, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { repoOfIssue, requestLanded } from './fleet-write/execute.mjs';
 import { OPS, TARGET_OWNER, TARGET_REPO_SHAPE, TRANSFER_TARGETS, transferRemedy } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText, validateStroke } from './fleet-write/validate.mjs';
@@ -178,14 +209,44 @@ export function exitForVerdict(verdict) {
   return EXIT_PLATFORM_REFUSAL;
 }
 
-/** The issue number an API redirect names (`…/issues/31`), or null. */
-export function numberFromRedirect({ json, location } = {}) {
+/**
+ * The card an API redirect names: `{ number, repo }` from the first of the
+ * body's `url` and the `location` header that ends in `/issues/{n}`. `repo` is
+ * read only from the `/repos/{owner}/{name}/issues/{n}` spelling — the one the
+ * platform was measured to answer — and is null for `/repositories/{id}/…`.
+ * Both null for a 301 that names nothing: the measured answer to an identity
+ * that cannot see the target, with an empty `url` and an empty `location`.
+ */
+export function redirectTarget({ json, location } = {}) {
   for (const candidate of [json?.url, location]) {
-    const m = /\/issues\/([1-9][0-9]*)(?:[?#].*)?$/.exec(String(candidate ?? ''));
-    if (m) return Number(m[1]);
+    const text = String(candidate ?? '');
+    const m = /\/issues\/([1-9][0-9]*)(?:[?#].*)?$/.exec(text);
+    if (!m) continue;
+    const repo = /\/repos\/([^/]+\/[^/]+)\/issues\/[1-9][0-9]*(?:[?#].*)?$/.exec(text);
+    return { number: Number(m[1]), repo: repo ? repo[1] : null };
   }
-  return null;
+  return { number: null, repo: null };
 }
+
+/** The issue number an API redirect names (`…/issues/31`), or null. */
+export function numberFromRedirect(answer = {}) {
+  return redirectTarget(answer).number;
+}
+
+/**
+ * The read-back's bounded re-read of the TARGET (header, "Read-back"): the
+ * wait before each re-read, in order, taken only while the target ANSWERS
+ * without the card. Why these values: a repository's issue list was measured
+ * lagging a new issue by 3–4 s and never by 5 s (the relay's `issue_create`
+ * read-back, measured over five filings in one shift), and the direct path
+ * reads the target as soon as the mutation answers, the relay path within
+ * one 5 s poll of its run completing — so 3 s, 7 s, then 15 s cover a target
+ * that lags harder under load, 25 s in all. The OLD URL is not what this
+ * waits for: it was measured lagging by minutes, which no bounded read-back
+ * may sit through. ⛔ Never unbounded and ⛔ never a re-send of the transfer;
+ * the self-test holds the sum.
+ */
+export const TRANSFER_READ_BACK_DELAYS_MS = Object.freeze([3_000, 7_000, 15_000]);
 
 // ---------------------------------------------------------------------------
 // Transport — the one shape, with both halves of the throttle around the one
@@ -244,8 +305,10 @@ async function rest(path, { method = 'GET', body = null, redirect = 'follow' } =
 
 /**
  * Transfer the card the plan names, read it back, and say what happened.
- * Returns `{ exitCode, from, to, lines, transport, relay }`; never throws on a
- * status.
+ * Returns `{ exitCode, from, to, lines, transport, relay }` — plus
+ * `pendingRedirect` on a success, true while the old URL still serves the
+ * card; never throws on a status. `deps.sleep` and `deps.now` serve the
+ * read-back's bounded re-read alone (`TRANSFER_READ_BACK_DELAYS_MS`).
  */
 export async function transferIssue(plan, deps = {}) {
   const lines = [];
@@ -286,6 +349,7 @@ export async function transferIssue(plan, deps = {}) {
   const labelsBefore = (pre.json.labels ?? []).map((l) => l?.name ?? String(l));
 
   // ── the transfer ──────────────────────────────────────────────────────────
+  const sentAt = (deps.now ?? Date.now)();
   let claimed = null;
   if (route.transport === 'dispatch') {
     const packed = packRequest({ repo: plan.repo, session: route.session, actions: [plan.action] });
@@ -338,40 +402,106 @@ export async function transferIssue(plan, deps = {}) {
     lines.push(`  issue-transfer: ${req.graphql.mutation} answered ${plan.to}#${claimed}${moved.url ? ` ${moved.url}` : ''} — reading the card back.`);
   }
 
-  // ── the read-back: the old URL redirects, the new one answers ─────────────
-  const unconfirmed = (why) => {
-    lines.push(`✗ issue-transfer: UNCONFIRMED — ${why}. Go READ ${plan.repo}#${plan.issue} and ${plan.to}; ⛔ do not re-run blind. Exit ${EXIT_UNCONFIRMED}.`);
-    return done(EXIT_UNCONFIRMED);
+  // ── the read-back: the TARGET decides; the old URL only corroborates ──────
+  const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const unconfirmed = (why, extra = {}) => {
+    lines.push(`✗ issue-transfer: UNCONFIRMED — ${why}. Go READ ${plan.repo}#${plan.issue} and ${plan.to}; ⛔ do not re-run blind — the transfer was sent. Exit ${EXIT_UNCONFIRMED}.`);
+    return done(EXIT_UNCONFIRMED, extra);
   };
-  const old = await rest(`/repos/${plan.repo}/issues/${plan.issue}`, { redirect: 'manual' }, deps);
-  if (old.status === 200) {
-    lines.push(`✗ issue-transfer: the board disagrees — ${old.call} still answers 200 from ${repoOfIssue(old.json) ?? '?'}: the card did not move${claimed !== null ? `, though the mutation answered #${claimed}` : ''}.`);
-    return done(EXIT_BOARD_DISAGREES);
+  const sameRepo = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+  // The old URL, WITHOUT following its redirect: corroboration, printed beside the verdict and never instead of it.
+  const readOld = async () => {
+    const r = await rest(`/repos/${plan.repo}/issues/${plan.issue}`, { redirect: 'manual' }, deps);
+    if (r.status === 301) return { kind: 'redirect', ...redirectTarget(r), r };
+    if (r.status === 200 && r.json) return { kind: 'serving', at: repoOfIssue(r.json), number: r.json.number ?? null, r };
+    return { kind: 'other', r };
+  };
+  const pendingAt = (o) => o.kind === 'serving' && sameRepo(o.at, plan.repo);
+  const oldAccount = (o) => {
+    if (o.kind === 'redirect') return o.number === null ? 'the old URL answers 301 naming no card this identity can read' : `the old URL answers 301 to ${o.repo && !sameRepo(o.repo, plan.to) ? o.repo : ''}#${o.number}`;
+    if (pendingAt(o)) return `the old URL still answers 200 from ${plan.repo} — a PENDING REDIRECT: GitHub serves a moved card's old URL for minutes before it turns into the 301`;
+    if (o.kind === 'serving') return `the old URL answers 200 from ${o.at ?? '?'}${o.number !== null ? ` as #${o.number}` : ''}`;
+    return `the old URL answers HTTP ${o.r.status}${said(o.r)} — neither the 301 nor the card, so it is not read as the move`;
+  };
+  const old = await readOld();
+  // Only a 301 ever supplies a number; one naming another repository or another number than the mutation answered is the board disagreeing.
+  let number = claimed;
+  if (old.kind === 'redirect' && old.number !== null) {
+    if (old.repo && !sameRepo(old.repo, plan.to)) {
+      lines.push(`✗ issue-transfer: the board disagrees — the old URL redirects to ${old.repo}#${old.number}, not to ${plan.to}. ⛔ Not re-sent: go READ both.`);
+      return done(EXIT_BOARD_DISAGREES, { to: { repo: old.repo, number: old.number, url: null } });
+    }
+    if (claimed !== null && claimed !== old.number) {
+      lines.push(`✗ issue-transfer: the board disagrees — the mutation answered #${claimed}, the old URL redirects to #${old.number}.`);
+      return done(EXIT_BOARD_DISAGREES, { to: { repo: plan.to, number: old.number, url: null } });
+    }
+    number = old.number;
   }
-  if (old.status !== 301) return unconfirmed(`${old.call} answered HTTP ${old.status}${said(old)}, not the 301 a moved card answers`);
-  const number = numberFromRedirect(old);
-  if (number === null) return unconfirmed(`${old.call} answered 301 naming no issue number`);
-  if (claimed !== null && claimed !== number) {
-    lines.push(`✗ issue-transfer: the board disagrees — the mutation answered #${claimed}, the old URL redirects to #${number}.`);
-    return done(EXIT_BOARD_DISAGREES, { to: { repo: plan.to, number, url: null } });
+  // The card on the target: by its number when one is in hand, else by the pre-read's title among the cards updated since the send.
+  const since = encodeURIComponent(new Date(sentAt - READ_BACK_SLACK_MS).toISOString());
+  const look = async () => {
+    if (number !== null) {
+      const r = await rest(`/repos/${plan.to}/issues/${number}`, {}, deps);
+      if (r.status === 200 && r.json) return { state: 'answered', card: r.json, r };
+      if (r.status === 404) return { state: 'absent', r, why: `${r.call} answers 404` };
+      return { state: 'unread', r };
+    }
+    const r = await rest(`/repos/${plan.to}/issues?state=all&sort=updated&direction=desc&since=${since}&per_page=100`, {}, deps);
+    if (r.status !== 200 || !Array.isArray(r.json)) return { state: 'unread', r };
+    const hits = r.json.filter((o) => o && !o.pull_request && String(o.title ?? '').trim() === title);
+    if (hits.length === 1) return { state: 'answered', card: hits[0], r };
+    if (hits.length > 1) return { state: 'ambiguous', hits, r };
+    return { state: 'absent', r, why: `no card on ${plan.to} updated since the transfer was sent is titled ${JSON.stringify(title)}` };
+  };
+  let found = await look();
+  let waited = 0;
+  const delays = TRANSFER_READ_BACK_DELAYS_MS;
+  for (let i = 0; i < delays.length && found.state === 'absent'; i++) {
+    lines.push(`  issue-transfer: ${found.why} yet — re-read ${i + 1}/${delays.length} of ${plan.to} in ${delays[i]} ms (the target may lag the transfer; ⛔ the transfer is not re-sent).`);
+    await sleep(delays[i]);
+    waited += delays[i];
+    found = await look();
+    if (found.state === 'answered') lines.push(`  issue-transfer: ${plan.to}#${found.card.number ?? number} found on re-read ${i + 1}, ${waited} ms after the first read.`);
   }
-  const fresh = await rest(`/repos/${plan.to}/issues/${number}`, {}, deps);
-  if (fresh.status !== 200 || !fresh.json) return unconfirmed(`the old URL redirects to #${number}, but ${fresh.call} answered HTTP ${fresh.status}${said(fresh)}`);
-  const freshAt = repoOfIssue(fresh.json);
-  const freshTitle = String(fresh.json.title ?? '').trim();
-  const to = { repo: freshAt ?? plan.to, number, url: fresh.json.html_url ?? null };
-  if (!freshAt || freshAt.toLowerCase() !== plan.to.toLowerCase() || freshTitle !== title) {
-    lines.push(`✗ issue-transfer: the board disagrees — #${number} answers from ${freshAt ?? '?'} titled ${JSON.stringify(freshTitle)}; wanted ${plan.to} titled ${JSON.stringify(title)}.`);
+  const known = number !== null ? { to: { repo: plan.to, number, url: null } } : {};
+  if (found.state === 'unread') {
+    return unconfirmed(`the target could not be read — ${found.r.call} answered HTTP ${found.r.status}${said(found.r)}; ${oldAccount(old)}`, known);
+  }
+  if (found.state === 'ambiguous') {
+    return unconfirmed(`${found.hits.length} cards on ${plan.to} updated since the transfer was sent carry the title ${JSON.stringify(title)} (${found.hits.map((h) => `#${h.number}`).join(', ')}), and a title names one card or none; ${oldAccount(old)}`);
+  }
+  if (found.state === 'absent') {
+    // A board that truly disagrees: the target still lacks the card AND the old URL, read again, still serves it from the source.
+    const after = await readOld();
+    const tried = `read ${delays.length + 1} times over ${waited} ms`;
+    if (pendingAt(after)) {
+      lines.push(
+        `✗ issue-transfer: the board disagrees — ${found.why} (${tried}), and ${after.r.call} still answers 200 from ${plan.repo}: the card did not move` +
+          `${claimed !== null ? `, though the mutation answered #${claimed}` : ''}${ctx.relay ? ', though the relay run reported success' : ''}. ⛔ Not re-sent: go READ both.`,
+      );
+      return done(EXIT_BOARD_DISAGREES, known);
+    }
+    return unconfirmed(`${found.why} (${tried}), while ${oldAccount(after)}`, known);
+  }
+  const card = found.card;
+  const cardAt = repoOfIssue(card);
+  const cardTitle = String(card.title ?? '').trim();
+  const cardNumber = Number.isInteger(card.number) ? card.number : number;
+  const to = { repo: cardAt ?? plan.to, number: cardNumber, url: card.html_url ?? null };
+  if (!cardAt || !sameRepo(cardAt, plan.to) || cardTitle !== title) {
+    lines.push(`✗ issue-transfer: the board disagrees — #${cardNumber} answers from ${cardAt ?? '?'} titled ${JSON.stringify(cardTitle)}; wanted ${plan.to} titled ${JSON.stringify(title)}.`);
     return done(EXIT_BOARD_DISAGREES, { to });
   }
-  const labelsAfter = (fresh.json.labels ?? []).map((l) => l?.name ?? String(l));
+  const labelsAfter = (card.labels ?? []).map((l) => l?.name ?? String(l));
   const dropped = labelsBefore.filter((l) => !labelsAfter.includes(l));
-  lines.push(`✓ issue-transfer: ${plan.repo}#${plan.issue} → ${plan.to}#${number}${to.url ? ` ${to.url}` : ''}`);
+  const pending = pendingAt(old);
+  lines.push(`✓ issue-transfer: ${plan.repo}#${plan.issue} → ${plan.to}#${cardNumber}${to.url ? ` ${to.url}` : ''}`);
   lines.push(
-    `  read-back: the old URL answers 301 to #${number}; #${number} answers from ${plan.to} with the same title; labels kept: ${labelsAfter.join(', ') || '(none)'}` +
+    `  read-back: #${cardNumber} answers from ${plan.to} with the same title${number === null ? ' (found by that title: no number was in hand)' : ''}; ${oldAccount(old)}` +
+      `; labels kept: ${labelsAfter.join(', ') || '(none)'}` +
       `${dropped.length ? `; dropped (no same-named label on the target): ${dropped.join(', ')}` : ''}.`,
   );
-  return done(EXIT_OK, { to });
+  return done(EXIT_OK, { to, pendingRedirect: pending });
 }
 
 // ---------------------------------------------------------------------------
@@ -383,12 +513,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the arguments: one card, a source in the organization, a target from the governed roster that is not the source — judged by the relay's own validator": 11,
   'the pre-read: a pull request, a card already moved, or an unreadable card is refused before any write': 5,
   "the direct transport: the target's node id, then ONE paced mutation carrying both node ids — the relay row's own query": 7,
-  'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 8,
+  'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 9,
   'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy and is never fallen back from': 8,
+  'the target decides: a card the target answers is a transfer even while the old URL still serves it (a pending redirect: exit 0, the target URL); exit 4 only when the target still lacks it after the bounded re-read AND the old URL is unchanged; an unreadable or ambiguous target is UNCONFIRMED; the transfer is never re-sent': 16,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one write verb, on the roster': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -446,6 +577,7 @@ export async function selfTest() {
     });
     const TOKEN_FIXTURE = 'ghs_FixtureTokenNotRealAtAll0000000000000';
     const API_TEST = 'https://api.github.test';
+    const NOW_FIXTURE = Date.parse('2026-10-01T02:00:00Z');
     const card = (repo, number, extra = {}) => ({
       number,
       node_id: `I_${number}`,
@@ -472,6 +604,11 @@ export async function selfTest() {
           return { status: 200, json: landedOn(UI) };
         },
         [`GET /repos/${UI}/issues/31`]: () => (state.moved ? { status: 200, json: card(UI, 31, { labels: [{ name: 'bug' }] }) } : { status: 404, json: { message: 'Not Found' } }),
+        // The target's list: a card under another title, and a PULL REQUEST under the same one — neither is the card.
+        [`GET /repos/${UI}/issues`]: () => ({
+          status: 200,
+          json: [card(UI, 30, { title: 'another card' }), card(UI, 29, { pull_request: { url: 'x' } }), ...(state.moved ? [card(UI, 31, { labels: [{ name: 'bug' }] })] : [])],
+        }),
         ...overrides,
       };
       return { state, answers };
@@ -479,25 +616,44 @@ export async function selfTest() {
     const platform = (answers, seen) => async (url, init) => {
       const u = new URL(url);
       const call = `${init?.method ?? 'GET'} ${u.pathname}`;
-      seen.push({ call, redirect: init?.redirect ?? 'follow', body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
+      seen.push({ call, query: u.search, redirect: init?.redirect ?? 'follow', body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
       const make = answers[call];
       const a = make ? make(init ?? {}) : { status: 404, json: { message: 'Not Found' } };
       if (a.throws) throw new Error(a.throws);
       return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999', ...(a.headers ?? {}) }), json: async () => a.json };
     };
     const DIRECT_ROUTE = { requested: 'direct', transport: 'direct', reason: 'self-test: direct', error: null, session: null };
-    const drive = async (b, { file, route, send, token = TOKEN_FIXTURE, planOverride } = {}) => {
+    // `sleeps` records every wait the read-back takes — offline, nothing really waits.
+    const drive = async (b, { file, route, send, token = TOKEN_FIXTURE, planOverride, onSleep } = {}) => {
       const seen = [];
+      const sleeps = [];
+      const sleep = async (ms) => {
+        sleeps.push(ms);
+        onSleep?.(sleeps.length);
+      };
       const pace = paceFor(file ?? join(dir, `pace-${paceCase++}.jsonl`));
       try {
-        const r = await transferIssue(planOverride ?? plan, { fetch: platform(b.answers, seen), token, pace, route: route ?? DIRECT_ROUTE, send });
-        return { ...r, seen, pace, text: r.lines.join('\n') };
+        const r = await transferIssue(planOverride ?? plan, { fetch: platform(b.answers, seen), token, pace, route: route ?? DIRECT_ROUTE, send, sleep, now: () => NOW_FIXTURE });
+        return { ...r, seen, sleeps, pace, text: r.lines.join('\n') };
       } catch (e) {
         if (e?.throttleExit === undefined) throw e;
-        return { exitCode: e.throttleExit, lines: [], seen, pace, throttled: true, text: '' };
+        return { exitCode: e.throttleExit, lines: [], seen, sleeps, pace, throttled: true, text: '' };
       }
     };
     const posts = (seen) => seen.filter((s) => s.call.startsWith('POST '));
+    const SRC_KEY = `GET /repos/${SRC}/issues/7`;
+    const withAnswers = (b, extra) => ({ state: b.state, answers: { ...b.answers, ...extra } });
+    // The measured lag: the card stands on the target while its old URL still answers 200 from the source.
+    const lagOld = (b) => withAnswers(b, { [SRC_KEY]: (init) => (init.redirect === 'manual' ? { status: 200, json: card(SRC, 7) } : b.answers[SRC_KEY](init)) });
+    const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const dispatchRoute = (requested = 'dispatch') => ({ requested, transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION });
+    const RUN = { id: 42, url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' };
+    const outcome = (state, b, extra = {}) => async (payload) => {
+      if (state === 'success') b.state.moved = true;
+      return { state, ok: state === 'success', status: state === 'refused' ? 404 : 204, verdict: state === 'refused' ? 'refusal' : 'ok', requestId: payload.request_id, startMs: 1, ceilingMs: 2, run: state === 'no-run' || state === 'refused' ? null : RUN, detail: '', ...extra };
+    };
+    // A run that reports success while the board never moved.
+    const liar = async (p) => ({ state: 'success', ok: true, status: 204, verdict: 'ok', requestId: p.request_id, startMs: 1, ceilingMs: 2, run: RUN, detail: '' });
 
     // ── the pre-read ────────────────────────────────────────────────────────
     battery('the pre-read: a pull request, a card already moved, or an unreadable card is refused before any write');
@@ -539,13 +695,25 @@ export async function selfTest() {
       t('…the old URL was read WITHOUT following its redirect, the pre-read with it', ok.seen.filter((s) => s.call === `GET /repos/${SRC}/issues/7`).map((s) => s.redirect), ['follow', 'manual']);
       const stuck = await drive(board({ 'POST /graphql': () => ({ status: 200, json: landedOn(UI) }) }));
       t('a mutation that answered while the old URL still serves the card is exit 4', [stuck.exitCode, stuck.text.includes('the card did not move')], [EXIT_BOARD_DISAGREES, true]);
-      const b404 = board();
-      const gone = await drive({ answers: { ...b404.answers, [`GET /repos/${SRC}/issues/7`]: (init) => (init.redirect === 'manual' ? { status: 404, json: { message: 'Not Found' } } : b404.answers[`GET /repos/${SRC}/issues/7`](init)) } });
-      t('an old URL that answers neither 301 nor 200 is UNCONFIRMED (6), never a success', [gone.exitCode, gone.text.includes('UNCONFIRMED') && gone.text.includes('not the 301 a moved card answers')], [EXIT_UNCONFIRMED, true]);
+      const old404 = (b) => withAnswers(b, { [SRC_KEY]: (init) => (init.redirect === 'manual' ? { status: 404, json: { message: 'Not Found' } } : b.answers[SRC_KEY](init)) });
+      const gone = await drive(old404(board()));
+      const b404blind = board();
+      const goneBlind = await drive(withAnswers(old404(b404blind), { [`GET /repos/${UI}/issues/31`]: () => ({ status: 502, json: { message: 'Bad Gateway' } }) }));
+      t(
+        'an old URL that answers neither 301 nor 200 is never read as the move — printed as itself beside a card the target confirms (0), and UNCONFIRMED (6) when the target cannot be read',
+        [gone.exitCode, gone.text.includes('the old URL answers HTTP 404') && gone.text.includes('not read as the move'), goneBlind.exitCode, goneBlind.text.includes('UNCONFIRMED')],
+        [EXIT_OK, true, EXIT_UNCONFIRMED, true],
+        `${gone.text}\n${goneBlind.text}`,
+      );
       // Only the PERMANENT redirect a moved card answers counts — a temporary one naming the same card is not that fact.
       const b307 = board();
-      const temporary = await drive({ answers: { ...b307.answers, [`GET /repos/${SRC}/issues/7`]: (init) => (init.redirect === 'manual' && b307.state.moved ? { status: 307, json: { url: REDIRECT }, headers: { location: REDIRECT } } : b307.answers[`GET /repos/${SRC}/issues/7`](init)) } });
-      t('⛔ a 307 naming the new card is UNCONFIRMED too — only the 301 a moved card answers is read as the move', [temporary.exitCode, temporary.text.includes('HTTP 307')], [EXIT_UNCONFIRMED, true], temporary.text);
+      const temporary = await drive(withAnswers(b307, { [SRC_KEY]: (init) => (init.redirect === 'manual' && b307.state.moved ? { status: 307, json: { url: REDIRECT }, headers: { location: REDIRECT } } : b307.answers[SRC_KEY](init)) }), { route: dispatchRoute(), send: outcome('success', b307) });
+      t(
+        '⛔ a 307 naming the new card never supplies its number — under the relay, with no number in hand, #31 is never read by it: the title finds the card on the target',
+        [temporary.exitCode, temporary.seen.some((x) => x.call === `GET /repos/${UI}/issues/31`), temporary.seen.some((x) => x.call === `GET /repos/${UI}/issues`), temporary.text.includes('HTTP 307')],
+        [EXIT_OK, false, true, true],
+        temporary.text,
+      );
       const bo = board();
       bo.answers['POST /graphql'] = () => {
         bo.state.moved = true;
@@ -557,18 +725,17 @@ export async function selfTest() {
       const renamed = await drive({ answers: { ...bRenamed.answers, 'POST /graphql': bRenamed.answers['POST /graphql'], [`GET /repos/${UI}/issues/31`]: () => ({ status: 200, json: card(UI, 31, { title: 'something else' }) }) } });
       t('a new card under another title is exit 4', [renamed.exitCode, renamed.text.includes('titled "something else"')], [EXIT_BOARD_DISAGREES, true]);
       t('the redirect number is read from the url, else the location header, else nothing', [numberFromRedirect({ json: { url: REDIRECT } }), numberFromRedirect({ json: {}, location: `${API_TEST}/repositories/9/issues/12` }), numberFromRedirect({ json: { url: `${API_TEST}/repos/x/y` } })], [31, 12, null]);
+      // The two 301 shapes measured on landed transfers: a public target named by `/repos/{owner}/{name}`, and EMPTY `url` and `location` for a target the reader cannot see.
+      t(
+        'the measured 301 shapes: the repository is read from the /repos/ spelling, none from /repositories/{id}, and an empty redirect names nothing',
+        [redirectTarget({ json: { url: 'https://api.github.com/repos/objectstack-ai/hotcrm/issues/1972' }, location: 'https://api.github.com/repos/objectstack-ai/hotcrm/issues/1972' }), redirectTarget({ json: { url: REDIRECT } }), redirectTarget({ json: { message: 'Moved Permanently', url: '' }, location: '' })],
+        [{ number: 1972, repo: 'objectstack-ai/hotcrm' }, { number: 31, repo: null }, { number: null, repo: null }],
+      );
     }
 
     // ── the relay transport ─────────────────────────────────────────────────
     battery('the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy and is never fallen back from');
     {
-      const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
-      const dispatchRoute = (requested = 'dispatch') => ({ requested, transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION });
-      const RUN = { id: 42, url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' };
-      const outcome = (state, b, extra = {}) => async (payload) => {
-        if (state === 'success') b.state.moved = true;
-        return { state, ok: state === 'success', status: state === 'refused' ? 404 : 204, verdict: state === 'refused' ? 'refusal' : 'ok', requestId: payload.request_id, startMs: 1, ceilingMs: 2, run: state === 'no-run' || state === 'refused' ? null : RUN, detail: '', ...extra };
-      };
       const sentPayloads = [];
       const b = board();
       const ok = await drive(b, { route: dispatchRoute(), send: async (p) => { sentPayloads.push(p); return outcome('success', b)(p); } });
@@ -591,8 +758,97 @@ export async function selfTest() {
       t('under AUTO, no run falls back to the direct mutation — said out loud — and the card is read back', [fallback.exitCode, fallback.text.includes('Falling back to DIRECT'), posts(fallback.seen).map((s) => s.call)], [EXIT_OK, true, ['POST /graphql']]);
       // A run that reports success while the board never moved: the read-back, not the run, decides.
       const bs = board();
-      const lied = await drive(bs, { route: dispatchRoute(), send: async (p) => ({ state: 'success', ok: true, status: 204, verdict: 'ok', requestId: p.request_id, startMs: 1, ceilingMs: 2, run: RUN, detail: '' }) });
-      t('a run that succeeded while the old URL still serves the card is exit 4, never a success', [lied.exitCode, lied.text.includes('the card did not move')], [EXIT_BOARD_DISAGREES, true]);
+      const lied = await drive(bs, { route: dispatchRoute(), send: liar });
+      t('a run that succeeded while the target lacks the card and the old URL still serves it is exit 4, never a success', [lied.exitCode, lied.text.includes('the card did not move') && lied.text.includes('though the relay run reported success')], [EXIT_BOARD_DISAGREES, true], lied.text);
+    }
+
+    // ── the target decides ──────────────────────────────────────────────────
+    battery('the target decides: a card the target answers is a transfer even while the old URL still serves it (a pending redirect: exit 0, the target URL); exit 4 only when the target still lacks it after the bounded re-read AND the old URL is unchanged; an unreadable or ambiguous target is UNCONFIRMED; the transfer is never re-sent');
+    {
+      const DELAYS = TRANSFER_READ_BACK_DELAYS_MS;
+      const WINDOW = DELAYS.reduce((a, b) => a + b, 0);
+      const calls = (r, call) => r.seen.filter((x) => x.call === call).length;
+      const T31 = `GET /repos/${UI}/issues/31`;
+      const LIST = `GET /repos/${UI}/issues`;
+      t(
+        'the re-read schedule is frozen and non-empty, every wait a positive integer that never shrinks, the whole window at most 30 s',
+        [Object.isFrozen(DELAYS), DELAYS.length > 0, DELAYS.every((ms, i, a) => Number.isInteger(ms) && ms > 0 && (i === 0 || ms >= a[i - 1])), WINDOW <= 30_000],
+        [true, true, true, true],
+      );
+
+      // ① THE PIN: the old URL lags, the target holds the card — exit 0 with the target URL, under both transports.
+      const direct = await drive(lagOld(board()));
+      t(
+        'direct: the old URL still answers 200 from the source while #31 answers from the target — exit 0 with the target URL, read as a PENDING REDIRECT, never as "did not move"',
+        [direct.exitCode, direct.to, direct.pendingRedirect, direct.text.includes('PENDING REDIRECT'), direct.text.includes('did not move')],
+        [EXIT_OK, { repo: UI, number: 31, url: `https://github.test/${UI}/issues/31` }, true, true, false],
+        direct.text,
+      );
+      t('…by the number the mutation answered: ONE mutation, the old URL read once, #31 read once, no wait', [posts(direct.seen).length, calls(direct, SRC_KEY), calls(direct, T31), direct.sleeps], [1, 2, 1, []]);
+      const bRelay = board();
+      const relay = await drive(lagOld(bRelay), { route: dispatchRoute(), send: outcome('success', bRelay) });
+      const listed = relay.seen.find((x) => x.call === LIST);
+      t(
+        'relay: no number in hand and the old URL still answers 200 — the card is found by its title on the target: exit 0 with the target URL, a PENDING REDIRECT',
+        [relay.exitCode, relay.to, relay.pendingRedirect, relay.text.includes('found by that title'), relay.text.includes('did not move')],
+        [EXIT_OK, { repo: UI, number: 31, url: `https://github.test/${UI}/issues/31` }, true, true, false],
+        relay.text,
+      );
+      t(
+        '…the list read is the target\'s cards updated since the send (less the slack), newest first — the decoy titled otherwise and the pull request under the same title are passed over; no POST left this process',
+        [relay.seen.map((x) => x.call), new URLSearchParams(listed?.query ?? '').get('since'), new URLSearchParams(listed?.query ?? '').get('sort'), new URLSearchParams(listed?.query ?? '').get('state'), posts(relay.seen).length],
+        [[SRC_KEY, SRC_KEY, LIST], new Date(NOW_FIXTURE - READ_BACK_SLACK_MS).toISOString(), 'updated', 'all', 0],
+      );
+      const bBlank = board();
+      const blank = await drive(withAnswers(bBlank, { [SRC_KEY]: (init) => (init.redirect === 'manual' && bBlank.state.moved ? { status: 301, json: { message: 'Moved Permanently', url: '' }, headers: { location: '' } } : bBlank.answers[SRC_KEY](init)) }), { route: dispatchRoute(), send: outcome('success', bBlank) });
+      t('relay: a 301 naming no card (a target this identity cannot see) supplies no number — the title finds the card, exit 0', [blank.exitCode, blank.to?.number, blank.text.includes('answers 301 naming no card this identity can read')], [EXIT_OK, 31, true], blank.text);
+
+      // ② the positive controls: the target lacks the card AND the old URL is unchanged — still exit 4, after exactly the window.
+      const stuck = await drive(board({ 'POST /graphql': () => ({ status: 200, json: landedOn(UI) }) }));
+      t(
+        'direct: the mutation answered #31 but the target never holds it and the old URL still serves the card — exit 4, after one read per step of the schedule and no more',
+        [stuck.exitCode, stuck.text.includes('the card did not move') && stuck.text.includes(`read ${DELAYS.length + 1} times over ${WINDOW} ms`), stuck.sleeps, calls(stuck, T31)],
+        [EXIT_BOARD_DISAGREES, true, [...DELAYS], DELAYS.length + 1],
+        stuck.text,
+      );
+      t('…④ the transfer was sent ONCE: one mutation, the old URL read twice after it (before and after the window)', [posts(stuck.seen).length, calls(stuck, SRC_KEY)], [1, 3]);
+      let sends = 0;
+      const lied = await drive(board(), { route: dispatchRoute(), send: async (p) => { sends++; return liar(p); } });
+      t('relay: a run that reported success while the target never lists the card and the old URL still serves it — exit 4 after the window, ONE dispatch, no POST', [lied.exitCode, lied.sleeps, calls(lied, LIST), sends, posts(lied.seen).length], [EXIT_BOARD_DISAGREES, [...DELAYS], DELAYS.length + 1, 1, 0], lied.text);
+
+      // the bounded re-read finds a target that lags the transfer
+      const bLag = board();
+      let lagReads = 0;
+      const late = await drive(withAnswers(bLag, { [T31]: (init) => (++lagReads <= 2 ? { status: 404, json: { message: 'Not Found' } } : bLag.answers[T31](init)) }));
+      t('direct: #31 answers 404 twice, then from the target — exit 0 on re-read 2, having waited exactly the first two steps, the transfer sent once', [late.exitCode, late.sleeps, late.text.includes('found on re-read 2'), posts(late.seen).length], [EXIT_OK, DELAYS.slice(0, 2), true, 1], late.text);
+      const bListLag = board();
+      let listReads = 0;
+      const slowList = await drive(withAnswers(lagOld(bListLag), { [LIST]: (init) => (++listReads === 1 ? { status: 200, json: [] } : bListLag.answers[LIST](init)) }), { route: dispatchRoute(), send: outcome('success', bListLag) });
+      t('relay: a target list that lags is re-read — exit 0 on re-read 1, a pending redirect', [slowList.exitCode, slowList.sleeps, slowList.pendingRedirect], [EXIT_OK, DELAYS.slice(0, 1), true], slowList.text);
+
+      // ③ an unreadable or ambiguous target is UNCONFIRMED — never "did not move", and an unreadable one is not waited for.
+      const GATE = 'GitHub access to this repository is not enabled for this session. Use add_repo to request access.';
+      const bGate = board();
+      const gated = await drive(withAnswers(lagOld(bGate), { [LIST]: () => ({ status: 403, json: { message: GATE } }) }), { route: dispatchRoute(), send: outcome('success', bGate) });
+      t(
+        'relay in a session that cannot read the target (403): UNCONFIRMED (6) printing the platform\'s sentence and the pending redirect — never exit 4, and an unreadable target is not re-read',
+        [gated.exitCode, gated.text.includes(GATE), gated.text.includes('PENDING REDIRECT'), gated.text.includes('did not move'), gated.sleeps, calls(gated, LIST)],
+        [EXIT_UNCONFIRMED, true, true, false, [], 1],
+        gated.text,
+      );
+      const bGate31 = board();
+      const gated31 = await drive(withAnswers(bGate31, { [T31]: () => ({ status: 403, json: { message: GATE } }) }));
+      t('direct with the target unreadable: UNCONFIRMED (6), carrying the number the mutation and the 301 agree on', [gated31.exitCode, gated31.to, gated31.text.includes('the old URL answers 301 to #31')], [EXIT_UNCONFIRMED, { repo: UI, number: 31, url: null }, true], gated31.text);
+      const bTwo = board();
+      const two = await drive(withAnswers(lagOld(bTwo), { [LIST]: () => ({ status: 200, json: [card(UI, 31), card(UI, 32)] }) }), { route: dispatchRoute(), send: outcome('success', bTwo) });
+      t('relay: two cards on the target under the title are UNCONFIRMED (6), both named — a title names one card or none', [two.exitCode, two.text.includes('(#31, #32)'), two.sleeps], [EXIT_UNCONFIRMED, true, []], two.text);
+      const bFar = board();
+      const far = await drive(withAnswers(bFar, { [SRC_KEY]: (init) => (init.redirect === 'manual' && bFar.state.moved ? { status: 301, json: { url: `${API_TEST}/repos/${TARGET_OWNER}/cloud/issues/31` }, headers: { location: `${API_TEST}/repos/${TARGET_OWNER}/cloud/issues/31` } } : bFar.answers[SRC_KEY](init)) }));
+      t('a 301 to another repository than the target is exit 4, naming it, and the target is not read', [far.exitCode, far.text.includes(`redirects to ${TARGET_OWNER}/cloud#31, not to ${UI}`), calls(far, T31)], [EXIT_BOARD_DISAGREES, true, 0], far.text);
+      let manualReads = 0;
+      const bTurn = board();
+      const turn = await drive(withAnswers(bTurn, { [SRC_KEY]: (init) => (init.redirect !== 'manual' ? bTurn.answers[SRC_KEY](init) : ++manualReads === 1 ? { status: 200, json: card(SRC, 7) } : { status: 301, json: { url: '' }, headers: { location: '' } }) }), { route: dispatchRoute(), send: liar });
+      t('relay: the target still lacks the card after the window, but the old URL now answers 301 — UNCONFIRMED (6), not exit 4: the source is no longer unchanged', [turn.exitCode, turn.text.includes('did not move'), turn.text.includes('answers 301 naming no card')], [EXIT_UNCONFIRMED, false, true], turn.text);
     }
 
     // ── dry-run ─────────────────────────────────────────────────────────────
@@ -652,8 +908,9 @@ export async function selfTest() {
   }
   console.log(
     `✓ issue-transfer self-test: ${cases.length} cases pass across ${declared.length} batteries — one card to a governed target judged by the relay's own validator, ` +
-      'a pull request or an already-moved card refused before any write, one paced mutation or one dispatch, a read-back that demands the 301 and the card at its new ' +
-      'address, a failed run that names the installation remedy and is never fallen back from, and both halves of the throttle around the one write.',
+      'a pull request or an already-moved card refused before any write, one paced mutation or one dispatch, a read-back that confirms on the TARGET — an old URL ' +
+      'still answering 200 read as a pending redirect, exit 4 only when a bounded re-read still finds no card AND the old URL is unchanged, the transfer never ' +
+      're-sent — a failed run that names the installation remedy and is never fallen back from, and both halves of the throttle around the one write.',
   );
   selfTestReachedVerdict = true;
   return 0;
@@ -725,7 +982,7 @@ export async function main(argv) {
   if (rearmed !== null) return rearmed;
   const result = await transferIssue(plan);
   for (const line of result.lines) console.error(line);
-  if (opts.json && result.to) console.log(JSON.stringify({ from: result.from, to: result.to, transport: result.transport ?? null, relay_run: result.relay?.run?.url ?? null, exit: result.exitCode }));
+  if (opts.json && result.to) console.log(JSON.stringify({ from: result.from, to: result.to, transport: result.transport ?? null, relay_run: result.relay?.run?.url ?? null, pending_redirect: result.pendingRedirect ?? null, exit: result.exitCode }));
   return result.exitCode;
 }
 

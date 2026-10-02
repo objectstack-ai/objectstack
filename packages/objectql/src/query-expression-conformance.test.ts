@@ -1029,7 +1029,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // refused on two axes must not be sent two different ways, which is
         // exactly how #4256 and #6673 drifted apart in the first place.
         //
-        // [#8648] It used to assert only that the four SORT/FILTER doors share
+        // [commit e5eeb499c] It used to assert only that the four SORT/FILTER doors share
         // one stem — which left the claim unpinned in the one place where
         // reading it as word-identity was FALSE. The SEARCH axis cannot match
         // that stem and never did; measured from the running doors on this
@@ -1067,7 +1067,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         //      actionable.
         //
         // ⛔ Unifying the SEARCH wording onto the shared stem is route 3 of
-        // #8648 and was NOT taken: it changes a shipped error message and
+        // the card commit e5eeb499c fixed, and was NOT taken: it changes a shipped error message and
         // needs somewhere for the `text` narrowing to live. Layer 2 is what
         // makes that a decision someone takes on purpose instead of a silent
         // edit — if you are here because it went red, that is the pin working.
@@ -1114,7 +1114,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
                 emit: () => engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] }),
             },
             {
-                // [#8648] The door the claim was missing. SEARCH has no engine
+                // [commit e5eeb499c] The door the claim was missing. SEARCH has no engine
                 // twin to pair with: `search` is expanded at ingress into the
                 // `$or` of `$icontains` the engine receives (ADR-0061), so
                 // this axis has exactly one door — which is why "the three
@@ -1388,7 +1388,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
         expect(err.message).toMatch(/follows the relationship 'project_id' into another object/);
         // The one-vocabulary discipline, emitted-vs-emitted: both doors close
-        // with the SAME remedy sentence the #8648 agreement pin protects.
+        // with the SAME remedy sentence the commit e5eeb499c agreement pin protects.
         const ingressErr: any = await protocol
             .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
             .then(() => null, (e: unknown) => e);

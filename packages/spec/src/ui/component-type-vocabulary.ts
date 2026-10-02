@@ -49,23 +49,21 @@ import { ComponentPropsMap } from './component.zod';
  * `REACT_OVERLAY_SHADOWS` house shape: an exemption is deliberate, evidenced,
  * and written down next to itself, or it does not exist.
  *
- * - `record:line_items` — objectui registers it (`plugin-form/src/index.tsx`,
- *   the inline-editable child grid of objectui ADR-0001) and lists it as a
- *   public block (`core/src/registry/public-blocks.ts`); the showcase authors
- *   it (`examples/app-showcase/src/ui/pages/project-detail.page.ts`). Its
- *   row-lessness in `ComponentPropsMap` is pinned deliberately in
- *   `validate-component-props.test.ts` — a registered-but-unmeasured gap of the
- *   record-blocks class, to be measured into the map by the renderer-read-point
- *   method, not silently grandfathered by this file. When that row lands, the
- *   vocabulary test beside this file forces this entry OUT (a ledger row for a
- *   type the map declares is dead weight).
+ * EMPTY since #21142. Its one entry, `record:line_items` (objectui's
+ * inline-editable child grid, registered in `plugin-form/src/index.tsx`,
+ * listed as a public block, authored by the showcase project page), was
+ * measured into `ComponentPropsMap` by the renderer-read-point method, and a
+ * ledger row for a type the map declares is dead weight — the vocabulary test
+ * beside this file forced it OUT in the same change. The row-less state it
+ * ledgered was not harmless: the props gate skipped the type as unregistered,
+ * and the showcase's `field`-keyed columns published green over an empty grid.
  *
  * Growing this list is a contract decision, not a convenience: every entry is a
- * type the spec's own namespace claim cannot see, so each one needs the same
- * three-part evidence face as the entry above (registration, publication,
- * authorship) written into its comment.
+ * type the spec's own namespace claim cannot see, so each one needs a
+ * three-part evidence face (registration, publication, authorship) written
+ * into its comment — and a gap measured into the map is the better answer.
  */
-export const STRING_ARM_REGISTERED_TYPES: readonly string[] = ['record:line_items'];
+export const STRING_ARM_REGISTERED_TYPES: readonly string[] = [];
 
 /**
  * The namespaces the enum itself populates — DERIVED, never restated, so a new
@@ -81,9 +79,9 @@ export const RESERVED_COMPONENT_TYPE_NAMESPACES: ReadonlySet<string> = new Set(
  * Every type string the spec answers for: the enum vocabulary, every
  * `ComponentPropsMap` row (which is a superset of the enum by exactly the
  * measured string-arm registrations that DID get a row — `element:metadata_viewer`,
- * the plugin console widgets, the `object-*` blocks — plus every type the
- * vocabulary RETIRED by name, whose row is kept on purpose so the readers that
- * dispatch on it keep recognising the name: `user:profile`, and the
+ * `record:line_items`, the plugin console widgets, the `object-*` blocks — plus
+ * every type the vocabulary RETIRED by name, whose row is kept on purpose so the
+ * readers that dispatch on it keep recognising the name: `user:profile`, and the
  * retired-with-tombstones `element:filter` / `element:form`), and the
  * string-arm ledger above.
  *

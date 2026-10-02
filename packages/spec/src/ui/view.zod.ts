@@ -84,19 +84,17 @@ import { BulkActionDefSchema } from './bulk-action.zod';
  */
 import { HttpMethodSubsetSchema, HttpRequestSchema } from '../shared/http.zod';
 import { lazySchema } from '../shared/lazy-schema';
-
-/**
- * Shared history for this file (#4001).
- *
- * Views are the surface an author iterates on visually, which is exactly why a
- * dropped key hides here: the view still renders, just not the way it was
- * described. `FormFieldBaseSchema` / `FormSectionSchema` / `FormButtonConfig`
- * were closed years ago (ADR-0089 D3a); the other forty-odd shapes in this file
- * kept the posture those three were rescued from.
- */
-const VIEW_HISTORY =
-  'Until these shapes were closed an unknown key was dropped silently — the view still '
-  + 'rendered, without whatever the key was meant to configure.';
+// This file's shared refusal history (#4001), declared outside it since #21229
+// so the export options block it shares with the `object-grid` row keeps it.
+import { VIEW_HISTORY } from './view-history';
+// [#21229] The export options block — its format enum, the retired-`'pdf'`
+// prescription and the five-member object — declared once, outside the `ui`
+// barrel: the `object-grid` page-component row takes the object by identity.
+import {
+  LIST_VIEW_EXPORT_PDF_RETIRED,
+  ListViewExportFormatSchema,
+  ListViewExportOptionsSchema,
+} from './list-view-export-options';
 
 export { HttpMethodSubsetSchema, HttpRequestSchema };
 
@@ -2129,6 +2127,15 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * two `getMapConfig` lines `409` -> `408` and `414` -> `413`, byte-identical:
  * objectui `846cec0ef` (objectui#8348) rewrote the record-source docblock above
  * `getMapConfig` one line shorter and left the function untouched. The
+ * `ListView.tsx` anchors did not move. RE-READ again at pin `31971ff1e` on
+ * 2026-10-01: that bump redded two anchors, both in `objectql.zod.ts`, which
+ * grew above them (objectui#10859 batches 4 to 6 and objectui#11276 moved
+ * `object-form`, `object-map`, `object-gantt` and `object-chart` onto the
+ * `properties` bag, among others), and neither changed what it reads —
+ * `ObjectMapConfigSchema` `2056` -> `2123`, its ten-line declaration
+ * byte-identical and still closed with `.strict()`, and
+ * `LIST_VIEW_LOCAL_OVERRIDES` `1083` -> `1138`, the whole list byte-identical
+ * and still without `map`; `ObjectMap.tsx`, `ObjectView.tsx` and the
  * `ListView.tsx` anchors did not move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
@@ -2148,7 +2155,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:2056` first line
+ *   `packages/types/src/zod/objectql.zod.ts:2123` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object` at `dd3f7e1be`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. ⚠️ At `db11afd49` the declaration is closed with `.strict()`
@@ -2171,7 +2178,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `db11afd49` it is closed by `.strict()` and still warn-only). And this parse is
  * the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1083`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1138`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -2231,7 +2238,7 @@ export const NavigationModeSchema = lazySchema(() => z.enum([
 // #126 item 4 (maintainer ruling 2026-09-13, option B: retire). Declared with
 // `//` on purpose: build-docs takes a file's first JSDoc per exported symbol,
 // and this constant needs no doc page (the `LIST_VIEW_EXPORT_PDF_RETIRED`
-// placement note in this same file).
+// placement note, in `./list-view-export-options.ts` since #21229).
 //
 // The key promised "the form view to use for details" and nothing from spec to
 // console ever resolved a view BY NAME. Its one read in the shipped console put
@@ -2296,59 +2303,6 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
    */
   width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
-
-// `'pdf'` retirement prescription (#8010). Declared with `//` on purpose — the
-// hook-body precedent's placement note applies here too: build-docs takes a
-// file's first JSDoc per exported symbol, and this constant needs no doc page.
-const LIST_VIEW_EXPORT_PDF_RETIRED =
-  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 "
-  + '(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF '
-  + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
-  + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
-  + "formats are 'csv', 'xlsx' and 'json'. "
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
-
-/**
- * Export formats the platform actually delivers (#8010): `csv`/`json` on both
- * export paths, `xlsx` on the server stream only.
- *
- * `'pdf'` was REMOVED in 17 (#8010): PDF export was declined platform-side
- * (#1301 NOT_PLANNED), so the enum member was a declared-but-unrenderable
- * format whose only failure signal was a browser console line. This is an
- * enum-VALUE narrowing, so there is no `retiredKey()` tombstone to hang the
- * prescription on — the enum's own error map carries it
- * ({@link LIST_VIEW_EXPORT_PDF_RETIRED}), keyed on `issue.input` so that only
- * the value which used to be legal gets the "was removed" message (the
- * `HookBodyCapability` / `object.managedBy: 'system'` precedent).
- */
-const ListViewExportFormatSchema = z.enum(['csv', 'xlsx', 'json'], {
-  error: (issue) => (issue.input === 'pdf' ? LIST_VIEW_EXPORT_PDF_RETIRED : undefined),
-});
-
-/**
- * Object form of `view.exportOptions` (#8010, maintainer ruling 2026-08-12 —
- * option A). The declared key set is exactly what the only renderer reads,
- * measured on objectui `origin/main@878140b` (`ObjectGrid.tsx:1596–1642`):
- * `formats`, `maxRecords`, `includeHeaders`, `fileNamePrefix`, and the
- * previously UNDECLARED `streaming` opt-out — declared here so no
- * undeclared-but-read key survives the fix. Declaring anything more would be
- * capability surface with no reader; declaring less recreates the defect.
- */
-const ListViewExportOptionsSchema = strictObject({
-  surface: 'this export options block',
-  history: VIEW_HISTORY,
-}, {
-  formats: z.array(ListViewExportFormatSchema).optional()
-    .describe("Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only."),
-  maxRecords: z.number().int().nonnegative().optional()
-    .describe('Maximum number of records to export; 0 or absent = unlimited'),
-  includeHeaders: z.boolean().optional()
-    .describe('Include column headers in the exported file (default true)'),
-  fileNamePrefix: z.string().optional()
-    .describe('Download file name prefix — replaces the object label and suppresses the view label in the generated file name'),
-  streaming: z.boolean().optional()
-    .describe('Set false to force the client-side export path (csv/json only) instead of the server stream'),
-});
 
 /**
  * Loud top-level refusal for a retired `'pdf'` anywhere in `exportOptions`
@@ -3139,94 +3093,32 @@ export const FormSelectOptionSchema = lazySchema(() => {
  * so a closed parent said nothing about it.
  */
 /**
- * [#7467] Public-lookup opt-in for a lookup / `master_detail` / `user` field on
- * an ANONYMOUS public form.
+ * [#21180] Prescription for the retired `publicPicker` block on a form field
+ * (ADR-0087 D2, immediate retirement, no alias window).
  *
- * This block GATES the REST public-lookup capability: `GET
- * /forms/:slug/lookup/:field` answers a picker search only for a field whose
- * form declaration carries `publicPicker`. Without it the route answers `403
- * LOOKUP_NOT_PUBLIC` — loud by design (#3022), so a misconfigured form is a
- * visible refusal rather than a silently empty picker. The public-form resolve
- * route enforces the same opt-in from the other side: an undeclared
- * lookup/master_detail/user field is stripped from the rendered sections, so an
- * anonymous form can never expose unrestricted record search by accident.
+ * The block opted a lookup / `master_detail` / `user` field on an ANONYMOUS
+ * public form into a record-search picker served by an unauthenticated route
+ * (`GET /forms/:slug/lookup/:field`). The maintainer's ruling E on #21079
+ * (comment 5933054144) retired the capability outright and reversed the
+ * #7467 ruling that had declared the key: anonymous public forms no longer
+ * take lookup, `master_detail` or `user` fields at all, and the route is
+ * deleted. What survives is the resolve route's strip, now unconditional —
+ * those three field types are always left off the anonymous rendering — so a
+ * form cannot expose record search to the internet by any declaration.
  *
- * Until #7467 this key was ENFORCED but declared nowhere — the mirror image of
- * ADR-0049's "declared ≠ enforced": `FormFieldSchema` is strict (ADR-0089 D3a),
- * so every authoring path refused a form carrying a picker and the capability
- * was unreachable. Declaring it is the maintainer-ruled direction (option 1 of
- * that card's fork).
- *
- * Every key below mirrors a read the route actually performs
- * (`packages/rest/src/rest-server.ts`, `GET /forms/:slug/lookup/:field`
- * handler), and NOTHING else: this block opens an unauthenticated search
- * surface, so the schema deliberately admits no option the route does not
- * enforce. The route's own hard bounds are encoded rather than restated in
- * prose — `displayFields` beyond the first 5 are never projected (the route
- * slices), a `maxResults` above 50 is never honored (the route clamps), so
- * authoring either is refused here instead of silently meaning less than it
- * says. Anonymous visitors can search but cannot paginate (`offset` is pinned
- * to 0 server-side), which is what keeps a leaked endpoint from enumerating
- * the table.
- *
- * @example Opt a lookup field into the public picker
- * { field: 'owner', publicPicker: { displayFields: ['name'], maxResults: 10 } }
+ * The key stays in the shape as a {@link retiredKey} tombstone so `tsc` types
+ * it `never` and the parse refuses it with this text instead of a bare
+ * unrecognized-key report; `form-field-public-picker-removed`
+ * (`conversions/registry.ts`) strips it from stored sources.
  */
-export const FormFieldPublicPickerSchema = lazySchema(() => strictObject({
-  surface: 'this public picker configuration',
-  history: VIEW_HISTORY,
-}, {
-  /**
-   * Projection: the fields returned for each picker row (plus `id`), and the
-   * search target — the visitor's `q` is matched with `contains` against the
-   * FIRST entry. The route projects at most 5 and defaults to `['name']` when
-   * omitted, so more than 5 (or an empty list) is refused here rather than
-   * silently truncated / silently replaced.
-   */
-  displayFields: z.array(z.string()).min(1).max(5).optional().describe(
-    'Fields projected into each picker result (with `id`); the visitor\'s search matches '
-    + '`contains` on the first entry. At most 5 (the route projects no more); omitted → [\'name\'].',
-  ),
-  /**
-   * Per-request result cap. The route clamps to a hard ceiling of 50 and
-   * defaults to 20; anonymous visitors cannot paginate, so this bounds what a
-   * single request can pull. Values the route would never honor (0, negatives,
-   * fractions, > 50) are refused at authoring time.
-   */
-  maxResults: z.number().int().min(1).max(50).optional().describe(
-    'Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous '
-    + 'visitors cannot paginate past it).',
-  ),
-  /**
-   * Static pre-filter, ANDed ahead of the visitor's search predicate. Same
-   * rule dialect as every other view filter (`ViewFilterRuleSchema`) — the
-   * route composes these rows with its own `{ field, operator: 'contains',
-   * value: q }` search row in one filters list.
-   */
-  filter: z.array(ViewFilterRuleSchema).optional().describe(
-    'Static pre-filter rows ANDed ahead of the visitor\'s search (e.g. only active records are '
-    + 'searchable). Same `{ field, operator, value }` dialect as list-view filters.',
-  ),
-  /**
-   * Referenced-object override. Omitted, the route resolves the target from
-   * the field definition on the parent object (`reference`); set it only when
-   * that resolution is wrong for this form.
-   *
-   * `reference` is the key `FieldSchema` accepts — `referenceTo` is only a
-   * rejected alias it lists so a failed parse can offer a rename hint, so an
-   * author following the old spelling of this sentence had their whole object
-   * metadata refused at parse.
-   */
-  object: z.string().optional().describe(
-    'Referenced-object override for the picker search; omitted → resolved from the `reference` '
-    + 'key on the field definition.',
-  ),
-}).describe('Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).'));
-
-/** Authoring shape of {@link FormFieldPublicPickerSchema}. */
-export type FormFieldPublicPicker = z.input<typeof FormFieldPublicPickerSchema>;
-/** Post-parse shape of {@link FormFieldPublicPicker} — filter-rule operator aliases folded (ADR-0122). */
-export type FormFieldPublicPickerParsed = z.infer<typeof FormFieldPublicPickerSchema>;
+const FORM_FIELD_PUBLIC_PICKER_RETIRED =
+  '`view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) '
+  + '— an anonymous public form no longer offers record search: lookup, `master_detail` and `user` '
+  + 'fields are always left off the anonymous rendering, and the anonymous record-search route '
+  + '(`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` '
+  + 'block). To let a visitor choose from a fixed list, use a `select` field with static `options`; '
+  + 'to let them pick an existing record, put the form behind sign-in. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 const FormFieldBaseSchema = lazySchema(() => {
   const shape = {
@@ -3266,17 +3158,12 @@ const FormFieldBaseSchema = lazySchema(() => {
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
 
   /**
-   * [#7467] Public-lookup opt-in (lookup / master_detail / user fields on an
-   * anonymous public form). Gates `GET /forms/:slug/lookup/:field` — absent,
-   * the route answers 403 LOOKUP_NOT_PUBLIC (loud by design, #3022) and the
-   * resolve route strips the field from the rendered sections. See
-   * {@link FormFieldPublicPickerSchema}.
+   * [#21180] RETIRED — the anonymous public-form record-search picker. See
+   * {@link FORM_FIELD_PUBLIC_PICKER_RETIRED}: the parse refuses the key with
+   * that prescription, and a public form's lookup / `master_detail` / `user`
+   * fields are always left off its anonymous rendering.
    */
-  publicPicker: FormFieldPublicPickerSchema.optional().describe(
-    'Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). '
-    + 'Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the '
-    + 'rendered public form.',
-  ),
+  publicPicker: retiredKey(FORM_FIELD_PUBLIC_PICKER_RETIRED),
   
   /** Text constraints */
   // #12174 — the form-field row's constraint keys converge on the value shape
@@ -3349,7 +3236,15 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `e420df310`, re-read 2026-09-30: `autoLayout.ts` and
+   * (`.objectui-sha` = `31971ff1e`, re-read 2026-10-01: `autoLayout.ts` and
+   * `fields`' `field-type-alias.ts` are byte-identical to `e420df310`, so
+   * `resolveColSpan` `:154`, `WIDE_FIELD_TYPES` `:58-69` and the `repeater` ->
+   * `field:grid` mapping held unmoved, and `form.tsx` changed on this hop — 59
+   * insertions, 112 deletions: objectui#11070 round 5, the text family reading
+   * the spec's `minLength` / `maxLength` alone — none of it inside
+   * `spanLadderFor`, still `:204-231` byte-identical, and its one call site
+   * moved `:2985` -> `:2986` with the call byte-identical, so it still emits the
+   * ladder. At `e420df310`, re-read 2026-09-30: `autoLayout.ts` and
    * `fields`' `field-type-alias.ts` are byte-identical to `db11afd49`, so
    * `resolveColSpan` `:154`, `WIDE_FIELD_TYPES` `:58-69` and the `repeater` ->
    * `field:grid` mapping held unmoved, and `form.tsx` changed on this hop — 142
@@ -3375,7 +3270,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `e420df310f5b`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `31971ff1e28f`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -4197,7 +4092,7 @@ function refineFormFieldFeaturesRoot(
 
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049
 // enforce-or-remove). Declared with `//` on purpose — the
-// `LIST_VIEW_EXPORT_PDF_RETIRED` placement note above applies here too. An
+// `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too. An
 // enum-VALUE narrowing: the enum's own error map carries the prescription,
 // keyed on `issue.input`, so only a value which used to be legal gets the "was
 // removed" message. The twin of `OBJECT_FORM_LAYOUT_RETIRED`

@@ -1306,7 +1306,54 @@ const actionObject = () => strictObject({
   // `ActionSchema`'s refine chain alone — hence "a registered action" rather
   // than an unqualified claim that would be false on the inline surface.
   confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.'),
-  successMessage: I18nLabelSchema.optional().describe('Success message to show after execution'),
+  // `${result.*}` is the scope `onSuccess.navigate` declares (see that key's
+  // docblock for its members) — the copy reuses it rather than growing a
+  // second interpolation dialect (#21095). The sentence is phrased "on a
+  // registered action" for the same reason `confirmText`'s is: this describe()
+  // also renders into the InlineAction table, which does not pick
+  // `outcomeMessages`.
+  successMessage: I18nLabelSchema.optional().describe("Success message shown after the action succeeds. On a `type: 'api'` or `type: 'script'` action it may interpolate ${result.*} — the server response payload, the same scope `onSuccess.navigate` declares (e.g. ${result.id}). On a registered action that declares `outcomeMessages`, the entry named by the response's `outcome` is shown instead, and this message is the fallback."),
+
+  /**
+   * Outcome-specific success copy — ruling A on objectstack-ai/cloud#2315,
+   * the mechanism half of ruling B there: the server returns FACTS, the
+   * console composes the message in the user's locale. Landing order: this
+   * key (spec and client, #21095), then the console reader
+   * (objectstack-ai/objectui#11344), then cloud's producers.
+   *
+   * One server-executing action can succeed in more than one way — an
+   * environment delete archives, finds it already archived, defers a purge or
+   * destroys; an update check finds updates, finds none, or finds nothing
+   * installed — and one static `successMessage` cannot say which happened.
+   * So the handler answers with a closed `outcome` fact and this map carries
+   * the copy for each: keys are the snake_case outcome names the handler
+   * returns, values the message shown for that outcome.
+   *
+   * **Selection** (the console's, after an `api` or `script` action
+   * succeeds): the success payload's top-level `outcome` — the payload
+   * `${result.*}` reads, i.e. `${result.outcome}` — names the entry; failing
+   * a match, `successMessage`; failing that, the runner's default text.
+   *
+   * **Interpolation**: each message, like `successMessage`, may interpolate
+   * `${result.X}` — the scope `onSuccess.navigate` declares
+   * (for `type: 'api'` the `target` call's response body, for
+   * `type: 'script'` the handler's return value). No second dialect.
+   *
+   * **Where it is refused** (`refuseInertOutcomeMessages`, and the
+   * declarative-update table): on a type with no server response to report
+   * an outcome (`url` / `modal` / `flow` / `form`), beside `resultDialog`
+   * (which suppresses the success toast this copy is shown in), and beside
+   * `operation: 'update'` (no handler, so no outcome). Each would parse clean
+   * and never be read — the ADR-0078 shape this file refuses at authoring time.
+   *
+   * **Translation** rides beside `successMessage`:
+   * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, then
+   * `globalActions.<action>.outcomeMessages.<outcome>` (`translateAction`).
+   *
+   * Liveness `planned` until the console reader lands — the ledger row names
+   * its carrier.
+   */
+  outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
   errorMessage: I18nLabelSchema.optional().describe('Error message to show when the action fails (overrides the raw error).'),
@@ -1744,6 +1791,10 @@ const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why:
     "`onSuccess` is not defined for an `operation: 'update'` action yet — its `${result.*}` scope is a "
     + "handler's return value, and a declarative update has no handler. Drop it; post-success navigation "
     + 'for the declarative write is a spec proposal, not a silent key.'],
+  ['outcomeMessages',
+    "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
+    + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '
+    + 'ever be chosen. Drop it; a fixed confirmation for the write is `successMessage`.'],
   ['opensInNewTab',
     "`opensInNewTab` pre-opens a tab for a handler-returned `{ redirectUrl }` — an `operation: 'update'` "
     + 'action has no handler and returns no redirect. Drop it.'],
@@ -1840,6 +1891,56 @@ function refuseDeclarativeUpdateContradictions(
           + 'runs on. Use a record location (`list_item`, `record_header`, `record_more`, `record_section`) or, '
           + "for the selection bar, a `bulkActionDefs` entry on the list view (`{ operation: 'update', patch }`).",
       });
+    });
+  }
+}
+
+/**
+ * The two places `outcomeMessages` (#21095) would parse clean and never be
+ * read — refused at the key's own path, each with the rewrite. The third,
+ * `operation: 'update'`, lives in {@link DECLARATIVE_UPDATE_REFUSED_KEYS}
+ * beside `onSuccess`, the sibling key it is refused for the same reason as.
+ *
+ *  1. A type with no server response. Only `type: 'api'` (the `target` call's
+ *     response body) and `type: 'script'` (the handler's return value) hand
+ *     the console a success payload that can carry an `outcome` — the same
+ *     two-type scope as `onSuccess`, whose `${result.*}` the copy interpolates.
+ *  2. Beside `resultDialog`. A result dialog SUPPRESSES the success toast
+ *     (the one-shot reveal opens an acknowledge-only dialog instead), and the
+ *     toast is the only place outcome copy is shown.
+ *
+ * `type` has already been defaulted to `'script'` when this runs (the
+ * #13897 asymmetry), so an action that never wrote `type` is in scope.
+ */
+function refuseInertOutcomeMessages(
+  data: { type?: string; outcomeMessages?: unknown; resultDialog?: unknown },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.outcomeMessages === undefined) return;
+
+  if (data.type !== 'api' && data.type !== 'script') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['outcomeMessages'],
+      message:
+        '`outcomeMessages` holds the success copy for each `outcome` a server handler reports, and only '
+        + "`type: 'api'` and `type: 'script'` actions have a server response that can report one — on a "
+        + `\`type: '${data.type}'\` action the map would parse clean and never be read. For one fixed `
+        + 'confirmation use `successMessage`; to report distinct outcomes, run the work in a '
+        + "`type: 'script'` handler (or a `type: 'api'` endpoint) whose success payload carries "
+        + "`{ outcome: '<key>' }`.",
+    });
+  }
+
+  if (data.resultDialog !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['outcomeMessages'],
+      message:
+        '`outcomeMessages` is success-TOAST copy, and `resultDialog` suppresses that toast: the one-shot '
+        + 'reveal opens an acknowledge-only dialog instead, so no outcome message would ever be shown. '
+        + 'Drop `outcomeMessages`, or drop `resultDialog` if the response holds nothing the user must '
+        + 'copy now.',
     });
   }
 }
@@ -2089,6 +2190,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + "`type: 'api'` action calling an endpoint of your own — otherwise drop `undoable`.",
   path: ['undoable'],
 }).superRefine(refuseDeclarativeUpdateContradictions)
+  .superRefine(refuseInertOutcomeMessages)
   .transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.input<typeof ActionSchema>;

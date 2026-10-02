@@ -20,7 +20,7 @@
  * matched. With the sentinel gone the ordinary authoring paths must still
  * pass — that is the regression #4441 was bitten by.
  *
- * [#14535] "The real thing" is a claim about the TARGET KEY too, and it was
+ * [commit 1aba3159a] "The real thing" is a claim about the TARGET KEY too, and it was
  * false here until this change. The declaration spelled `referenceTo` — an
  * alias `FieldSchema` refuses by name (#11567) and `referenceTargetOf`, the
  * single arbiter the write-path guard resolves through, does not read at all.

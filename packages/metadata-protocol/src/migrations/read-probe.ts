@@ -45,7 +45,7 @@
  * than an oversight. Quietening a refusal requires CLASSIFYING it, this repo has
  * exactly one predicate for that (`isMissingTableError`, `@objectstack/types`),
  * and it needs `readObject` — the name of the thing the caller was reading —
- * both to avoid the #13324 fail-open and because
+ * both to avoid the fail-open commit 4cda78c9b closed and because
  * `driver-error-classification.callers.test.ts` fails any in-repo call that
  * omits it. The raw path has no such name: `execute()` takes a string, and
  * `rawStatementFaultError` declares no targeted table (pinned by
@@ -111,7 +111,7 @@ export type ReadProbeExec = (sql: string) => Promise<unknown>;
  * array (better-sqlite3 through knex), `{ rows }` (pg), and the `[rows, fields]`
  * tuple (mysql2). An empty result set in any of those spellings is still a
  * result set, and still `true` — that is what keeps a healthy install's
- * `no-split` intact, and it is the half of #10789 that stopped it being a
+ * `no-split` intact, and it is the half of commit 38bc74ed1 that stopped it being a
  * rename.
  *
  * This cannot lose a split that {@link normalizeRows} would have found: every
@@ -255,7 +255,7 @@ export type TablePresenceVerdict =
   | 'absent'
   /**
    * The seam accepted the statement and returned no result set at all — a
-   * memory engine's no-op `execute` (#10789). Not a failure and not an answer;
+   * memory engine's no-op `execute` (commit 38bc74ed1). Not a failure and not an answer;
    * each caller maps it the way its own history already ruled.
    */
   | 'no-answer'
@@ -274,7 +274,7 @@ export interface TablePresenceProbe {
   /**
    * The table whose presence is asked. Also the `readObject` the fallback arm's
    * classification compares the dialect's phrase against, so a refusal naming
-   * some OTHER relation is ⛔ not read as this table's absence (#13324).
+   * some OTHER relation is ⛔ not read as this table's absence (commit 4cda78c9b).
    */
   table: string;
   /** The knex client name, when the caller resolved one. */

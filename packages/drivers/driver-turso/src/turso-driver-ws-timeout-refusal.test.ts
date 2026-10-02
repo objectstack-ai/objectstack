@@ -7,7 +7,7 @@
  *
  * # What was measured (the reading this refusal stands on)
  *
- * `@libsql/client@0.17.4` routes on scheme: `wss` / `ws` go to its WebSocket
+ * `@libsql/client@0.18.0` routes on scheme: `wss` / `ws` go to its WebSocket
  * client (`lib-esm/ws.js`), which opens `hrana.openWs(url, authToken)` and reads
  * neither `Config.fetch` — the seam the HTTP arm's window rides — nor any
  * timeout option: over `@libsql/hrana-client@0.10.0`'s `lib-esm/ws/*.js` and

@@ -427,7 +427,7 @@ describe('[#5088] batchData delete — the driver`s return decides, as in delete
 describe('[#19433] batchData delete — a row that MATCHED and was deliberately NOT removed', () => {
     /**
      * The THIRD by-id delete door, and the last one still pushing the literal.
-     * The single-record face (#19306) and `deleteManyData` (#19412) both learned
+     * The single-record face (commit f9e16d856) and `deleteManyData` (#19412) both learned
      * to read the engine's answer; this branch — "the OTHER by-id bulk delete,
      * ten lines from it", as its own comment calls it — kept `success: true` for
      * every result that was not the driver contract's `false`.

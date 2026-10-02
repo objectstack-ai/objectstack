@@ -249,19 +249,17 @@ for (const cell of CELLS) {
 
         // [#21044] The one rule declines the boolean class (three readings
         // disagree about what the aggregate returns), so the producer's `number`
-        // stands — the word SQLite's 0 / 1 answer fits. Not run on PostgreSQL's
-        // native face, where `max(boolean)` does not exist and the statement is
-        // a 500 for an ACCEPTED pair: a defect of the native lowering, reported
-        // on its own and not this door's.
-        it.skipIf(cell.id === 'pg' && face === 'native')(
-          `${face}: an accepted boolean pair is served and keeps number — the one rule declines it`,
-          async () => {
-            const { res, err } = await read(face, CUBE.name, ['max_flag']);
-            expect(err, err?.message).toBeUndefined();
-            expect(res!.rows[0]!.max_flag).toBe(1);
-            expect(res!.fields.find((f) => f.name === 'max_flag')?.type).toBe('number');
-          },
-        );
+        // stands — the word SQLite's 0 / 1 answer fits. [#21042] Runs on every
+        // cell and face: PostgreSQL defines no `max(boolean)`, and the native
+        // face now casts the boolean aggregand to `int` as `driver-sql` does,
+        // through the one policy both read (`@objectstack/core`), so the
+        // accepted pair answers `1` there too instead of a 500.
+        it(`${face}: an accepted boolean pair is served and keeps number — the one rule declines it`, async () => {
+          const { res, err } = await read(face, CUBE.name, ['max_flag']);
+          expect(err, err?.message).toBeUndefined();
+          expect(res!.rows[0]!.max_flag).toBe(1);
+          expect(res!.fields.find((f) => f.name === 'max_flag')?.type).toBe('number');
+        });
 
         it(`${face}: a suffix-inferred measure is judged as an authored one — on the configured cube and on an inferred cube`, async () => {
           for (const cube of [CUBE.name, OBJECT]) {

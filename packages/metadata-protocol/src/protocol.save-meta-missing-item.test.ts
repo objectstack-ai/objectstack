@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8818 — `saveMetaItem`'s opening guard was the ONE refusal in the method
+ * Commit fd6bdf89f — `saveMetaItem`'s opening guard was the ONE refusal in the method
  * that declared no ADR-0112 envelope, so consumers applying the rule withheld
  * its sentence and the REST boundary served it as a server fault.
  *

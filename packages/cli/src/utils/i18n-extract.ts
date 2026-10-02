@@ -83,11 +83,13 @@
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
+ *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
+ *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
@@ -680,6 +682,28 @@ function pushActionParams(
  * LITERAL result-field path (`"user.email"`) — the dot stays inside a single
  * path segment, matching how resolvers index the record without splitting.
  */
+/**
+ * Emit `outcomeMessages.<outcome>` entries under an action's translation root —
+ * one per outcome the action declares (`ActionSchema.outcomeMessages`, #21095),
+ * beside `successMessage`, at the address `translateAction` overlays
+ * (`spec/system/i18n-resolver.ts`). Each message is optional-not-derived like
+ * `successMessage`: an outcome with no entry falls back at render time, so
+ * nothing is seeded for an outcome the author did not write.
+ */
+function pushActionOutcomeMessages(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const messages = action?.outcomeMessages;
+  if (!messages || typeof messages !== 'object' || Array.isArray(messages)) return;
+  for (const [outcome, message] of Object.entries<unknown>(messages)) {
+    pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], message, kind, { objectName });
+  }
+}
+
 function pushActionResultDialog(
   out: ExpectedEntry[],
   actionRoot: string[],
@@ -1255,6 +1279,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
+        pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
@@ -1337,6 +1362,7 @@ export function collectExpectedEntries(
     pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
+    pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
   }
@@ -2351,7 +2377,7 @@ export function renderSourceHashModule(
   lines.push(' *');
   lines.push(" * Each entry is the digest of the SOURCE REVISION that this locale's leaf at");
   lines.push(' * that path is still a byte copy of — provenance for the generated half of the');
-  lines.push(' * bundles (commit 09b4f4e4e, maintainer ruling #12069 Option A, extending #8765 Option B).');
+  lines.push(' * bundles (commit 09b4f4e4e): a leaf whose digest no longer matches its source is stale and serves the source text instead.');
   lines.push(' *');
   lines.push(' * An entry exists only while the leaf IS such a copy. Re-translate the leaf in');
   lines.push(' * `<locale>.objects.generated.ts` and the next extract drops its entry by');

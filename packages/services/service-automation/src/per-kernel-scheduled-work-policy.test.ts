@@ -256,3 +256,124 @@ describe('AutomationServicePlugin — forwards the per-kernel policy (#19834)', 
         }
     });
 });
+
+// ─── [#21110] a host-injected OFF reports the HOST's reason ─────────
+//
+// The #19834 seam had no reason slot, so a kernel a host turned off for its
+// own reason (cloud's free plan) was reported with the deployment sentence —
+// "set OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true" — on a process where that
+// variable IS set, to a tenant who cannot set it. `ScheduledWorkPolicy` now
+// carries an optional `hostDisabledReason`, and `scheduledWorkDisabledReason`
+// is the one answer the bind log, the audit and the `/_status` row read.
+//
+// `getFlowRuntimeStates()` is the row `GET /automation/_status` serves,
+// verbatim (`packages/runtime/src/domains/automation.ts`, the `_status`
+// branch), so the status-door half is pinned on it here.
+
+const HOST_REASON = 'Scheduled flows are not included in the Free plan; upgrade the plan to run them.';
+const HOST_OFF: ScheduledWorkPolicy = { ...OFF, hostDisabledReason: HOST_REASON };
+
+/** A logger that keeps every `info` line — the bind log is said at `info`. */
+function recordingLogger() {
+    const infos: string[] = [];
+    const l: any = { info: (m: string) => void infos.push(String(m)), warn() {}, error() {}, debug() {} };
+    l.child = () => l;
+    return { logger: l, infos };
+}
+
+/** Engine + trigger + one schedule flow, with the bind log captured. */
+function bindOneLogged(options?: ConstructorParameters<typeof AutomationEngine>[2]) {
+    const { logger, infos } = recordingLogger();
+    const engine = new AutomationEngine(logger, undefined, options);
+    const rec = recordingTrigger();
+    engine.registerTrigger(rec.trigger);
+    engine.registerFlow('digest', scheduleFlow('digest'));
+    // Every `info` line naming the flow: the bind log is the only one at this
+    // point, and selecting it by the flow's name rather than by its framing
+    // words keeps the refusal's wording out of the pin.
+    const bindLog = infos.filter((m) => m.includes("'digest'"));
+    return { engine, started: rec.started, bindLog };
+}
+
+/** The three surfaces' reasons for 'digest': bind log line, audit, `/_status` row. */
+function reasonsOf(bound: ReturnType<typeof bindOneLogged>) {
+    const audit = bound.engine.getTriggerBindingAudit();
+    const row = bound.engine.getFlowRuntimeStates().find((s) => s.name === 'digest');
+    return { audit, row, bindLog: bound.bindLog };
+}
+
+describe("AutomationEngine — a host-injected OFF reports the host's reason (#21110)", () => {
+    const PRIOR_SWITCH = process.env[SCHEDULED_WORK_ENV];
+    const PRIOR_POSTURE = process.env[POSTURE_ENV];
+    afterEach(() => {
+        if (PRIOR_SWITCH === undefined) delete process.env[SCHEDULED_WORK_ENV];
+        else process.env[SCHEDULED_WORK_ENV] = PRIOR_SWITCH;
+        if (PRIOR_POSTURE === undefined) delete process.env[POSTURE_ENV];
+        else process.env[POSTURE_ENV] = PRIOR_POSTURE;
+    });
+
+    for (const [label, deployment] of [
+        ['deployment ON (the measured case: the variable IS set)', 'true'],
+        ['deployment OFF (unset)', undefined],
+    ] as const) {
+        it(`${label}: the bind log, the audit and the /_status row all carry the host's reason`, () => {
+            withDeployment(deployment);
+            const bound = bindOneLogged({ scheduledWorkPolicy: HOST_OFF });
+            expect(bound.started, 'the host-OFF kernel called its trigger').toEqual([]);
+            const { audit, row, bindLog } = reasonsOf(bound);
+
+            expect(audit).toEqual([{ flowName: 'digest', triggerType: 'schedule', reason: HOST_REASON }]);
+            expect(row).toMatchObject({ enabled: true, bound: false, triggerType: 'schedule', reason: HOST_REASON });
+            expect(bindLog, 'the bind log is said once').toHaveLength(1);
+            expect(bindLog[0]).toContain(HOST_REASON);
+            // ⛔ The defect: the deployment switch named as the cause on a
+            // kernel whose host decided. Pinned by absence on all three.
+            for (const reason of [audit[0].reason, row?.reason, bindLog[0]]) {
+                expect(reason).not.toContain(SCHEDULED_WORK_ENV);
+            }
+        });
+    }
+
+    it('a host policy with enabled:false and NO reason keeps the deployment sentence, byte for byte', () => {
+        withDeployment('true');
+        const { audit, row, bindLog } = reasonsOf(bindOneLogged({ scheduledWorkPolicy: OFF }));
+        expect(audit.map((a) => a.reason)).toEqual([SCHEDULED_WORK_DISABLED_REASON]);
+        expect(row?.reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(bindLog).toHaveLength(1);
+        expect(bindLog[0]).toContain(SCHEDULED_WORK_DISABLED_REASON);
+    });
+
+    it('CONTROL: an unset variable with no host policy keeps the deployment sentence on every surface', () => {
+        withDeployment(undefined);
+        const { audit, row, bindLog } = reasonsOf(bindOneLogged());
+        expect(audit.map((a) => a.reason)).toEqual([SCHEDULED_WORK_DISABLED_REASON]);
+        expect(row?.reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(bindLog).toHaveLength(1);
+        expect(bindLog[0]).toContain(SCHEDULED_WORK_DISABLED_REASON);
+    });
+
+    it('the reason is read from the RECORDED refusal, not re-asked of the resolver at report time', () => {
+        // A resolver may answer something else by the time the audit or the
+        // status door runs. What is reported is the sentence of the reading
+        // that refused.
+        withDeployment('true');
+        let current: ScheduledWorkPolicy = HOST_OFF;
+        const engine = new AutomationEngine(silentLogger(), undefined, { scheduledWorkPolicy: () => current });
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        current = { ...OFF, hostDisabledReason: 'a later, different reason' };
+        expect(engine.getTriggerBindingAudit().map((a) => a.reason)).toEqual([HOST_REASON]);
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'digest')?.reason).toBe(HOST_REASON);
+    });
+
+    it('through the plugin: a kernel booted with a host reason reports it under a deployment that is ON', async () => {
+        withDeployment('true');
+        const off = await bootKernel(HOST_OFF);
+        try {
+            expect(off.started).toEqual([]);
+            expect(off.engine.getTriggerBindingAudit().map((a) => a.reason)).toEqual([HOST_REASON]);
+            expect(off.engine.getFlowRuntimeStates().find((s) => s.name === 'digest')?.reason).toBe(HOST_REASON);
+        } finally {
+            await off.kernel.shutdown();
+        }
+    });
+});

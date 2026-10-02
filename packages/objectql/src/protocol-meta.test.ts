@@ -67,7 +67,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // save stamps `organization_id` on the row — is unchanged, but since
             // the 2026-08-08 ruling only types that DECLARE a per-org channel may
             // carry one, and `app` rolled back to `allowOrgOverride: false` in
-            // #6483. `view` is the whitelisted specimen, so this now measures the
+            // commit ee58392e1. `view` is the whitelisted specimen, so this now measures the
             // stamping on a row the platform can actually read back.
             mockEngine.findOne.mockResolvedValue(null);
             await protocol.saveMetaItem({
@@ -86,7 +86,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             }), expect.anything());
         });
 
-        // [#14770] Re-spelled from `app` to `view`, and its sibling below with
+        // [commit d5cbb44f3] Re-spelled from `app` to `view`, and its sibling below with
         // it. The CLAIM is unchanged — an org row and an env-wide row of the
         // same `(type, name)` both exist, and the org row is the one SERVED,
         // whole, by precedence rather than a merge. It just has to be measured
@@ -95,12 +95,12 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // `getMetaItem` now resolves its own read scope through
         // `organizationIdForMetaRead` — the read-side twin of the predicate
         // `saveMetaItem` already gates on — so on `app`, which rolled back to
-        // `allowOrgOverride: false` in #6483, `organizationId` is gated to
+        // `allowOrgOverride: false` in commit ee58392e1, `organizationId` is gated to
         // `undefined` and the org partition is never queried. On `app` this
-        // case was pinning the phantom read #14770 removes: a pre-#6190
+        // case was pinning the phantom read commit d5cbb44f3 removed: a pre-#6190
         // org-scoped row served INSTEAD OF the live env-wide document. `view`
         // is the whitelisted specimen — the same re-spelling #6190 made one
-        // case up and #14683 made one case down.
+        // case up and commit 96326040f made one case down.
         it('getMetaItem returns org-specific overlay when both org and env-wide rows exist', async () => {
             // findOverlay calls: first attempts org=org_alpha (returns row),
             // env-wide fallback should be skipped.
@@ -149,7 +149,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // ⚠️ NON-VACUITY, and the reason this case had to move too. A
             // fall-through only states something if the org partition was
             // actually read FIRST. Left on `app` this case kept passing after
-            // #14770 while measuring nothing at all: the gate resolves `app` to
+            // commit d5cbb44f3 while measuring nothing at all: the gate resolves `app` to
             // `undefined`, so the only read ever issued was the env-wide one and
             // the assertion could no longer fail.
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
@@ -157,28 +157,28 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
         });
 
-        // [#14683] Re-spelled from `app` to `view`, the READ-side twin of the
+        // [commit 96326040f] Re-spelled from `app` to `view`, the READ-side twin of the
         // `[#6190]` re-spelling three cases up — same reason, one verb over.
         // `getMetaItems` now resolves its own read scope through
         // `organizationIdForMetaRead`, so an `organizationId` handed in for a
         // type the registry declares NON-overridable is gated to `undefined`
         // and the org partition is never queried. `app` rolled back to
-        // `allowOrgOverride: false` in #6483, so on `app` this case was
+        // `allowOrgOverride: false` in commit ee58392e1, so on `app` this case was
         // asserting a union the platform must NOT perform: the org rows it
         // seeded are the pre-#6190 phantoms `loadMetaFromDb` walks past, and
-        // reading them back is the resurrection #14683 closes.
+        // reading them back is the resurrection commit 96326040f closed.
         //
         // The CLAIM is unchanged and is what this case still pins — env-wide
         // and org rows union, org winning on collision. It just has to be
         // measured on a type that has an org partition to union.
         //
-        // ⚠️ SUPERSEDED, 2026-09-03 (#14770). This paragraph used to read "Its
+        // ⚠️ SUPERSEDED, 2026-09-03 (commit d5cbb44f3). This paragraph used to read "Its
         // two `getMetaItem` (SINGULAR) siblings above keep `app` deliberately:
-        // that verb is untouched here." That was true when #14683 landed and is
-        // the sentence #14770 falsified: the singular verb now gates too, so
+        // that verb is untouched here." That was true when commit 96326040f landed and is
+        // the sentence commit d5cbb44f3 falsified: the singular verb now gates too, so
         // both siblings moved to `view` in the same edit. The reasoning it gave
         // — a singular caller CAN be right about its scope, and its REST door
-        // already gates — held for the DOOR and not for the VERB: `#14770`
+        // already gates — held for the DOOR and not for the VERB: commit d5cbb44f3
         // measured four runtime callers that reach the verb with a raw active
         // organization, and on a `??` precedence read an ungated organization
         // does not merely ADD a row, it SUBSTITUTES the served document.
@@ -280,7 +280,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     });
 
     describe('saveMetaItem', () => {
-        // [#8818] WAS `rejects.toThrow('Item data is required')` — a bare
+        // [commit fd6bdf89f] WAS `rejects.toThrow('Item data is required')` — a bare
         // message match that stayed green while the refusal declared no
         // ADR-0112 envelope at all, so `clientFacingFailureText` withheld the
         // sentence and the REST boundary served `500 INTERNAL_ERROR`. The
@@ -415,7 +415,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // given, and `sampleApp` is shared by every case in this file.
             registry.registerItem('app', { ...sampleApp }, 'name', 'com.acme.showcase');
 
-            // #6483 rolled `app`'s `allowOrgOverride` back to `false`
+            // Commit ee58392e1 rolled `app`'s `allowOrgOverride` back to `false`
             // (ADR-0005 table: ❌ for page/app/action), so overriding this
             // packaged app needs the one documented door that remains — the
             // `OS_METADATA_WRITABLE` operator escape hatch. The receipt
@@ -666,7 +666,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 // Every overlay-allowed built-in type now has a canonical Zod
                 // schema registered in `getMetadataTypeSchema()`. The probe
                 // breaks `label`, not `name`: an ungrammatical item name is
-                // refused by the #12194 grammar door (INVALID_REQUEST 400)
+                // refused by the grammar door (commit 311433f6b, INVALID_REQUEST 400)
                 // before the registry runs, so a bad name can no longer reach
                 // — and therefore cannot prove — the schema gate under test.
                 let caught: any;
@@ -1634,7 +1634,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // here it would have flipped this test red for a reason that has
         // nothing to do with what it proves.
         //
-        // [#10194] `theme` left it by exactly the webhook rule: it gained a
+        // [commit 2306a765c] `theme` left it by exactly the webhook rule: it gained a
         // SCHEMA (not a registry entry), and the old specimen body
         // (`tokens: {}` — an alias of `customVars`, with the required `colors`
         // missing) is spec-INVALID and now 422s. `analytics_cube` was bound in
@@ -1644,7 +1644,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // no-schema fall-through control below. Each newly-bound type's own
         // behaviour, door and 422 both, is pinned in the tests below.
         //
-        // [#10485] `theme` then left the CONTRACT ITSELF (ADR-0049 — the
+        // [commit 35ad101bc] `theme` then left the CONTRACT ITSELF (ADR-0049 — the
         // `themes` carrier and `ThemeSchema` retired; the `themes: 'theme'`
         // fold left `PLURAL_TO_SINGULAR`), so it is no longer a URL-map-only
         // kind at all: both halves of its old pair now earn the #8421
@@ -1843,14 +1843,14 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         });
 
         // ───────────────────────────────────────────────────────────────
-        // [#10194] `theme` / `analytics_cube` — the two doors #6245 left
+        // [commit 2306a765c] `theme` / `analytics_cube` — the two doors #6245 left
         // open, closed the same way and pinned the same way: the write door
         // is UNCHANGED (no-static-entry authorization fall-through, verdict
         // byte-identical), the shape check is new. Both halves per type, so a
         // change that quietly CLOSED the door fails the "accepts" half.
         // ───────────────────────────────────────────────────────────────
 
-        // [#10485] `theme` left this pair: the carrier retired out of the
+        // [commit 35ad101bc] `theme` left this pair: the carrier retired out of the
         // spelling contract, so BOTH halves now earn the #8421 unrecognised
         // refusal before any schema is consulted — pinned once below. The
         // still-bound `webhook` door keeps the two-halves pin alive for the

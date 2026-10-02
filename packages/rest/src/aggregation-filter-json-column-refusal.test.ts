@@ -23,6 +23,19 @@
  * presents) is `@objectstack/objectql`'s
  * `engine-aggregate-filter-json-column-refusal.test.ts`.
  *
+ * [#21009] The text operators other than the membership pair joined the shared
+ * set. Measured before (`origin/main` `7a606a9a3`) on the same table: `owners`
+ * / `tags` `$startsWith` / `$endsWith` / `$icontains` — `where` answered the
+ * serialization on SQLite (`$startsWith: '['` matched every row with a value)
+ * and `500` `DATABASE_ERROR` on PostgreSQL 16.14; the per-aggregation `filter`
+ * counted `m = 0` for each. Both faces now answer the `400` above.
+ *
+ * [#21067] And the body carries the WHOLE refusal. The withheld message was
+ * 748 characters, so this door cut it to 499 plus an ellipsis, on SQLite and
+ * PostgreSQL alike: the wire ended mid-reason, before the sentence saying the
+ * field and the operator were withheld. It is now one text under the bound, and
+ * each row asserts the body equals it, not merely that the two faces agree.
+ *
  * ## The dialect axis of THIS file
  *
  * The SQLite cell always runs. The PostgreSQL and MySQL cells run where
@@ -34,6 +47,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { jsonColumnOperatorRefusalText } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -67,6 +81,13 @@ const VALUES: Record<string, readonly [string, string]> = {
   meta: ['a', 'b'],
 };
 
+/**
+ * [#21067] The withheld message every refusal below answers with: one constant
+ * text (it names neither the field nor the operator), so any call reads it.
+ * Read from the builder rather than copied, so a rewording moves it here too.
+ */
+const WITHHELD_MESSAGE = jsonColumnOperatorRefusalText('owners', '$in', false).message;
+
 /** Every member of the family `where` refuses on a JSON column, as a filter on `field`. */
 function family(field: string): Array<readonly [string, Record<string, unknown>]> {
   const [a, b] = VALUES[field];
@@ -89,6 +110,30 @@ function family(field: string): Array<readonly [string, Record<string, unknown>]
   ];
 }
 
+/**
+ * [#21009] The text operators other than the membership pair, on a multi-valued
+ * field. Before, `where` answered the SERIALIZATION on SQLite (`$startsWith: '['`
+ * matched every row with a value) and a 500 `DATABASE_ERROR` on PostgreSQL, while
+ * the per-aggregation `filter` counted `m = 0` for each — three answers to one
+ * filter, none of them the caller's.
+ */
+function textFamily(field: 'owners' | 'tags'): Array<readonly [string, Record<string, unknown>]> {
+  const [a] = VALUES[field];
+  return [
+    ['$startsWith', { [field]: { $startsWith: a } }],
+    ['$startsWith on the serialization', { [field]: { $startsWith: '[' } }],
+    ['$endsWith', { [field]: { $endsWith: ']' } }],
+    ['$icontains', { [field]: { $icontains: a.toUpperCase() } }],
+  ];
+}
+
+/** [#21009] The same text operators on the scalar `title` column: unaffected. */
+const TEXT_CONTROLS: ReadonlyArray<readonly [string, Record<string, unknown>, number]> = [
+  ['title $startsWith', { title: { $startsWith: 'u1' } }, 2],
+  ['title $endsWith', { title: { $endsWith: 'u10' } }, 1],
+  ['title $icontains', { title: { $icontains: 'U1' } }, 3],
+];
+
 /** Controls on the scalar `title` column: the per-aggregation count equals the where twin's. */
 const CONTROLS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
   ['title $in', { title: { $in: ['u1', 'x'] } }],
@@ -97,6 +142,10 @@ const CONTROLS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
   ['title implicit equality', { title: 'x' }],
   ['owners $contains — the prescribed spelling', { owners: { $contains: 'u1' } }],
   ['owners an $or of $contains — the any-of spelling', { $or: [{ owners: { $contains: 'u1' } }, { owners: { $contains: 'u3' } }] }],
+  // [#21067] The presence spellings the refusal prescribes for a `null` comparand answer too.
+  ['owners $null — the no-value spelling', { owners: { $null: true } }],
+  ['owners $empty — the no-value spelling that counts an empty list', { owners: { $empty: true } }],
+  ['owners $null: false — the has-a-value spelling', { owners: { $null: false } }],
 ];
 
 interface Cell {
@@ -198,10 +247,20 @@ for (const cell of CELLS) {
             const agg = await post(perAggregation(filter));
             expect(agg.status, JSON.stringify(agg.json)).toBe(400);
             expect(agg.json.code).toBe('INVALID_FILTER');
-            // The same words — byte for byte, including the envelope's own cut.
+            // The same words — byte for byte.
             expect(agg.json.error).toBe(twin.json.error);
+            // [#21067] …and every one of them: the envelope cuts a 4xx message at
+            // its bound, so equal to what the refusal wrote means nothing was cut,
+            // the any-of remedy and the "withheld" sentence included.
+            expect(twin.json.error).toBe(WITHHELD_MESSAGE);
             expect(agg.json.error).toContain('{ "FIELD": { "$contains": "a" } }');
-            expect(agg.json.error).toContain('{ "$or": [{ "FIELD": { "$contains": "a" } }');
+            expect(agg.json.error).toContain('{ "$or": [{ "FIELD": { "$contains": "a" } }, { "FIELD": { "$contains": "b" } }] }');
+            // The no-value spelling a null comparand needs, in two pieces: this file
+            // is in `check:live-db-isolation`'s scan, which reads a MySQL USE
+            // statement in the verb followed by a quoted operand.
+            expect(agg.json.error).toContain('For no value,');
+            expect(agg.json.error).toContain('"$null" or "$empty".');
+            expect(agg.json.error).toContain('withheld from the message; the full diagnostic is in the server log.');
             expect(agg.json.error).not.toContain(`"${field}"`);
             // The field and the operator are in the server log, not the response.
             const logged = warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
@@ -218,6 +277,49 @@ for (const cell of CELLS) {
           const agg = await post(perAggregation(filter));
           expect(agg.status, JSON.stringify(agg.json)).toBe(200);
           expect(agg.json.records).toEqual([{ n: 6, m: twin.json.records[0].n }]);
+        }, 60_000);
+      }
+
+      for (const field of ['owners', 'tags'] as const) {
+        for (const [name, filter] of textFamily(field)) {
+          it(`[#21009] ${field} ${name}: 400 INVALID_FILTER on both faces, the where twin's very body`, async () => {
+            const twin = await post(whereTwin(filter));
+            expect(twin.status, JSON.stringify(twin.json)).toBe(400);
+            expect(twin.json.code).toBe('INVALID_FILTER');
+            warn.mockClear();
+            const agg = await post(perAggregation(filter));
+            expect(agg.status, JSON.stringify(agg.json)).toBe(400);
+            expect(agg.json.code).toBe('INVALID_FILTER');
+            expect(agg.json.error).toBe(twin.json.error);
+            expect(twin.json.error).toBe(WITHHELD_MESSAGE);
+            expect(agg.json.error).toContain('{ "FIELD": { "$contains": "a" } }');
+            expect(agg.json.error).not.toContain(`"${field}"`);
+            const logged = warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
+            expect(logged).toMatch(new RegExp(`Operator "\\$[A-Za-z]+" on field "${field}" WAS NOT APPLIED`));
+          }, 60_000);
+        }
+
+        it(`[#21009] ${field} $like: where refuses it as a JSON column, the per-aggregation filter as an operator it does not evaluate`, async () => {
+          const filter = { [field]: { $like: '%u1%' } };
+          const twin = await post(whereTwin(filter));
+          expect(twin.status, JSON.stringify(twin.json)).toBe(400);
+          expect(twin.json.code).toBe('INVALID_FILTER');
+          expect(twin.json.error).toContain('WAS NOT APPLIED');
+          const agg = await post(perAggregation(filter));
+          expect(agg.status, JSON.stringify(agg.json)).toBe(400);
+          expect(agg.json.code).toBe('INVALID_FILTER');
+          expect(agg.json.error).toContain("Unsupported operator '$like'");
+        }, 60_000);
+      }
+
+      for (const [name, filter, m] of TEXT_CONTROLS) {
+        it(`[#21009] control — ${name}: answered on both faces, m = ${m}`, async () => {
+          const twin = await post(whereTwin(filter));
+          expect(twin.status, JSON.stringify(twin.json)).toBe(200);
+          expect(twin.json.records).toEqual([{ n: m }]);
+          const agg = await post(perAggregation(filter));
+          expect(agg.status, JSON.stringify(agg.json)).toBe(200);
+          expect(agg.json.records).toEqual([{ n: 6, m }]);
         }, 60_000);
       }
 

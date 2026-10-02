@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11014 — the Phase 3a-destructive gate's REACHABLE TYPE SET is `object`
+ * Commit 2d8b92ff1 — the Phase 3a-destructive gate's REACHABLE TYPE SET is `object`
  * alone, and this file is the measurement that says so.
  *
  * ## Why a type set needs a pin at all
@@ -10,7 +10,7 @@
  * open on `(singularType === 'object' || singularType === 'field')`. The
  * `field` limb could not produce a finding, so the condition made the gate's
  * coverage READ wider than it is — and that is not a cosmetic problem:
- * #10886's face inventory had to establish, per face, exactly which types can
+ * Commit 809e61221's face inventory had to establish, per face, exactly which types can
  * reach this gate, and the `field` spelling is the one thing that made the
  * answer look bigger. An inventory that trusted the condition chased a face
  * population that does not exist.
@@ -87,7 +87,7 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 // ---------------------------------------------------------------------------
-// Harness — a `sys_metadata`-backed kernel, the shape the #10886 face
+// Harness — a `sys_metadata`-backed kernel, the shape commit 809e61221's face
 // inventory uses. `update` is present because §2's hatch-open cases really do
 // PERSIST (that is what "the write got past reason 2" means), and it routes
 // through the producer's predicate for the reason above. `delete` is

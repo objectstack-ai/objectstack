@@ -1,5 +1,477 @@
 # @objectstack/driver-turso
 
+## 17.6.0
+
+### Minor Changes
+
+- c876a74: fix(spec,driver-turso)!: a turso config that forces `mode: 'replica'` with no `syncUrl` is refused where it is written and when the driver is built, instead of running as a plain local database that never syncs
+  
+  Clause-②: yes (narrowing) — the accept set of the `turso` `datasource.config` contract narrows by one combination. No key is added, removed or renamed, and no exported symbol moves.
+  
+  An embedded replica is a local file kept in sync with the remote named in `syncUrl`. A config that forced `mode: 'replica'` on a `file:` url with no `syncUrl` (or an empty one) was accepted by `@objectstack/spec`'s `TursoConfigSchema`, by the published mirror in `@objectstack/driver-turso`, and by `new TursoDriver()`. Measured on the built driver before this change, with and without `sync`: it constructed with `transportMode` `'replica'`, `isSyncEnabled()` answered `false`, no sync interval started, the sync call did nothing, and every read and write went to the local file. A datasource declared as a replica ran as a plain local database that never replicated, with no error and no warning.
+  
+  **BREAKING** accept-set narrowing on a published schema and a published constructor, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). Refused now, at both doors together, with one message whose prescription names both ways out:
+  
+  - **at authoring**, as one `custom` issue on `mode` (`config.mode` on a datasource): `DatasourceSchema`, `validateDriverConfig`, `defineStack` / `os validate`, and a save or test connection through the datasource admin service;
+  - **at construction**, `VALIDATION_ERROR` / 400 from `new TursoDriver()` (and `createTursoDriver()`), before any client or database is opened.
+  
+  The message is the same text at both doors, and a test holds the constructor's copy equal to the schema's issue byte for byte. The sibling refusals keep their order. A forced replica on a remote url, an in-memory url or a bare path still meets its `url` refusal first. One with `sync` and no `syncUrl` still meets the `sync` refusal first; the schema now reports the `mode` issue beside it. The driver mirror declares no `mode` key and strips an authored one, so it cannot see a forced mode: this refusal reaches it only as byte-identical text, and the spec contract and the constructor are the two doors that judge it.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `url: 'file:./data/replica.db', mode: 'replica'` (no `syncUrl`, or `syncUrl: ''`) | an embedded replica: keep the `file:` url and name the remote, `syncUrl: 'libsql://my-db.turso.io'` |
+  | the same | a plain local database: drop `mode` (`url: 'file:./data/app.db'` alone) |
+  
+  A datasource row stored in this shape is not re-parsed when it loads, so it now fails when the driver is built. `factory.create` throws the refusal. The connection service records the datasource as `failed-degraded` with the message, and a test connection answers `ok: false` ("Failed to build driver: …"). Under ADR-0062 D5, the boot fails fast when objects bind to that datasource or are routed to it, or when it is boot-critical, unless `OS_ALLOW_DRIVER_CONNECT_FAILURE` is set. Otherwise it is left unconnected with a warning. Before this change the same row booted and ran as a local database. The way out is the table above.
+  
+  Blast radius, measured on this tree: no example, template, published skill or hand-written doc authors the shape, and no host default or environment variable sets `mode` (a turso `mode` reaches the driver only from an authored `datasource.config`). Whether any out-of-repo deployment declares such a config is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: registered turso-config-forced-replica-without-sync-url-refused -->
+- 05cb2bc: fix(spec,driver-turso)!: a turso config that forces `mode: 'local'` beside a `syncUrl` is refused where it is written and when the driver is built, instead of running as an embedded replica under a `local` label
+  
+  Clause-②: yes (narrowing) — the accept set of the `turso` `datasource.config` contract narrows by one combination. No key is added, removed or renamed, and no exported symbol moves.
+  
+  A `syncUrl` names the remote an embedded replica syncs with. A config that forced `mode: 'local'` on a `file:` url (or `:memory:`) beside a non-empty `syncUrl` was accepted by `@objectstack/spec`'s `TursoConfigSchema`, by the published mirror in `@objectstack/driver-turso`, and by `new TursoDriver()`. Measured on the driver source before this change, with a client that counts syncs: it constructed with `transportMode` `'local'`, then synced on connect, started the sync interval, and `isSyncEnabled()` answered `true` — exactly what the same config with no `mode` (a replica) did. A datasource declared local was kept in sync with a remote, and only a label said otherwise.
+  
+  **BREAKING** accept-set narrowing on a published schema and a published constructor, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). Refused now, at both doors together, with one message whose prescription names both ways out:
+  
+  - **at authoring**, as one `custom` issue on `mode` (`config.mode` on a datasource): `DatasourceSchema`, `validateDriverConfig`, `defineStack` / `os validate`, and a save or test connection through the datasource admin service;
+  - **at construction**, `VALIDATION_ERROR` / 400 from `new TursoDriver()` (and `createTursoDriver()`), before any client or database is opened.
+  
+  The message is the same text at both doors, and a test holds the constructor's copy equal to the schema's issue byte for byte. It is the twin of the forced `mode: 'replica'`-without-`syncUrl` refusal, the other way round: honouring `mode: 'local'` by skipping the sync would ignore a declared `syncUrl` instead, which is the same defect with the keys swapped. The sibling refusals keep their order: a forced local mode on a remote url or a bare path still meets its `url` refusal first. An empty `syncUrl` is unset and is still accepted. The driver mirror declares no `mode` key and strips an authored one, so it cannot see a forced mode: this refusal reaches it only as byte-identical text, and the spec contract and the constructor are the two doors that judge it.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `url: 'file:./data/replica.db', mode: 'local', syncUrl: 'libsql://my-db.turso.io'` | an embedded replica: drop `mode` (`url` and `syncUrl` select the replica) |
+  | the same | a plain local database: drop `syncUrl` (and `sync`), keeping `url: 'file:./data/app.db'` with or without `mode: 'local'` |
+  
+  A datasource row stored in this shape is not re-parsed when it loads, so it now fails when the driver is built. `factory.create` throws the refusal. The connection service records the datasource as `failed-degraded` with the message, and a test connection answers `ok: false` ("Failed to build driver: …"). Under ADR-0062 D5, the boot fails fast when objects bind to that datasource or are routed to it, or when it is boot-critical, unless `OS_ALLOW_DRIVER_CONNECT_FAILURE` is set. Otherwise it is left unconnected with a warning. Before this change the same row booted and synced with the remote under a `local` label. The way out is the table above.
+  
+  Blast radius, measured on this tree: no example, template, published skill or hand-written doc authors the shape, and no host default or environment variable sets `mode` or `syncUrl` (a turso `mode` reaches the driver only from an authored `datasource.config`). Whether any out-of-repo deployment declares such a config is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: registered turso-config-forced-local-with-sync-url-refused -->
+- e35c40a: feat(driver-turso): the remote transport issues `auto_number` values (#21113)
+  
+  Clause-②: yes (widening)
+  
+  A `create()`, `bulkCreate()` or `upsert()` on the Turso REMOTE transport that
+  leaves an `autonumber` field empty (`undefined`, `null` or `''`) now gets a
+  generated value. It used to be refused with `NOT_IMPLEMENTED` / 501, so on a
+  hosted tenant database — which is on this transport — no object declaring an
+  `auto_number` field could get a new record at all. Nothing is declared anew in
+  the spec or in the package exports; `supports.autonumber` stays `true` and is
+  now honoured.
+  
+  - The value comes from the same persistent `_objectstack_sequences` counter the
+    local and embedded-replica transports use, rendered by the same format rules
+    (`autonumberFormat` / `format`, organization scope, date and `{field}`
+    tokens), bootstrapped from the table's highest existing value by the same
+    reading, and re-seeded the same way after rows land above the counter by a
+    seed replay or import. A remote driver and an embedded replica of one
+    database draw from one counter row.
+  - The counter moves in one statement over the connection (`UPDATE … RETURNING`,
+    or on a cold counter `INSERT … ON CONFLICT (key_hash) DO UPDATE … RETURNING`),
+    so writers in different processes never draw the same number.
+  - An `upsert()` that merges into an existing row keeps the number already in
+    the row; a row that carries its own number is written unchanged.
+  - A `_objectstack_sequences` table in the pre-`key_hash` shape is refused in
+    remote mode with `DATABASE_ERROR` / 500 and the remedy in the message (open
+    the database once through the local or embedded-replica transport, which
+    migrates it); remote mode does not migrate it and does not key by the legacy
+    rule.
+  - `RemoteTransport.upsert()` takes an optional fifth argument naming columns
+    that are written on insert and left alone on merge.
+  
+  `@objectstack/driver-sql`: the sequence rules a second transport shares are
+  now `protected` members of `SqlDriver` (`resolveSequenceTenantId`,
+  `defineSequencesTable`, `maxAutonumberCounter`, `escapeLikePrefix`,
+  `sequencesTableName`, `autoNumberCollisionRetries`). No export is added and no
+  behaviour changes on any dialect.
+- 862f12c: fix(driver-turso)!: in remote mode, a filter on a declared JSON-stored field is refused with `INVALID_FILTER` / 400 for every operator the local face refuses there, and `$contains` / `$notContains` answer membership instead of a substring of the stored text (#21178)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at the remote transport's filter compiler: the operators refused on a JSON-stored column are exactly the ones driver-sql's where refuses there (and so this driver's local transport), read from the one JSON_COLUMN_INCOMPATIBLE_OPERATORS set @objectstack/core holds, and $contains / $notContains move from a substring test to the membership test the local transport already answers, through the same jsonMembershipPredicate. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query this transport answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour, with no published export or type narrowed or removed — the one interface change is an ADDED optional method, a widening (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (`@objectstack/driver-turso`, remote mode): this narrows what `TursoDriver` answers when its `url` is a remote libSQL endpoint (such as `libsql://` or `https://`), the transport every hosted tenant database runs on, for every door that compiles a `where`: `find`, `findOne`, `count`, `updateMany`, `deleteMany`, `aggregate` and distinct values. It ships as `minor` under the launch-window convention for accept-set narrowings. Local and embedded-replica mode inherit `driver-sql`'s compiler and already answered this way; nothing moves there.
+  
+  **What is refused.** On a field the object declares JSON-stored (a structured-JSON type such as `json` or `address`, an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`), a `where` that aims any operator in `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS` at the field is refused with `INVALID_FILTER` / 400, at any depth under `$and` / `$or` / `$not`, before any statement runs: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin`, `$startsWith`, `$endsWith`, `$icontains`, `$like`, `$ilike`, and implicit equality (`{ "owners": "u1" }`), whatever the comparand, `null` included.
+  
+  **What `$contains` / `$notContains` answer now.** Membership: `{ "owners": { "$contains": "u1" } }` matches the rows whose stored list holds `u1` as an element, so it no longer matches a row holding only `u10`; `$notContains` is its exact complement, a row with no value included; and a structured-JSON object answers no member at all, instead of matching text inside its serialization. On a scalar text field both remain the substring test they were.
+  
+  **What an author sees now.** The body the local transport answers for the same filter, byte for byte: the filter WAS NOT APPLIED, the comparison can never equal one member of a stored list, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership, or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message, and the full diagnostic, naming both, is written to the driver's logger at `warn`.
+  
+  **Why.** The remote transport compiles its own SQL and read neither the shared refused set nor the membership construct, so over a `multiple: true` lookup holding `["u1","u2"]`, `["u2"]`, `["u3","u1"]` and `["u10"]` it answered: `$nin: ["u1"]` and `$ne: "u1"` every row, the rows holding `u1` included; `$eq`, `$in` and implicit equality no row; `$lt` / `$lte` a lexicographic verdict over the serialization; `$startsWith: "["` and `$endsWith: "]"` every row with a value; `$contains: "u1"` the row holding only `u10` too. One driver gave two answers to one filter depending only on the connection string, and the exclusion operators failed open.
+  
+  **Who is affected.** A caller, saved filter, list view, report or read scope that reaches a remote-mode `TursoDriver` with one of those operators on a JSON-stored field and read the rows it got as the answer. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", `$not` around either for the exclusion, and `$null` / `$exists` / `$empty` for presence.
+  
+  **New optional API.** `RemoteTransport.setJsonColumnResolver(resolver)` in `@objectstack/driver-turso`, which `TursoDriver` wires to its own `isJsonColumn`, beside `setDeclaredValueShapeResolver`. A `RemoteTransport` driven standalone without it treats no column as JSON-stored and compiles as before.
+  
+  **Unchanged.** `$contains` and `$notContains` on a scalar field, `$exists`, `$null` and `$empty`; every operator on a field that is not declared JSON-stored; and a table this driver holds no declaration for, where nothing is judged.
+- 95e24b0: fix(driver-sql,driver-turso)!: an upsert whose conflict lands on another organization's row is refused with `UNIQUE_VIOLATION` and writes nothing, and an upsert never changes a row's organization (#21185)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered driver-upsert-cross-organization-conflict-refused -->
+  
+  **BREAKING for `upsert` callers on the SQL drivers and on `TursoDriver`.**
+  
+  **What changed.** `upsert` resolves its conflict against the whole table, and the
+  primary key and a `unique: 'global'` column are installation-wide, so the row a
+  tenant-scoped call (`options.tenantId` on an object with a tenant column) collided
+  with could belong to another organization. The merge wrote the payload onto that
+  row, tenant column included. Now:
+  
+  - **A tenant-scoped upsert merges only into a row of the organization the row is
+    written under**, for any conflict target, the primary key included. A conflict
+    that lands on a row of another organization, or on a row with no organization,
+    is refused with `code: 'UNIQUE_VIOLATION'`, `status: 409`, and nothing is
+    written. That is the answer `create()` gets for the same collision: from the
+    caller's organization the call is an insert, and that insert collides. The
+    refusal names no organization and no value of the row it collided with.
+  - **The tenant column is insert-only** (`insertOnlyUpsertColumns`), like `id`,
+    `created_at` and `auto_number` columns: an upsert with no tenant context merges
+    into the row it lands on and keeps that row's organization.
+  
+  Mechanism, per face: on SQLite, PostgreSQL and the remote (libSQL) face, the merge
+  statement carries the organization predicate (`DO UPDATE … WHERE`), so another
+  organization's row is never written. On MySQL, whose `ON DUPLICATE KEY UPDATE`
+  takes no `WHERE`, the statement and a read of the landed row run in one
+  transaction (a savepoint inside a caller's transaction), and the read's failure
+  rolls the write back. The remote face now also stamps the caller's organization on
+  the row it inserts, as the local faces do.
+  
+  ## FROM → TO
+  
+  | you relied on | now |
+  |:--|:--|
+  | a tenant-scoped `upsert` merging into a row of another organization | refused with `UNIQUE_VIOLATION` / 409, nothing written |
+  | an `upsert` payload's tenant value moving the row it merges into | the row keeps its organization; to move a row between organizations, use `update()` |
+  
+  **What is not affected.** A tenant-scoped upsert whose conflict lands on a row of
+  its own organization merges as before, on every target. An upsert that inserts
+  lands under the caller's organization, or under the organization the payload
+  names explicitly, as before.
+- 4b59a38: fix(driver-turso)!: a tenant-scoped call on the remote (libSQL) face reaches the rows the local face reaches, and a remote `create` stamps the caller's organization (#21226)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered driver-remote-doors-tenant-scoped -->
+  
+  **BREAKING for callers of a remote-mode `TursoDriver` that pass `tenantId`.**
+  
+  **What changed.** The engine hands every driver the caller's organization as
+  `DriverOptions.tenantId`, and the group posture's membership set as `tenantIds`
+  (ADR-0131 D8). The local face applies them through `SqlDriver.applyTenantScope`
+  on every read and on every update and delete predicate, and stamps the
+  organization on a new row. The remote face's doors received no driver options,
+  so their statements carried the caller's filter and nothing else. Now:
+  
+  - **`find`, `findOne`, `count`, `aggregate`, `update`, `delete`, `bulkUpdate`,
+    `bulkDelete`, `updateMany` and `deleteMany` carry the caller's tenant scope on
+    the remote face.** The predicate is not a second copy: the remote face asks the
+    local face's own chokepoint for it and ANDs what that compiles to onto each
+    statement. So the rows a scoped call reaches are the same on both faces: the
+    caller's organization, rows with no organization, and, under the group posture,
+    the caller's membership set.
+  - **A remote `create` (and `bulkCreate`) stamps the caller's organization** on a
+    row that names none, as the local `create` does. An explicit value on the row
+    is kept.
+  - **`distinct` still refuses a tenant-scoped call on the remote face**, as before.
+  - A scope the remote face cannot read is refused (`INTERNAL_ERROR` / 500), never
+    sent without the scope.
+  
+  Where the engine's tenant wall composes a predicate above the driver, it already
+  kept other organizations' rows out of these answers. Where it composes none (the
+  posture in which that wall is inert, or an elevated caller that carries its
+  organization), the driver scope is the only fence, and the remote face had none.
+  
+  ## FROM → TO
+  
+  | you relied on | now |
+  |:--|:--|
+  | a tenant-scoped remote `find` / `findOne` / `count` / `aggregate` reading another organization's rows | those rows are excluded (`findOne` answers `null`); call without `tenantId` to read every organization, as on the local face |
+  | a tenant-scoped remote `update` / `delete` by id reaching another organization's row | `update` answers `null` and `delete` answers `false`, and the row is untouched |
+  | a tenant-scoped remote `updateMany` / `deleteMany` / `bulkUpdate` / `bulkDelete` reaching another organization's rows | only rows in scope are written; the count reports them |
+  | a tenant-scoped remote `create` landing a row with no organization | the row carries the caller's organization; to write a row with none, call without `tenantId` |
+  
+  **What is not affected.** A call without `tenantId`, or on an object with no
+  tenant column, sends the same statement as before. The local and embedded-replica
+  faces are unchanged. A scoped call's answer for the caller's own rows, and for
+  rows with no organization, is unchanged.
+
+### Patch Changes
+
+- 42d78b9: driver-turso refusals and log lines, and driver-sql's last three aggregate refusals, no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages the Turso driver shows to authors and operators ended with an issue-tracker number where
+  the reason belonged. Most of the Turso remote transport's numbers were bare ids from the repository that
+  file used to live in, so here they pointed at unrelated cards. The number goes, and where the sentence
+  did not already say what was decided, it now does:
+  
+  - Aggregate refusals, on both drivers: the undeclared-function, `count_distinct`-without-`field` and
+    per-aggregation `filter` refusals lose their citation on the SQL driver and the Turso remote
+    transport together, so the two faces still read one sentence. The remote transport's
+    declared-but-uncompiled and date-bucket refusals lose theirs too, and read exactly like the SQL
+    driver's again.
+  - Turso remote filter refusals (`INVALID_FILTER`): the withheld cross-field and unbindable-comparand
+    wording, and the full diagnostics behind every filter refusal (unsupported operator, unlowered
+    `$between`, undeclared or non-list combinator, non-node operand, non-object `where`, empty operator
+    map, undefined comparand, non-boolean `$exists`) lose only the citation, because their sentences
+    already said it. The non-boolean `$null` diagnostic now says every driver refuses it, so one filter
+    no longer gets a different answer per backend.
+  - The Turso remote `auto_number` refusal (`NOT_IMPLEMENTED`) now says why it refuses rather than
+    resolves: resolving would write NULL into the slot and persist the row without its record number.
+  - Log lines: the unnumbered-upsert warning loses its citation; the remote canonical backfill's info line
+    says what a conversion buys (the column drops the unindexable read-side repair only once a pass finds
+    nothing left to convert); the unresolvable-remainder warning says a value that cannot be read as an
+    instant is counted and reported, never guessed at.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- 19fc8d6: fix(driver-turso): a declared index the remote face skips because a key column never materializes is logged at `error`, not `warn`
+  
+  Clause-②: no
+  
+  In remote mode (a `libsql://` URL), schema sync skips a declared index whose key column is not
+  a stored column: a name that is not a field of the object (a misspelling), or a virtual
+  `formula` field, which is computed on read and has no column. The skip itself is unchanged, since
+  DDL naming a missing column would fail the whole sync. It used to be reported through the
+  driver's `warn` diagnostics, so a skipped UNIQUE index left duplicates accepted while the log
+  said `warn`.
+  
+  The skip is now logged at `error`, on the same channel the remote face already uses for a
+  declared index it could not create, and the local face uses for the same skip. There is one
+  line per skipped index per sync. It names the object, the index and the missing column, says
+  whether the index was UNIQUE, states what is not enforced (duplicates for a UNIQUE index, a full
+  table scan for a plain one), and says how to fix it: make every key column a stored field of
+  the object, or remove the index.
+  
+  No DDL, accept set or refusal changes: the same indexes are created and the same ones are
+  skipped.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- ceee88f: fix(driver-sql, driver-turso, plugin-security, spec)!: `SqlDriver` and `TursoDriver` compile the filter they are handed — their copies of the whole-day bound and of the NULL-safe `$not` rewrite are deleted, and the RLS compile seam lowers type-blind when it cannot read the declared types (ADR-0053 D-D1 items 5, 7 and 9, #20822)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered driver-sql-calendar-day-methods-removed -->
+  
+  **BREAKING**: `SqlDriver` in `@objectstack/driver-sql` loses three `protected` methods: `calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` and `calendarDayBetweenRewrite`. They were the driver's copy of the whole-day bound, which the shared lowering now applies once, at the seams, before a driver sees the filter. A subclass of `SqlDriver` that calls one of them, or overrides one with the `override` modifier, no longer compiles (TS2339, TS4113). That includes a subclass of `SqliteWasmDriver` or `TursoDriver`, which extend `SqlDriver`. A subclass that re-declares one without `override` still compiles, but the driver never calls it, so the rule it carried stops applying. It ships as `minor` under the launch-window convention. The class's public methods are unchanged.
+  
+  FROM → TO: a `SqlDriver` subclass that called `this.calendarDayUpperBoundRewrite(table, field, op, value)`, `this.calendarDayBetweenRewrite(table, field, value)` or `this.calendarDayExclusiveUpperBound(table, field, value)`, or overrode one of them, lowers the filter with `lowerFilterCondition` from `@objectstack/spec/data` instead, before the driver compiles it: `lowerFilterCondition(where, { isDatetimeColumn })`, where `isDatetimeColumn` answers which columns get the whole-day bound.
+  
+  **Supersedes two sentences of this release's shared-lowering entry** (`lowerFilterCondition`, #5930), which this change makes false:
+  
+  - "A guard without that set treats no column as `datetime`." Now: when the RLS compile seam has no field guard, or one without a `datetime` set, it cannot read which columns are `datetime`, so it applies the whole-day rule to every column (the `@objectstack/plugin-security` entry below).
+  - "Each driver keeps its own copy of these rules, and every copy gives the same answer on lowered input." Now: `SqlDriver`, `SqliteWasmDriver` and `TursoDriver` keep no copy of the whole-day bound or of the NULL-safe `$not` rewrite. A read through the engine or the RLS compile seam gets the lowered answer, and a call on the driver itself gets the comparison it wrote (the `@objectstack/driver-sql` and `@objectstack/driver-turso` entries below).
+  
+  - **`@objectstack/plugin-security` — an RLS policy compiled with no field guard is lowered type-blind.** The RLS compile seam runs the shared `lowerFilterCondition` on every compiled `using` and `check` filter. When the security plugin could not resolve the object's declared fields (no field guard), or a caller of `RLSCompiler.compileFilter` passes a guard without a `datetime` set, the seam cannot read which columns are `datetime`, and it now applies the whole-day rule to every column (a bare-day upper bound becomes `$lt` the next day), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the type. It used to read no column as `datetime`, which left the bound to each driver's own copy of the rule. Visible on a `using` policy such as `record.signed_on <= '2026-01-05'` on such an object: every row of that day is kept on every driver, including `InMemoryDriver`, which had compared it as written since its own copy was deleted. A guard with a `datetime` set is unchanged, and so are the NULL-polarity guards.
+  - **`@objectstack/driver-sql` — `SqlDriver` keeps no copy of the rules the seams apply.** Deleted: the whole-day rewrite of a bare-day `$lte` and of a `$between` maximum on a `datetime` column, on the plain and the legacy-normalised column paths, including the last supported day (the protected methods `calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` and `calendarDayBetweenRewrite` are removed from the class); and the NULL-safe rewrite of a `$not` operand (`nullSafeNegationOperand` and its polarity tables, module-private). A read through the engine or the RLS compile seam is unchanged: the seam hands the driver a filter the shared lowering has already rewritten, and the deleted copies gave the same answer on that input. A caller that passes no seam — `find`, `findOne`, `count`, `aggregate`, `distinct`, `updateMany`, `deleteMany` or `findWithWindowFunctions` called on the driver itself — now gets the comparison it wrote: a bare-day `$lte` compares against that day's midnight, a `$between` is inclusive at both ends, `$lte '9999-12-31'` compares against that midnight, and a `$not` is SQL's three-valued negation, so a row whose compared column is NULL is not returned by it. `$ne`, `$nin` and `$notContains` keep their NULL-safe form, which this emitter spells for the operator itself. The refusal of an `undefined` comparand (`INVALID_FILTER` / 400) is kept: without it some positions would answer instead of refusing. To keep the seam's reading on a direct call, lower the filter first: `driver.find(object, { where: lowerFilterCondition(where, { isDatetimeColumn }) })`, with `lowerFilterCondition` from `@objectstack/spec/data`. A subclass that called or overrode one of the three removed methods: see **BREAKING** above.
+  - **`@objectstack/driver-sqlite-wasm` — `SqliteWasmDriver` inherits the `SqlDriver` change above**, with the same answers on a seamed read and on a direct call.
+  - **`@objectstack/driver-turso` — both faces of `TursoDriver` compile the filter they are handed.** Local and replica mode inherit the `SqlDriver` change. Remote mode: `toRemoteFilter` no longer widens a bare-day `$lte` or a `$between` maximum (it still splits a two-bound `$between` into the `$gte` / `$lte` pair the remote transport compiles, both ends inclusive, and still converts each comparand to storage form), and `RemoteTransport` no longer rewrites a `$not` operand (its copy of the polarity tables is deleted). The two faces still answer every filter alike, on a seamed read and on a direct call. The remote transport keeps its refusal of an `undefined` comparand, worded as `driver-sql`'s, so both faces refuse it in one sentence. The same one line keeps the seam's reading on a direct call.
+  - **`@objectstack/spec` — the ADR-0087 ledger records the removal.** The protocol-18 step of `MIGRATIONS_BY_MAJOR` gains the semantic entry `driver-sql-calendar-day-methods-removed`, which names the three removed methods with their replacement and acceptance criteria. Every upgrade channel that projects protocol 18 carries it. `spec-changes.json` and the generated upgrade guide stop at the current protocol, 17, so neither changes in this release. A subclass that re-declares one of the methods without `override` still compiles and is never called, so the ledger, not the compiler, is the notice that reaches it.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- ebdb6f2: An `upsert` keyed on a business column keeps the stored row's primary key on the Turso remote face, and both drivers answer the stored row.
+  
+  Clause-②: no
+  
+  **Remote face (`@objectstack/driver-turso`).** `upsert(object, data, ['email'])` on a remote (hosted) database used to replace the matched row's `id`: with the payload's `id` when it carried one, else with a freshly generated one. Every reference to the old id was left pointing at nothing, and no error was raised. The merge now leaves `id` and `created_at` alone, as the local and embedded-replica faces already do. It reads the columns to leave alone from the same list the local faces use, so `id`, `created_at` and the `auto_number` columns are kept on a merge on every face. An upsert on the primary key (no `conflictKeys`, or `['id']`) is unchanged, and an upsert that inserts still writes the payload's `id`, or a generated one.
+  
+  **The answer (`@objectstack/driver-sql`, and the remote face).** On such a merge, `upsert` returned the payload instead of the stored row, so the answer carried the payload's `id` (or the generated one), an id no stored row has. It now returns the stored row: its own `id`, with the merged values. The row is read back by the conflict-key values. When a conflict key is empty in the payload, nothing can have matched it, so the row was inserted and it is read back by its `id`, as before.
+  
+  To change a row's `id` on purpose, use `update()`. An `upsert` never changes it.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [df67985]
+- Updated dependencies [42d78b9]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [810d42b]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [cf0346e]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [e35c40a]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [c6b6889]
+- Updated dependencies [ebdb6f2]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [be5a83c]
+- Updated dependencies [d2bc644]
+- Updated dependencies [7923c8e]
+- Updated dependencies [95b91cc]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+  - @objectstack/driver-sql@17.6.0
+  - @objectstack/core@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

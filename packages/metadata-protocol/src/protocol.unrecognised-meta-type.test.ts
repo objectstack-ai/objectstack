@@ -28,7 +28,7 @@
  *  - a DECLARED type still saves (`view`), and so does a type whose only write
  *    channel is runtime (`hook`);
  *  - a PLUGIN kind with no static registry entry still saves (`webhook`;
- *    `theme` was the specimen until #10485 retired that kind entirely) — the
+ *    `theme` was the specimen until commit 35ad101bc retired that kind entirely) — the
  *    operation option C would have broken, and the one this change must not;
  *  - READS of an unrecognised type still answer, because the live type set
  *    legitimately holds keys the static contract does not (`data`, `kind` and
@@ -43,7 +43,7 @@
  * minted by definition — `protocol.stored-residue-resave.test.ts` carries the
  * production paths that made it necessary) still passes, while the COMPOUND
  * arity exemption (skip the verdict when the name contains a slash) is GONE —
- * #12194's item-name grammar refuses every slash-bearing name BEFORE this
+ * Commit 311433f6b's item-name grammar refuses every slash-bearing name BEFORE this
  * verdict runs, so the request that needed it can no longer arrive
  * (`protocol.item-name-grammar.test.ts` is that door's own suite).
  *
@@ -169,7 +169,7 @@ describe('#8421 — an unrecognised `/meta` type is refused instead of minted', 
     });
 
     it("[#10485] `theme` is now on the refused side — the retired kind left the spelling contract", async () => {
-        // Until #10485, `theme` was a URL-map-only plugin kind and this suite's
+        // Until commit 35ad101bc, `theme` was a URL-map-only plugin kind and this suite's
         // ACCEPTED specimen. The retirement removed the `themes: 'theme'` fold
         // from `PLURAL_TO_SINGULAR`, so `/meta/theme` now earns the same
         // ADR-0112 refusal as any minted namespace — loud, and nothing stored.
@@ -218,7 +218,7 @@ describe('#8421 — the traffic that must keep working', () => {
             item: { name: 'probe_item', object: 'task', events: ['beforeUpdate'] },
         },
         {
-            // `theme` held this slot until #10485 retired the themes surface
+            // `theme` held this slot until commit 35ad101bc retired the themes surface
             // (ADR-0049) and `theme` left the URL-spelling contract with it.
             type: 'webhook',
             why: 'PLUGIN kind — no static registry entry at all',
@@ -245,7 +245,7 @@ describe('#8421 — the traffic that must keep working', () => {
         // plugin kind is untouched.
         const { protocol, rows } = makeProtocol();
         // Spec-valid body — this control measures the STATIC-contract door,
-        // not the shape check. (`theme` was the specimen until #10485.)
+        // not the shape check. (`theme` was the specimen until commit 35ad101bc.)
         const result = await protocol.saveMetaItem({
             type: 'webhook',
             name: 'first_hook',
@@ -299,12 +299,12 @@ describe('#8421 — the refusal is scoped to the door that MINTS', () => {
 
 describe('#8421/#12194 — the COMPOUND arity is refused at the grammar gate, not exempted here', () => {
     // `/metadata/lead/views/all_leads` → `type='lead'`, `name='views/all_leads'`.
-    // Until #12194 this door EXEMPTED that shape (skip the type verdict when
+    // Until commit 311433f6b this door EXEMPTED that shape (skip the type verdict when
     // the name contains a slash) because `lead` is an OBJECT name no static
     // contract can enumerate — and the exemption's residue was that
     // `PUT /meta/fieldz/a/b` minted a namespace. The item-name grammar now
     // refuses every slash-bearing name BEFORE this verdict runs (maintainer
-    // ruling 2026-08-25, #12176 stage 1), so the exemption is gone and the
+    // ruling 2026-08-25, stage 1, commit 311433f6b), so the exemption is gone and the
     // compound write is refused outright — for the GRAMMAR reason, with the
     // dotted qualified spelling as the prescription.
     const VIEW_BODY = { name: 'all_leads', label: 'All Leads', columns: ['name'] };

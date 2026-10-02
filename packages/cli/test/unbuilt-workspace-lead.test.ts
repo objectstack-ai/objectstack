@@ -25,6 +25,12 @@
  * `isInvocationError` requires both) answers `undefined` for this failure and
  * why it could not be the place this lands.
  *
+ * Each fixture's `module:` line names the `@oclif/core` its run loaded
+ * (4.13.3) and stays as recorded, because a transcript is evidence of one run.
+ * Nothing here reads that line — the classifier works off `message:` — and
+ * `@oclif/core` 5.1.2 builds the detail from the same lines in the same order,
+ * re-measured when the CLI moved to the 5 line.
+ *
  * ⚠️ This file pins the decision only. Whether `bin/run-dev.js` actually asks
  * the question and prints the answer is a different fact with its own test —
  * `run-dev-unbuilt-workspace.e2e.test.ts` drives the real binary, and deleting

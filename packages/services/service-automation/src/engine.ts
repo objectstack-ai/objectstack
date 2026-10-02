@@ -27,7 +27,7 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 import { resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstack/spec/automation';
 import {
     resolveScheduledWorkPolicy,
-    SCHEDULED_WORK_DISABLED_REASON,
+    scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
 } from '@objectstack/types';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
@@ -875,8 +875,11 @@ export interface AutomationEngineOptions {
      * (one scheduled work OFF, its sibling ON): the per-kernel answer has
      * nowhere else to live, because the deployment resolver reads one
      * process-wide environment. A time-triggered flow this policy leaves
-     * unarmed is reported exactly as a deployment-disabled one —
-     * `SCHEDULED_WORK_DISABLED_REASON` on the binding audit and the status row.
+     * unarmed is reported through the same branch as a deployment-disabled one
+     * — on the bind log, the binding audit and the status row — with the
+     * sentence `scheduledWorkDisabledReason(policy)` answers [#21110]: the
+     * policy's `hostDisabledReason` when the host gave one, else
+     * `SCHEDULED_WORK_DISABLED_REASON`, which names the deployment switch.
      *
      * ⚠️ Hand the SAME policy to `ScheduleTriggerPlugin` and
      * `TimeRelativeTriggerPlugin` of the same kernel: each trigger keeps its own
@@ -2451,8 +2454,17 @@ export class AutomationEngine implements IAutomationService {
      * the gate, and {@link unregisterFlow} drops it with the flow. A later
      * registration under a switched-on deployment clears it by the ordinary
      * path.
+     *
+     * ## Why it records the SENTENCE, not just the flow
+     *
+     * [#21110] The reason depends on the policy that refused: a host-injected
+     * per-kernel policy may carry its own `hostDisabledReason`, and only the
+     * deployment's answer names `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`. So the
+     * value is `scheduledWorkDisabledReason(policy)` of the reading that
+     * REFUSED, kept for the same reason the key is: a resolver re-asked at read
+     * time may answer something else by then.
      */
-    private readonly policyDisabledFlows = new Set<string>();
+    private readonly policyDisabledFlows = new Map<string, string>();
     /**
      * [#20725, ADR-0126 §7.3] Packaged callers {@link activateFlowTrigger}
      * declined to arm because a packaged subflow they call is disabled — each
@@ -3684,17 +3696,27 @@ export class AutomationEngine implements IAutomationService {
         // between the two: see its own docblock for why the audit must read
         // what happened rather than re-derive it from an environment that may
         // have moved since.
-        if (isTimeTriggeredKind(resolved.triggerType) && !this.readScheduledWorkPolicy().enabled) {
-            if (!this.policyDisabledFlows.has(flowName)) {
-                this.policyDisabledFlows.add(flowName);
-                // Said once per flow while it stays refused, at `info`, for the
-                // reason the trigger's own refusal records: this is the DEFAULT
-                // state of every deployment and the deployment declared it, so
-                // nothing is wrong and nothing looks normal-but-broken. The
-                // structured channel is the audit below, which the
-                // `kernel:bootstrapped` hook and the CLI startup summary read.
+        //
+        // The policy is read only for a time-triggered kind, as before: a
+        // record-change or api flow never asks it.
+        const policy = isTimeTriggeredKind(resolved.triggerType) ? this.readScheduledWorkPolicy() : undefined;
+        if (policy !== undefined && !policy.enabled) {
+            // [#21110] The sentence comes from the SAME reading that refused —
+            // the host's own reason when its per-kernel policy carries one, else
+            // the deployment sentence — and the bind log, the audit and the
+            // `/_status` row all read this one recorded value.
+            const reason = scheduledWorkDisabledReason(policy);
+            if (this.policyDisabledFlows.get(flowName) !== reason) {
+                this.policyDisabledFlows.set(flowName, reason);
+                // Said once per flow while it stays refused for the same
+                // reason, at `info`, for the reason the trigger's own refusal
+                // records: this is the DEFAULT state of every deployment and the
+                // deployment declared it, so nothing is wrong and nothing looks
+                // normal-but-broken. The structured channel is the audit below,
+                // which the `kernel:bootstrapped` hook and the CLI startup
+                // summary read.
                 this.logger.info(
-                    `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${SCHEDULED_WORK_DISABLED_REASON}`,
+                    `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${reason}`,
                 );
             }
             return;
@@ -4538,7 +4560,10 @@ export class AutomationEngine implements IAutomationService {
      * between — an operator setting the switch, a test restoring it — makes
      * this report *binding failed* for a flow whose trigger was never called.
      * The record says what HAPPENED; `activateFlowTrigger` clears it the moment
-     * the flow gets past the gate.
+     * the flow gets past the gate. [#21110] And it holds the SENTENCE, not just
+     * the fact: `scheduledWorkDisabledReason` of the policy reading that
+     * refused, so a host-injected OFF reports the host's reason here and the
+     * deployment switch's sentence is reported only where that switch decided.
      *
      * @param resolved the caller's already-resolved binding, so neither door
      *   pays for a second {@link resolveTriggerBinding} on the same row.
@@ -4550,7 +4575,8 @@ export class AutomationEngine implements IAutomationService {
         if (!resolved) return undefined; // manual / screen flow — nothing to bind
         if (!this.isFlowEnabled(name)) return undefined;
         if (this.boundFlowTriggers.has(name)) return undefined;
-        if (this.policyDisabledFlows.has(name)) return SCHEDULED_WORK_DISABLED_REASON;
+        const policyReason = this.policyDisabledFlows.get(name);
+        if (policyReason !== undefined) return policyReason;
         // [#20725, ADR-0126 §7.3] The arming gate declined it onto a disabled
         // packaged subflow — read from the record, for the policy line's
         // reason, and ahead of the trigger branches for the gate's: with the

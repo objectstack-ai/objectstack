@@ -4390,7 +4390,7 @@ export default class Serve extends Command {
         if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
           throw new Error(
             'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
-            + 'data is always denied (#3963), which would leave the data API unusable.\n'
+            + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
             + 'Fix it one of two ways:\n'
             + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
             + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
@@ -5629,7 +5629,7 @@ export function createUnknownHostnameGuardPlugin(
   body {
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background: #fafafa;
-    color: #111;
+    color: #111111;
     display: grid;
     place-items: center;
     padding: 24px;
@@ -5654,7 +5654,7 @@ export function createUnknownHostnameGuardPlugin(
   .code { font: 600 64px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; letter-spacing: -2px; }
   h1 { font-size: 20px; margin: 16px 0 8px; font-weight: 600; }
   p { margin: 8px 0; }
-  .muted { color: #666; font-size: 14px; }
+  .muted { color: #666666; font-size: 14px; }
   .host {
     display: inline-block;
     margin-top: 16px;
@@ -5663,7 +5663,7 @@ export function createUnknownHostnameGuardPlugin(
     border: 1px solid #e4e4e7;
     border-radius: 6px;
     font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #444;
+    color: #444444;
     word-break: break-all;
   }
   a { color: #2563eb; text-decoration: none; }
@@ -5949,8 +5949,8 @@ export function formatOrganizationsInstallRemedy(
   return `      • add ${pkg} (the multi-org runtime) to THIS APP\n` +
     "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
     '          app, not from the framework it is linked out of. Being merely reachable\n' +
-    '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
-    '          (#4719) — that made this wall depend on how the process was launched.\n' +
+    '          through NODE_PATH / a hoisted workspace store is deliberately not enough:\n' +
+    '          accepting it made this wall depend on how the process was launched.\n' +
     '          NOTE: this runtime is Apache-2.0 and published on the public npm registry\n' +
     '          (ADR-0132), so this bullet is followable on any install — no subscription.\n' +
     '          A commercial deployment resolves the same package name to its own private,\n' +
@@ -6018,7 +6018,7 @@ export function formatOrganizationsMountFatal(
     "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org.\n\n" +
     '    OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will not get past it:\n' +
     '    it covers an ABSENT multi-org runtime the operator accepts doing without, not a\n' +
-    '    present one that declined to mount. (#4818)\n'
+    '    present one that declined to mount.\n'
   );
 }
 

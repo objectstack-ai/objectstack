@@ -133,9 +133,9 @@ export async function assertArmed(probes: readonly ArmingProbe[]): Promise<void>
   if (!Array.isArray(probes) || probes.length === 0) {
     throw new Error(
       'assertArmed(): the arming declaration is EMPTY, which asserts nothing. An empty ' +
-        'declaration would certify every fixture that forgot to write one — the exact defect ' +
-        'class this helper exists to close (#8074). Name at least one control, or do not call ' +
-        'assertArmed at all and say in the fixture header why no precondition applies.',
+        'declaration would certify every fixture that forgot to write one — the exact defect class this ' +
+        'helper exists to close, a fixture that passes while the control it measures is not engaged. Name ' +
+        'at least one control, or do not call assertArmed at all and say in the fixture header why no precondition applies.',
     );
   }
 
@@ -159,7 +159,7 @@ export async function assertArmed(probes: readonly ArmingProbe[]): Promise<void>
 
   if (disarmed.length > 0) {
     throw new Error(
-      `[#8074] this fixture is DISARMED: ${disarmed.length} of ${probes.length} control(s) it ` +
+      `assertArmed(): this fixture is DISARMED: ${disarmed.length} of ${probes.length} control(s) it ` +
         'measures are not engaged on the booted stack, so its assertions would pass without ' +
         'testing anything.\n\n' +
         `${disarmed.join('\n\n')}\n\n` +

@@ -5,7 +5,7 @@
  *
  * Each entry is the digest of the SOURCE REVISION that this locale's leaf at
  * that path is still a byte copy of — provenance for the generated half of the
- * bundles (commit 09b4f4e4e, maintainer ruling #12069 Option A, extending #8765 Option B).
+ * bundles (commit 09b4f4e4e): a leaf whose digest no longer matches its source is stale and serves the source text instead.
  *
  * An entry exists only while the leaf IS such a copy. Re-translate the leaf in
  * `<locale>.objects.generated.ts` and the next extract drops its entry by
@@ -18,8 +18,8 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_http_delivery.fields.error.help": "3edd3406757bedcf",
-  "objects.sys_http_delivery.fields.headers_json.help": "b14e8e640874e0a6",
+  "objects.sys_http_delivery.fields.error.help": "195b3fdb4a940b54",
+  "objects.sys_http_delivery.fields.headers_json.help": "a120981f1b5b6978",
   "objects.sys_http_delivery.fields.status.help": "e437ecf81dfb4715",
   "objects.sys_notification_delivery.fields.display_title.help": "0803d3f90a14907c",
   "objects.sys_notification_delivery.fields.display_title.label": "70f7aadecce647a5",

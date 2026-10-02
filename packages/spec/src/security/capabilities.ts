@@ -76,6 +76,22 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // admin flows are unchanged; `manage_platform_settings` is honoured as a
   // legacy equivalent by the enforcement seams that predate this capability.
   { name: 'manage_sharing', label: 'Manage Sharing', description: 'Administer record sharing: author and evaluate sharing rules, and manage per-record shares beyond one’s own records.', scope: 'org' },
+  // [#21260, ruling B on #21175] The compliance ledger's audit capability. A
+  // read of `sys_audit_log` takes the parent-record read gate (a row about a
+  // record is served only to a caller who can read that record), so without
+  // it no non-system caller is served the deletion and sign-out trail, and a
+  // broad read fails closed at the gate's pre-scan bound. Its holder is exempt
+  // from that gate — and from it alone: the ledger's object grant, its other
+  // read seams and field-level security still apply. The activity stream's
+  // gate does not honour it. Held by default by platform administrators
+  // (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other position only by explicit
+  // grant. `org`, measured rather than assumed: the ledger carries the
+  // registry-provisioned `organization_id`, its writers stamp the record's
+  // organization, and under a wall-enforcing tenancy posture the tenant wall
+  // still bounds a holder to its own organization's rows (only the
+  // parent-record gate is lifted). A platform administrator reaches every
+  // organization through its own wall bypass, not through this capability.
+  { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the ledger grant reaches in the caller’s organization, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Field-level security still narrows each row’s before/after snapshots.', scope: 'org' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */

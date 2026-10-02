@@ -6,7 +6,7 @@
  * timeout in milliseconds for remote operations. Effective in replica and
  * remote modes."), delivered by no code until the ADR-0049 enforce-or-remove
  * ruling on it. Two arms, two seams, both measured against
- * `@libsql/client@0.17.4`:
+ * `@libsql/client@0.18.0`:
  *
  *  - REMOTE over HTTP: the hrana transport takes a custom `fetch`
  *    (`Config.fetch`) and routes EVERY request through it, the protocol-version

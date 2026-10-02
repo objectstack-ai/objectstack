@@ -25,7 +25,12 @@ export const SEARCH_SURFACE: ConformanceRow[] = [
     // emits `$icontains` — the operator that actually folds — so the row names
     // it. Neither operator's own semantics moved; only what `$search` compiles
     // to did.
-    summary: '`$search` server-resolved cross-field executor (terms AND-ed, fields OR-ed, case-insensitive via `$icontains`)',
+    // [#21009] A MULTI-VALUED field (stored as a JSON array, where only the
+    // membership pair answers) is matched by `$contains` membership instead.
+    // No showcase object carries one in its search set, so that half's
+    // HTTP-level proof is `packages/rest`'s
+    // `data-search-multi-valued-membership.test.ts`, not this row's dogfood file.
+    summary: '`$search` server-resolved cross-field executor (terms AND-ed, fields OR-ed, case-insensitive via `$icontains`; a multi-valued field by `$contains` membership)',
     surface: 'spec/api/query.zod.ts:$search (QueryParams `search`)',
     state: 'enforced',
     enforcement: 'objectql/src/engine.ts (find AST expansion) → objectql/src/search-filter.ts expandSearchToFilter',
@@ -41,7 +46,7 @@ export const SEARCH_SURFACE: ConformanceRow[] = [
   },
   {
     id: 'search-fields-override',
-    summary: '`$searchFields` per-query narrowing — validated against the allowed set, can never widen it; a name outside the set is 400 INVALID_FIELD at the REST ingress (#4254), not silently dropped',
+    summary: '`$searchFields` per-query narrowing — validated against the allowed set, can never widen it; a name outside the set is 400 INVALID_FIELD at the REST ingress, not silently dropped',
     surface: 'spec/api/query.zod.ts:$searchFields',
     state: 'enforced',
     enforcement: 'spec/data/search-fields.ts resolveSearchFields (intersection) + metadata-protocol/src/protocol.ts assertSearchFieldsAreSearchable (ingress gate)',

@@ -49,11 +49,18 @@ import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // every member a query names, judged against the caller's readable fields.
 import {
   assertNamedFieldsReadable,
+  assertCallerMembersJudgeable,
+  fieldReadUnjudgeableError,
   type QueryableFieldsProvider,
   type NamedField,
+  type NamedRead,
   type FieldReadRole,
   type ReadableFieldsProvider,
 } from './field-read-admission.js';
+// [#21120] The stored-metadata-body door refusal — a query naming the stored
+// body column of `sys_metadata` / `sys_metadata_history` as a member is refused
+// here, on the one family seam, before any strategy runs.
+import { storedMetadataBodyAnalyticsRefusal } from './stored-metadata-body-refusal.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -63,7 +70,7 @@ import { measureResultType } from './measure-result-type.js';
 // a measure whose aggregate × field-type pair it refuses is refused in
 // `ensureCube`, ahead of both strategies, as the dataset door refuses it at
 // compile.
-import { assertCubeMeasureFieldTypesAccepted } from './cube-measure-field-type-door.js';
+import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -108,8 +115,10 @@ import { assertNoStructuredJsonDimension } from './structured-json-dimension-doo
 import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSqlDialect } from './text-match-sql.js';
 // [#20986] The one resolver of the object a relationship-path hop reads. The
 // door's field gate and its admitted and scoped set read it here; both
-// strategies read it through the context's `relationshipReference`.
-import { resolvePathHops, type HopReference } from './hop-object.js';
+// strategies read it through the context's `relationshipReference`. [#21129]
+// So do the measure × field-type door and the measure result type, for the
+// object a relationship-path measure column is declared on.
+import { columnObjectOf, resolvePathHops, type HopReference } from './hop-object.js';
 
 /**
  * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
@@ -405,6 +414,21 @@ function resolveMemberSource(
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
 /**
+ * [#21177] Whether `sql` is a plain COLUMN REFERENCE the admission can attribute
+ * to a field — a bare identifier (`amount`), a relationship path ending in one
+ * (`account.region`), or `'*'` (the count wildcard, which reads no field value).
+ * The same grammar the field gate resolves with ({@link fieldsOfColumnSql}) and
+ * `@objectstack/spec`'s `CUBE_MEMBER_SQL` (the authored-cube contract since
+ * #20943). Anything else — whitespace, an operator, a paren, a quote, a subquery
+ * — is an expression this layer cannot attribute, so `NativeSQLStrategy` would
+ * compile it into its statement as written.
+ */
+function isColumnReferenceSql(sql: string): boolean {
+  const path = sql.trim();
+  return path === '*' || BARE_IDENTIFIER.test(path) || IDENTIFIER_PATH.test(path);
+}
+
+/**
  * [#20917] The fields a member's column `sql` reads, each on the object that
  * declares it.
  *
@@ -418,10 +442,14 @@ const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
  *   hidden relationship field discloses which record each row points to, and
  *   the engine judges a path's first segment on the local object for the same
  *   reason.
- * - Anything else is an EXPRESSION the cube's author wrote (`CASE WHEN …`,
- *   `SUM(…)`, `*`). It names no field this gate can attribute, so it adds
- *   nothing — the author's declaration of a derived value, the way a formula
- *   field is.
+ * - `'*'` reads no field value — the row wildcard a `count` uses — so it
+ *   names nothing (`[]`).
+ * - [#20965] Anything else is not a column reference: `null`. It names no
+ *   field this gate can judge, so the caller refuses the member
+ *   (`NamedExpression`, `field-read-admission.ts`) — ⛔ never an empty list,
+ *   which would pass it. The parse refuses such a `sql` (#20943), but the
+ *   registry never parses, so a cube built before that, or never put through
+ *   it, still reaches here.
  */
 function fieldsOfColumnSql(
   cube: Cube,
@@ -429,10 +457,11 @@ function fieldsOfColumnSql(
   sql: string,
   role: FieldReadRole,
   referenceOf: HopReference | undefined,
-): NamedField[] {
+): NamedField[] | null {
   const path = sql.trim();
+  if (path === '*') return [];
   if (BARE_IDENTIFIER.test(path)) return [{ object: baseObject, field: path, role }];
-  if (!IDENTIFIER_PATH.test(path)) return [];
+  if (!IDENTIFIER_PATH.test(path)) return null;
   const segments = path.split('.');
   const hops = resolvePathHops(cube, baseObject, segments.slice(0, -1), referenceOf);
   const out: NamedField[] = hops.map((hop) => ({ object: hop.from, field: hop.field, role }));
@@ -466,6 +495,13 @@ function fieldsOfColumnSql(
  * it is policy, and the engine's own field guard never judges policy
  * predicates — they may name fields the caller cannot read.
  *
+ * [#20965] A member that resolves to neither a field nor `'*'` — a declared
+ * member whose `sql` is not a column reference (or is not a string), an
+ * undeclared one whose own spelling is not — is read as a `NamedExpression`
+ * on the base object, which the field gate refuses. `NativeSQLStrategy` emits
+ * such a `sql` into its statement as written, so passing it would let the
+ * statement read fields no verdict was reached for.
+ *
  * A cube whose `sql` is not a bare object name names no attributable field.
  *
  * [#20986] `referenceOf` answers a relationship field's declared target: the
@@ -476,15 +512,23 @@ function namedQueryFields(
   cube: Cube,
   datasetScope: DatasetScope | undefined,
   referenceOf: HopReference | undefined,
-): NamedField[] {
+): NamedRead[] {
   const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
   if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return [];
-  const out: NamedField[] = [];
+  const out: NamedRead[] = [];
   const name = (member: string, kind: 'dimension' | 'measure' | 'any', role: FieldReadRole) => {
     if (typeof member !== 'string' || member === '') return;
     const entry = declaredMemberEntry(cube, member, kind);
-    const sql = entry ? entry.sql : kind === 'measure' ? undefined : member;
-    if (typeof sql === 'string') out.push(...fieldsOfColumnSql(cube, baseObject, sql, role, referenceOf));
+    // An undeclared measure reads nothing: both strategies refuse a measure the
+    // cube does not carry.
+    if (!entry && kind === 'measure') return;
+    const sql = entry ? entry.sql : member;
+    const fields = typeof sql === 'string' ? fieldsOfColumnSql(cube, baseObject, sql, role, referenceOf) : null;
+    if (fields) out.push(...fields);
+    // [#21156] `declared` records WHICH text is the expression: the author's
+    // declared `sql` (`entry` present) or the member the caller named itself
+    // (`entry` absent). The caller-supplied kind is refused in every tier.
+    else out.push({ object: baseObject, member, expression: true, declared: !!entry });
   };
   const filterMembers = (where: unknown): string[] => {
     if (!where || typeof where !== 'object') return [];
@@ -609,20 +653,37 @@ function withDeclaredMeasureFormats(
 /**
  * [#21044] The cube measure a `measures` entry resolves to — through
  * {@link declaredMemberEntry}, the resolver {@link withDeclaredMeasureFormats}
- * reads — and the base-object COLUMN it aggregates: its `sql` when that is a
- * bare identifier, `null` otherwise (`'*'`, or a relationship path whose
- * declaration lives on another object). `undefined` when the entry resolves to
- * no declared measure.
+ * reads — and the COLUMN it aggregates, located on the object that declares
+ * it; `null` when its `sql` is not a column reference (`'*'`, an expression).
+ * `undefined` when the entry resolves to no declared measure.
+ *
+ * - A bare identifier is a column of `baseObject`.
+ * - [#21129] A relationship path (`account.name`) is its last segment, on the
+ *   object the path's last hop reaches: {@link columnObjectOf}, the one hop
+ *   resolver (`hop-object.ts`) — the cube's join, else the relationship
+ *   field's declared target through `referenceOf`, else the alias — which is
+ *   the object both strategies join and read for that path. ⛔ No second walk.
  */
 function declaredMeasureColumn(
   cube: Cube,
   member: string,
-): { type: unknown; column: string | null } | undefined {
+  baseObject: string,
+  referenceOf: HopReference | undefined,
+): { type: unknown; column: MeasureColumn | null } | undefined {
   const entry = declaredMemberEntry(cube, member, 'measure');
   const measure = entry ? cube.measures[entry.key] : undefined;
   if (!measure) return undefined;
   const sql = typeof measure.sql === 'string' ? measure.sql.trim() : '';
-  return { type: measure.type, column: BARE_IDENTIFIER.test(sql) ? sql : null };
+  if (BARE_IDENTIFIER.test(sql)) return { type: measure.type, column: { object: baseObject, column: sql, path: sql } };
+  if (!IDENTIFIER_PATH.test(sql)) return { type: measure.type, column: null };
+  return {
+    type: measure.type,
+    column: {
+      object: columnObjectOf(cube, baseObject, sql, referenceOf),
+      column: sql.slice(sql.lastIndexOf('.') + 1),
+      path: sql,
+    },
+  };
 }
 
 /** The `AggregationFunction` vocabulary — the aggregates `measureResultType` speaks about. */
@@ -638,13 +699,15 @@ const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.o
  * ADR-0021 enrichment (`enrichResultColumns`); the cube door described a
  * `min` / `max` over a temporal column as a number, in the same response that
  * carried the instant. ⛔ No copy of the rule: this asks it with the cube
- * measure's aggregate and the declared type of the base-object column it reads,
- * and writes only what it answers. It answers `undefined` for every pair it has
+ * measure's aggregate and the declared type of the column it reads, and writes
+ * only what it answers. It answers `undefined` for every pair it has
  * nothing to say about — the numeric and boolean classes, the count / sum / avg
  * rows, an expression metric type — and for every pair the aggregate ×
  * field-type table refuses, which the cube door has refused before any strategy
- * ran ({@link assertCubeMeasureFieldTypesAccepted}). A relationship-path column
- * is not described: the declaration this reads is the base object's.
+ * ran ({@link assertCubeMeasureFieldTypesAccepted}). [#21129] The column is
+ * {@link declaredMeasureColumn}'s, the door's own: a relationship-path column
+ * is described by the declaration on the object its last hop reaches, as a
+ * base-object column is by the base object's.
  *
  * Copy-on-write, like the format pass: the strategy owns the object it
  * returned.
@@ -654,6 +717,7 @@ function withMeasureResultTypes(
   query: AnalyticsQuery,
   cube: Cube | undefined,
   declaredTypeOf: ((object: string, field: string) => string | undefined) | undefined,
+  referenceOf: HopReference | undefined,
 ): AnalyticsResult {
   if (!declaredTypeOf || !cube || !result?.fields?.length || !query.measures?.length) return result;
   const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
@@ -662,9 +726,12 @@ function withMeasureResultTypes(
   let fields: AnalyticsResult['fields'] | undefined;
   result.fields.forEach((f, i) => {
     if (!requested.has(f.name)) return;
-    const measure = declaredMeasureColumn(cube, f.name);
+    const measure = declaredMeasureColumn(cube, f.name, object, referenceOf);
     if (!measure?.column || typeof measure.type !== 'string' || !AGGREGATION_FUNCTIONS.has(measure.type)) return;
-    const type = measureResultType(measure.type as AggregationFunction, declaredTypeOf(object, measure.column));
+    const type = measureResultType(
+      measure.type as AggregationFunction,
+      declaredTypeOf(measure.column.object, measure.column.column),
+    );
     if (type === undefined || f.type === type) return;
     fields ??= [...result.fields];
     fields[i] = { ...f, type };
@@ -1090,6 +1157,21 @@ export interface AnalyticsServiceConfig {
    * says once, in its log, that the rest reach the engine unjudged.
    */
   judgeFilter?: ReadScopeFilterJudge;
+  /**
+   * [#21080] Does the data engine hold a middleware registered FOR
+   * `objectName` — `IObjectQLEngine.hasObjectMiddleware` — or `undefined` when
+   * this host cannot say?
+   *
+   * `NativeSQLStrategy` runs no engine operation, so no engine middleware runs
+   * on it, the per-object read gates included. It declines a query that reads
+   * an object this answers `true` OR `undefined` for, and the engine path
+   * serves it with the caller's context. `AnalyticsServicePlugin` wires it from
+   * the data engine, answering `undefined` when that engine lacks the member.
+   *
+   * A host that wires nothing keeps the native path for every object, and is
+   * told once, at construction, when it also wires `executeRawSql`.
+   */
+  hasObjectMiddleware?: (objectName: string) => boolean | undefined;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -1417,7 +1499,23 @@ export class AnalyticsService implements IAnalyticsService {
         }
         return config.judgeFilter(objectName, where, options);
       },
+      // [#21080] The engine's answer to "is a middleware registered for this
+      // object?", passed through untouched, `undefined` included:
+      // `NativeSQLStrategy` declines on `true` and on `undefined`, so the
+      // engine path serves the object and its middlewares run.
+      hasObjectMiddleware: config.hasObjectMiddleware,
     };
+    // [#21080] …and a host that wires raw SQL without that answer is told so,
+    // once: the native path then serves every object, gated ones included.
+    if (config.executeRawSql && typeof config.hasObjectMiddleware !== 'function') {
+      this.logger.warn(
+        '[Analytics] executeRawSql is configured without hasObjectMiddleware, so NativeSQLStrategy cannot ask ' +
+          'the data engine which objects carry a middleware registered for them. It serves every object as raw ' +
+          'SQL, and per-object engine middlewares (read gates among them) do not run on that path. Supply ' +
+          'hasObjectMiddleware from the engine (IObjectQLEngine.hasObjectMiddleware); AnalyticsServicePlugin ' +
+          'wires it from the data engine.',
+      );
+    }
 
     // Build strategy chain (built-in + custom, sorted by priority)
     // InMemoryStrategy is NOT built-in — it lives in @objectstack/driver-memory
@@ -1583,6 +1681,18 @@ export class AnalyticsService implements IAnalyticsService {
     // the objects admitted and the objects scoped are one value, not two calls.
     const objects = this.queryObjects(query, scope);
     await this.assertReadAdmitted(objects, context);
+    // [#21120] …and the stored-metadata-body refusal — a hard product refusal,
+    // not a permission check, so it runs ahead of (and independent of) the
+    // field gate below whether or not a security provider is wired. A query
+    // that names the stored body column of `sys_metadata` / `sys_metadata_history`
+    // as a member would evaluate the stored body (a credential read exit), so it
+    // is refused here on the same seam every other door uses. See
+    // `stored-metadata-body-refusal.ts`.
+    this.assertStoredMetadataBodyNotQueried(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? reads.getDatasetScope(query.cube) : undefined,
+    );
     // [#20917] …and the FIELD-level gate, right behind it and for the same
     // reason: every member the query names is judged here, once, so every
     // strategy — and the SQL echo — inherits the verdict by construction. The
@@ -1779,9 +1889,97 @@ export class AnalyticsService implements IAnalyticsService {
    * members straight into a statement no middleware sees, so the engine's field
    * guard could never reach it. See `field-read-admission.ts`.
    *
+   * [#20965] A member that resolves to neither a field nor `'*'` is refused
+   * here too, `PERMISSION_DENIED` / 403, ahead of the field verdicts on its
+   * object ({@link namedQueryFields}).
+   *
    * A no-op when no provider is wired (no security service) or when the query
    * names no field.
    */
+  /**
+   * [#21156] The member-SHAPE gate, asked at the door for every member the
+   * caller named — BEFORE inference mints it into the cube and before a
+   * strategy compiles it. A member that is neither a column reference (a field,
+   * a relationship path, or `'*'`) nor a member the cube's author declared is
+   * refused `PERMISSION_DENIED` / 403, the SAME refusal the field-level gate
+   * reaches where it judges (#21153), whoever the caller is and whatever the
+   * tier.
+   *
+   * It is the tier-independent complement of {@link assertFieldsReadable}: that
+   * gate is a no-op with no security service and stands down on an object its
+   * reader answers `undefined` for, which is exactly where caller-supplied text
+   * that is not a column reference reached `NativeSQLStrategy`'s statement as
+   * written. See `field-read-admission.ts`.
+   *
+   * ## Judged against the cube BEFORE inference
+   *
+   * `authorCube` is `scope.getCube(name)` as it stood before {@link ensureCube}
+   * inferred one — `undefined` for an ad-hoc query, which {@link
+   * inferCubeFromQuery} would mint every caller member into. A probe cube with
+   * the base object but NO declared members stands in for that case, so a
+   * caller member laundered into an inferred dimension still reads as
+   * caller-supplied. A dataset's own filter is author text and is deliberately
+   * not judged here (no `datasetScope` is passed); #21153's gate judges it
+   * where it applies.
+   *
+   * ## The measure position
+   *
+   * {@link namedQueryFields} skips a measure the cube does not declare (both
+   * strategies refuse one it does not carry), so a caller-named measure that
+   * {@link inferCubeFromQuery} MINTS — its `sql` built from the caller's own
+   * text by {@link inferMeasure} — is not in that list. Judged on the inferred
+   * cube (the judged tier), the minted measure reads as a declared expression
+   * member and #21153 refuses it; in the ungated tiers nothing did, and the
+   * caller's text reached the aggregate position of the statement verbatim.
+   * So the inferred `sql` is judged here too, against the same rule, before a
+   * strategy compiles it: a caller-named measure must reduce — after
+   * {@link inferMeasure}'s suffix strip, the no-suffix default included — to
+   * `count` / `'*'` or to a column reference, or it is refused. Author-declared
+   * measures are skipped (handled where #21153 / the parse #20943 judge them),
+   * and a dotted non-qualifier measure has already been refused by #5918 in
+   * {@link ensureCube} ahead of this.
+   */
+  private assertCallerMembersResolvable(
+    query: AnalyticsQuery,
+    authorCube: Cube | undefined,
+    context: ExecutionContext | undefined,
+  ): void {
+    const name = query.cube;
+    if (!name) return;
+    const probeCube: Cube =
+      authorCube ?? ({ name, title: name, sql: name, measures: {}, dimensions: {} } as Cube);
+    const named = namedQueryFields(query, probeCube, undefined, this.hopReference);
+    assertCallerMembersJudgeable(named, this.logger, context);
+
+    // [#21156] The measure position, which `namedQueryFields` does not carry.
+    const baseObject = typeof probeCube.sql === 'string' ? probeCube.sql.trim() : '';
+    if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
+    for (const measure of query.measures ?? []) {
+      if (typeof measure !== 'string' || measure === '') continue;
+      // Author-declared measures are not this gate's business.
+      if (authorCube && declaredMemberEntry(authorCube, measure, 'measure')) continue;
+      const inferredSql = inferredCallerMeasureSql(measure, name);
+      // `null` — a dotted non-qualifier measure #5918 already refused — and a
+      // column reference (`'*'`, a bare identifier, a relationship path) both
+      // pass; anything else is caller text reaching the aggregate unjudged.
+      if (
+        inferredSql === null ||
+        inferredSql === '*' ||
+        BARE_IDENTIFIER.test(inferredSql) ||
+        IDENTIFIER_PATH.test(inferredSql)
+      ) {
+        continue;
+      }
+      this.logger.warn(
+        `[Analytics] field-level read admission refused caller-named measure "${measure}" on ` +
+          `"${baseObject}" (user ${String((context as { userId?: unknown } | undefined)?.userId ?? 'unknown')}) — ` +
+          `it reduces to a source that is not a column reference, so no field it aggregates can be ` +
+          `judged, in any tier (fail-closed)`,
+      );
+      throw fieldReadUnjudgeableError(baseObject, measure);
+    }
+  }
+
   private async assertFieldsReadable(
     query: AnalyticsQuery,
     cube: Cube | undefined,
@@ -1800,6 +1998,97 @@ export class AnalyticsService implements IAnalyticsService {
       this.logger,
       this.queryableFieldsProvider,
     );
+  }
+
+  /**
+   * [#21120] Refuse a query that names the stored body column of
+   * `sys_metadata` / `sys_metadata_history` as a dimension, measure, filter or
+   * sort key. The members are resolved the SAME way the strategies and the
+   * field gate resolve them ({@link namedQueryFields}), so the refusal reaches
+   * the auto-inferred `sys_metadata` cube and an inline dataset that names the
+   * body field alike. See `stored-metadata-body-refusal.ts` for why the body
+   * column is refused rather than projected on this door.
+   *
+   * Unconditional — not gated on a security provider — because the body is a
+   * credential read exit on every deployment, and evaluating it is a
+   * disclosure regardless of who the caller is.
+   */
+  private assertStoredMetadataBodyNotQueried(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    datasetScope: DatasetScope | undefined,
+  ): void {
+    if (!cube) return;
+    const refusal = storedMetadataBodyAnalyticsRefusal(
+      namedQueryFields(query, cube, datasetScope, this.hopReference),
+    );
+    if (refusal) throw refusal;
+  }
+
+  /**
+   * [#21177] The dimension/measure `field` text of a dataset handed to
+   * {@link queryDataset} is judged here, and main did not judge it:
+   * {@link answerDataset} compiles the dataset into a cube whose members read as
+   * DECLARED, so a dimension/measure whose `field` is a raw expression resolves to
+   * a declared cube member whose `sql` is that expression — and #21156's
+   * {@link assertCallerMembersResolvable} leaves a DECLARED expression member to
+   * the field-level gate (#20965), which stands down with no security service and
+   * on an object its reader answers `undefined` for. In those tiers the
+   * expression reached `NativeSQLStrategy`'s statement as written.
+   *
+   * ## Every branch that supplies the dataset
+   *
+   * The service cannot tell where the dataset came from, so the judgement does not
+   * depend on it. The `/analytics/dataset/query` route hands this door an INLINE
+   * dataset (`body.dataset`, the caller's own text) and a SAVED one alike — it
+   * loads `body.datasetName` from metadata and calls the same
+   * {@link queryDataset} — and the build probe calls it with a saved dataset too.
+   * One uniform refusal here is the safer reading: a saved dataset whose `field` is
+   * an expression is refused exactly as an inline one is. No shipped dataset
+   * carries a non-column `field`. Refusing such a `field` when it is AUTHORED is
+   * the job of the dataset schema's own retirement of expression fields, not of
+   * this door.
+   *
+   * ## The refusal
+   *
+   * A `field` that is not a column reference names no field the admission can
+   * attribute, so it is refused through main's {@link assertCallerMembersJudgeable}
+   * / {@link fieldReadUnjudgeableError} — `PERMISSION_DENIED` / 403, the SAME
+   * refusal #21156 reaches, no new error code — for EVERY caller (admin included)
+   * and whether or not a security provider is wired, BEFORE the dataset is
+   * compiled, so no such expression reaches a strategy (the draft-preview branch
+   * included). It names the dimension/measure, never the `field` expression
+   * behind it.
+   *
+   * ## Boundary
+   *
+   * Only the dataset's OWN `field` text is judged here. The dataset's `filter`,
+   * the selection's `runtimeFilter` and the query's members are lowered into the
+   * compiled query's `where` / member list by `DatasetExecutor` and are already
+   * judged by #21156 on the query path (`callCtx` →
+   * {@link assertCallerMembersResolvable}), so this gate does not re-judge them. A
+   * dataset registered through the configuration door ({@link registerDataset})
+   * and queried by cube name runs through {@link query}, not here; its members
+   * stay with the field gate / the parse (#20943), exactly as #21156 leaves them.
+   *
+   * A derived measure references other measures BY NAME (the spec enforces that),
+   * so it carries no `field` to judge.
+   */
+  private assertDatasetFieldsJudgeable(dataset: Dataset, context: ExecutionContext | undefined): void {
+    const object = typeof dataset.object === 'string' ? dataset.object : '';
+    const caller: NamedRead[] = [];
+    for (const d of dataset.dimensions ?? []) {
+      if (typeof d.field === 'string' && d.field !== '' && !isColumnReferenceSql(d.field)) {
+        caller.push({ object, member: d.name, expression: true, declared: false });
+      }
+    }
+    for (const m of dataset.measures ?? []) {
+      if ((m as { derived?: unknown }).derived) continue;
+      if (typeof m.field === 'string' && m.field !== '' && !isColumnReferenceSql(m.field)) {
+        caller.push({ object, member: m.name, expression: true, declared: false });
+      }
+    }
+    assertCallerMembersJudgeable(caller, this.logger, context);
   }
 
   /**
@@ -1915,7 +2204,14 @@ export class AnalyticsService implements IAnalyticsService {
       scope.getCube(queryInput.cube),
     );
 
+    // [#21156] The pre-inference cube: `undefined` here means the ad-hoc path
+    // will mint one, so every member the caller named must stand on its own.
+    const authorCube = scope.getCube(query.cube!);
     this.ensureCube(query, scope);
+    // [#21156] Refuse a caller-named member that is not a column reference and
+    // names no declared member — in every tier, before a strategy compiles it.
+    // After `ensureCube` so a non-existent cube/object still answers 404 first.
+    this.assertCallerMembersResolvable(query, authorCube, context);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
@@ -1945,6 +2241,7 @@ export class AnalyticsService implements IAnalyticsService {
             query,
             cube,
             this.sourceFieldMeta && ((object, field) => this.sourceFieldMeta?.(object, field)?.type),
+            this.hopReference,
           ),
         );
       } catch (e) {
@@ -2112,6 +2409,12 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
+    // [#21177] The dataset's own dimension/measure `field` text — inline or saved,
+    // whichever branch supplied it — is judged here: a `field` that is not a
+    // column reference is refused ahead of compile and the draft-preview branch,
+    // so no such expression reaches a strategy (`PERMISSION_DENIED` / 403, the one
+    // judge, every tier). See {@link assertDatasetFieldsJudgeable}.
+    this.assertDatasetFieldsJudgeable(dataset, context);
     const compiled = this.compile(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
 
@@ -2143,6 +2446,14 @@ export class AnalyticsService implements IAnalyticsService {
         // fields the published ones do.
         const previewService = {
           query: async (q: AnalyticsQuery) => {
+            // [#21120] The body-column refusal rides this preview path too —
+            // a drafted seed row carries the same stored body the published
+            // ones do.
+            this.assertStoredMetadataBodyNotQueried(
+              q,
+              compiled.cube,
+              { filter: compiled.filter, measureFilters: compiled.measureFilters },
+            );
             await this.assertFieldsReadable(
               q,
               compiled.cube,
@@ -2701,7 +3012,12 @@ export class AnalyticsService implements IAnalyticsService {
       this.resolveQueryTokens(queryInput, tokenCtx),
       scope.getCube(queryInput.cube),
     );
+    // [#21156] Same member-shape gate as `query()`: the dry-run door must not
+    // compile a caller-named non-column member into the statement it hands back
+    // either. Pre-inference cube captured before `ensureCube`.
+    const authorCube = scope.getCube(query.cube!);
     this.ensureCube(query, scope);
+    this.assertCallerMembersResolvable(query, authorCube, context);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
@@ -2899,7 +3215,10 @@ export class AnalyticsService implements IAnalyticsService {
    * - The measure and column a member resolves to are
    *   {@link declaredMeasureColumn}'s — {@link declaredMemberEntry}, the
    *   resolver {@link withDeclaredMeasureFormats} reads — and nothing else
-   *   resolves a member to a field here.
+   *   resolves a member to a field here. [#21129] A relationship-path column
+   *   is located on the object its last hop reaches by the one hop resolver,
+   *   with {@link hopReference}: the answer the field gate admitted the path
+   *   with and the strategies join it by.
    * - The column's declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s,
    *   the declaration the #20807 / #20912 door reads beside it.
    *
@@ -2916,8 +3235,7 @@ export class AnalyticsService implements IAnalyticsService {
     assertCubeMeasureFieldTypesAccepted(
       query,
       cube.name,
-      object,
-      (member) => declaredMeasureColumn(cube, member),
+      (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
       (o, field) => fieldMeta(o, field)?.type,
     );
   }
@@ -2927,7 +3245,7 @@ export class AnalyticsService implements IAnalyticsService {
    * structured-JSON field — `INVALID_FIELD` / 400, naming the member the caller
    * wrote — before either strategy builds anything. The rule, the
    * measurements and the envelope are {@link assertNoStructuredJsonDimension}'s
-   * (`structured-json-dimension-door.ts`); this method supplies the two
+   * (`structured-json-dimension-door.ts`); this method supplies the three
    * answers only the service has.
    *
    * - The dimension `sql` a member resolves to is {@link declaredMemberEntry}'s
@@ -2936,6 +3254,10 @@ export class AnalyticsService implements IAnalyticsService {
    *   and the member itself when the cube declares none — the column the
    *   strategies group by in that case.
    * - Its declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s.
+   * - [#21232] A relationship-path column is located on the object its last
+   *   hop reaches by the one hop resolver, with {@link hopReference}: the
+   *   answer the field gate admitted the path with and the strategies join it
+   *   by.
    *
    * Runs after the dimension source-field gate on every `ensureCube` path, so a
    * member naming a column the object does not have is answered as that first.
@@ -2961,6 +3283,7 @@ export class AnalyticsService implements IAnalyticsService {
         if (typeof meta?.type !== 'string' || meta.type === '') return undefined;
         return { type: meta.type, multiple: meta.multiple === true };
       },
+      this.hopReference,
     );
   }
 
@@ -3677,6 +4000,25 @@ export function inferMeasure(key: string): { label: string; type: 'count' | 'sum
     }
   }
   return { label: key, type: 'sum', sql: key };
+}
+
+/**
+ * [#21156] The `sql` {@link inferMeasure} would mint for a caller-named measure
+ * — the text that reaches the aggregate position — or `null` for a dotted
+ * non-qualifier measure, which {@link mintableMeasureKey} / #5918 refuses in
+ * {@link AnalyticsService.ensureCube} ahead of the member-shape gate. Mirrors
+ * `mintableMeasureKey`'s qualifier strip WITHOUT its throw (that refusal has
+ * already happened), then reads {@link inferMeasure}'s source. The gate judges
+ * whether the result is a column reference.
+ */
+function inferredCallerMeasureSql(measure: string, cubeName: string): string | null {
+  let key = measure;
+  const dot = measure.indexOf('.');
+  if (dot >= 0) {
+    if (measure.slice(0, dot) === cubeName) key = measure.slice(dot + 1);
+    else return null;
+  }
+  return inferMeasure(key).sql;
 }
 
 /**

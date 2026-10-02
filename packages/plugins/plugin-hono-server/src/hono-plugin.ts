@@ -680,7 +680,7 @@ export class HonoServerPlugin implements Plugin {
             if (!hasPlugin(REST_API_PLUGIN) && !hasPlugin(RUNTIME_DISPATCHER_PLUGIN)) {
                 ctx.logger.warn(
                     'No data or discovery API is mounted on this server. HonoServerPlugin is a '
-                    + 'transport adapter and serves neither (#4073). Mount `createRestApiPlugin` '
+                    + 'transport adapter and serves neither. Mount `createRestApiPlugin` '
                     + 'from @objectstack/rest for full CRUD behind the gate stack, or '
                     + '`createDispatcherPlugin` from @objectstack/runtime.',
                 );

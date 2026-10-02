@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-storage",
-  "version": "17.5.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "Storage Service for ObjectStack — implements IStorageService with local filesystem and S3 adapter skeleton",
   "type": "module",
@@ -47,7 +47,7 @@
     "@objectstack/objectql": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@types/node": "^26.6.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

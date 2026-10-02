@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-mcp",
-  "version": "17.5.0",
+  "version": "17.6.0",
   "license": "Apache-2.0",
   "description": "Model Context Protocol (MCP) connector for ObjectStack — a generic adapter that turns any MCP server's tools into a connector's actions on the automation engine's connector registry (ADR-0024).",
   "main": "dist/index.js",
@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },

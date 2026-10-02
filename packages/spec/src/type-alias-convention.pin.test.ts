@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 779 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 778 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1480,8 +1480,8 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // bare-string arm TRANSFORMS to the canonical `{ dialect, source }` envelope,
 // so input ≠ infer by construction — the alias stays `z.input` (the authoring
 // face), per the convention's own rule for Expression-carrying shapes.
-// The object-* block family (#7751; `ObjectFormPropsSchema` and
-// `ObjectMasterDetailFormPropsSchema` are the members still pinned) —
+// The object-* block family (#7751; `ObjectFormPropsSchema` is the member
+// still pinned) —
 // deliberately default-free in its first, warning-tier step ("the author said
 // nothing" must stay distinguishable from "the author asked for the renderer's
 // fallback"), so input === infer holds. A default added to any of them goes
@@ -1495,13 +1495,15 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // ui#6206-B filter orthography reaching the four `object-*` `filter` doors:
 // each now carries `z.array(ViewFilterRuleSchema)` (input ≠ infer), so the
 // three `XParsed` aliases are declared and the three pins deleted.
+// `ObjectMasterDetailFormPropsSchema` left the same way on #20928: its
+// `details[].columns` now carries `InlineGridColumnSchema` (input ≠ infer), so
+// `ObjectMasterDetailFormPropsParsed` is declared and its pin deleted.
 // #20371 — `element:definition-list` (`ElementDefinitionListPropsSchema`),
 // default-free on the same principle: the renderer's one-column and
 // "No details" fallbacks stay the renderer's facts. Its five sibling rows from
 // that card carry an expression or a filter rule and declare `XParsed` instead.
 export type Iso_ui_component__ElementDefinitionListPropsSchema = Assert<Eq< z.input< typeof M170.ElementDefinitionListPropsSchema >, z.infer< typeof M170.ElementDefinitionListPropsSchema > >>;
 export type Iso_ui_component__ObjectFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
-export type Iso_ui_component__ObjectMasterDetailFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
 export type Iso_ui_component__PageContainerProps = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
 export type Iso_ui_component__RecordAlertActionSchema = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
 export type Iso_ui_component__RecordHighlightsField = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
@@ -1671,7 +1673,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 779 isomorphic pins', () => {
+  it('still declares all 778 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2405,7 +2407,13 @@ describe('ADR-0122 type-alias convention', () => {
     // or transform in its tree, so it is pinned here
     // (Iso_api_discovery__AuthFamiliesSchema) rather than given an
     // `AuthFamiliesParsed` synonym. +1 added.
-    expect(pins).toHaveLength(779);
+    //
+    // 779 -> 778 is #20928: `object-master-detail-form`'s `details` entries
+    // became a strict shape whose `columns` carry `InlineGridColumnSchema`,
+    // whose own input ≠ infer, so `ObjectMasterDetailFormPropsSchema` left the
+    // isomorphic family for an `ObjectMasterDetailFormPropsParsed` alias, the
+    // route the object-* family note above prescribes. -1 removed.
+    expect(pins).toHaveLength(778);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

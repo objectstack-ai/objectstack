@@ -173,7 +173,7 @@ export const HttpDelivery = ObjectSchema.create({
             internal: true,
             description:
                 'Authored request headers for this delivery — the ordinary place a credential goes, '
-                + 'so never returned on the generic data path (#8118). The dispatcher recovers it '
+                + 'so never returned on the generic data path. The dispatcher recovers it '
                 + "through the engine's privileged accessor on the claim path.",
         }),
         // [#7722] The SIGNATURE, not the key that produced it. This column used
@@ -234,7 +234,7 @@ export const HttpDelivery = ObjectSchema.create({
             defaultValue: 0,
             description:
                 'Number of attempts made so far. 0 on a terminal row means the delivery was PARKED — '
-                + 'never sent, and not redeliverable (#8069); see `error` for the cause.',
+                + 'never sent, and not redeliverable, because it carries no signature; see `error` for the cause.',
         }),
 
         claimed_by: Field.text({ label: 'Claimed By', required: false, maxLength: 128 }),
@@ -257,7 +257,7 @@ export const HttpDelivery = ObjectSchema.create({
             required: false,
             description:
                 'Why this row is not a delivered callout: the last transport error, or — on a row with '
-                + '0 attempts — why the delivery could never be prepared (#8069).',
+                + '0 attempts — why the delivery could never be prepared.',
         }),
 
         // Builtin audit columns are native TIMESTAMP columns (Postgres/MySQL),

@@ -318,7 +318,13 @@ const MODULES = {
     // 44 → 43 (#20102): the saved-report `/reports` family was retired whole,
     // and one of its arms spelled a literal string `error`. Deleted, not
     // converted — banked per the ratchet's own rule.
-    stringError: 43,
+    //
+    // 43 → 39 (#21180): the anonymous public-form lookup picker route
+    // (`GET /forms/:slug/lookup/:field`) was retired whole by ruling E on
+    // #21079 — its four `{ code, error }` answers (400 `INVALID_REQUEST`, 404
+    // `FORM_NOT_FOUND`, 403 `LOOKUP_NOT_PUBLIC`, 500 `LOOKUP_TARGET_MISSING`)
+    // left with the handler. Deleted, not converted; banked per the same rule.
+    stringError: 39,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -353,7 +359,10 @@ const MODULES = {
     // with the saved-report stack — its eleven `{ code, error }` sites (the
     // `*_FAILED` 500s and `SCHEDULE_DELETE_FAILED`) left with the eight routes.
     // Deleted rather than converted, so no wire answer that still exists moved.
-    siblingCode: 58,
+    //
+    // 58 → 54 (#21180): the same four picker-route answers as `stringError`
+    // above, counted again here — the route was deleted, not converted.
+    siblingCode: 54,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from

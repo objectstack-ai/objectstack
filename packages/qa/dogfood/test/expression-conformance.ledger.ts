@@ -141,7 +141,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'sharing-condition',
-    summary: 'sharing-rule `condition` → criteria_json (ADR-0058 D3, closes #1887)',
+    summary: 'sharing-rule `condition` → criteria_json (ADR-0058 D3: compiled from the authored CEL, a faithful lowering rather than a divergent hand-written filter)',
     dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'plugin-sharing/bootstrap-declared-sharing-rules.ts celToFilter → compileCelToFilter; matched by sharing-rule-service findMatchingRecords',
     covers: ['security/sharing.zod.ts:CriteriaSharingRuleSchema.condition'],
@@ -290,7 +290,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // from the schema.
     dialect: 'settings-visibility', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement:
-      'service-settings `evaluateVisibility` (visibility-eval.ts), called from `SettingsService.validatePatch` — a closed grammar: single root `data`, one-level member access, `|| && !`, `=== !== == != >= <= > <`, parens, and string/number/bool/null literals, optionally `${…}`-wrapped, as a bare string or a `{dialect, source}` envelope. Fail-closed since #7310: a predicate outside the grammar REFUSES the save (SettingsValidationError, HTTP 400) instead of skipping the specifier — `visible` gates every other check on the key (`required`, `options`, `pattern`, `valueDomain`, the value window), so skipping it switched all of them off at once. The console evaluates the same string client-side through `new Function(...)`. Since #7327 the spec DECLARES that same grammar (`SettingsVisibilityInputSchema`), so it is refused at publish/parse too',
+      'service-settings `evaluateVisibility` (visibility-eval.ts), called from `SettingsService.validatePatch` — a closed grammar: single root `data`, one-level member access, `|| && !`, `=== !== == != >= <= > <`, parens, and string/number/bool/null literals, optionally `${…}`-wrapped, as a bare string or a `{dialect, source}` envelope. Fail-closed: a predicate outside the grammar REFUSES the save (SettingsValidationError, HTTP 400) instead of skipping the specifier — `visible` gates every other check on the key (`required`, `options`, `pattern`, `valueDomain`, the value window), so skipping it switched all of them off at once. The console evaluates the same string client-side through `new Function(...)`. The spec DECLARES that same grammar (`SettingsVisibilityInputSchema`) rather than CEL, so it is refused at publish/parse too',
     covers: ['system/settings-manifest.zod.ts:SpecifierSchema.visible', 'system/settings-manifest.zod.ts:SettingsManifestSchema.visible'],
     // Proof is the producer/consumer pin rather than a runtime fixture: the
     // failure mode this surface actually has is the two sides disagreeing about
@@ -300,7 +300,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-action-param-option-visible',
-    summary: "action param option-list per-option gating (params[].options[].visibleWhen, #5016)",
+    summary: "action param option-list per-option gating (params[].options[].visibleWhen, the same per-option key a field's option list declares)",
     // Same key, same evaluator and same binding environment as the per-option
     // `visibleWhen` on a FIELD's option list — which is why it is `cel`,
     // `interpret` and `fail-soft-log` like `cel-field-rule` rather than
@@ -316,7 +316,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-bulk-action-visible',
-    summary: "selection-bar bulk action per-record eligibility (bulkActionDefs[].visible, objectui#3067)",
+    summary: "selection-bar bulk action per-record eligibility (bulkActionDefs[].visible)",
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'console (objectui) partitionBulkRows (plugin-grid/bulkEligibility.ts) → evalRowPredicate → @objectstack/formula celEngine (interpret), evaluated ONCE PER SELECTED RECORD with that record bound: the button is offered when at least one selected record passes, and the run covers only those — the rest are reported as skipped in the dialog. Faults hide the record (fallback:false, warnOnError) rather than acting on one the predicate was written to exclude; UI gating only, write enforcement stays with permissions/hooks',
     // Reached the ledger in #4457, not #3067: the key existed and was evaluated
@@ -340,14 +340,14 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-row-crud-visible',
-    summary: 'built-in row Edit/Delete per-record visibility (RowCrudActionOverride.visibleWhen, objectui#2614)',
+    summary: 'built-in row Edit/Delete per-record visibility (RowCrudActionOverride.visibleWhen)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'console (objectui) RowActionMenu BuiltinRowActionItem + data-table DataTableBuiltinRowActionItem → useRowPredicate → @objectstack/formula celEngine (interpret); FALSE/fault hides the row button (UI gating only — write enforcement stays with permissions/hooks)',
     covers: ['data/object.zod.ts:RowCrudActionOverrideSchema.visibleWhen'],
   },
   {
     id: 'cel-row-crud-disabled',
-    summary: 'built-in row Edit/Delete per-record disabling (userActions.{edit,delete}.disabledWhen, objectui#2614)',
+    summary: 'built-in row Edit/Delete per-record disabling (userActions.{edit,delete}.disabledWhen)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: 'console (objectui) RowActionMenu BuiltinRowActionItem + data-table DataTableBuiltinRowActionItem → useRowPredicate → @objectstack/formula celEngine (interpret); TRUE renders the button disabled, a fault leaves it enabled (server hooks are the real boundary)',
     covers: ['data/object.zod.ts:RowCrudActionOverrideSchema.disabledWhen'],

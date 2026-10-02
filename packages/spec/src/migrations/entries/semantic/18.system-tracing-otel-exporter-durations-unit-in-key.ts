@@ -69,12 +69,13 @@ export const entry: SemanticMigration = {
     + 'dark control of 0; inside packages/spec the '
     + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
     + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-    + 'pinned objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names none of it: all 37 exports of '
-    + 'tracing.zod.ts and each of the four key names occur 0 times across the 9800 files '
+    + 'pinned objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — names none of it: all 37 exports of '
+    + 'tracing.zod.ts and each of the four key names occur 0 times across the 9912 files '
     + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
     + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-    + 'two lit controls on that same corpus and sha: 15352 hits for the bare token objectstack, '
-    + 'and 6024 for the package specifier @objectstack/spec (at db11afd49: 0 across 9546, Span 486, '
+    + 'two lit controls on that same corpus and sha: 15691 hits for the bare token objectstack, '
+    + 'and 6206 for the package specifier @objectstack/spec (at e420df310: 0 across 9800, Span 486, '
+    + '15352 and 6024; at db11afd49: 0 across 9546, Span 486, '
     + '14704 and 5545; at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
     + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
   acceptanceCriteria:

@@ -36,7 +36,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `app.zod.ts` | 19 |
 | `bulk-action.zod.ts` | 4 |
 | `chart.zod.ts` | 8 |
-| `component.zod.ts` | 56 |
+| `component.zod.ts` | 58 |
 | `dashboard.zod.ts` | 11 |
 | `dataset.zod.ts` | 4 |
 | `i18n.zod.ts` | 1 |
@@ -44,7 +44,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `report.zod.ts` | 3 |
 | `responsive.zod.ts` | 1 |
 | `sharing.zod.ts` | 1 |
-| `view.zod.ts` | 62 |
+| `view.zod.ts` | 60 |
 | `widget.zod.ts` | 1 |
 | **total** | **188** |
 
@@ -60,7 +60,7 @@ over it is here.
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 19 |
-| `view.zod.ts` | 4 | 62 |
+| `view.zod.ts` | 4 | 60 |
 | `widget.zod.ts` | 1 | 1 |
 | **total** | **7** | **188** |
 

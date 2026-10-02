@@ -12,13 +12,34 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
  */
 function makeProtocol(opts: { pkgSvc?: unknown } = {}) {
   const installed: Array<{ manifest: { id: string } }> = [];
+  // Namespace owners, as `SchemaRegistry.registerNamespace` keeps them: the
+  // real `installPackage` registers `manifest.namespace` → `manifest.id`.
+  const namespaces = new Map<string, Set<string>>();
   const registry = {
-    installPackage: vi.fn((manifest: { id: string }) => {
+    installPackage: vi.fn((manifest: { id: string; namespace?: string }) => {
       const pkg = { manifest, status: 'installed', enabled: true };
       installed.push(pkg);
+      if (manifest.namespace) {
+        const owners = namespaces.get(manifest.namespace) ?? new Set<string>();
+        owners.add(manifest.id);
+        namespaces.set(manifest.namespace, owners);
+      }
       return pkg;
     }),
     getPackage: vi.fn((id: string) => installed.find((p) => p.manifest.id === id)),
+    // [#21243] The verbs a failed persist's undo calls, with the real
+    // `SchemaRegistry`'s behaviour (`packages/objectql/src/registry.ts`).
+    unregisterItem: vi.fn((type: string, name: string) => {
+      if (type !== 'package') return;
+      const at = installed.findIndex((p) => p.manifest.id === name);
+      if (at >= 0) installed.splice(at, 1);
+    }),
+    getNamespaceOwners: vi.fn((namespace: string) => [...(namespaces.get(namespace) ?? [])]),
+    unregisterNamespace: vi.fn((namespace: string, packageId: string) => {
+      const owners = namespaces.get(namespace);
+      owners?.delete(packageId);
+      if (owners?.size === 0) namespaces.delete(namespace);
+    }),
   };
   const engine = { registry } as never;
   const services = new Map<string, unknown>();
@@ -87,21 +108,39 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
     expect(res.package.manifest.id).toBe('app.nopkg');
   });
 
-  it('does not throw and keeps the registry write when persistence rejects', async () => {
+  // [#21243] Inverted from "does not throw and keeps the registry write when
+  // persistence rejects". That answer was success over a write that never
+  // landed — on MySQL every install answered 201 and was gone after a restart.
+  // Triage's ruling (both halves): the failure is ANSWERED, and the registry
+  // write is UNDONE, so the process never holds a package the store does not.
+  it('rejects with a 500 and undoes the registry write when persistence rejects', async () => {
+    const dbDown = new Error('db down');
     const publish = vi.fn(async () => {
-      throw new Error('db down');
+      throw dbDown;
     });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { protocol, registry } = makeProtocol({ pkgSvc: { publish } });
     const manifest = { id: 'app.err', name: 'Err', version: '1.0.0', type: 'application' };
 
-    const res = (await protocol.installPackage({ manifest } as never)) as {
-      package: { manifest: { id: string } };
-    };
+    let thrown: unknown;
+    try {
+      await protocol.installPackage({ manifest } as never);
+    } catch (e) {
+      thrown = e;
+    }
 
+    // ① Answered: a 500 the door serves, with the store's own error kept on
+    // `cause` for the operator and out of the caller's sentence.
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as { status?: unknown }).status).toBe(500);
+    expect((thrown as { cause?: unknown }).cause).toBe(dbDown);
+    expect((thrown as Error).message).not.toContain('db down');
+    // ② Undone: the install DID write the registry, and that write is withdrawn
+    // — row and derived namespace (`app.err` → `err`) both.
     expect(registry.installPackage).toHaveBeenCalledOnce();
-    expect(res.package.manifest.id).toBe('app.err');
-    warn.mockRestore();
+    expect(publish).toHaveBeenCalledOnce();
+    expect(registry.unregisterItem).toHaveBeenCalledWith('package', 'app.err');
+    expect(registry.getPackage('app.err')).toBeUndefined();
+    expect(registry.getNamespaceOwners('err')).toEqual([]);
   });
 
   it('persists a versionless manifest with a defaulted version (#2540: base packages must survive restart)', async () => {

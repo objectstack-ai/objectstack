@@ -120,7 +120,7 @@ describe('connector sync retirement — the tombstones', () => {
   it('the `syncConfig` prescription is honest about the binding it points at: pulled when a job drives it, scheduled by nothing yet', () => {
     // The pull executor reads the target-side binding (its ledger rows are
     // `live`), but nothing schedules a pull until the `job` stage lands (the
-    // container keeps `authorWarn`), so a prescription that sent the author
+    // binding's own description says so), so a prescription that sent the author
     // there as if it ran on its own would be the defect this retirement
     // removes, moved one type over.
     const message = issueAt(ConnectorSchema.safeParse({ ...WELL_FORMED, syncConfig: {} }), 'syncConfig')!.message;

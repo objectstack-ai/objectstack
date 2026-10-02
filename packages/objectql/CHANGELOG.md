@@ -1,5 +1,973 @@
 # @objectstack/objectql
 
+## 17.6.0
+
+### Minor Changes
+
+- 88b484e: feat(objectql): the runtime resolves a field's `picklist` onto its served options, validates writes against the resolved list, and merges `picklistExtensions` additively
+  
+  Clause-②: no
+  
+  - **Load.** `defineStack({ picklists })` and `defineStack({ picklistExtensions })` now register, from a manifest and from a nested plugin, through the same registration seam as every other collection. The compiled-artifact door registers `picklists` as `picklist` items, so `GET /meta/picklist` serves them on an artifact boot.
+  - **Merge.** A picklist's options are its own, followed by the options every `picklistExtensions` entry adds. A value the list already carries is refused with `422 INVALID_METADATA`, which names both declarations, whichever of the two registered first. The later declaration never replaces the earlier one. A package that registers again replaces its own extension. Uninstalling a package removes the values it added.
+  - **Serve.** A field with `picklist: 'NAME'` is served with the resolved options written onto it and `picklist` kept (`PicklistServedFieldSchema`), on every object read, including objects stored in `sys_metadata`. The list's translations (`picklists.NAME.options.VALUE`) relabel those options per request locale. An option marked `default: true` in the list fills an omitted field on insert, as an inline option does, and the import template reads it the same way.
+  - **Unknown name.** A packaged field that names a picklist no loaded package declares fails the boot at `kernel:ready` with `INVALID_METADATA`, and so does a `picklistExtensions` entry that extends such a list. The error names every such field or extension and the package that declared it. After boot, an artifact registered through the `manifest` service is checked before any of it registers. A field whose list does not resolve is served with no options and accepts no value.
+  - **Write validation.** The write door judges a picklist-bound field against the resolved options, and its refusal names the picklist. The wire code stays `invalid_option`. The validation message catalog gains three message keys for this (`invalid_option_picklist`, `invalid_option_value_picklist`, `invalid_option_picklist_unresolved`) in en, zh-CN, ja-JP and es-ES. They change the message text only, never the wire.
+  - **Writing the served body back.** The served body carries `picklist` and `options` together. Writing it back through the metadata door is still refused, with the prescription to drop `options`, as `FieldSchema` declares. Nothing strips it on the write side.
+  - **Ledger.** `field.picklist`, the `picklist` kind's rows and `translation.picklists` are `live`. `field.picklist` no longer carries `authorWarn`, so `os lint` / `os validate` stop warning an author who writes it.
+- 05a7547: fix(core,objectql)!: a `datetime` value names a year from 1000 to 9999 at both engine doors, so one before year 1000 is refused as a written value and as a filter comparand; a `date` keeps 0001 to 9999
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE at the two engine doors: a datetime whose UTC year falls in 0001..0999, refused VALIDATION_FAILED (field code invalid_date) as a written value and INVALID_FILTER / 400 as a comparand. No authorable key, spelling, export or stored metadata shape moves: FieldSchema's datetime type, every object definition and every query shape parse as before, and @objectstack/core and @objectstack/objectql export nothing new and nothing less (isOutsideTemporalYearRange keeps its signature). A datetime already stored before year 1000 is record data, not metadata: nothing converts it, no conversion is registered, and it is never shifted; the body says how an operator finds such rows and that a write carrying one is refused, which is guidance about data, not a rewrite of any consumer's code or metadata. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a value range and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the engine accepts as a `datetime`. The one range function both doors ask, `isOutsideTemporalYearRange` in `@objectstack/core`, now takes a lower bound per kind: a `datetime` starts at year 1000 (its UTC year), a `date` stays at 0001, and both still end at 9999. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A `datetime` whose UTC year falls in 0001..0999, which both doors accepted before:
+  
+  - **The write door** (the record validator), in every spelling it took: an ISO instant string, a bare `YYYY-MM-DD` (midnight UTC), a zone-naive `YYYY-MM-DD HH:MM`, and a `Date`. It answers `VALIDATION_FAILED` with the field's `invalid_date` code, on `engine.insert`, `engine.update` (one row or many) and the dry-run `engine.validate`, so on `POST /api/v1/data/:object`, `PATCH /api/v1/data/:object/:id` and each row of `POST /api/v1/data/:object/import` too. A number was already refused there, because a `datetime` is stored as text.
+  - **The comparand door** (the temporal-comparand door), in every spelling: an ISO string, a `Date` and epoch milliseconds as a number. It answers `INVALID_FILTER` / 400 at `where`, at a per-aggregation `filter` and at `having`, on the engine and on `POST /api/v1/data/:object/query`. The analytics native-SQL strategy asks the same predicate, so it declines such a comparand and the query reaches this door.
+  - The year is the instant's UTC year: `1000-01-01T00:00:00+08:00` is year 999 in UTC and is refused, and `0999-12-31T23:00:00-02:00` is year 1000 in UTC and is read.
+  
+  **What an author sees.** The comparand refusal names the field, the value, its position and the range: "an instant whose UTC year falls outside the years 1000 to 9999, the years a datetime value may name". It then says why the floor sits at 1000, instead of the misorder words that a year past 9999 still gets: MySQL documents its `DATETIME` from year 1000 only, and reads one stored in the years 0001 to 0099 back a century late. A comparand in those years that was already refused for its spelling or its day (a non-ISO spelling, a day that does not exist) is now named by its year first, as one past 9999 already was. The write refusal is the existing `invalid_date` sentence for a `datetime` field.
+  
+  **Why.** MySQL documents `DATETIME` from year 1000, and it reads a stored `DATETIME` in 0001..0099 back a century late through its client's instant parser (`0009-03-04 10:00` comes back as `2004-09-03T10:00Z`), which ADR-0053 D-F2 keeps. The range is the contract on every backend, so SQLite, PostgreSQL and the in-memory driver, which held these years, refuse them too. No writer or query of a `datetime` before year 1000 was found.
+  
+  **A `datetime` already stored before year 1000.** Nothing rewrites it, and nothing shifts it into the range. It reads back as before, and on MySQL a year in 0001..0099 still presents a century late. To find such rows, filter the field with `$lt` on `1000-01-01T00:00:00.000Z`, the floor's first instant, which both doors admit; the comparison runs on the stored value, so it finds them on MySQL as well. An update that leaves the field out is accepted. A write that carries a year below 1000 is refused, so the field can be written again with an instant from year 1000 on, or with `null`, and the author decides which.
+  
+  **Unchanged.** A `date` keeps 0001..9999, padded to four digits as before. A `time` column still reads the time of day of an instant in 0001..0999, and a `time` comparand refused for another reason keeps that reason's words. Every year from 1000 to 9999 on a `datetime`, and every refusal outside 0001..9999 on either kind, answers as before, apart from the range the words name.
+- 97005ae: fix(objectql)!: a plain object with no `$` operator where a scalar field's value belongs is refused with `INVALID_FILTER` / 400 at `where`, a per-aggregation `filter` and `having`, on every driver
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of filter STRUCTURE at the engine's query door: a plain object with no `$` operator key under a column whose declared type holds scalar values. No authorable key, spelling, export or stored shape moves (the engine's door modules are internal; `@objectstack/objectql` exports nothing new and nothing less), and no stored row is read or rewritten. What is refused could match no record on any backend, and which value or operator the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a filter's structure (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a filter may put beneath a scalar field. A plain object with no `$`-operator key — `{ "amount": { "a": 1 } }`, `{}` included — where a value of a field that holds scalar values belongs is refused by the engine before any driver is asked, where the in-memory driver answered it with no records (every record under `$not`) and the SQL driver refused it in its own words. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  The judged fields are the spec's scalar-valued classes: every type in `SCALAR_FILTER_HEAD_TYPES` (text-like, numeric, boolean, date, datetime, time, single-option, `autonumber`, `summary`), with or without `multiple: true`, and the multi-option types (`multiselect`, `checkboxes`, `tags`). A `having` column is judged by the type it carries: a `count` / `sum` / `avg` is a number, a groupBy or `min` / `max` column the type of its field, a date bucket a date or text label.
+  
+  The refusal names the field, its declared type, the object's keys and the position (`where.amount`, `aggregations[1].filter.amount`, `having.total`). No mechanical rewrite exists, because which value or operator the caller meant is not in the object; the fix is one line by hand: compare the field with a value (`{ "amount": 12 }`) or an operator (`{ "amount": { "$gt": 12 } }`), and to filter by a related record, name a relation field.
+  
+  Measured through `engine.find` / `engine.aggregate` and `POST /data/:object/query`, three rows:
+  
+  | position | filter | before: memory · SQLite · PostgreSQL 16 | now, on all three |
+  |:--|:--|:--|:--|
+  | `where` | `{ amount: { a: 1 } }` (number), `{ title: { a: 1 } }` (text), and the select, boolean, date, autonumber, multi-select and `multiple: true` select twins | no records · the driver's 400 · the driver's 400 | `INVALID_FILTER` / 400, the engine's words |
+  | `where` | `{ $not: { amount: { a: 1 } } }` | every record · the driver's 400 · the driver's 400 | `INVALID_FILTER` / 400 |
+  | per-aggregation `filter` | `{ amount: { a: 1 } }`, `{ amount: {} }` | count 0 on all three | `INVALID_FILTER` / 400 |
+  | `having` | `{ total: { a: 1 } }` (a `sum`), `{ title: { a: 1 } }` (a groupBy) | no group on all three | `INVALID_FILTER` / 400 |
+  | `where` | control: `{ owner: { region: "NA" } }` on a `lookup`, `{ meta: { a: 1 } }` on a `json` field | no records / one record · the driver's 400 · the driver's 400 | unchanged: reaches the driver as written |
+  
+  **Who is affected.** A caller that sends a no-operator object beneath a scalar field to the in-memory driver — a test suite, a local or embedded deployment on `InMemoryDriver`, a flow or hook calling the engine in-process — and read the empty answer as a real one. On `SqlDriver` the same filter was already a 400, now in the engine's words; at the per-aggregation `filter` and `having` it was a silent count of 0 or an empty group set on every driver. No existing test in `@objectstack/objectql` or `@objectstack/rest` sent the shape: both suites pass with no fixture changed.
+  
+  **Unchanged.** A relation field (`lookup`, `master_detail`, `user`, `tree`, single or multiple) keeps its nested-relation form, and a structured-JSON field (`json`, `composite`, `address`, …) its object comparand; both reach the driver as written, which answers them as before. File and media fields, `formula` (refused one door earlier, `INVALID_FIELD`), undeclared keys, a `{ $field }` reference and every operator bag are not judged by this refusal. A `Map` or a class instance keeps the comparand-type door's refusal in its own words.
+- 2473e26: fix(core,objectql)!: a temporal filter comparand is refused with `INVALID_FILTER` / 400 exactly when the same value is refused as a written value — a day that does not exist (`"2026-02-30"`) is no longer rolled over or compared as text, and a non-ISO `datetime` spelling (`"07/15/2026 10:00"`) is no longer read in the server's zone (#20549); and a `time` comparand whose instant has no four-digit UTC year (`"+010000-01-01T10:00:00Z"`) is refused rather than compared as text (#20480)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a filter comparand VALUE at the engine's temporal-comparand door (where, a per-aggregation filter, having) and, through the same predicate, the analytics raw-SQL decline: no authorable key, spelling or stored shape of metadata moves, `packages/spec` is untouched, and no stored row is read or rewritten. What is refused is a temporal string naming a day that does not exist, a datetime string outside the ISO spellings, and a bare integer string; which instant such a string meant (a host zone, a locale's day order, a year or epoch milliseconds) is not something a ledger entry can decide. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a comparand value check (not `registered` / `already-registered`); and the change is runtime behaviour, not a TypeScript declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a `date`, a `datetime` and a `time` field accept as a filter comparand. It ships as `minor` under the launch-window convention for accept-set narrowings (`check-changeset-no-major` refuses `major` until GA; the breaking-ness is carried by this banner and the ADR-0087 disposition above).
+  
+  The record validator already refused the `date` / `datetime` classes as written values (`VALIDATION_FAILED` / `invalid_date`). The comparand door was wider, so a filter admitted what a write refused and answered the wrong rows. The two predicates moved into `@objectstack/core`'s `isUninterpretableTemporalComparand`, and both doors now ask that one rule. A comparand is refused with `INVALID_FILTER` / 400, naming the field, before any driver read, at `where`, a per-aggregation `filter` and `having`:
+  
+  - **A day that does not exist**, on a `date` or as the day part of a `datetime`: `"2026-02-30"`, `"2026-02-29"` (2026 is not a leap year), `"2026-04-31"`, `"2026-02-30T10:00:00Z"`. `"2028-02-29"` is a real day and is read.
+  - **A `datetime` string in any spelling but the ISO 8601 ones the platform writes**, after trimming: `YYYY-MM-DD` (midnight UTC); `YYYY-MM-DDTHH:MM[:SS[.fraction]]` followed by `Z`, a `±HH:MM` or `±HHMM` offset, or nothing (a zone-naive wall clock is UTC, ADR-0074); and `YYYY-MM-DD HH:MM[:SS[.fraction]]` with no zone. Refused now, for example: `"07/15/2026 10:00"`, `"2026/07/15 10:00"`, `"15 July 2026 10:00"`, `"07/08/2026"`, `"Wed, 15 Jul 2026 10:00:00 GMT"`, `"2026-07-15 10:00:00+08:00"` (write it with a `T`), and a bare integer string such as `"2026"` or `"1784109600000"`.
+  - **An instant on a `time` column in either class above.** A `time` column reads a comparand that is not a bare wall clock as an instant, by the `datetime` rule, and keeps its UTC time of day — so `"07/15/2026 10:00"` was the host zone's time of day, and `"1784109600000"` a string of epoch milliseconds. A wall clock (`"10:00"`, `"10:00:00.5"`), an ISO instant, a `Date` and an epoch-millisecond number are read as before, in a four-digit year (next).
+  - **An instant on a `time` column whose UTC year has no four-digit spelling**, in every spelling (#20480): `"+010000-01-01T10:00:00Z"`, `"-000001-01-01T10:00:00Z"`, `"9999-12-31T23:00:00-02:00"` (year 10000 in UTC), and the epoch-millisecond number or `Date` of any of them. A `time` column keeps the UTC time of day of an instant only when that instant spells a four-digit year; any other one reached the driver as written and was compared with the stored `HH:MM:SS` text. No time of day is read from an extended year. Year 0 (`"0000-06-15T10:00:00Z"`) spells four digits, and its time of day is read as before.
+  
+  Epoch milliseconds stay a `datetime` comparand as a JSON number: `{ "$gt": 1784109600000 }` is read exactly as before. As a string, a bare integer was read as epoch milliseconds, so `"2026"` meant two seconds after 1970 and matched every later row; send the number, or an ISO instant.
+  
+  What a caller sees through `POST /api/v1/data/:object/query`, the process in America/New_York, PostgreSQL 16 at `Asia/Shanghai`:
+  
+  | `where` | memory | SQLite | PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|:--|
+  | `datetime` `$eq "2026-02-30T10:00:00Z"` | 200, the row stored at `2026-03-02T10:00:00.000Z` | the same | the same | 400 `INVALID_FILTER` |
+  | `datetime` `$eq "07/15/2026 10:00"`, `"2026/07/15 10:00"` | 200, the row at `2026-07-15T14:00:00.000Z`, the server process's zone | the same | the same | 400 `INVALID_FILTER` |
+  | `date` `$eq "2026-02-30"` | 200 `[]`, compared as text | the same | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  | `datetime` `$gt "2026"` | 200, every row (read as 2026 epoch milliseconds) | the same | the same | 400 `INVALID_FILTER` |
+  | `time` `$gt "+010000-01-01T10:00:00Z"`, rows `09:00` / `10:30` / `12:00` | 200, 3 of 3 (compared as text) | the same | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  | `time` `$gt` the number of that instant | 200 `[]` | 200, 3 of 3 | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  
+  The refusal names the field and the value, says the filter was not applied, and names the spellings that are read. The rows a non-ISO comparand matched were a property of the deployment host: the same request answered differently on two servers.
+  
+  **Who is affected.** A caller that filters a `date` or `datetime` field with a string: a REST or SDK client, a saved report or view filter, a dashboard's analytics query (the raw-SQL strategy declines such a comparand, and the engine refuses it), an MCP `query_records` call written by a model. A `{placeholder}` such as `{30_days_ago}`, the empty string, a JS `Date` and an epoch-millisecond number are unchanged.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL:
+  
+  - a real leap day: `date` `"2028-02-29"`, `datetime` `"2028-02-29T10:00:00Z"`;
+  - each ISO spelling above, compared as the same instant whatever the host's zone: `"2026-07-15T14:00:00Z"`, `"2026-07-15T22:00:00+08:00"`, `"2026-07-15 14:00"` (UTC, not the host zone);
+  - a `date` comparand with a leading real `YYYY-MM-DD`, still compared as that day (`"2026-07-15T10:00:00Z"` on a `date` is July 15);
+  - the same wall clock as a 2026 instant on a `time` column: `$gt "2026-07-15T10:00:00Z"` answers the `10:30` and `12:00` rows, as does its epoch-millisecond number or `Date`;
+  - the year range 0001..9999, and every written value (the record validator now asks the same rule it copied, and answers exactly as before).
+- 63bfe69: fix(objectql)!: a `time` field is a zone-less wall clock — a time of day written with a `Z` or an offset (`"10:00Z"`, `"10:00+08:00"`), and an instant whose UTC year has no four-digit spelling (`"+010000-01-01T10:00:00Z"`), are refused with `VALIDATION_FAILED` / 400 (`invalid_time`) instead of being stored verbatim on memory and SQLite and read back differently, or failing with a 500, on PostgreSQL (#20671)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a written VALUE at the record validator's time arm: no authorable key, spelling or stored shape of metadata moves, and no schema, type or export changes. `packages/spec` gains one sentence in the built-in validation-message catalog (`invalid_time_zoned`, a rendering variant of the existing `invalid_time` wire code, which is unchanged). A stored row keeps whatever it holds, and which wall clock a zone-suffixed time of day meant is not something a ledger entry can decide. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a write-door value check (not `registered` / `already-registered`); and the change is runtime behaviour, not a TypeScript declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a `time` field accepts as a written value. It ships as `minor` under the launch-window convention for accept-set narrowings (`check-changeset-no-major` refuses `major` until GA; the breaking-ness is carried by this banner and the ADR-0087 disposition above).
+  
+  The record validator's `time` arm now asks `@objectstack/core`'s one temporal rule, the same one the `time` filter comparand door asks, so a value is refused as a written `time` exactly when it is refused as a `time` comparand. It reads two things: a bare wall clock `HH:MM[:SS[.fraction]]` in range, and an instant in one of the ISO 8601 spellings a `datetime` is written in, on a calendar day that exists, whose UTC year has four digits (its UTC time of day is stored). Everything else is refused with `VALIDATION_FAILED` / 400 and the field code `invalid_time`, naming the field, on insert, update, a multi-row update and `engine.validate`, before anything is written.
+  
+  Refused now, where they were accepted:
+  
+  - **A time of day with a zone suffix**: `"10:00Z"`, `"10:00+08:00"`, `"10:00:00+0800"`, `"10:00:00.250Z"`. A `time` field carries no zone. The refusal has its own sentence, which `@objectstack/spec`'s validation-message catalog now carries in all four locales (`invalid_time_zoned`; English: "… is a time of day with no time zone: drop the Z or offset (HH:MM or HH:MM:SS), or use a datetime field for an instant"). The wire code stays `invalid_time`.
+  - **An instant the rule does not read as a time of day**: an extended year (`"+010000-01-01T10:00:00Z"`, or a `Date` of it), an instant whose UTC year is 10000 (`"9999-12-31T23:00:00-02:00"`), a day that does not exist (`"2026-02-30T10:00:00Z"`), and a spelling the `datetime` arm already refuses (`"2026-07-15 10:00Z"`, a space and a zone; `"2026-07-15t10:00:00z"`, lower case).
+  
+  What a caller sees, before and after, through `POST /api/v1/data/:object` and a read-back, the process in America/New_York, PostgreSQL 16 at `Asia/Shanghai`:
+  
+  | written to a `time` | memory | SQLite | PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|:--|
+  | `"+010000-01-01T10:00:00Z"`, `"9999-12-31T23:00:00-02:00"` | 201, read back as written | the same | 500 `DATABASE_ERROR` | 400 `invalid_time` |
+  | `"10:00Z"`, `"10:00+08:00"`, `"10:00:00+0800"` | 201, read back as written | the same | 201, read back `"10:00:00"` | 400 `invalid_time`, the zone sentence |
+  | `"2026-07-15 10:00Z"` | 201, `"10:00:00"` | the same | the same | 400 `invalid_time` |
+  
+  **Who is affected.** A caller that writes a `time` field as a string with a `Z` or an offset, or as an out-of-range instant: a REST or SDK client, a flow, an MCP `create_record` / `update_record` call written by a model. A row already stored with such a value keeps it; nothing rewrites it. PostgreSQL stored a zone-suffixed time of day as its bare wall clock, so only a memory or SQLite deployment can hold one. An update that omits the field is not affected; one that sends the old value back is refused, naming the field. A `time` field whose literal `defaultValue` carries a `Z` or an offset has each insert that falls back to that default refused the same way. The server import (`POST /api/v1/data/:object/import`) turns a `time` cell into `HH:MM:SS` itself before the write, and already refused a zone-suffixed time-of-day cell, so its cells are unchanged.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL through REST:
+  
+  - a bare wall clock: `"10:00"` and `"10:00:00"` read back `"10:00:00"`, `"10:00:00.250"` reads back `"10:00:00.250"`;
+  - a full ISO instant with a four-digit year, stored as its UTC time of day: `"2026-07-15T10:00:00Z"` and `"2026-07-15T18:00:00+08:00"` read back `"10:00:00"`;
+  - a `Date` with a four-digit year, still accepted; an epoch-millisecond number, a `{placeholder}` and an out-of-range clock (`"25:00"`), still refused with `invalid_time`;
+  - every `date` and `datetime` value, and every filter comparand.
+- 4b4ee88: fix(objectql)!: a plain object with no `$` operator beneath a relation field, a structured-JSON field or an undeclared `id` column is refused with `INVALID_FILTER` / 400 at `where`, a per-aggregation `filter` and `having`, on every driver
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of filter STRUCTURE at the engine's query door, the same door and category as the scalar-field refusal it extends: a plain object with no `$` operator key beneath a relation column (the nested-relation form), a structured-JSON column (a whole-value match) or a platform-provisioned column the declared map omits. No authorable key, spelling, export or stored shape moves (the door modules are internal; `@objectstack/objectql` exports nothing new and nothing less, and `FilterCondition` keeps parsing the form), and no stored row is read or rewritten. The nested-relation form could match no record on the in-memory driver and was refused by the SQL driver, and which related records a caller meant is not something a ledger entry can rewrite into ids. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a filter's structure (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a filter may put beneath a relation or JSON-valued field. A plain object with no `$`-operator key — `{ "owner": { "region": "NA" } }` beneath a `lookup`, `{ "meta": { "a": 1 } }` beneath a `json` field, `{}` included — is refused by the engine before any driver is asked. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What an author sees now.** `400 INVALID_FILTER`, naming the field, its declared type, the object's keys (never its values), the position (`where.owner`, `aggregations[1].filter.owner`, `having.owner`) and the route that works, inside the first 500 characters the REST door keeps:
+  
+  - **A relation field** — `lookup`, `master_detail`, `user`, `tree`, single or multiple (the nested-relation form, a condition on the related record's own fields). No data-path driver follows a relation: the field stores the related record's id. Filter the related object first, then match the field against the ids it returns — `{ "owner": { "$in": ["ID", "..."] } }` on a single-valued field, `{ "owners": { "$contains": "ID" } }` per id on a multi-valued one (an `$or` of those for several ids; the SQL driver refuses `$in` on a multi-valued column). A dotted path (`"owner.region"`) is no route: it was already refused with `INVALID_FIELD` on every driver.
+  - **A structured-JSON field** — `json`, `composite`, `repeater`, `record`, `location`, `address`, `vector` (a whole-value match). The drivers share no meaning for it: the in-memory driver compared documents, the SQL driver refused the bind. Test the whole value's presence with `{ "meta": { "$null": false } }`, or store the part you filter on in a field of its own and filter that field. `$contains` is no route: it was already refused over a JSON value on every driver.
+  - **`id`, `created_at` or `updated_at` absent from the declared field map** — the platform provisions these columns, so they are judged by the type they store (text, datetime), in the scalar-field words: compare with a value or an operator.
+  
+  No mechanical rewrite exists, because which related records or which part of the JSON value the caller meant is not in the object; the fix is by hand, as above.
+  
+  Measured through `POST /api/v1/data/:object/query`, three rows (owner `u1`, region NA, on `d1` and `d3`):
+  
+  | position | filter | before: memory · SQLite · PostgreSQL 16 | now, on all three |
+  |:--|:--|:--|:--|
+  | `where` | `{ owner: { region: "NA" } }` on a `lookup`, and its `master_detail`, multiple-lookup, `user` and `tree` twins | no records (`d1`, `d3` were meant) · the driver's 400 · the driver's 400 | `INVALID_FILTER` / 400, the engine's words |
+  | `where` | `{ meta: { a: 1 } }` on a `json` field, and its `address` and `composite` twins | the deep-equal records · the driver's 400 · the driver's 400 | `INVALID_FILTER` / 400 |
+  | `where` | `{ id: { a: 1 } }` | no records · the driver's 400 · the driver's 400 | `INVALID_FILTER` / 400 |
+  | per-aggregation `filter` | `{ owner: { region: "NA" } }` | count 0 on all three | `INVALID_FILTER` / 400 |
+  | per-aggregation `filter` | `{ meta: { a: 1 } }` | count 1 on all three (the engine's own deep equality) | `INVALID_FILTER` / 400, one answer per filter at every position |
+  | `having` | `{ owner: { region: "NA" } }` over a lookup groupBy | no group on all three | `INVALID_FILTER` / 400 |
+  | `where` | route `{ owner: { $in: ["u1"] } }`; `{ owners: { $contains: "u1" } }` | `d1`, `d3` on all three | unchanged |
+  
+  **Who is affected.** A caller that sends the nested-relation form or a JSON object comparand to the in-memory driver — a test suite, a local or embedded deployment on `InMemoryDriver`, a flow or hook calling the engine in-process — and read the empty (or deep-equal) answer as a real one; and a per-aggregation `filter` that matched a JSON value by deep equality. On `SqlDriver` the `where` forms were already a 400, now in the engine's words.
+  
+  **Supersedes** the "Unchanged" paragraph of the scalar-field refusal entry (`20546-no-operator-object-on-scalar`) for relation and structured-JSON fields: they are judged now, in words of their own. File and media fields (a legacy stored value is an inline object), `formula` (refused one door earlier, `INVALID_FIELD`), any other undeclared key, a `{ $field }` reference and every operator bag are still not judged by this refusal.
+- 157baa7: fix(objectql)!: a `groupBy` on a structured-JSON field is refused with `INVALID_FIELD` / 400 at the engine's `aggregate`, on every driver
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a grouping TARGET at the engine's aggregate door: a groupBy entry naming a declared json, composite, repeater, record, location, address or vector field. No authorable key, spelling, export or stored shape moves (the door module is internal; `@objectstack/objectql` exports nothing new and nothing less, and `EngineAggregateOptions` / `QuerySchema.groupBy` keep parsing the entry), and no stored row is read or rewritten. The grouping had no shared meaning to preserve (one merged group on the in-memory driver, one group per serialized document on SQLite, a 500 on PostgreSQL), and which scalar part of the document a caller meant to group on is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a grouping target (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what `aggregate` accepts as a grouping target. A `groupBy` entry that names a declared field of the structured-JSON class (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`) is refused by the engine before any driver is asked. Both entry spellings are judged, the field name and the `{ field }` object, a `dateGranularity` bucket included. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the position (`groupBy[0]`, or `groupBy[0].field` for the object form), the field and its declared type, saying the query was not run, and naming the route inside the first 500 characters the REST door keeps: group by a field that stores one scalar value, storing the part of the document you group on in a field of its own. The thrown error carries `field`, `fields`, `object` and `param: 'groupBy'`.
+  
+  **Why a refusal.** The drivers share no meaning for a JSON document as a group key. Measured through `POST /api/v1/data/:object/query` over three rows with different documents under the grouped field: the in-memory driver answered 200 with one group holding every row, SQLite answered 200 with one group per serialized document, and PostgreSQL answered 500 `DATABASE_ERROR`. A `vector` field split the same three ways, and a date bucket over a `json` field answered one `null` bucket on memory and SQLite and 500 on PostgreSQL. No producer that groups by a structured-JSON field was found (no dataset, cube, view grouping or `groupBy` in the example apps names one), so no meaning is defined for it here.
+  
+  **Who is affected.** A caller of `engine.aggregate` or of the REST query door that grouped by such a field on the in-memory driver or on SQLite and read the merged or per-serialization groups as real ones. On PostgreSQL the same query was already a 500. The analytics service's aggregate path (a cube query the native-SQL strategy declines, such as a time dimension with a granularity, or any cube query on the in-memory driver) reaches the engine and answers this refusal too.
+  
+  **Unchanged.** A `groupBy` on any other type (`text`, `number`, a `multiple: true` select, a file field), a structured-JSON field as an AGGREGATED column (`count`, `count_distinct`, `min`, `max`), and an undeclared name, which the REST door answers `INVALID_FIELD` as unknown before the engine is reached.
+- ca5408c: feat(objectql): the nested-relation filter `{ relation: { field: value } }` is served in `where`, lowered at the engine's filter seam — the drivers receive `$in` / `$contains` and are unchanged
+  
+  Clause-②: yes (widening)
+  
+  A condition on a related record's own fields, written beneath a relation field of the queried object — `{ "account": { "industry": "tech" } }` beneath a `lookup` — is now answered by the engine in `where`, on every verb that takes one (`find`, `findOne`, `count`, `aggregate`, `update`, `delete`) and by `judgeFilter`. It was refused with `INVALID_FILTER` / 400 until now; this supersedes the relation-field paragraph of the pending `20745-nested-object-door` entry.
+  
+  **How it is answered.** The engine reads the related object with the condition, then matches the relation field against the ids that read returns, and the drivers receive only that: `{ "account": { "$in": [ids] } }` on a single-valued relation, and on a multi-valued one (`multiple: true`) an `$or` of one `$contains` per id, so it matches on any member. The relation types are `lookup`, `master_detail`, `user` and `tree`. It composes as written inside `$and` / `$or` / `$not`, and the `FilterArray` sugar lowers to it too. No related record matching selects no rows; under `$not`, a record whose relation is empty satisfies the negation.
+  
+  **As the caller.** The related read is the engine's own `find` on the related object with the caller's execution context, so that object's access check, row scope and field permissions apply exactly as they do to a direct read of it. A condition on a field the caller cannot read is refused by the same check that refuses a direct filter on it (`PERMISSION_DENIED` / 403, naming the field), never answered with an empty list; a related record the caller cannot see matches no condition.
+  
+  **Bounded.** At most `RELATION_FILTER_ID_CAP` (1,000, exported) related ids feed one condition. A condition matching more is refused with `INVALID_FILTER` / 400, naming the cap, the related object and the two-step route — never run over a cut-off list.
+  
+  **Still refused, in the engine's words (`INVALID_FILTER` / 400, before any read):** a second level (a relation condition beneath the related object's own relation field, or a dotted key inside the condition), a key the related object does not declare, an empty condition `{}`, and a related object that is not registered. An aggregation's own `filter` and `having` keep refusing the form, and their words now name `where` as the place it is served. The dotted spelling `{ "account.industry": "tech" }` stays refused with `INVALID_FIELD` / 400, and its words now name the nested form to write instead. The structured-JSON and scalar-field refusals are unchanged.
+  
+  Measured through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16 (owner `u1`, region NA, on `d1` and `d3`; `d4` has no owner):
+  
+  | `where` | before | now |
+  |:--|:--|:--|
+  | `{ owner: { region: "NA" } }` on a `lookup`, and its `master_detail` and multiple-lookup twins | `INVALID_FILTER` / 400 | `d1`, `d3` |
+  | `{ parent: { title: "a" } }` on a `tree` field | `INVALID_FILTER` / 400 | `d2`, `d3` |
+  | `{ $not: { owner: { region: "NA" } } }` | `INVALID_FILTER` / 400 | `d2`, `d4` |
+  | `{ owner: { region: "APAC" } }` (no owner matches) | `INVALID_FILTER` / 400 | no rows |
+  
+  SQLite, PostgreSQL and the in-memory driver match the element of a multi-valued relation, so an id that is a substring of another stored id (`u1` inside `u10`) does not match it.
+- b280546: A caller-supplied value for a `formula` field is stripped on every engine write path, in every context, and reported through `droppedFields` / `onFieldsDropped` under a new `reason`, `computed`; and `ObjectQL.validate` runs the write's own field doors, so a dry run built on it predicts what the write will do (#20805).
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of runtime behaviour at the engine's write doors and its validate-only preview, plus one new arm on an OUTPUT enum. No authorable key, spelling, export or stored shape moves: `DroppedFieldsEvent` is an event the engine emits, never metadata an author writes, so widening its `reason` enum leaves every stored row and every authored file valid as it stands; `ObjectQL.validate` gains an optional listener and keeps its signature otherwise. The narrowing refuses, in the preview, a key the write already refused, so there is nothing for a ledger entry to rewrite: the payload was never writable. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a write payload's keys or a strip's report (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `ObjectQL.validate` now refuses a row that carries a key the object does not declare, exactly as `insert` and `update` refuse it: the call throws `INVALID_FIELD` / 400 naming the field. It used to answer `valid: true` for that row while the write it previews refused it, so the protocol's `validateData` and the import dry run built on it said "ok" for rows the commit then failed. It ships as `minor` under the launch-window convention; the widening half is the new `reason` arm.
+  
+  **A formula value is stripped, never refused.** A `formula` field is computed on every read and no driver has a column for it, so a full read returns the key and a record written back carries it: a form save, a flow's `update_record`, a `GET` then `PUT`. The key used to reach the driver, and the driver decided. On SQL drivers the whole write failed with the driver's own error (`SqliteError` "table … has no column named …", with no `status` and no `field`; the REST door relabelled it `400 INVALID_FIELD` "Unknown field" for a field the object declares). On the in-memory driver the value was stored as a shadow column nothing reads. Now the engine takes the value out before the defaults, the hooks and the other strips, completes the write, and reports one `{ reason: 'computed' }` event per call. That holds on `insert` (one row or a batch), `insertMany`, and `update` by id and by predicate, on every driver, and in every context, `isSystem` included: there is no column for any caller's value to land in. Measured on SQLite and the in-memory driver through `protocol.createData`, `POST /api/v1/data/:object`, `PATCH /api/v1/data/:object/:id` and `engine.update`: each now answers success with `droppedFields: [{ fields: ['doubled'], reason: 'computed' }]`, the stored row carries no such key, and the read still returns the computed value.
+  
+  - **`computed` is not `readonly`.** `isSystem` exempts the static `readonly` strip and does not exempt this one. A `formula` field also declared `readonly: true` is reported once, as `computed`.
+  - **`strictReadonlyWrites` refuses it.** That option's coverage is derived from what `onFieldsDropped` reports, so a caller that passes it and sends a formula value now gets `ERR_READONLY_FIELD_REJECTED` with a `computed` drop in `drops`, and nothing is written, `isSystem` included. The refusal message names the reason and its remedy; a refusal without a `computed` drop reads exactly as before.
+  - **Hooks are handed the payload that will be stored.** A `beforeInsert` / `beforeUpdate` hook no longer sees the formula key in `ctx.input.data`; `ctx.submitted` on update still carries the caller's submission as sent.
+  - **Consumers of `DroppedFieldsEvent['reason']` must handle `computed`.** The contract requires a branch on `reason` to be exhaustive. In this release the strict refusal message (`@objectstack/objectql`) and the flow `create_record` / `update_record` step warning (`@objectstack/service-automation`) word it.
+  
+  **What `validate` runs now.** Before judging a row, `ObjectQL.validate` runs the write's own doors, by the same functions the write calls: the declared-field door (the refusal above), the computed-field strip, and the caller-write strips, under the write's `isSystem` gate (on `insert` mode the runtime-owned strip and the static `readonly` strip with its re-default; on `update` mode the static `readonly` strip, where a supplied `id` is the address the write binds and is never judged). What the write would drop is reported through a new optional `onFieldsDropped` listener on `validate`'s options, in the same events the write emits. One consequence for verdicts: a reference field declared static `readonly` is now stripped in the preview as it is on the write, so a validation rule that reads through it answers the same on both.
+  
+  **Unchanged.** A `summary` field keeps its column: a caller-supplied roll-up value is still stored as sent and overwritten by the next write of a child record. The REST layer's own handling of a missing column (schema drift) is unchanged.
+- 975b248: fix(objectql,spec)!: a `groupBy` on a multi-value field and a `count_distinct` on a JSON-stored field are refused with `INVALID_FIELD` / 400 at the engine's `aggregate`, on every driver, and the aggregate × field-type table stops accepting `count_distinct` over the JSON-stored types
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the one metadata-facing half of this change is a row of AGGREGATE_FIELD_TYPE_COMPATIBILITY narrowing, and that family's hand-migration is already registered under protocol major 18 by this id: "an aggregate the field's type accepts, per AGGREGATE_FIELD_TYPE_COMPATIBILITY", with every refused pair of the table refused at the compile door. The non-temporal sum / avg narrowing rode the same id the same way; this diff amends that entry's surface and acceptance prose to name the count_distinct rider, and corrects the min / max entry's route that called count_distinct valid over every type. The engine-door halves refuse a query shape, not a stored one: no authorable key, export or stored row moves. -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts, in two positions, on every driver and for every caller that reaches the engine (the REST query door, a flow or hook, and the analytics strategy that lowers a cube query onto `engine.aggregate`). Shipped as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  - A `groupBy` entry that names a **multi-value** field: an inherently-multi option type (`multiselect`, `checkboxes`, `tags`), or a `select`, `lookup`, `user`, `file` or `image` field declared `multiple: true`. Both entry spellings are judged, the field name and the `{ field }` object.
+  - A `count_distinct` aggregation over a **JSON-stored** field: a structured-JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`), an inherently-multi option type, or a multi-capable field declared `multiple: true`.
+  
+  **BREAKING** (`@objectstack/spec`): `AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct` no longer lists the ten JSON-stored types (the structured-JSON seven and `multiselect`, `checkboxes`, `tags`), so `isAggregateCompatibleWithFieldType('count_distinct', type)` answers `false` for them. Every reader of the table refuses those pairs now: the dataset-measure lint rule (`measure-aggregate-field-type-refused`, run by `os validate` and at a runtime dataset save), the analytics dataset compile leg (`400 DATASET_INVALID`), and the engine door above. The `count` row is unchanged.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the position (`groupBy[0]`, `groupBy[0].field`, or `aggregations[0].field`), the field and its declaration, saying the query was not run, and naming the route inside the first 500 characters the REST door keeps. For a multi-value field the route is to filter by one member: `where` with `$contains` on the field, one query per member. For a structured-JSON field it is to store the part you count in a field of its own, or to count rows with `count`. The thrown error carries `field`, `fields`, `object` and `param` (`groupBy` or `aggregations`).
+  
+  **Why a refusal.** Every SQL driver stores these values in a JSON column, and the drivers share no meaning for one as a group key or a distinct key. Measured through `POST /api/v1/data/:object/query` over three rows: grouping by any of the eight multi-value declarations answered one group per array on the in-memory driver, one group per serialized array on SQLite, and 500 `DATABASE_ERROR` on PostgreSQL 16. `count_distinct` over any structured-JSON or multi-value field answered 3 on the in-memory driver (equal values counted apart), 2 on SQLite (serialized text compared), and 500 on PostgreSQL (no equality operator for `json`). No example app and no published stack groups by a multi-value field or counts one distinct, so no meaning is defined for either here.
+  
+  **What to write instead.** A dataset measure or a query that counted a JSON-stored field distinct: use `count` over it, or store the scalar part you meant to count in a field of its own and `count_distinct` that field. A grouping by a multi-value field: filter by each member with `$contains` and count.
+  
+  **Who is affected.** A caller that grouped by a multi-value field, or counted a JSON-stored field distinct, on the in-memory driver or on SQLite and read the answer as a real one; on PostgreSQL both were already a 500. A dataset whose measure pairs `count_distinct` with a JSON-stored field is refused by the lint rule and the compile leg.
+  
+  **Unchanged.** (Two shapes the structured-JSON `groupBy` entry of this same release lists as unchanged are narrowed here: a `multiple: true` select as a group key, and `count_distinct` over a structured-JSON field. This entry is the later word on both.) A `groupBy` or `count_distinct` on a scalar-stored field, a single-value `select` or `lookup` included; `count` over any field; the `having`, filter and sort positions; and an undeclared name, which the REST door answers `INVALID_FIELD` as unknown before the engine is reached.
+  
+  `@objectstack/lint`: the dataset-measure refusal's hint no longer says `count_distinct` accepts every type.
+  
+  `@objectstack/service-analytics`: the dataset compile leg's refusal of a `count_distinct` measure over a JSON-stored field says why it diverges (the drivers compare the values for equality three ways) and prescribes `count`, or a scalar field for the part being counted; its other refusals no longer say `count_distinct` accepts every type.
+- dcd3309: fix(core,objectql)!: a relative-date placeholder that resolves outside its field's years is refused `INVALID_FILTER` / 400, naming the placeholder and the year it resolved to, instead of reaching the driver and answering the wrong rows
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE at the engine's filter-resolution stage: a relative-date placeholder (a date macro such as {8000_years_from_now}) whose resolved day or instant falls outside its column's years, refused INVALID_FILTER / 400 on where, a per-aggregation filter and having. No authorable key, spelling, export or stored metadata shape moves: every filter, view, dataset and query shape parses as before, the date-macro vocabulary is unchanged, and @objectstack/core and @objectstack/objectql export nothing new and nothing less (resolveFilterToken and resolveFilterTokens keep their signatures). The resolver's spelling of a day outside 0001..9999 changes, and that day was never a value any reader read as the day it names. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a value range or a resolved value and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the engine answers for a filter carrying a relative-date placeholder. A date macro is resolved after the temporal-comparand door, which steps around a placeholder, so the year range that door asks of a literal never saw the value one resolved to. It does now, through the same function, core's `isOutsideTemporalYearRange`, by the column's kind: a `date` takes the years 0001 to 9999 and a `datetime` 1000 to 9999. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A date macro whose resolved value falls outside its column's years, on a declared `date` or `datetime` field (or, on a `time` field, one that resolves to an instant whose UTC year has no four-digit spelling), at `where` (on `find`, `findOne`, `count`, `aggregate`, a multi-row `update` and `delete`), at a per-aggregation `filter`, at `having` (by the aggregated column's kind), and through `judgeFilter`. On REST that is `POST /api/v1/data/:object/query` and every other door that reads through the engine. Measured before this on InMemoryDriver and SqlDriver on SQLite, over a `datetime` field with a row in 2026 and a row in 1500:
+  
+  - `$gt {8000_years_from_now}` answered both rows, and the right answer was none;
+  - `$lt {2027_years_ago}` answered the 1500 row, because the resolver spelled year -1 as `-1-10-01` and that text was read as a day in 2001, and the right answer was none;
+  - `$lt {1977_years_ago}` resolved to year 49, below the `datetime` floor of 1000, which now applies to a resolved placeholder as it does to a literal;
+  - on a `time` field, `$gt {8000_years_from_now}` answered every row: the `time` rule keeps no time of day from an instant whose UTC year has no four-digit spelling, so it compared as text. Such a placeholder is refused now in the words a literal of that instant gets.
+  
+  **What an author sees.** The refusal names the field, the placeholder as written, its position, the value it resolved to and that value's year, in the temporal-comparand door's words for the year class: `filter on 'opened_at' compares a declared datetime field against "{8000_years_from_now}" at where.opened_at.$gt, a relative-date placeholder that resolved to "+010026-10-01" (the year 10026), an instant whose UTC year falls outside the years 1000 to 9999 …`. It ends by asking for a placeholder whose offset lands inside those years.
+  
+  **The resolver's spelling** (`@objectstack/core`). A date macro that lands on a day outside 0001..9999 now resolves to that day in the expanded-year form of ECMAScript's date time string format, `+010026-10-01` or `-000001-10-01` (year 0 is `0000-10-01`). It used to take the storage rule's unpadded spelling, `10026-10-01` or `-1-10-01`, which `Date.parse` reads through the host's legacy parser in the host's zone, so a day in year -1 read as one in 2001 and could not be judged. Every consumer of `resolveFilterToken` and `resolveFilterTokens` sees the new spelling for such a day only. A day inside 0001..9999 and a sub-day placeholder's instant are spelled as before.
+  
+  **Unchanged.** A placeholder that resolves inside its column's years answers as before; a `date` keeps the years 0001 to 0999, which a `datetime` refuses, and a `time` field reads the time of day of any instant with a four-digit year, year 0 included. A placeholder on a column with no temporal kind (text, number) and a context placeholder such as `{current_user_id}` are not judged by this range. Every literal comparand answers as before.
+- a75311d: fix(objectql)!: the engine's `aggregate` asks the aggregate × field-type table for every aggregation over a declared field, so `min` / `max` / `avg` over a type the table refuses answer `INVALID_FIELD` / 400 on every driver instead of one answer per driver
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-selecting-aggregate-field-type-refused, dataset-measure-aggregate-field-type-refused) the pairs this change refuses are exactly the pairs AGGREGATE_FIELD_TYPE_COMPATIBILITY already refuses, and the table is not edited: every refused min / max pair is registered under protocol major 18 by the first id and every refused avg pair by the second, each with its routes (count, a sort for a first or last record, or a numeric / temporal field for a quantity stored as text or JSON). This change adds a query-time reader of the same table at the engine door; it refuses a query shape, not a stored one, and no authorable key, export or stored row moves. -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts, on every driver and for every caller that reaches the engine — the REST query door, a flow or hook, a roll-up summary's recompute, and the analytics strategy that lowers a cube query onto `engine.aggregate`. Shipped as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  FROM → TO, per aggregation `{ function, field }` naming a declared field:
+  
+  - `min` / `max` over a type outside the numeric, temporal and boolean classes — the structured-JSON types (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`), the multi-option types (`multiselect`, `checkboxes`, `tags`), the string family (`text`, `email`, `url`, `phone`, …), the option and reference types (`select`, `radio`, `lookup`, `master_detail`, `tree`, `user`), `autonumber`, the file family and `formula` — and over any `select`, `lookup`, `user`, `file` or `image` declared `multiple: true`: FROM whatever the driver answered (a document or an array in memory, the serialized text on SQLite, a 500 on PostgreSQL for a JSON-stored field; a collation-dependent string for a text field) TO `400 INVALID_FIELD`.
+  - `avg` over a type outside the numeric and boolean classes — a `date`, `datetime` or `time` field included: FROM `null` in memory, a coerced number on SQLite (the average YEAR for a datetime), a 500 on PostgreSQL, TO `400 INVALID_FIELD`.
+  - `count_distinct` is unchanged: it was already refused over the JSON-stored types, in the same words.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the position (`aggregations[0].field`), what the function does and the field with its declaration (`takes the max of 'meta', a declared json field — a structured-JSON value`), saying the query was not run, and naming the types the function accepts, read off the table, inside the first 500 characters the REST door keeps. The thrown error carries `field`, `fields` (every offending aggregation), `object` and `param` (`aggregations`).
+  
+  **Why a refusal.** `AGGREGATE_FIELD_TYPE_COMPATIBILITY` already declares which pairs every backend answers the same way, and the dataset compile and lint legs refuse the rest; the engine door asked only its `count_distinct` row. Measured through `engine.aggregate` over two rows: `max` over a `json` field answered `{ a: 1 }` in memory, the string `'{"b":1}'` on SQLite and 500 `DATABASE_ERROR` on PostgreSQL 16 (`function max(json) does not exist`); a `tags` field and a `multiple: true` select or lookup split the same way; `avg` over a `datetime` answered `null`, `2026` and a 500. One query, three answers.
+  
+  **What to write instead.** Aggregate a field of a type the function accepts — for `min` / `max`: `number`, `currency`, `percent`, `rating`, `slider`, `progress`, `summary`, `date`, `datetime`, `time`, `boolean` or `toggle`; for `avg`: the same minus the temporal three. A question that was counting in disguise is `count` (or `count_distinct` over a scalar-stored field). A first or last record by a text value is a sort on a list, not an aggregate. A quantity stored as text or JSON belongs in a numeric or temporal field of its own, aggregated there.
+  
+  **Who is affected.** A caller that asked `min` / `max` / `avg` of such a field on the in-memory driver or SQLite and read the answer as a real one; on PostgreSQL a JSON-stored field was already a 500. Metadata that lowers onto `engine.aggregate` takes the same verdict at run time: a roll-up summary (`summaryOperations`) whose `min` / `max` / `avg` names such a child field records a failed recompute, a grouped list view's server-side header summary is refused, and a chart or metric component's `aggregate` over such a field is refused. No example app and no published stack authors such a pair.
+  
+  **Not judged yet: `sum`.** The `sum` row of the table is held back at this door: a published stack authors a `sum` column summary over a `formula` field, a pair the table refuses, so that row awaits its own decision. `sum` over any field reaches the driver as before.
+  
+  **Unchanged.** Every pair the table accepts; `count` over any field, a JSON-stored one included; an aggregation that names no field; an undeclared name or a relationship path, which this door does not judge (the REST door answers an unknown name `INVALID_FIELD` before the engine is reached); a field whose declared type is outside `FieldType`. The structured-JSON `groupBy` entry of this same release lists a structured-JSON field as an aggregated `min` / `max` column as unchanged; this entry is the later word on that shape.
+  
+  `@objectstack/spec`: the TSDoc of `AGGREGATE_FIELD_TYPE_COMPATIBILITY` and `isAggregateCompatibleWithFieldType` no longer says the engine's `aggregate` door reads only the `count_distinct` row. The table itself is unchanged.
+- d98bf24: fix(objectql)!: the engine's `aggregate` judges the `sum` row of the aggregate × field-type table too, so `sum` over a type the table refuses answers `INVALID_FIELD` / 400 on every driver instead of `0` in memory and on SQLite and a 500 on PostgreSQL
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the pairs this change refuses are exactly the pairs the sum row of AGGREGATE_FIELD_TYPE_COMPATIBILITY already refuses, and the table is not edited: that id's prescription covers sum / avg over every field class the table refuses (widened to them by a later change that registered against it), with its routes (count, an aggregate the type accepts, or a numeric field for a quantity stored otherwise). This change lets the engine door ask the one row it had skipped; it refuses a query shape, not a stored one, and no authorable key, export or stored row moves. -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts, on every driver and for every caller that reaches the engine — the REST query door, a flow or hook, a roll-up summary's recompute, and the analytics strategy that lowers a cube query onto `engine.aggregate`. Shipped as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  This completes the change of this same release that made the engine's `aggregate` ask the table for `min`, `max` and `avg`, and that held the `sum` row back. Its paragraph "Not judged yet: `sum`" is superseded: this entry is the later word, and the door now asks every row of the table.
+  
+  FROM → TO, per aggregation `{ function: 'sum', field }` naming a declared field:
+  
+  - `sum` over a type outside `number`, `currency`, `rating`, `slider`, `progress`, `summary`, `boolean` and `toggle` — a `percent` (a rate does not add), the temporal types (`date`, `datetime`, `time`), the string family (`text`, `email`, `url`, `phone`, …), the option and reference types (`select`, `radio`, `lookup`, `master_detail`, `tree`, `user`), `autonumber`, the file family, the structured-JSON types (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`), the multi-option types (`multiselect`, `checkboxes`, `tags`) and `formula` — and over any `select`, `radio`, `lookup`, `user`, `file` or `image` declared `multiple: true`: FROM whatever the driver answered TO `400 INVALID_FIELD`. Measured through `engine.aggregate` over two rows: a `json`, `text`, `select` or `tags` field summed to `0` in memory and on SQLite and answered 500 `DATABASE_ERROR` on PostgreSQL 16 (`function sum(json) does not exist`); a `datetime` field summed to `0` in memory, to the years added on SQLite and a 500 on PostgreSQL; a `formula` field summed to `0` in memory and was already refused `400 INVALID_FIELD` by both SQL drivers, which have no column for it; a `percent` field added the rates on all three.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the position (`aggregations[0].field`), what the function does and the field with its declaration (`sums 'meta', a declared json field — a structured-JSON value`), saying the query was not run, and naming the types `sum` accepts, read off the table, inside the first 500 characters the REST door keeps. The thrown error carries `field`, `fields` (every offending aggregation), `object` and `param` (`aggregations`).
+  
+  **What to write instead.** Sum a field of a type `sum` accepts: `number`, `currency`, `rating`, `slider`, `progress`, `summary`, `boolean` or `toggle`. A rate stored as a `percent` is averaged (`avg` accepts it), or the quantity it is a rate of is summed. A value computed by a `formula` is stored in a numeric field of its own when it must be summed on the server. A question that was counting in disguise is `count`.
+  
+  **Who is affected.** A caller that asked `sum` of such a field on the in-memory driver or SQLite and read the `0` as a real total, and a caller that summed a `percent` field on any driver. On PostgreSQL the other measured pairs were already refused (a 500, or a 400 for a `formula`), and on SQLite so was a `formula`. Metadata that lowers onto `engine.aggregate` takes the same verdict at run time: a roll-up summary (`summaryOperations`) whose `sum` names such a child field records a failed recompute, a grouped list view's server-side header summary is refused, and a chart or metric component's `sum` over such a field is refused. No example app authors such a pair. One published stack authors a `sum` list-column summary over a `formula` field; that summary is computed client-side and does not reach `engine.aggregate`.
+  
+  **Unchanged.** Every pair the table accepts, `sum` over the eight types above included; `count` over any field; an aggregation that names no field; an undeclared name or a relationship path, which this door does not judge (the REST door answers an unknown name `INVALID_FIELD` before the engine is reached); a field whose declared type is outside `FieldType`.
+  
+  **A correction to the earlier entry of this release.** It listed the multi-capable types declared `multiple: true` as `select`, `lookup`, `user`, `file` or `image`; the list is `select`, `radio`, `lookup`, `user`, `file` and `image` (`MULTI_CAPABLE_TYPES`). A `radio` declared `multiple: true` was refused by `min` / `max` / `avg` there all the same, by its type's own row, and it is refused by `sum` here.
+  
+  `@objectstack/spec`: the TSDoc of `AGGREGATE_FIELD_TYPE_COMPATIBILITY` and `isAggregateCompatibleWithFieldType` states that the engine's `aggregate` door asks every row of the table, where it said "the other rows" while one was held, and names `radio` among the multi-capable types. The table and the predicate are unchanged.
+- 657b6b7: The dry run and the partial-success batch insert now say which row lost which field. `ObjectQL.validate` (and `validateData`, which relays it) answers `droppedFields` on each accepted row of `results`, and `ObjectQL.insertMany` (and `insertManyData`, which passes it through) answers `droppedFields` on each `ok` outcome: the caller-supplied fields the engine legally strips from that row, one `DroppedFieldsEvent` per reason, in the engine's own reason vocabulary (`computed` for a `formula` value, `readonly` for a static `readonly` or runtime-owned field). The key is absent when nothing was taken from the row.
+  
+  - **Recorded at the strips, never inferred from the union.** Each strip records what it takes from each row as it runs. A `beforeInsert` hook that assigns a protected key on one row keeps it there, so that row is not named, while a sibling row that supplied the same key and lost it is.
+  - **A row the write does not complete carries none.** A preview row the verdict refuses, and an `ok: false` outcome, carry no `droppedFields`: a drop means the write completed without the field.
+  - **The dry run and the commit agree.** On `insert` mode the preview runs the same strips the write runs, so a row's preview drops and its outcome drops are the same list. One gap is unchanged: the preview runs no hooks, so a key a `beforeInsert` hook assigns is reported by the preview and kept by the write. An `update`-mode preview does not run the `readonlyWhen` or primary-key strips, which judge a prior record the preview does not read.
+  - **Unchanged:** the `onFieldsDropped` listener on `insert`, `insertMany` and `validate` still reports the batch-level union, one event per reason, naming no row. So does `insertManyData`'s top-level `droppedFields`. `insert(object, rows[])` still returns the records, with no per-row slot. `strictReadonlyWrites` still refuses the whole batch before any outcome is built.
+  
+  Graded `minor` in both packages: each widens a published method's declared answer with a new optional key (`InsertManyRowOutcome` gains `droppedFields`, and so does each outcome of `insertManyData`'s return type), which is an additive widening of the public surface. Nothing is removed, renamed or refused. The keys on the wire, `ValidateDataResponseSchema.results[].droppedFields` and `ImportRowResultSchema.droppedFields`, were already declared in `@objectstack/spec`.
+- c35436c: fix(objectql)!: a per-aggregation `filter` and a `having` refuse a non-boolean `$exists` / `$null` with `INVALID_FILTER` / 400, in the words every driver's `where` refuses it in, instead of reading `$exists` by truthiness and dropping `$null` (#20981)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered filter-query-face-comparands-refused-at-save) this narrows the engine's own in-process evaluator to the rule that registered entry already records: its reason states that every query face refuses a non-boolean $null / $exists flag, its surface names a query having, the data-engine aggregate call's having and an aggregation filter among the carriers, and its replacement is this change's whole migration (a flag is the boolean itself; $null true is "has no value", $exists true is "has a value"). This change makes that statement true on the per-aggregation filter and having positions, which the engine evaluates itself after the driver. No authorable key, spelling, export or published type moves, and no stored row is read or rewritten; a stored filter carrying such a flag is already refused when it is saved, by that entry. -->
+  
+  **BREAKING**: this narrows what `aggregate` accepts in two positions, `aggregations[i].filter` and `having`, on every driver. A `$exists` or `$null` comparand that is not a boolean (a string such as `"false"`, a number, `null`, an array) is now refused with `INVALID_FILTER` / 400, before any driver is asked for a row, so an empty table refuses it too, at any depth under `$and` / `$or` / `$not`. A plain object or `undefined` there is refused first by the comparand-type check, in its own words, as before; a `{ $field }` reference there, already refused as a reference outside a scalar comparison, is now refused in this entry's words. The published `applyInMemoryAggregation(rows, ast, timezone, fields)` narrows the same way, per row: it throws the same refusal for a row its per-aggregation filter judges on the flag, with or without a `fields` map (an empty `rows` array, or a row a `$or` branch settles first, is not judged there; `engine.aggregate` judges the whole filter once before any row). It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **Why a refusal.** `FieldOperatorsSchema` declares both flags as booleans, and every driver's `where` refuses any other comparand. The engine evaluates a per-aggregation `filter` and a `having` itself, and it read one anyway. Measured through `engine.aggregate` on the in-memory driver and on `SqlDriver` (SQLite), with identical answers: `$exists` was read by truthiness, so `"yes"`, `1` and the string `"false"` selected the rows and groups WITH a value, and `0` / `null` the ones without; and `$null` tested only `true` / `false`, so any other value constrained nothing, and every row and every group came back.
+  
+  **What an author sees now.** The message `driver-sql` gives the same flag, beginning `Operator "$exists" on field "FIELD" requires a boolean comparand (true or false).`, naming what arrived and the position (`aggregations[1].filter.stage.$exists`, `having.stage.$null`). Unlike a `where` on `SqlDriver`, the field and the value are not withheld: a per-aggregation `filter` and a `having` never carry a merged read scope.
+  
+  **What to write instead.** Write the boolean itself. `"$exists": true` and `"$null": false` match a field that has a value; `"$exists": false` and `"$null": true` match one that has none.
+  
+  **Who is affected.** A caller that reaches `engine.aggregate` without the REST query door's schema parse (server-side code, a flow or hook, the analytics bridge that lowers a dataset measure's filter into an aggregation filter, a host calling `applyInMemoryAggregation` directly) and read the count as a real answer. `POST /api/v1/data/:object/query` already refused all three positions with 400 `VALIDATION_FAILED` before the request reached the engine, and still does.
+  
+  **Unchanged.** `$exists: true` / `false` and `$null: true` / `false` answer exactly as before, on both positions. `$empty` and every other operator, and `where`.
+- a11faee: fix(objectql)!: a per-aggregation `filter` refuses `$in` / `$nin` / `$eq` / `$ne` / an ordering / `$between` / implicit equality on a declared JSON-stored field with `INVALID_FILTER` / 400, in the words `where` refuses them in, instead of counting rows the stored arrays cannot support
+  
+  Clause-②: yes (widening)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at the engine's per-aggregation filter position: the operator x declared-type pairs refused are exactly the pairs driver-sql's where has refused on a JSON-stored column since its column-type gate landed, and the per-aggregation position now answers them the same way. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema, AggregationNodeSchema and every object and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query the engine answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour plus ADDITIONS only (three new @objectstack/core exports and one new optional trailing parameter on applyInMemoryAggregation), with no published interface or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts in one position, `aggregations[i].filter`, on every driver and for every caller that reaches the engine: the REST query door (`POST /api/v1/data/:object/query`), a flow or hook, and the analytics strategy that lowers a dataset measure's filter onto `engine.aggregate`. The published `applyInMemoryAggregation(rows, ast, timezone, fields)` narrows the same way when it is handed a field map. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field the object declares JSON-stored (a structured-JSON type such as `json` or `address`, an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`), a per-aggregation `filter` that compares the field with `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin` or implicit equality (`{ "owners": "u1" }`) is refused with `INVALID_FILTER` / 400, whatever the comparand (`null` and an empty list included), at any depth under `$and` / `$or` / `$not`, and before any driver is asked for a row, so an empty table refuses it too. That is the set `driver-sql`'s `where` refuses on such a column, for the same reason.
+  
+  **What an author sees now.** The same 400 body the same filter gets as a `where`: the filter WAS NOT APPLIED, the comparison can never equal one member of a stored list, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership, or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message, as they are for `where`, and the full diagnostic, naming both and the aggregation position, goes to the server log.
+  
+  **Why a refusal.** The engine evaluates a per-aggregation filter itself, and it compared the whole stored array against a scalar. Measured through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16 over six rows of a `multiple: true` lookup, two of them holding `u1`: `{ owners: { $in: ['u1', 'u9'] } }` counted 0, `{ owners: { $nin: ['u1', 'u9'] } }` counted all 6, the two rows it was asked to exclude among them, `$gt` / `$lte` / `$between` counted 4 / 1 / 5, and `{ tags: { $eq: 'red' } }` counted the row holding `['red']` by JS loose equality. The same filters in `where` were 400 on both dialects.
+  
+  **Who is affected.** A dashboard, report, dataset measure or caller whose per-aggregation filter compares a JSON-stored field with one of those operators and read the count as a real answer. Also a host calling `applyInMemoryAggregation` directly with a `fields` map: it now judges each `aggregations[i].filter` against that map before any row (an empty `rows` array included) and throws the same `INVALID_FILTER` / 400. It takes an optional fifth argument, `reportWithheld(diagnostic)`, which receives the withheld field, operator and position; without it the diagnostic is dropped. A call without `fields` judges nothing, as before. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not JSON-stored; `having`; `where`; and a host whose engine has no declaration for the object, where nothing is judged.
+  
+  **`@objectstack/core`** (three new root exports): `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, `jsonColumnOperatorRefusalText(field, op, bare)` and its return type `JsonColumnOperatorRefusalText` (`{ message, diagnostic }`). They are the operator set and the two texts (the withheld message and the full diagnostic) of the JSON-column refusal, so `driver-sql`'s `where` and the engine's per-aggregation filter refuse with one set and one sentence.
+  
+  **`@objectstack/driver-sql`**: no behaviour change. Its JSON-column gate reads the set and the text from `@objectstack/core`; every refusal it prints is byte for byte what it printed before.
+- 2c1cef3: fix(core)!: a filter that aims `$startsWith`, `$endsWith`, `$icontains`, `$like` or `$ilike` at a field stored as a JSON column is refused with `INVALID_FILTER` / 400, as `$eq` / `$in` / `$nin` already are, instead of matching the field's serialized text or failing at query time
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape on a JSON-stored column: the five text operators join the operator set driver-sql's where and the engine's per-aggregation filter already refuse there, through the one shared set in @objectstack/core. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema, ViewFilterRuleSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query a driver answers, not what any metadata says, and the refusal itself names the spelling to use. The other categories are closed on facts: @objectstack/core publishes (not unpublished); no ADR-0087 id covers a text operator on a multi-valued field, and filter-text-operator-declared-type-refused covers declared non-text types only, so this diff neither registers nor reuses one (not registered / already-registered); and the change is runtime behaviour only, with no published interface or type narrowed or removed: the exported set keeps its ReadonlySet of string type, and objectql's search expander changes only which operator it emits for a multi-valued field (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows which filters are answered on a field stored as a JSON column, on every face that reads `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`: `driver-sql`'s `where` (and `driver-sqlite-wasm` and `driver-turso`'s local transport, which inherit it) on every read and write face that lowers a filter, and the engine's per-aggregation `filter`. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field declared multi-valued (an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`) or structured-JSON (`json`, `address`, …), a filter using `$startsWith`, `$endsWith`, `$icontains`, or the staged pattern pair `$like` / `$ilike`, is refused with `INVALID_FILTER` / 400, at any depth under `$and` / `$or` / `$not`. The per-aggregation `filter` refuses the three declared ones; it already refused `$like` / `$ilike` as operators it does not evaluate. Through the engine, a structured-JSON field was already refused all seven text operators by the text-operator declared-type door, which still answers first there, in its own words; what moves for it is a direct driver call.
+  
+  **What an author sees.** The body the equality family already gets there, byte for byte: the filter WAS NOT APPLIED, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message and named in the server-log diagnostic; a filter positively marked as the caller's own reads them named.
+  
+  **Why a refusal.** Such a column stores the serialization `["u1","u2"]`, and none of these five operators has a membership reading. Measured through `POST /api/v1/data/:object/query` on a multi-value lookup and a `tags` field: on SQLite `$startsWith: "["` and `$endsWith: "]"` matched every row with a value, `$startsWith: "u1"` matched none of the rows holding `u1`, and `$icontains: "U1"` also matched the row holding only `u10`; on PostgreSQL 16 every one failed at query time with a `500` `DATABASE_ERROR`, a `json` column having no `LIKE` operator; the per-aggregation `filter` counted 0 for each. No membership reading is invented for a prefix, suffix or case-folded test.
+  
+  **Who is affected.** A saved filter, list view, dashboard widget, report or caller that aims one of these operators at a multi-valued or JSON-stored field. On SQLite it read rows that matched the stored brackets and quotes; it now gets the 400. On PostgreSQL it already failed, with a 500. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **`@objectstack/objectql`: `$search` over a multi-valued field answers by membership.** The search expander (`$search` on `find`, `findOne` and `aggregate`, the REST `search` / `$search` parameter included) used to emit `$in` for a term matching a `select` option label and `$icontains` for any other term, against every field in the resolved search set. On a multi-valued field both are refused by the gate above, so one such field in the set failed the whole search: a label term answered 400 on every dialect, and any other term answered 500 on PostgreSQL and, with this change, 400 on SQLite. The auto-default set includes a `select` declared `multiple: true`, as in `examples/app-todo`'s `todo_task.tags`, and `searchableFields` may name a `tags` field or a multi-valued lookup. Such a field is now matched by membership: a term matching option labels becomes one `$contains` per matched option value, and any other term, or any term on a field with no options, becomes `$contains` of the term. No search answers 400 or 500 for it any more. **The visible cost:** to hit a multi-valued field, a term must now equal one of its members or match one of its option labels; SQLite used to match substrings of the stored array's serialized text as well, so a term like `wood` found a row tagged `redwood`, and it no longer does. Scalar fields are searched exactly as before.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not JSON-stored, the scalar text column included; `driver-memory`; and `driver-turso`'s remote transport, which compiles its own filters.
+- cb45469: fix(service-analytics)!: the analytics native-SQL strategy declines an object an engine middleware is registered for, so the engine serves it and that object's read gates apply; the engine answers which objects carry one (`IObjectQLEngine.hasObjectMiddleware`) (#21080)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a correction of which analytics strategy serves a query that reads an object the data engine holds a per-object middleware for, decided at request time. No authorable key, spelling, value domain or stored metadata shape moves: every dataset, cube and dashboard parses as before, nothing stored is rewritten, and the only declaration change is ADDITIVE (one optional member on IObjectQLEngine, one public method on ObjectQL, one optional member on AnalyticsServiceConfig), so there is nothing for an author to convert and nothing for `objectstack migrate meta` to reach. The queries newly refused are refused at request time by the ObjectQL strategy's existing envelope, not by a schema. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers strategy routing and this diff adds none (not registered / already-registered); and the change is runtime behaviour plus additive declarations, not a removal from a published interface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the analytics doors serve for one class of query. It ships as `minor` under the launch-window convention for narrowings.
+  
+  **What changes.** On a SQL driver, `NativeSQLStrategy` compiled a query to SQL and ran it through the driver's raw-SQL seam, so no engine operation ran and no engine middleware did. It applied the security service's object admission and read filter and nothing else, so the read gates that live in the engine as per-object middlewares did not apply there: a caller admitted to such an object at object level read grouped results and counts over every row, rows about parent records that caller cannot read included. It now declines a query that reads (as its base object, a declared join, or through a relationship path) an object the data engine holds a middleware registered for. The ObjectQL strategy serves it through the engine with the caller's context, so the engine's middlewares run, and the analytics answer for that caller equals the data door's. On the stock composition the objects that move off the native path are `sys_comment`, `sys_activity` and `sys_attachment` (read gates), `sys_approval_request` (the snapshot redaction), and `sys_user_position` and `sys_permission_set` (write-side middlewares, which move as a side effect: a middleware does not declare its operation). No shipped dataset or dashboard reads any of them.
+  
+  **What is newly refused.** A query on such an object that the ObjectQL strategy cannot serve is refused with that strategy's existing `400`, where the native strategy used to serve it: for example a dimension reached through a relationship path combined with a measure that cannot be recombined across it (`avg`, `count_distinct`). Correctness wins over the fast path for a gated object.
+  
+  **It fails closed.** `AnalyticsServicePlugin` asks the data engine. An engine without `hasObjectMiddleware`, or no engine, cannot say, and the strategy declines then too: every query on such a host is served by the ObjectQL strategy, and the plugin says so once at `warn`. A host that constructs `AnalyticsService` with `executeRawSql` and without the new `hasObjectMiddleware` config member keeps the native path for every object and is told so once at construction.
+  
+  **New, additive.** `IObjectQLEngine.hasObjectMiddleware?(objectName): boolean` (`@objectstack/spec`), `ObjectQL.hasObjectMiddleware(objectName)` (`@objectstack/objectql`): whether a `registerMiddleware(fn, { object })` names the object; a global registration (no `object`, or `'*'`) is keyed to none and is not counted. `AnalyticsServiceConfig.hasObjectMiddleware` (`@objectstack/service-analytics`), which the plugin fills from the data engine.
+  
+  **Unchanged.** Objects no middleware names keep the native path. The middleware chain, `registerMiddleware` and every gate are unchanged.
+  
+  **What to do after upgrading.** Nothing on the stock composition. A host whose `"data"` service is not ObjectQL should implement `hasObjectMiddleware` to keep the native path for ungated objects. A host that builds `AnalyticsService` itself with `executeRawSql` should pass `hasObjectMiddleware` from its engine.
+- 336e191: fix(security)!: stored metadata bodies are projected or refused at the audit, analytics, realtime and data-door filter/sort exits too
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) further read/copy/evaluate exits for a stored metadata body (sys_metadata / sys_metadata_history), each routed through the one shared redactor or refused: the audit/activity write-time copy is projected, a data-door filter or sort on the body column is refused (the sibling of the already-registered-as-not-required groupBy refusal), an analytics query member on the body column is refused, and a data.record.* realtime event body is projected. No authorable key, spelling, export or stored shape moves, and no stored row is read differently by any metadata consumer; the published surfaces gain and lose nothing. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter/sort target, an analytics member or an event body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what three doors accept or serve for the two stored-metadata tables — the generic data door refuses a filter or sort on the body column, the analytics door refuses it as a dimension / measure / filter / sort member, and the realtime event and the audit/activity copy now carry the body as its type's read projection instead of the stored bytes. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changes.**
+  
+  - **Audit / activity copy (`@objectstack/plugin-audit`).** The audit writer copies a `sys_metadata` / `sys_metadata_history` row into `sys_audit_log.new_value` / `old_value` and `sys_activity.metadata`. That copy now projects the body through the shared redactor, so stored credential material is withheld from the second store too. A new `os migrate audit-metadata-bodies` command rewrites the copies already at rest (dry run by default, `--apply` to write, idempotent).
+  - **Analytics (`@objectstack/service-analytics`).** A query naming the stored body column of these objects as a dimension, measure, filter or sort is refused with `400 INVALID_FIELD`, before any strategy runs — the posture analytics already takes for a member it will not evaluate.
+  - **Realtime (`@objectstack/objectql`).** A `data.record.*` event projects its `after` / `changes` body through the same redactor, so a subscriber to these objects' events receives no stored credential.
+  - **Data door filter / sort (`@objectstack/metadata-protocol`).** A filter or sort on the body column is refused with `400 INVALID_FIELD`, the same family and shape as the existing groupBy refusal.
+  
+  **What stays answerable.** Every scalar column of these objects — `type`, `name`, `scope`, `state`, timestamps — is still grouped, filtered, sorted, counted and served; only the body column is affected. Every other object is unchanged.
+
+### Patch Changes
+
+- c9d234c: The number-comparand refusal now says "a numeric aggregated column" at `having`, and names PostgreSQL's server error only where a driver actually binds the comparand
+  
+  Clause-②: no
+  
+  **Two false phrases, at two positions.** At `having`, filtering a `count` /
+  `sum` / `avg` result (or a groupBy column) against a non-numeric comparand
+  answered `filter on 'total' compares a declared number field …` — `total` is
+  the aggregated row's own column, not a declared field of the object; the
+  verdict is handed the numeric class the column belongs to, which has no
+  `FieldType` of its own. And at `having` and the per-aggregation `filter`, the
+  `not-a-number`, `boolean` and `date` clauses each named "(PostgreSQL with a
+  server error)", a fact about `where`: the engine evaluates both of those
+  clauses itself, on every driver, before any row is read, so a comparand there
+  never reaches a driver bind and PostgreSQL never answers it.
+  
+  **Measured, unchanged: the per-aggregation `filter`'s column IS a declared
+  field.** That position narrows the object's RAW rows before any aggregation
+  runs, against the object's real field map — so its refusal keeps "a declared …
+  field", exactly as `where`'s does. Only the PostgreSQL clause moves there,
+  because the engine evaluates that position itself too.
+  
+  **FROM** `filter on 'total' compares a declared number field against "abc" at
+  having.total.$gt, which is not a number: it has no numeric reading, and
+  backends answer it differently (PostgreSQL with a server error). …`
+  
+  **TO** `filter on 'total' compares a numeric aggregated column against "abc"
+  at having.total.$gt, which is not a number: it has no numeric reading. …`
+  
+  The `where` message is unchanged, byte for byte, and so is the accept set: no
+  comparand that was refused before is now accepted, and none that passed is now
+  refused. This is a wording fix.
+  
+  **What moved to carry it.** `NumberComparandRefusalSite` (`@objectstack/spec`)
+  gains two optional fields the engine door already knew and now passes along:
+  `aggregated` (the column is an aggregated-row column, not a declared field —
+  `having` sets it; `where` and the per-aggregation `filter` do not) and
+  `boundByDriver` (this position reaches a live driver bind — `where` alone sets
+  it true; unset defaults to `true`, so a site built before this change, or any
+  caller who never sets these fields, renders exactly as it always has).
+  `@objectstack/objectql`'s door passes both explicitly at each of its three
+  call sites; no second rule and no driver-level change.
+- 5a23096: Warnings, refusals and hints that cited a tracker number now say what was decided
+  
+  Clause-②: no
+  
+  Several runtime strings an author or operator reads sent the reader to an issue-tracker number for
+  the reason behind them. Each now states that reason in the sentence itself:
+  
+  - `@objectstack/objectql`: the two data-event warnings. A write that names no single record publishes
+    no per-record event rather than one with an empty `recordId`; a predicate (`multi: true`) write
+    publishes its own `data.records.*` event carrying the affected-row count and nothing else, so a
+    driver result that is not a count publishes no bulk event either.
+  - `@objectstack/service-automation`: the warning for a pausing node type that never declares
+    `resumeAuthority`, the generic-route resume refusal (its log line and its error text), and the
+    refusal of a suspension from a type that declares `supportsPause: false`. An undeclared
+    `resumeAuthority` resolves to `'service'` (fail-closed), so the generic resume route refuses those
+    pauses; guessing `'any'` is how a raw resume once walked past an approval decision no service had
+    recorded.
+  - `@objectstack/runtime`: the endpoint step's `NOT_IMPLEMENTED` message and its two hints (the
+    composed runtime always threads the policy context and the execution wiring, because execution is
+    reachable only past the policy chain), and the endpoint mapping refusals (the publish gate rejects
+    the same shapes, so a declaration that reaches the runtime check was stored without passing it).
+  
+  Text only: no error code, field name, status or behaviour changes.
+- a94f3ba: objectql refusals, log lines and metadata text no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages the query engine shows to authors, administrators and operators ended with an
+  issue-tracker number where the reason belonged. The number goes, and where the sentence did not
+  already say what was decided, it now does:
+  
+  - Refusals: the bulk update and bulk delete row-scoping refusals now name the seed they are missing
+    (the AST seeded before the middleware chain, which RLS and sharing compose their row-scoping onto,
+    so a bulk write reaches only the rows the caller may edit); the hook-target rebind refusal says
+    why `delete()` stopped honouring a rebind (a handler that silently redirects which row gets
+    deleted is a trap) and names the `dispatchUnscopedMultiWrite` registration the whole-operation
+    dispatch goes to, on update and delete alike. The unknown-option, filter-array,
+    credential-aggregation, HAVING-operator, empty-hook-target, strict read-only and system-write
+    organization refusals lose only the citation, because their sentences already said it.
+  - Metadata text: the lifecycle `retention_overrides` setting description and the search companion
+    field description lose their citation.
+  - Log lines: the non-atomic cascade warning says a single-datasource cascade is now one
+    transaction; the system-ledger transaction line calls the ledger the one class carved out of the
+    cross-datasource write refusal; the dangling-reference audit summary says findings are reported,
+    never rewritten, because a system-context write is exempt from the write-time reference check;
+    the legacy `apiMethods` warning says the authorable values are the six primitives only, every
+    other operation being derived from them or retired; the two unevaluable-rule warnings say such a
+    rule fails closed and is never skipped. The ADR-0104 value-shape gate lines, the delegated
+    protocol-assembly line and the read-only and runtime-owned strip warnings lose only the citation.
+  
+  The `findOne` no-predicate refusal keeps its citation for now: `@objectstack/metadata-core`
+  carries a byte-identical copy that this package's tests compare against, and both move together.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- b785c3b: fix: `sum` / `avg` answer the same double on every face the platform owns, added with one compensated fold that `@objectstack/core` now exports as `compensatedSum` (#20544)
+  
+  Clause-②: yes
+  
+  **New export.** `@objectstack/core` exports `compensatedSum(nums)`: the sum of
+  `nums`, added in order with Kahan-Babuska-Neumaier compensation, which is the
+  summation SQLite (3.43 and later) uses for its own `sum` and `avg`. It moved
+  here from `@objectstack/objectql`'s rows path (`in-memory-aggregation.ts`),
+  which now imports it instead of keeping a private copy.
+  
+  **What changed.** Three folds still added a group's values naively, and now call
+  the same function:
+  
+  - `@objectstack/driver-memory`'s `aggregate()` and `find()` with aggregations,
+    the path `engine.aggregate` takes on an in-memory datasource;
+  - `@objectstack/driver-memory`'s analytics face (`MemoryAnalyticsService`),
+    whose `sum` / `avg` measures are now a `$group` `$accumulator` in place of
+    mingo's `$sum` / `$avg`;
+  - `@objectstack/service-analytics`' draft preview.
+  
+  Over a `number` column holding `0.1`, `0.2` and `0.3`, each of them answered
+  `0.6000000000000001` / `0.20000000000000004`. They now answer `0.6` /
+  `0.19999999999999998`, as SQLite and the engine's rows path do. Over
+  `1e16, 1, -1e16` they answered `0` and now answer `1`. On driver-memory,
+  `engine.aggregate` gave two answers depending on its path: `having { s: { $eq:
+  0.6 } }` kept the group on the rows path and dropped it on the native path. It
+  now keeps it on both.
+  
+  **What did not move.** Two addends, integers whose running total stays within
+  2^53, and a non-finite total give the same answer as before. Which values count
+  as addends did not change either: booleans as 1 / 0, and nulls and non-numeric
+  strings left out, as each face already had it. `count`, `min` and `max` are
+  untouched. The analytics face's pipeline dump (`result.sql`) now renders the
+  accumulator's functions by name, so a `sum` measure and an `avg` measure still
+  dump differently.
+  
+  **Residual.** PostgreSQL and MySQL add their doubles natively without
+  compensation, and the platform does not wrap that arithmetic. So over three or
+  more fractions their native path can still differ from these faces in the last
+  place. An exact `$eq` on a fractional sum compares doubles; compare with a range.
+- 4bf4e7e: Provenance comments in `@objectstack/objectql` cite the commits and ADRs that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each one now cites the commit in this repository's history that made the decision it describes, or the
+  ADR that records it (ADR-0029 D9.2a, ADR-0104's 2026-09-05 addendum, ADR-0126 §7.2, ADR-0130 D3).
+  Some of these docblocks sit on exported members, so the reworded text appears in the published
+  `index.d.ts` / `index.d.mts`, `core.d.ts` / `core.d.mts` and the shared type chunk, and comments that
+  esbuild keeps appear in the JavaScript output.
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- cd6d8a5: fix(objectql,platform-objects,metadata-protocol)!: the platform's `sys_migration` primary-key lookups go through `findOne`, so an existing deployment no longer prints "Paged read of 'sys_migration' is NOT deterministic" on every boot and every `os migrate plan` (#20648)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/platform-objects/src/system/migration-flag.ts#MigrationFlagEngine, packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts#SeedTenancyLedger) two duck-typed engine interfaces, each the parameter type of a published helper, whose one read method moves from `find` to `findOne`. Neither is a Zod schema, a `packages/spec` declaration or an object definition, neither is a projection of a schema, and no metadata surface references either, so `objectstack migrate meta` has nothing to rewrite. The body carries no migration prescription. The only party affected is the TypeScript author of a hand-written stand-in, and that author's fix is carried by the compiler at their own call site, which names the missing `findOne`. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers an engine interface's method set, and this diff adds none (not `registered` / `already-registered`); and both interfaces were concretely typed at the merge base, not erased (not `type-surface-only`). This category, not the broader `no-migration-prescription`, because the positive reading it verifies is available here: the named symbols have no metadata surface. -->
+  
+  The deployment ledger is read one row at a time, by primary key. Five readers
+  spelled that read as `find(sys_migration, { where: { id }, limit: 1 })`: the
+  engine's migration-gate read (`readMigrationFlagVerified`, behind
+  `haveFileColumnsMoved`, `isFileReferencesMigrationVerified` and
+  `isValueShapesMigrationVerified`), the engine's deviation marker and
+  creation-attestation revocation, `readDataMigrationFlag` in
+  `@objectstack/platform-objects/system`, and the seed-tenancy repair's receipt.
+  The SQL driver cannot tell that read from page one of a walk. The engine's gate
+  read runs at boot before the schema pass registers `sys_migration` with the
+  driver, and on a table the driver has not registered an unsorted paged read
+  warns that its pages may repeat or skip rows. Measured on a SQLite database
+  created by 17.4.0: every 17.5.0 boot and every `os migrate plan` printed that
+  warning once, for a lookup that cannot return two rows. All five readers now use
+  `findOne`, the single-row route the driver already exempts. The driver's check is
+  unchanged: an unsorted `limit` read on a table the driver did not create still
+  warns.
+  
+  **BREAKING**: this narrows what two published engine interfaces accept. The
+  first is `MigrationFlagEngine` in `@objectstack/platform-objects/system`. It is
+  the parameter type of `readDataMigrationFlag`, `isDataMigrationVerified`,
+  `mayActIrreversibly`, `recordDataMigrationRun`, `recordFileColumnMove` and
+  `attestFreshDatastore`, and part of `FilesToReferencesEngine` in
+  `@objectstack/service-storage`. The second is `SeedTenancyLedger` in
+  `@objectstack/metadata-protocol`, the type of a `SeedTenancySeam`'s `ledger`.
+  Each now requires `findOne` where it required `find`, so a hand-written stand-in
+  that provides only `find` no longer satisfies either type. It ships as `minor`
+  under the launch-window convention for accept-set narrowings. The ObjectQL engine
+  has both methods, so a host that passes the engine needs no change.
+  
+  **Your fix:** a stand-in that implemented `find` for these helpers implements
+  `findOne(object, options)` instead, answering the row whose `where.id` matches,
+  or `null`.
+  
+  At run time, a stand-in that still provides only `find` fails the read.
+  `readDataMigrationFlag` then answers `null`, the same answer as a missing row, so
+  the gates it feeds stay closed. `resolveSeedTenancySeam` now attaches a `ledger`
+  only for a host that has `getObject`, `findOne`, `insert` and `update`. For a
+  find-only host the seam's `ledger` is `undefined`, and when the seed-tenancy
+  repair applies, it says at `warn` that it could not record its receipt.
+- 8460592: fix: the whole-day bound on a bare `YYYY-MM-DD` upper bound is applied at the seams only — `DatabaseLoader.queryHistory` in driver mode becomes one, the engine seam lowers type-blind for an object with no field map, and `InMemoryDriver` drops its own copy (ADR-0053 D-D1 items 5 and 7, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/metadata` — `DatabaseLoader.queryHistory` in driver mode lowers its own filter.** With a raw `IDataDriver` (`MetadataManager.setDatabaseDriver`) the history filter reaches the driver without passing any seam. The loader now runs the shared `lowerFilterCondition` (`@objectstack/spec/data`) on it, typed by the history object it syncs: `until: 'YYYY-MM-DD'` reads `recorded_at < next day`, so every version recorded on that day is kept on every driver, and an instant `until` is kept as written. Engine mode is unchanged (the engine's own `where` seam lowers it). Before this, the whole day was kept only by each driver's own copy of the rule; with `@objectstack/driver-memory`'s copy deleted below, `until` = today would have gone from every version of the day to none.
+  - **`@objectstack/objectql` — an object with no field map is lowered type-blind.** The engine's `where` seam (on `find`, `findOne`, `count`, `update`, `delete` and `aggregate`'s `where` / `aggregations[i].filter`) reads the object's declared field map and rewrites a declared `datetime` column only. For an object the registry does not hold there is no declaration to read, and the seam now applies the whole-day rules to every column (a bare-day `$lte` becomes `$lt` the next day, a `$between` splits), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the declared type. It used to leave such an object to each driver's own copy. Visible on `SqlDriver`: a bare-day `$lte` on a non-`datetime` column of an unregistered object that holds ISO instant text now keeps the whole day; a `datetime` or `date` column answers as before. An object with a field map is unchanged.
+  - **`@objectstack/driver-memory` — `InMemoryDriver` compiles the comparison it is handed.** Its four copies of the whole-day rule are deleted (the `$lte` and `$between` arms of the filter translator, the `<=` and `between` arms of the AST-node translator). A read through the engine hands it a `where` the engine's seam has already lowered, so on that path a declared `datetime` column keeps the whole named day, and a declared `date` column answers as before. A row-level security `using` filter is not lowered by the engine's seam: the security middleware ANDs it into the query's `where` after that seam has run, and only the RLS compile seam lowers it, rewriting just the columns its field guard declares `datetime`. Two answers converge on what `SqlDriver` already returns (ADR-0053 D-D1 item 7's scope): on a registered object, a bare-day `$lte` / `$between` on a declared `text` column holding ISO instant text, or on a column the object does not declare, is now compared as written, where this driver used to widen it to the whole day. One path narrows outside those two: an RLS `using` policy with a bare-day upper bound, on an object whose declared fields the security plugin cannot resolve, is compiled with no field guard, so the RLS compile seam reads no column as `datetime` and the bound reaches this driver as written, where this driver used to widen it to the whole day; that holds until #20822 group 2 makes the RLS compile seam type-blind when it has no guard. A direct `find()` that passed no seam gets the comparison it wrote (item 5); lower the filter with `lowerFilterCondition` first to keep the whole-day reading.
+- e18fea6: fix(objectql,driver-mongodb,formula): the `having` and per-aggregation evaluator compiles the whole-day comparison it is handed, and `$contains` asks membership on a JSON-stored field in `MongoDBDriver` and in `matchesFilterCondition` (ADR-0053 D-D1 items 5 and 9; the `FILTER_OPERATORS` `$contains` contract, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/objectql`: the aggregate evaluator's own whole-day copy is deleted.** The walker behind `having` and `aggregations[i].filter` no longer widens a bare `YYYY-MM-DD` `$lte`, or a `$between` maximum, on a `datetime` column to the whole day, and no longer drops the bound on `9999-12-31`. Through `engine.aggregate` nothing changes: the engine's seam lowers both positions with the shared `lowerFilterCondition` (`@objectstack/spec/data`) before the walker runs, by the object's declared `datetime` fields for the per-aggregation `filter` and by the aggregated column's type for `having`. A caller that passes no seam gets the comparison it wrote: `applyInMemoryAggregation(rows, ast, tz, fields)` called directly now counts `{ at: { $lte: '2026-02-01' } }` against that day's midnight. To keep the seam's reading on a direct call, lower each `filter` first with `lowerFilterCondition(filter, { isDatetimeColumn })`.
+  - **`@objectstack/driver-mongodb`: `$contains` / `$notContains` ask membership on a declared JSON-stored field.** On a field `syncSchema` recorded as `multiple: true`, a multi-option type (`tags`, `multiselect`, `checkboxes`) or a JSON type, `translateFilter` (every verb, and the aggregation `$match`) now emits an array-only `$elemMatch` over the members the comparand names, with the candidate rule the SQL dialects bind (`jsonMembershipCandidates`, `@objectstack/core`): `'1'` names the string `'1'` or the number `1`, `'true'` the string or `true`. It used to emit a `$regex`, which MongoDB applies to each element, so `{ owners: { $contains: 'u1' } }` matched a stored `['u10']` and `{ tags: { $contains: 'red' } }` a stored `['redwood']`. `$notContains` is the exact complement, and still admits a row with no value. A scalar column, and a field whose declaration the driver does not hold (an object never synced, a standalone `translateFilter` call), keep the substring `$regex`.
+  - **`@objectstack/formula`: `matchesFilterCondition` asks membership of a JSON-stored column.** When the caller supplies `options.fields` and it names the column, the declaration decides: membership on a JSON-stored column, substring on any other. Otherwise the stored value decides: an array asks membership, anything else substring. A stored array used to fail `$contains` and pass `$notContains` whatever it held.
+    - **The RLS write check, which evaluates a policy with this function, moves with it.** Under a `check` such as `record.tags.contains('x')` on a multi-valued field, a write whose post-image holds `['x']` (a row the same policy's read shows) is now admitted; it was refused `PERMISSION_DENIED` / 403. `['xy']` stays refused, and the read hides it.
+    - A scalar written to a declared multi-valued field is judged as written, before the write door wraps it in a list. So `tags: 'xy'`, which the check used to admit while the read hides the stored `['xy']`, is now refused 403. And `tags: 'x'` is now refused 403 too, although the read shows the stored `['x']`. Send the list, `tags: ['x']`.
+  - **`@objectstack/spec`: docblock only, in the shipped `src/data/filter.zod.ts`.** The three pointers to the deleted `SqlDriver.calendarDayUpperBoundRewrite` / `calendarDayBetweenRewrite` now name the shared `lowerFilterCondition` at the seams, and the `FILTER_OPERATORS` `$contains` implementation-status list gains `driver-mongodb` and `formula`. No schema, type or export changes.
+  - No exported name changes.
+- f6ccca4: fix(objectql,rest): a `date` or `datetime` value refused for its year says so — "must be a date in the years 0001 to 9999" / "must be a datetime whose UTC year falls in the years 1000 to 9999" — instead of "must be a valid date (ISO-8601)", which was false for a value such as `0500-07-15T10:00:00Z` (#20846)
+  
+  Clause-②: yes (widening) — one new export on `@objectstack/core`'s root, `SUPPORTED_TEMPORAL_YEARS`. No value's verdict moves and no wire key moves: the field code stays `invalid_date` and its `constraint` stays `{ type }`.
+  
+  `POST` / `PATCH /api/v1/data/:object` and each row of `POST /api/v1/data/:object/import`
+  refuse a `date` outside the years 0001 to 9999 and a `datetime` whose UTC year falls
+  outside 1000 to 9999. When the value itself is readable — an ISO 8601 string such as
+  `0500-07-15T10:00:00Z` or `+010000-01-01`, or a `Date` — the refusal's message now
+  names the kind's years. An author who read "not valid ISO" rewrote the spelling, and no
+  spelling of that year is admitted.
+  
+  - `@objectstack/spec`: the validation message catalog gains `invalid_date_range` and
+    `invalid_datetime_range` in `en`, `zh-CN`, `ja-JP` and `es-ES`. They are two more
+    sentences of the `invalid_date` code, never a wire value. The years are the template
+    parameters `{{firstYear}}` / `{{lastYear}}`. A deployment that overrides a message
+    under `validation.field.invalid_date` or `validation.field.invalid_datetime` does not
+    cover these values. To override their text, define
+    `validation.field.invalid_date_range` / `validation.field.invalid_datetime_range`.
+  - `@objectstack/core`: `SUPPORTED_TEMPORAL_YEARS` (`{ date: { first: 1, last: 9999 },
+    datetime: { first: 1000, last: 9999 } }`, frozen) is the range
+    `isOutsideTemporalYearRange` judges by. It is exported so a refusal names the range
+    from the source the doors use, never a copy of its numbers.
+  - `@objectstack/objectql` and `@objectstack/rest`: the record validator and the import's
+    cell reader choose the range sentence for such a value. An import cell with more than
+    four year digits (`+010000-01-01`) is refused by the import's reader. It used to read
+    "is not a valid date" and now gets the same range sentence as the write door.
+  
+  **What is not affected.** Which values are refused is unchanged, and so is the refusal's
+  code (`invalid_date`) and `constraint`. A value that is not readable keeps its sentence:
+  "must be a valid date (ISO-8601)" at the write door, `"…" is not a valid date` at the import.
+  So does a number, which is never a written `date` or `datetime`.
+- d67b942: fix(objectql): a per-aggregation `filter` with `$contains` / `$notContains` on a multi-valued field counts the rows the same `where` finds (#20873)
+  
+  Clause-②: no
+  
+  `engine.aggregate({ aggregations: [{ …, filter }] })` — and so `POST /api/v1/data/:object/query`
+  with a per-aggregation `filter` — evaluates that filter in the engine, not in the driver. Its
+  `$contains` arm failed every value that was not a string, so on a `multiple: true` lookup,
+  `multiselect`, `checkboxes` or `tags` field a stored array never matched:
+  `{ owners: { $contains: 'u1' } }` counted 0 on every driver where the same condition as a `where`
+  found 2 rows, and `$notContains` counted every row, the rows holding the member included.
+  
+  On a declared JSON-stored field (a multi-valued field, or a structured-JSON type) both operators
+  now ask MEMBERSHIP, the reading `FILTER_OPERATORS`' `$contains` docblock declares and `where` gives
+  on every SQL dialect: `'u1'` is a member of `['u1', 'u2']` and not of `['u10']`, and a member stored
+  as a number or boolean is named by its text (`'1'` finds `[1, 2]`). `$notContains` is the exact
+  complement, and a row with no value still satisfies it. A scalar text field keeps the substring
+  test, unchanged, and so does `having`.
+  
+  No query that was refused now answers, and none that answered is refused: only the count of a
+  per-aggregation `filter` on a multi-valued field moves, to the `where` count.
+- 682873d: fix(core): the refusal a filter gets for a scalar comparison or text operator on a multi-value or JSON field reads true on every backend that prints it, and reaches a REST caller whole
+  
+  Clause-②: no
+  
+  The `INVALID_FILTER` / 400 refusal `driver-sql`'s `where`, the engine's per-aggregation `filter` and `driver-memory` all print (`jsonColumnOperatorRefusalText`) explained itself with `driver-sql`'s storage ("a field this driver stores as a JSON TEXT column") and the two wrong answers SQL used to give. That is untrue on the engine and on `driver-memory`. The message was also 748 characters, and the REST envelope cuts a 4xx message at 499 plus an ellipsis, so callers on SQLite and PostgreSQL read `…Refused rather than compiled because the answ…` and never reached the sentence saying the field and the operator were withheld.
+  
+  The message now reads, on every backend, in 486 characters: `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison or text operator at a multi-value or JSON field, which it cannot test for one member.`, then the same `$contains` / `$or` of `$contains` remedy, then `For no value, use "$null" or "$empty".` (a `null` comparand such as `{ f: null }`, `$eq: null` or `$ne: null` is refused too, and `$contains` could not express it), then `The field and the operator are withheld from the message; the full diagnostic is in the server log.` The diagnostic (the server-log text, and what a filter's own author is shown) gives the same reason with the operator named, names the field, and spells the remedy with the field's name. It drops the storage and the SQL history too, and is now whole on the wire for field names up to 26 characters (it was 643 characters or more and always cut).
+  
+  Code, status, the refused operator set and the `$contains` remedy are unchanged. A client that matched on the old words `JSON TEXT column` or `Refused rather than compiled` should match on `code: "INVALID_FILTER"` instead.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- d2bc644: fix(plugin-security): a row-level `check` judges a lone scalar written to a declared multi-valued field as the one-member list it is stored as, so the write and the read the same policy scopes give one answer for one row (#21238)
+  
+  Clause-②: yes (widening)
+  
+  The write door stores a lone scalar sent to a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `lookup` / `user` / `file` / `image` flagged `multiple: true`) as a one-member list: `tags: 'x'` is stored as `["x"]`. The row-level write `check` judged the value as sent on the insert and on a by-id update, because both images are formed before the write door runs. Measured through `ObjectQL.insert` with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set, with the same predicate as `using` and `check`:
+  
+  | `check` | written | write, before | stored | read |
+  |---|---|---|---|---|
+  | `record.tags.contains('x')` | `'x'` | 403 | `["x"]` | shown |
+  | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
+  | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
+  
+  Now the image's value on every field the object declares multi-valued goes through the same rule the write door stores it by, before the check is judged. The first and third rows are admitted. The second is refused: a policy that forbids a member from tagging a row `x` can no longer be passed by sending `'x'` instead of `['x']`. A lone scalar now gets exactly the verdict its stored list gets, on the insert, a by-id update and a predicate update. That includes a policy that compares such a field with a scalar comparison (`==`, `!=`, `in`, an ordering), which the read refuses with `INVALID_FILTER` / 400: there `'x'` used to get the opposite of the verdict `['x']` got, and now gets the same one.
+  
+  Unchanged: a field the object does not declare multi-valued is judged as written; a list, `null`, a blank string and an object are judged as written, as the write door leaves them; the check's comparands are left as written, since `contains` takes one member; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
+  
+  **`@objectstack/core`** (one new root export, so `minor`; this export is the widening the `Clause-②: yes (widening)` line declares): `multiValueStorageForm(value)`, the rule itself. It wraps a string, a number or a boolean into a one-member list and returns every other value as the same value. `@objectstack/objectql`'s `normalizeMultiValueFields` now calls it, with no change in what the write door stores (`patch`). `@objectstack/plugin-security` is `minor` because the set of writes its check admits widens (the first and third rows above); that is a security-floor behaviour change, not the declared widening.
+- cfa9315: feat(spec, objectql, plugin-security): one shared filter lowering, run once at the engine and RLS seams (ADR-0053 D-D1, amended)
+  
+  Clause-②: yes
+  
+  `@objectstack/spec/data` exports `lowerFilterCondition(filter, options?)` and its `FilterLoweringOptions` type. It is not exported from the package root entry. It is a pure `FilterCondition → FilterCondition` rewrite that applies three rules once:
+  
+  - `$between` becomes `$gte` its minimum and `$lte` its maximum.
+  - A `$lte` whose comparand is a bare `YYYY-MM-DD` day becomes `$lt` the next day, in the calendar-string domain. On the last supported day (`9999-12-31`) a lone `$lte` becomes `{ $null: false }`, and a `$between` keeps only its minimum.
+  - The NULL-polarity guards the drivers already compile. A `$ne` of a value, a `$nin` or a `$notContains` holds for a row with no value. Every leaf of a `$not` operand is made total.
+  
+  The rewrite is copy-on-write, idempotent and never refuses. A node it rewrites keeps its filter-subtree provenance mark. With `options.isDatetimeColumn` (a typed seam), the first two rules change only a declared `datetime` column. Without it they apply to every column.
+  
+  As ADR-0053 D-D1 (amended 2026-09-30) requires, the seams now run it once, after the comparand doors and after filter-token resolution:
+  
+  - **`@objectstack/objectql`** runs it on every filter position, typed by the object's declared fields. That covers `where` on `find`, `findOne`, `count`, `update` and `delete`, and `aggregate`'s `where`, `aggregations[i].filter` and `having`. `having` is typed by the aggregated row's columns, so `max` of a `datetime` field counts as a `datetime`. Drivers receive the lowered filter. A date macro such as `{today}` is resolved before the lowering reads it.
+  - **`@objectstack/plugin-security`** runs it on every compiled RLS policy filter (`using` and `check`), right after the two comparand faces. `SecurityPlugin` now hands the compile seam the object's declared `datetime` columns (`RlsFieldGuard.datetime`). A guard without that set treats no column as `datetime`.
+  
+  Row answers stay the same on every driver. Each driver keeps its own copy of these rules, and every copy gives the same answer on lowered input. One result changes. The engine evaluates `aggregate`'s `aggregations[i].filter` and `having` itself, and that evaluator now treats a row or group with no value the way every driver's `where` already does. It no longer counts such a row in a `$between` on a `datetime` column. It now keeps such a row under a `$not` over an ordering such as `$lt`.
+  
+  Nothing is removed or renamed, and there is nothing to migrate.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [b531c7b]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [fe463b4]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [c96beb2]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [3f45b6c]
+- Updated dependencies [7510663]
+- Updated dependencies [a7d9768]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [31ed067]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [4b45afa]
+- Updated dependencies [1940afd]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [76bd58f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [4d0b9cd]
+- Updated dependencies [ceee88f]
+- Updated dependencies [8460592]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [b1aee33]
+- Updated dependencies [05be352]
+- Updated dependencies [250dec8]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [0c5a71b]
+- Updated dependencies [75519e1]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [657b6b7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [25f2e64]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [94990a2]
+- Updated dependencies [514001a]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [d34aa58]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [cfad7de]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [61455de]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/metadata@17.6.0
+  - @objectstack/metadata-protocol@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

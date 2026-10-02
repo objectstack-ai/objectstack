@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cli",
-  "version": "17.5.0",
+  "version": "17.6.0",
   "description": "Command Line Interface for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -108,17 +108,17 @@
     "@objectstack/trigger-schedule": "workspace:*",
     "@objectstack/types": "workspace:*",
     "@objectstack/verify": "workspace:*",
-    "@oclif/core": "^4.13.3",
+    "@oclif/core": "^5.1.2",
     "bundle-require": "^5.1.0",
-    "chalk": "^6.0.0",
+    "chalk": "^6.0.1",
     "chokidar": "^5.0.0",
     "create-objectstack": "workspace:*",
     "dotenv-flow": "^4.1.0",
     "esbuild": "^0.28.2",
     "ts-morph": "^28.0.0",
-    "tsx": "^4.23.12",
-    "yaml": "^2.9.0",
-    "zod": "^4.6.1"
+    "tsx": "^4.23.15",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "peerDependencies": {
     "@objectstack/driver-turso": "workspace:^"
@@ -137,8 +137,8 @@
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/driver-turso": "workspace:*",
     "@objectstack/plugin-dev": "workspace:*",
-    "@oclif/plugin-help": "^6.2.58",
-    "@oclif/plugin-plugins": "^5.4.87",
+    "@oclif/plugin-help": "^7.0.2",
+    "@oclif/plugin-plugins": "^7.0.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",

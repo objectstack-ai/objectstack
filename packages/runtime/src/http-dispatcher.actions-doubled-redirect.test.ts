@@ -98,8 +98,8 @@ describe('REST /actions — doubled post-success navigation diagnostic (#11519)'
         expect(doubled[0]).toContain("'crm_lead/open_portal'");
         expect(doubled[0]).toContain('onSuccess');
         expect(doubled[0]).toContain('redirectUrl');
-        expect(doubled[0]).toContain('objectui#5933');
-        expect(doubled[0]).toContain('#11519');
+        expect(doubled[0]).toContain('the interim precedence the console renderer applies');
+        expect(doubled[0]).toContain('a pair the contract refuses rather than ranks');
     });
 
     it('does NOT alter the wire — the handler return value still reaches the client intact', async () => {

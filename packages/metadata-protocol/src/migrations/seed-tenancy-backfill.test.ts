@@ -881,7 +881,7 @@ describe('#12395 zero organizations is a third state, not the ambiguous one', ()
    *
    * `organizationProbeThrown` names the value the organization probe throws;
    * omitted, it is a normal driver `Error`. It exists so the EMPTY-channel
-   * shapes (#17167) can be driven through the same seam — and it is compared
+   * shapes (commit dc709b2cf) can be driven through the same seam — and it is compared
    * against `undefined` rather than reached through `??`, because `''` is not
    * nullish and is exactly the value under test.
    */

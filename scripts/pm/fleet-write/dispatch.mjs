@@ -159,6 +159,30 @@
  * and over. `4` means what it means in every other fleet tool — the write
  * HAPPENED and the board disagrees: go READ it.
  *
+ * ## The `issue_create` re-list — the repository issue list lags a create
+ *
+ * A new issue is found by LISTING the repository's issues, and that list lags
+ * a create by seconds: measured over five relay filings in one shift, the three
+ * whose issue was created 3–4 s before its run completed read back `unfound`
+ * while the issue stood on the board with the title sent, byte for byte, and
+ * the two created 5 s before read back IDENTICAL. (Not the query: `since` filters
+ * on `updated_at`, which a brand-new issue always meets, and `sort=created`
+ * puts it first.) So when an `issue_create`'s list ANSWERED and no issue
+ * created since the dispatch carries the title sent, the read-back re-reads
+ * that same list on the bounded schedule `ISSUE_CREATE_RELIST_DELAYS_MS` names,
+ * one printed line per re-list and one when a re-list finds it, before it may
+ * say `unfound`. A list that could not be read ends the wait as `unread`, as
+ * on the first pass. Every re-list is a READ: ⛔ the create is never re-sent,
+ * and an issue the last re-list still lacks is `unfound` — exit 6,
+ * UNCONFIRMED, read the board — exactly what it meant before.
+ *
+ * Why a re-list and not the run's own report of the number it created: the
+ * executor prints `#number url` to the job log and the step summary, and a
+ * seat container reads neither — the job-log endpoint answers 302 to blob
+ * storage that the egress proxy refuses (CONNECT 403), and the job's check run
+ * carries a null `output.summary`. Making the run report it somewhere a seat
+ * CAN read is a change to what the relay emits, not to this read-back.
+ *
  * How the callers read the new outcomes — one exit vocabulary, no caller edited:
  *   - `failure` + `notStored` keeps the state every caller already reads as "the
  *     platform did not keep it whole — go READ, never fall back": post-stamped's
@@ -472,6 +496,19 @@ export function fallbackText(result, tool = 'fleet-write') {
 /** The clock slack a created object's timestamp may carry before the dispatch — post-stamped's relay read-back allows the same minute. */
 export const READ_BACK_SLACK_MS = 60_000;
 
+/**
+ * The `issue_create` read-back's bounded re-list (header): the wait before each
+ * re-read of the list, in order, taken only while the list answers and the
+ * title sent is not on it. Why these values: the measured misses were issues
+ * 3–4 s old when their run completed, the measured hits 5 s old, and the first
+ * list is taken within one 5 s poll of that completion — so the first re-list,
+ * 3 s later, already puts every measured miss past the measured hit age, and
+ * 7 s then 15 s cover a list that lags harder under load. 25 s in all, under
+ * 30 s: a genuine miss pays the window once and still reads `unfound`. ⛔ Never
+ * unbounded and ⛔ never a re-send of the create; the self-test holds the sum.
+ */
+export const ISSUE_CREATE_RELIST_DELAYS_MS = Object.freeze([3_000, 7_000, 15_000]);
+
 /** Every op the table lets carry a `body` — derived from `ops.mjs`, never listed, so a new body op is read back the day it lands. */
 export const BODY_OPS = Object.freeze(OP_NAMES.filter((op) => [...OPS[op].required, ...OPS[op].optional].includes('body')));
 
@@ -488,7 +525,7 @@ export const BODY_OPS = Object.freeze(OP_NAMES.filter((op) => [...OPS[op].requir
 export const READ_BACK_LOCATORS = Object.freeze({
   issue_patch: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/{issue}' }),
   comment_edit: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/comments/{comment_id}' }),
-  issue_create: Object.freeze({ found: 'key', where: 'the newest issue created since the dispatch whose title is the title sent' }),
+  issue_create: Object.freeze({ found: 'key', where: 'the newest issue created since the dispatch whose title is the title sent, the list re-read on ISSUE_CREATE_RELIST_DELAYS_MS before unfound' }),
   pr_create: Object.freeze({ found: 'key', where: 'the newest pull request on the head sent, created since the dispatch' }),
   comment: Object.freeze({ found: 'content', where: 'the newest comment on the issue, created since the dispatch, whose stored body holds the bytes sent' }),
 });
@@ -655,13 +692,16 @@ async function listAll(api, path, t, maxPages = 10) {
  * sent. Returns `{ state, rows }` — `state` from `strokeReadBackState`. Never
  * throws on a status: a read that fails makes its row `unverified`, with the
  * call and status in `why`. `taken` keeps two actions of one stroke from being
- * judged against the same created object.
+ * judged against the same created object. `sleep` and `log` serve the
+ * `issue_create` re-list alone (`ISSUE_CREATE_RELIST_DELAYS_MS`).
  */
 export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
   const targets = readBackTargets(payload);
   if (!targets.length) return { state: 'none', rows: [] };
   const api = deps.api ?? DEFAULT_API;
   const t = { fetch: deps.fetch, token: deps.token };
+  const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const log = deps.log ?? ((line) => console.error(line));
   const judge = deps.judge ?? (await loadReadBackJudge());
   const since = dispatchedAt - READ_BACK_SLACK_MS;
   const sinceIso = encodeURIComponent(new Date(since).toISOString());
@@ -685,14 +725,29 @@ export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
       const path = isPr
         ? `/repos/${repo}/pulls?state=all&head=${encodeURIComponent(head)}&sort=created&direction=desc`
         : `/repos/${repo}/issues?state=all&sort=created&direction=desc&since=${sinceIso}`;
-      const listed = await listAll(api, path, t, isPr ? 1 : 3);
-      const hit = listed.rows.find((o) => created(o) && !taken.has(o.id) && (isPr ? true : !o.pull_request && String(o.title ?? '').trim() === String(target.title ?? '').trim()));
+      const where = isPr ? `${repo} head ${head}` : `${repo} (new issue)`;
+      const find = (listedRows) => listedRows.find((o) => created(o) && !taken.has(o.id) && (isPr ? true : !o.pull_request && String(o.title ?? '').trim() === String(target.title ?? '').trim()));
+      let listed = await listAll(api, path, t, isPr ? 1 : 3);
+      let hit = find(listed.rows);
+      // `issue_create` alone: the list lags a create (header), so a list that ANSWERED without the title sent is re-read
+      // on the bounded schedule before `unfound`. Reads only — ⛔ the create is never re-sent.
+      const relists = isPr ? [] : ISSUE_CREATE_RELIST_DELAYS_MS;
+      let waited = 0;
+      for (let i = 0; i < relists.length && listed.ok && !hit; i++) {
+        log(`fleet-write: read-back action ${target.action} ${target.op} ${where}: no issue created since the dispatch carries the title sent yet — re-list ${i + 1}/${relists.length} in ${relists[i]} ms (the issue list lags a create; ⛔ the create is not re-sent).`);
+        await sleep(relists[i]);
+        waited += relists[i];
+        listed = await listAll(api, path, t, 3);
+        hit = find(listed.rows);
+        if (hit) log(`fleet-write: read-back action ${target.action} ${target.op}: ${repo}#${hit.number} found on re-list ${i + 1}, ${waited} ms after the first list.`);
+      }
       if (!listed.ok && !hit) {
-        rows.push(unread(target, isPr ? `${repo} head ${head}` : `${repo} (new issue)`, listed.failed));
+        rows.push(unread(target, where, listed.failed));
         continue;
       }
       if (!hit) {
-        rows.push({ action: target.action, op: target.op, where: isPr ? `${repo} head ${head}` : `${repo} (new issue)`, verdict: 'unverified', cls: 'unfound', why: isPr ? `no pull request on ${head} was created since the dispatch` : `no issue created on ${repo} since the dispatch carries the title sent` });
+        const tried = relists.length ? ` (listed ${relists.length + 1} times over ${waited} ms)` : '';
+        rows.push({ action: target.action, op: target.op, where, verdict: 'unverified', cls: 'unfound', why: isPr ? `no pull request on ${head} was created since the dispatch` : `no issue created on ${repo} since the dispatch carries the title sent${tried}` });
         continue;
       }
       taken.add(hit.id);
@@ -788,7 +843,7 @@ export async function sendFleetWrite(payload, deps = {}) {
   if (!ok) return { ...done, state: 'failure', ok: false, detail: `conclusion ${run.conclusion}` };
 
   // ── read it back — the run's success is the executor's, not the write's ─────
-  const readBack = await readBackStroke(payload, { dispatchedAt }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge });
+  const readBack = await readBackStroke(payload, { dispatchedAt }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge, sleep, log });
   for (const row of readBack.rows) log(readBackLine(row));
   if (readBack.state === 'not-stored') {
     const first = readBack.rows.find((r) => r.verdict === 'not-stored');
@@ -870,10 +925,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the verdict: post-stamped's own classifier, imported — declared normalisations land, a split, lost or truncated byte is NOT STORED at its first differing byte, an unreadable body is unverified, the PR-create footer forgiven on pr_create alone": 13,
   "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED": 8,
   'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 17,
+  'the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent': 13,
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1119,7 +1175,8 @@ export async function selfTest() {
      */
     /**
      * The BOARD the read-back reads: `store` maps a read call (`GET <path>`) to
-     * `{ status, json }`, or to a function of the parsed query. The default
+     * `{ status, json }`, or to a function of the parsed query and the elapsed
+     * ms since the dispatch — so a list that lags a create is time too. The default
      * holds the one comment the default stroke writes, created just after the
      * dispatch and stored as sent — so a stroke that succeeds reads back clean.
      */
@@ -1146,7 +1203,7 @@ export async function selfTest() {
         return r ? { status: 200, headers, json: async () => r } : { status: 404, headers, json: async () => ({ message: 'Not Found' }) };
       }
       if (call in store) {
-        const s = typeof store[call] === 'function' ? store[call](u.searchParams) : store[call];
+        const s = typeof store[call] === 'function' ? store[call](u.searchParams, clock.elapsed()) : store[call];
         // A list answers its rows on page 1 and nothing after, as the platform's pagination does.
         const page = Number(u.searchParams.get('page') ?? '1');
         const json = Array.isArray(s.json) && page > 1 ? [] : s.json;
@@ -1427,6 +1484,61 @@ export async function selfTest() {
       t('…and the same stroke read back intact exits 0, its row landed', [cliGood.code, cliGood.json?.read_back?.[0]?.verdict], [EXIT_OK, 'landed']);
     }
 
+    // ── the issue_create re-list ────────────────────────────────────────────
+    battery('the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent');
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const ISSUES = `GET /repos/${REPO}/issues`;
+      const PULLS = `GET /repos/${REPO}/pulls`;
+      const OK_RUN = { runs: () => [RUN('completed', 'success')] };
+      const B = 'Body with a multi-byte tail: no… 全部\n';
+      const strokeOf = (action) => packRequest({ repo: REPO, session: SESSION, actions: [action], requestId: 'fw-test-1' }).payload;
+      const stroke = strokeOf({ op: 'issue_create', title: 'Card', body: B });
+      const CARD = { id: 8, number: 20998, title: 'Card', created_at: at(3_000), body: B };
+      const OTHER = { id: 9, number: 20999, title: 'Other', created_at: at(2_000), body: 'x' };
+      const WINDOW = ISSUE_CREATE_RELIST_DELAYS_MS.reduce((a, b) => a + b, 0);
+      const SCHEDULE = ISSUE_CREATE_RELIST_DELAYS_MS.reduce((acc, ms) => [...acc, acc[acc.length - 1] + ms], [0]);
+      const writes = (r) => r.seen.filter((s) => !s.call.startsWith('GET ')).map((s) => s.call);
+      /** The issue list as a function of time: CARD is on it from `visibleFromMs` on. Each first-page read is recorded at its elapsed ms. */
+      const lagging = (visibleFromMs, rows, reads) => ({
+        [ISSUES]: (q, ms) => {
+          if ((q.get('page') ?? '1') === '1') reads.push(ms);
+          return { status: 200, json: ms >= visibleFromMs ? [CARD, ...rows] : rows };
+        },
+      });
+      t('the schedule is frozen and non-empty, every wait a positive integer that never shrinks, the whole window at most 30 s', [Object.isFrozen(ISSUE_CREATE_RELIST_DELAYS_MS), ISSUE_CREATE_RELIST_DELAYS_MS.length > 0, ISSUE_CREATE_RELIST_DELAYS_MS.every((ms, i, a) => Number.isInteger(ms) && ms > 0 && (i === 0 || ms >= a[i - 1])), WINDOW <= 30_000], [true, true, true, true]);
+      const lagReads = [];
+      const lag = await drive({ ...OK_RUN, store: lagging(8_000, [OTHER], lagReads) }, { stroke });
+      t('⭐ the list lags the create — the new issue absent from it until 8 s after the dispatch — and the read-back is IDENTICAL on THAT issue, not unfound: success, exit 0', [lag.state, lag.readBack?.rows?.[0]?.verdict, lag.readBack?.rows?.[0]?.cls, lag.readBack?.rows?.[0]?.where, exitForResult(lag)], ['success', 'landed', 'identical', `${REPO}#20998`, EXIT_OK]);
+      t('…found on the SECOND re-list: the list read at the declared cumulative waits, in order, and no further', lagReads, SCHEDULE.slice(0, 3));
+      t('…one printed line per re-list, and one naming the issue and the re-list that found it', [lag.logs.filter((l) => l.includes('re-list') && l.includes('the create is not re-sent')).length, lag.logs.some((l) => l.includes(`${REPO}#20998 found on re-list 2`))], [2, true]);
+      t('⛔ the create is never re-sent: ONE write across the whole stroke — the dispatch — however many re-lists', writes(lag), [DISPATCH]);
+      const missReads = [];
+      const miss = await drive({ ...OK_RUN, store: lagging(Infinity, [OTHER], missReads) }, { stroke });
+      t('the control — a list that never carries the title sent — is still unfound: unverified, exit 6, ⛔ never success, ⛔ never not-stored', [miss.state, miss.readBack?.rows?.[0]?.cls, miss.notStored ?? false, exitForResult(miss)], ['unverified', 'unfound', false, EXIT_UNCONFIRMED]);
+      t('…after exactly the declared window: one list read per step of the schedule, at its cumulative waits, and no more', missReads, SCHEDULE);
+      t('…its reason names how often and over how long it listed, and the CLI sentence still says do not re-run blind, exit 6', [miss.readBack?.rows?.[0]?.why?.includes(`listed ${SCHEDULE.length} times over ${WINDOW} ms`), unverifiedText(miss).includes('do not re-run blind'), unverifiedText(miss).includes(`Exit ${EXIT_UNCONFIRMED}`)], [true, true, true]);
+      t('⛔ …and still ONE write: a miss re-sends nothing', writes(miss), [DISPATCH]);
+      const STALE = { id: 7, number: 20001, title: 'Card', created_at: at(-120_000), body: B };
+      const stale = await drive({ ...OK_RUN, store: lagging(8_000, [STALE], []) }, { stroke });
+      t('an issue carrying the same title but created BEFORE the dispatch is never taken while the new one lags — the re-list waits for the new one', [stale.state, stale.readBack?.rows?.[0]?.where], ['success', `${REPO}#20998`]);
+      const flakyReads = [];
+      const flaky = await drive({ ...OK_RUN, store: { [ISSUES]: (q, ms) => {
+        if ((q.get('page') ?? '1') === '1') flakyReads.push(ms);
+        return ms === 0 ? { status: 200, json: [OTHER] } : { status: 503, json: { message: 'down' } };
+      } } }, { stroke });
+      t('a re-list that cannot be read ends the wait as unread — the call and its status named, ⛔ not unfound, no further re-list', [flaky.state, flaky.readBack?.rows?.[0]?.cls, flaky.readBack?.rows?.[0]?.why?.includes('HTTP 503') ?? false, flakyReads.length, exitForResult(flaky)], ['unverified', 'unread', true, 2, EXIT_UNCONFIRMED]);
+      const promptReads = [];
+      const prompt = await drive({ ...OK_RUN, store: lagging(0, [OTHER], promptReads) }, { stroke });
+      t('a list that already carries it is read ONCE — no wait, no re-list line', [prompt.state, promptReads.length, prompt.logs.some((l) => l.includes('re-list'))], ['success', 1, false]);
+      let pulls = 0;
+      const noPr = await drive({ ...OK_RUN, store: { [PULLS]: () => {
+        pulls += 1;
+        return { status: 200, json: [] };
+      } } }, { stroke: strokeOf({ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: B }) });
+      t("the re-list is issue_create's alone: a pull its head does not find is read ONCE and unfound, as before", [noPr.state, noPr.readBack?.rows?.[0]?.cls, pulls], ['unverified', 'unfound', 1]);
+    }
+
     // ── the wiring ──────────────────────────────────────────────────────────
     battery('the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log');
     {
@@ -1507,7 +1619,8 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/dispatch self-test: ${cases.length} cases pass across ${declared.length} batteries — the transport selector that never guesses, ` +
       'the session on the envelope, one paced dispatch per stroke, a run found by its request id and waited to its conclusion, both ceilings answered UNCONFIRMED and never retried, ' +
-      'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6).',
+      'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6) ' +
+      'only after a lagging issue list was re-read on its bounded schedule, the create never re-sent.',
   );
   selfTestReachedVerdict = true;
   return 0;

@@ -184,8 +184,8 @@
  * is a no-op with a false comment attached: `dist/` is never executed, the
  * suite stays green, and the comment claiming the built entry stays plausible.
  *
- * `@oclif/core@4.13.3` skips its TypeScript path lookup only when `isProd()`,
- * which its `lib/util/util.js` (line 66 as pinned -- a dependency file, outside
+ * `@oclif/core@5.1.2` skips its TypeScript path lookup only when `isProd()`,
+ * which its `lib/util/util.js` (line 65 as pinned -- a dependency file, outside
  * this tree) defines as a NEGATED membership test -- a leading
  * logical-NOT over `['development', 'test'].includes(process.env.NODE_ENV ?? '')`.
  * Measured directly against `Config.load()` on `packages/cli`, with
@@ -1090,8 +1090,8 @@ const BUILT_ENTRYPOINT = 'bin/run.js';
 /**
  * The `NODE_ENV` values that send `@oclif/core`'s command lookup to `src/`.
  *
- * `@oclif/core@4.13.3` skips its TypeScript path lookup only when `isProd()`,
- * which its `lib/util/util.js` (line 66 as pinned -- a dependency file, outside
+ * `@oclif/core@5.1.2` skips its TypeScript path lookup only when `isProd()`,
+ * which its `lib/util/util.js` (line 65 as pinned -- a dependency file, outside
  * this tree) defines as a NEGATED membership test:
  * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')`. So these two
  * values -- and only these two -- turn the reroute ON. `production` and unset
@@ -1597,7 +1597,7 @@ function main() {
       + '\n    is `development` or `test` is asking @oclif/core to resolve those commands'
       + '\n    from src/ instead and transpile them on the fly. Asking for both cancels:'
       + '\n    dist/ is never executed, and the comment claiming the built entry stays'
-      + '\n    plausible. Measured against @oclif/core@4.13.3\'s own Config.load(), reading'
+      + '\n    plausible. Measured against @oclif/core@5.1.2\'s own Config.load(), reading'
       + '\n    back the root plugin\'s resolved commandsDir:'
       + '\n'
       + '\n      NODE_ENV unset        -> packages/cli/dist/commands'
@@ -1605,7 +1605,7 @@ function main() {
       + '\n      NODE_ENV=development  -> packages/cli/src/commands'
       + '\n      NODE_ENV=test         -> packages/cli/src/commands'
       + '\n'
-      + '\n    lib/util/util.js:66 defines isProd() as a NEGATED membership test --'
+      + '\n    lib/util/util.js:65 defines isProd() as a NEGATED membership test --'
       + '\n    !["development","test"].includes(process.env.NODE_ENV ?? "") -- and the'
       + '\n    TypeScript path lookup is skipped only when that is true.'
       + '\n'

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10886 — the face inventory for `saveMetaItem`'s Phase 3a-destructive
+ * Commit 809e61221 — the face inventory for `saveMetaItem`'s Phase 3a-destructive
  * `409 DESTRUCTIVE_CHANGE`, and the pins that hold its conclusion.
  *
  * ## The duplication that raised the card
@@ -33,7 +33,7 @@
  * `object`, an item already exists under the target name, and the diff is
  * non-empty. That predicate is what eliminates four of the seven.
  *
- * ⚠️ [#11014] That type list read `object` or `field` while this inventory was
+ * ⚠️ [commit 2d8b92ff1] That type list read `object` or `field` while this inventory was
  * being built, and the `field` half could not produce a finding — so the
  * enumeration above had to chase a `field` face population that does not
  * exist. The limb is now trimmed; the reachable type set is `object` alone and
@@ -77,7 +77,7 @@
  *  - `PublishPackageDraftsResponseSchema`'s `failed[]`
  *    (`packages/spec/src/api/protocol.zod.ts`) DOES declare
  *    `issues: z.array(RuntimeAuthoringIssueSchema).optional()`. That DECLARED
- *    channel is what #10524 / #10895 trimmed the message against.
+ *    channel is what #10524 / commit a79bd3561 trimmed the message against.
  *
  * ⇒ The verdict is unchanged and the axis is sharper: #10524's order —
  * declare a structured channel, and only then trim — is still unsatisfied
@@ -114,17 +114,17 @@
  * the ablation therefore needs no rebuild, and its RED result is what rules
  * out the stale-artifact false green.
  *
- * ## [#11015] The same inventory, read one column further left
+ * ## [commit 82cb6e849] The same inventory, read one column further left
  *
  * The `force` column above is not decoration: it says which faces can lift
- * this refusal. When #11015 was written only ROW 1 could. Rows 2, 3 and 6 all
+ * this refusal. When commit 82cb6e849 was written only ROW 1 could. Rows 2, 3 and 6 all
  * reached the gate with no way to set `force` — rows 2 and 3 because their
  * routes never threaded the parameter, row 6 because `duplicatePackage` has no
  * `force` field at all — yet every one of them was handed the sentence
  * `re-submit with ?force=true to proceed.` A caller who did what it said got
  * the identical refusal back.
  *
- * #11015 repaired the clause on ROW 6, where a genuinely different remedy
+ * Commit 82cb6e849 repaired the clause on ROW 6, where a genuinely different remedy
  * exists to prescribe (a free target namespace, or reconciling the collision).
  * Rows 2 and 3 were left as measured and filed as #11095: the honest repair for
  * a `PUT` that cannot acknowledge a risk may be to thread `force` on those
@@ -288,13 +288,13 @@ async function destructiveRefusal(writeFace?: string): Promise<any> {
 }
 
 /**
- * The remedy sentence that must survive ANY future trim (#10886 non-effect),
+ * The remedy sentence that must survive ANY future trim (the non-effect commit 809e61221 measured),
  * as the ordinary REST `PUT` door renders it. `?force=true` is a real query
  * parameter THERE — the route reads it and threads it into the request.
  */
 const PUT_REMEDY = 're-submit with ?force=true to proceed.';
 /**
- * [#11015] …and as the DUPLICATE door renders it, which is a different
+ * [commit 82cb6e849] …and as the DUPLICATE door renders it, which is a different
  * sentence because `?force=true` is not a thing a caller can set on that face.
  * See section 4 — the remedy stays, the mechanism it names becomes one that
  * exists.
@@ -344,7 +344,7 @@ describe('[#10886] the 409 renders its findings into the message AND attaches th
         // whole point, it is not one of the `issues`, and nothing else on any
         // face carries it.
         // No `writeFace` on this request — the ordinary REST/Studio save, the
-        // one door where `?force=true` is real. [#11015] made this clause
+        // one door where `?force=true` is real. [commit 82cb6e849] made this clause
         // face-aware; this default is byte-identical to what it always said.
         expect(err.message).toContain(PUT_REMEDY);
         const wire = JSON.stringify(err.issues);
@@ -352,7 +352,7 @@ describe('[#10886] the 409 renders its findings into the message AND attaches th
     });
 
     /**
-     * [#10888] The two switches that read `writeFace` answer DIFFERENT
+     * [commit d806081dd] The two switches that read `writeFace` answer DIFFERENT
      * questions, and this pin holds them independent.
      *
      * That card made the sibling `422 INVALID_METADATA` findings clause
@@ -375,7 +375,7 @@ describe('[#10886] the 409 renders its findings into the message AND attaches th
         expect(err.message).toContain(PUT_REMEDY);
         expect(err.message).not.toContain(DUPLICATE_REMEDY_HEAD);
         // …and the findings prose is still restated here, because this gate's
-        // sole-carrier verdict (#10886) is untouched by #10888: the 422's face
+        // sole-carrier verdict (commit 809e61221) is untouched by commit d806081dd: the 422's face
         // split applies to the 422's clause only.
         expect(err.message).toContain(FINDING_PROSE);
     });
@@ -456,12 +456,12 @@ describe('[#10886] [GUARD] `duplicatePackage`’s `failed[].error` is the SOLE c
             sourcePackageId: PKG, targetPackageId: TARGET_PKG,
         });
 
-        // ⚠️ [#11015] This assertion USED to read `toContain(REMEDY)` with
+        // ⚠️ [commit 82cb6e849] This assertion USED to read `toContain(REMEDY)` with
         // REMEDY = the `?force=true` sentence, and it passed — because the
         // producer rendered that sentence on every face. It was pinning the
         // defect: this door accepts no `force`, so the prescription it quoted
         // was unactionable. Replaced rather than re-spelled, because what it
-        // asserted stopped being true of a correct producer. What #10886 put
+        // asserted stopped being true of a correct producer. What commit 809e61221 put
         // it here to protect is unchanged and still asserted: SOME remedy
         // reaches the caller through this string and through nothing else.
         expect(r.failed[0].error).toContain(DUPLICATE_REMEDY_HEAD);
@@ -474,7 +474,7 @@ describe('[#10886] [GUARD] `duplicatePackage`’s `failed[].error` is the SOLE c
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. [#11015] [GUARD] The remedy names a mechanism THIS face actually has
+// 4. [commit 82cb6e849] [GUARD] The remedy names a mechanism THIS face actually has
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#11015] [GUARD] the destructive remedy clause is face-aware', () => {
@@ -521,7 +521,7 @@ describe('[#11015] [GUARD] the destructive remedy clause is face-aware', () => {
     it('[#10886 non-effect] the per-field findings prose is still there, untrimmed', async () => {
         const r = await duplicateFailure();
 
-        // ⛔ This card repaired the remedy clause ONLY. #10886's verdict — the
+        // ⛔ This card repaired the remedy clause ONLY. Commit 809e61221's verdict — the
         // findings prose stays, because `failed[].error` is its sole carrier on
         // this face — is untouched, and this is the assertion that says so.
         expect(r.failed[0].error).toContain(FINDING_PROSE);
@@ -612,8 +612,8 @@ describe('[#11095] [GUARD] the `meta-dispatch` face prescribes a remedy that doo
     it('[#10886 non-effect] the per-field findings prose is still there, untrimmed', async () => {
         const err = await destructiveRefusal('meta-dispatch');
 
-        // ⛔ #10886's sole-carrier verdict is untouched by this card, exactly as
-        // it was untouched by #11015: only the remedy clause is face-aware, and
+        // ⛔ Commit 809e61221's sole-carrier verdict is untouched by this card, exactly as
+        // it was untouched by commit 82cb6e849: only the remedy clause is face-aware, and
         // the findings the refusal renders stay whole on every face.
         expect(err.message).toContain(FINDING_PROSE);
         expect(err.message).toContain('would drop or transform existing data');
@@ -651,7 +651,7 @@ describe('[#11095] [GUARD] the `meta-dispatch` face prescribes a remedy that doo
      *
      * The 422's polarity makes that failure SILENT in the dangerous direction:
      * silence renders the full prose, so a `'meta-dispatch'` that fell to the
-     * default would re-introduce #10888's duplication on one door only, with
+     * default would re-introduce the duplication commit d806081dd removed on one door only, with
      * every 409 assertion above still green. This case is what says otherwise.
      */
     it('⛔ [COUPLING] the new face changes the 409 clause and NOTHING about the 422', async () => {

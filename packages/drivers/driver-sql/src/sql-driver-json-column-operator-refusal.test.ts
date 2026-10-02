@@ -32,6 +32,13 @@
  * sorts below `usr_…` on the leading `[`, so the ordering comparisons return a
  * lexicographic verdict over a *serialization*.
  *
+ * [#21009] The text family other than the membership pair answered the same
+ * way and is refused the same way now: on this fixture `$startsWith: '['` and
+ * `$endsWith: ']'` matched the row by the serialization's brackets, and
+ * `$icontains` by substring; on PostgreSQL all five (with the staged
+ * `$like` / `$ilike`) failed at query time with a 500. The dialect cells are
+ * `sql-driver-21009-json-column-text-operator-refusal.test.ts`.
+ *
  * ## What these tests pin
  *
  * 1. **The refusal**, per operator and per FACE. #6203's one-query-two-answers
@@ -113,10 +120,12 @@ function expectJsonColumnRefusal(err: WireBearingError, op: string, field: strin
   expect(err.message).toContain(op);
   expect(err.message).toContain(field);
   // The three things the message owes a caller: that the filter did NOT run,
-  // why (the column is JSON text), and what to write instead.
+  // why, and what to write instead. [#21067] The why is the field's
+  // declaration, not this driver's storage form: the same words are printed by
+  // faces that store no JSON text.
   expect(err.message).toContain('WAS NOT APPLIED');
-  expect(err.message).toContain('JSON TEXT column');
-  expect(err.message).toContain('$contains');
+  expect(err.message).toContain(`it aims "${op}", a scalar comparison or text operator, at a multi-value or JSON field`);
+  expect(err.message).toContain(`{ "${field}": { "$contains": "a" } }`);
 }
 
 /**
@@ -139,6 +148,21 @@ const REFUSED: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
   // compiling the compound would leave the same wrong answer alive at one more
   // spelling — the reasoning #5234 already applied in this file.
   ['$between', [U1, U2]],
+  // [#21009] The text family other than the membership pair. None has a
+  // membership reading, so each matched the SERIALIZATION as text: on this
+  // fixture `$startsWith: '['` and `$endsWith: ']'` matched the row (every
+  // stored array opens and closes that way), and on live PostgreSQL each failed
+  // at query time with a 500, a `json` column having no `LIKE` operator. The
+  // comparands below are the ones that used to MATCH here, so the flip from a
+  // row to a refusal is the whole point of each line.
+  ['$startsWith', '['],
+  ['$endsWith', ']'],
+  ['$icontains', U1],
+  // [#21009] The staged pattern pair — answered by this driver ahead of
+  // `FILTER_OPERATORS` (so outside the closed-world sweep below), and refused
+  // here for the same reason.
+  ['$like', `%${U1}%`],
+  ['$ilike', `%${U1.toUpperCase()}%`],
 ];
 
 /**
@@ -159,9 +183,9 @@ const REFUSED: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
 const KEPT: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
   ['$contains', U1],
   ['$notContains', 'nobody'],
-  ['$startsWith', '['],
-  ['$endsWith', ']'],
-  ['$icontains', U1],
+  // [#21009] `$startsWith` / `$endsWith` / `$icontains` stood here, with the
+  // very comparands that now head the refused rows above: they "worked" only
+  // by reading the serialization, which is the wrong answer #21009 refuses.
   ['$null', false],
   ['$exists', true],
   // [#20446] `$empty` joined `FILTER_OPERATORS`. It asks the question this
@@ -434,7 +458,11 @@ describe('[#7398] SqlDriver refuses scalar-comparison operators on JSON/multi-va
       }
       // The partition is asserted whole, so an operator quietly moving from one
       // side to the other cannot pass as "still 16 operators".
-      expect(refused).toEqual(REFUSED.map(([op]) => op));
+      // [#21009] REFUSED also carries the staged `$like` / `$ilike`, which this
+      // sweep never iterates — so its expectation is REFUSED's DECLARED members.
+      expect(refused).toEqual(
+        REFUSED.map(([op]) => op).filter((op) => (FILTER_OPERATORS as readonly string[]).includes(op)),
+      );
       expect(compiled).toEqual(KEPT.map(([op]) => op));
     });
 

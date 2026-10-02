@@ -230,7 +230,8 @@ Complete, production-grade integration with external systems. Includes authentic
 >   the pages it never read. Point `connectorSource` at an endpoint that answers the
 >   whole (incremental) set in one response.
 > - ⚠️ **Nothing schedules a pull yet.** A `job` drives it, and that stage has not
->   landed, so authoring `connectorSource` still warns.
+>   landed, so the binding alone moves no rows — `connectorSource`'s own description
+>   says so. It is not a lint warning: every key of the binding is `live`.
 > Already authored the retired keys? `os migrate meta --from 17` lists the mechanical edits.
 
 ### Use Cases

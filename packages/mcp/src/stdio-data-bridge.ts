@@ -68,8 +68,17 @@
  * generic data path (#7728). Measured on the `create` arm: the flagged column
  * rode the tool response verbatim. The strip is applied below, through the same
  * single helper every other write mouth uses; the read verbs are unaffected
- * (the engine's read path still strips, unchanged). What remains of the
- * divergence above is genuinely not security.
+ * (the engine's read path still strips, unchanged).
+ *
+ * ⚠️ [#21207] A SECOND limb was security too: the stored-metadata-body family
+ * (`sys_metadata` / `sys_metadata_history`'s body column, credential material
+ * included). The protocol layer serves that body only as its type's read
+ * projection and refuses to evaluate it; the engine returns it as stored, so
+ * this engine-only reader served it as stored — to an administrator's key, a
+ * member being refused by the engine as usual. The family's one projection is
+ * now applied here and the evaluate shapes are refused; see
+ * {@link storedMetadataBodyRefusal} and {@link serveStoredMetadataRows}. What
+ * remains of the divergence above is genuinely not security.
  */
 
 import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
@@ -81,6 +90,17 @@ import {
   type EnableLike,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// [#21207] The stored-metadata-body family's ONE projection and its object set,
+// from where every other surface of the family takes them (the data door, the
+// audit copy, the analytics refusal, the realtime event). This package does not
+// depend on `@objectstack/metadata-protocol` and needs nothing from it: the
+// projection itself lives in `@objectstack/spec/kernel`.
+import {
+  isStoredMetadataBodyObject,
+  redactStoredMetadataRow,
+  STORED_METADATA_BODY_COLUMN,
+  STORED_METADATA_TYPE_COLUMN,
+} from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
@@ -283,6 +303,180 @@ export async function enforceApiExposure(
   );
 }
 
+// ---------------------------------------------------------------------------
+// [#21207] The stored-metadata-body family, at this engine-only reader
+// ---------------------------------------------------------------------------
+
+/**
+ * The combinators a filter nests conditions under — exactly the three the
+ * filter contract declares (`$and` / `$or` / `$not`), the same set the
+ * protocol's data door descends through when it collects the field names a
+ * filter evaluates. Any other `$` key names no field of this object.
+ */
+const FILTER_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']);
+
+/**
+ * Every key of a filter that NAMES A FIELD of the object being read, nested
+ * combinators descended, structure discarded. A field key's value (an operator
+ * bag, or a related object's condition) is not descended into: its keys are not
+ * this object's fields. `depth` is a backstop against a self-referential
+ * in-process `where`.
+ */
+function filterFieldKeys(where: unknown, out: unknown[] = [], depth = 0): unknown[] {
+  if (depth > 32 || !where || typeof where !== 'object' || Array.isArray(where)) return out;
+  for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+    if (key.startsWith('$')) {
+      if (!FILTER_LOGICAL_KEYS.has(key)) continue;
+      for (const arm of Array.isArray(value) ? value : [value]) filterFieldKeys(arm, out, depth + 1);
+      continue;
+    }
+    out.push(key);
+  }
+  return out;
+}
+
+/**
+ * Whether a field reference reaches the stored body column — the column itself,
+ * or a dotted path whose HEAD segment is that column (a path into the body
+ * evaluates the body just the same).
+ */
+function reachesStoredBody(field: unknown): boolean {
+  return typeof field === 'string' && field.split('.')[0] === STORED_METADATA_BODY_COLUMN;
+}
+
+/** A refusal to evaluate the stored body column: an `Error` carrying the data door's envelope. */
+export interface McpStoredMetadataBodyRefusal extends Error {
+  /** ADR-0112 machine code — the one a refused field reference answers on every data door. */
+  code: 'INVALID_FIELD';
+  status: 400;
+  field: string;
+  fields: string[];
+  object: string;
+  /** Which part of the call named the body column. */
+  param: 'groupBy' | 'filter' | 'sort' | 'aggregations';
+}
+
+/**
+ * The refusal for a read of a stored-metadata-body table (`sys_metadata` /
+ * `sys_metadata_history`) whose call would EVALUATE the stored body column
+ * rather than serve it, or `undefined` when there is none to make.
+ *
+ * The stored body is served only as its type's read projection (see
+ * {@link serveStoredMetadataRows}); a call that groups by it, filters or sorts
+ * on it, or aggregates over it runs the engine against the STORED bytes, where
+ * the projection cannot reach: a group key would be a whole stored body, a
+ * predicate answers a guess about withheld credential material row by row, and
+ * an order or an aggregate is computed over the same bytes. So each is refused
+ * before the engine is asked — the posture the protocol's data door and the
+ * analytics door take for the same column, in the same envelope:
+ * `INVALID_FIELD` / 400, naming the field, the object and the offending part.
+ *
+ * Judged in the data door's order — grouping first, then filter, then sort —
+ * with the aggregate members last. A filter is collected from the call's
+ * `where` and from each aggregation's own `filter`.
+ */
+export function storedMetadataBodyRefusal(
+  object: string,
+  opts: {
+    where?: unknown;
+    orderBy?: ReadonlyArray<{ field?: unknown }>;
+    groupBy?: ReadonlyArray<unknown>;
+    aggregations?: ReadonlyArray<{ field?: unknown; filter?: unknown }>;
+  },
+): McpStoredMetadataBodyRefusal | undefined {
+  if (!isStoredMetadataBodyObject(object)) return undefined;
+  const make = (param: McpStoredMetadataBodyRefusal['param'], doing: string): McpStoredMetadataBodyRefusal => {
+    const err = new Error(
+      `Cannot ${doing} '${object}' by '${STORED_METADATA_BODY_COLUMN}' (${param}): the query was not run. `
+        + `The '${STORED_METADATA_BODY_COLUMN}' column holds a stored metadata body, which this door serves only as `
+        + `its type's read projection, with stored credential material withheld; ${doing === 'filter'
+          ? 'a filter on it evaluates the stored body row by row, which would answer guesses about the withheld material'
+          : `to ${doing} by it is to compute over the same stored bytes`}. `
+        + `Use '${STORED_METADATA_TYPE_COLUMN}', 'name' or another scalar column instead, and read bodies with a plain query.`,
+    ) as McpStoredMetadataBodyRefusal;
+    err.code = 'INVALID_FIELD';
+    err.status = 400;
+    err.field = STORED_METADATA_BODY_COLUMN;
+    err.fields = [STORED_METADATA_BODY_COLUMN];
+    err.object = object;
+    err.param = param;
+    return err;
+  };
+
+  const groupFields = (opts.groupBy ?? []).map((entry) =>
+    entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as { field?: unknown }).field : entry,
+  );
+  if (groupFields.some(reachesStoredBody)) return make('groupBy', 'group');
+
+  const aggregations = Array.isArray(opts.aggregations) ? opts.aggregations : [];
+  const filterFields = [
+    ...filterFieldKeys(opts.where),
+    ...aggregations.flatMap((a) => filterFieldKeys(a?.filter)),
+  ];
+  if (filterFields.some(reachesStoredBody)) return make('filter', 'filter');
+
+  const sortFields = (Array.isArray(opts.orderBy) ? opts.orderBy : []).map((entry) => entry?.field);
+  if (sortFields.some(reachesStoredBody)) return make('sort', 'sort');
+
+  if (aggregations.some((a) => reachesStoredBody(a?.field))) return make('aggregations', 'aggregate');
+  return undefined;
+}
+
+/**
+ * The field projection to hand the engine for a read of `object`, given the
+ * caller's own.
+ *
+ * The body's redactor is chosen by the row's `type`, so a projection naming the
+ * body column without the type column would leave nothing to choose with — the
+ * body would then be withheld whole (fail-closed) rather than projected. The
+ * type column is read too in that case, and `addedType` tells the caller to
+ * take it back off the served rows, so the caller gets exactly the columns it
+ * named: the data door's answer for the same projection. Every other
+ * projection, and every object outside the family, passes through unchanged.
+ */
+export function storedMetadataBodyReadFields(
+  object: string,
+  fields: string[] | undefined,
+): { fields: string[] | undefined; addedType: boolean } {
+  if (!isStoredMetadataBodyObject(object) || !Array.isArray(fields)) return { fields, addedType: false };
+  if (!fields.includes(STORED_METADATA_BODY_COLUMN) || fields.includes(STORED_METADATA_TYPE_COLUMN)) {
+    return { fields, addedType: false };
+  }
+  return { fields: [...fields, STORED_METADATA_TYPE_COLUMN], addedType: true };
+}
+
+/**
+ * Serve one row of `object` as read through the engine: on a stored-metadata-body
+ * table its body becomes the body's type's read projection, through the family's
+ * ONE projection (`redactStoredMetadataRow`, `@objectstack/spec/kernel`) — the
+ * same object the protocol's data door and every `/meta` read serve, with stored
+ * credential material withheld, and the body omitted when it cannot be judged.
+ * Every other column, and every row of any other object, is returned as the
+ * engine returned it. ⛔ A throwing redactor is not caught: the read fails
+ * rather than serving what the projection exists to withhold.
+ *
+ * Exported within the package for the ADR-0101 record resource (`plugin.ts`),
+ * the one read path on this transport that does not go through the bridge —
+ * the reason {@link enforceApiExposure} is exported too.
+ */
+export function serveStoredMetadataRow<T>(object: string, row: T, opts?: { dropType?: boolean }): T {
+  if (!isStoredMetadataBodyObject(object) || !row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const served = redactStoredMetadataRow(object, row) as Record<string, unknown>;
+  if (opts?.dropType !== true) return served as T;
+  const { [STORED_METADATA_TYPE_COLUMN]: _type, ...rest } = served;
+  return rest as T;
+}
+
+/** {@link serveStoredMetadataRow} over the rows of one read. */
+export function serveStoredMetadataRows(
+  object: string,
+  rows: Array<Record<string, unknown>>,
+  opts?: { dropType?: boolean },
+): Array<Record<string, unknown>> {
+  if (!isStoredMetadataBodyObject(object)) return rows;
+  return rows.map((row) => serveStoredMetadataRow(object, row, opts));
+}
+
 /**
  * Build the stdio transport's principal-bound data bridge.
  *
@@ -344,13 +538,22 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async query(object, opts) {
       const context = await resolvePrincipal();
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.query, context);
+      // [#21207] After the exposure gate, before the engine: a filter or sort
+      // on a stored metadata body is refused rather than evaluated.
+      const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
+      if (bodyRefusal) throw bodyRefusal;
+      const read = storedMetadataBodyReadFields(object, opts?.fields);
       const query: Record<string, unknown> = {};
       if (opts?.where) query.where = opts.where;
-      if (opts?.fields) query.fields = opts.fields;
+      if (read.fields) query.fields = read.fields;
       if (opts?.orderBy) query.orderBy = opts.orderBy;
       if (typeof opts?.limit === 'number') query.limit = opts.limit;
       if (typeof opts?.offset === 'number') query.offset = opts.offset;
-      const records = unwrapRows(await engine.find(object, query, { context }));
+      const records = serveStoredMetadataRows(
+        object,
+        unwrapRows(await engine.find(object, query, { context })),
+        { dropType: read.addedType },
+      );
       return { object, records, total: records.length };
     },
 
@@ -359,7 +562,8 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.get, context);
       // `null` rather than a throw: `get_record` owns the not-found wording on
       // this path and already branches on a nullish record.
-      return await findById(engine, object, id, context);
+      // [#21207] A stored metadata body is served as its type's projection.
+      return serveStoredMetadataRow(object, await findById(engine, object, id, context));
     },
 
     async create(object, data) {
@@ -431,6 +635,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // `list` must not leak row statistics through GROUP BY either. The
       // derivation lives in the spec helpers, so that holds here for free.
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.aggregate, context);
+      // [#21207] A grouping, filter or aggregate member on a stored metadata
+      // body computes over the stored bytes, so it is refused, not run.
+      const bodyRefusal = storedMetadataBodyRefusal(object, {
+        where: opts?.where,
+        groupBy: opts?.groupBy,
+        aggregations: opts?.aggregations,
+      });
+      if (bodyRefusal) throw bodyRefusal;
       // No casts: `McpDataBridge.aggregate` declares the engine's own
       // `EngineAggregateOptions` slices since #8032, so the honest call
       // compiles — the two `as unknown as` casts this line used to carry

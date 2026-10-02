@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { ensurePackageTable, PACKAGE_TABLE_STATEMENTS, resolvePackageTableDialect } from './package-table.js';
 
 export interface PackageMetadata {
   objects?: any[];
@@ -363,11 +364,24 @@ export class PackageServicePlugin implements Plugin {
       throw new Error('ObjectQL service with execute() support is required for PackageService');
     }
 
-    // Create sys_packages table if it doesn't exist
+    // Create sys_packages table if it doesn't exist.
+    //
+    // [#21243] This catch was unreachable until now: `ensureTable` swallowed
+    // every DDL failure at `debug` ("may already exist"), so the table was
+    // never created on MySQL and nothing above `debug` said so. "Already
+    // exists" is no longer an error at all (see `ensurePackageTable`), so
+    // anything arriving here is a real refusal, and the start fails with it.
     try {
       await this.ensureTable(objectql, logger);
     } catch (error) {
-      logger.error('Failed to create sys_packages table', error as Error);
+      logger.error(
+        'Failed to create the sys_packages table — the database refused the DDL. This plugin\'s start() fails and '
+          + 'no `package` service is registered: under the kernel\'s default rollback the boot fails, and a kernel '
+          + 'that continues past a failed plugin installs packages in memory only. The refusal is attached here and '
+          + 'in the driver\'s log line; make the database accept it (its permissions, or a dialect the driver '
+          + 'names), then restart.',
+        error as Error,
+      );
       throw error;
     }
 
@@ -379,16 +393,11 @@ export class PackageServicePlugin implements Plugin {
             .update(JSON.stringify({ manifest: data.manifest, metadata: data.metadata }))
             .digest('hex');
 
+          // [#21243] The upsert is spelled for the driver's dialect: MySQL has
+          // no `ON CONFLICT`, and refused the standard spelling with
+          // `ER_PARSE_ERROR` on every publish (`PACKAGE_TABLE_STATEMENTS`).
           await objectql.execute!({
-            sql: `
-              INSERT INTO sys_packages (id, version, manifest, metadata, hash, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-              ON CONFLICT(id, version) DO UPDATE SET
-                manifest = excluded.manifest,
-                metadata = excluded.metadata,
-                hash = excluded.hash,
-                updated_at = CURRENT_TIMESTAMP
-            `,
+            sql: PACKAGE_TABLE_STATEMENTS[resolvePackageTableDialect(objectql)].upsert,
             args: [
               data.manifest.id,
               data.manifest.version,
@@ -645,37 +654,19 @@ export class PackageServicePlugin implements Plugin {
     }
   }
 
+  /**
+   * [#21243] Create `sys_packages` and its index in the driver's dialect.
+   *
+   * ⛔ No `catch` here, deliberately. The old body caught EVERY failure and
+   * logged it at `debug` as "may already exist", which is how a MySQL
+   * `ER_INVALID_DEFAULT` read as a table that was there. An existing table or
+   * index is not an error at all any more — `ensurePackageTable` asks the
+   * dialect instead of interpreting a refusal — so whatever throws is a refusal
+   * and goes to `start()` whole.
+   */
   private async ensureTable(objectql: IDataEngine, logger: any): Promise<void> {
-    try {
-      // Create the sys_packages table
-      await objectql.execute!({
-        sql: `
-          CREATE TABLE IF NOT EXISTS sys_packages (
-            id TEXT NOT NULL,
-            version TEXT NOT NULL,
-            manifest TEXT NOT NULL,
-            metadata TEXT NOT NULL,
-            hash TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id, version)
-          )
-        `,
-      });
-
-      // Create index for faster latest version queries
-      await objectql.execute!({
-        sql: `
-          CREATE INDEX IF NOT EXISTS idx_packages_latest
-          ON sys_packages(id, created_at DESC)
-        `,
-      });
-
-      logger.debug('sys_packages table ensured');
-    } catch (error) {
-      // Table might already exist, log and continue
-      logger.debug('sys_packages table creation skipped (may already exist)');
-    }
+    const dialect = await ensurePackageTable(objectql);
+    logger.debug(`sys_packages table ensured (${dialect} statements)`);
   }
 }
 

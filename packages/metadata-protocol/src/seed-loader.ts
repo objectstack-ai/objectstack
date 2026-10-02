@@ -362,7 +362,7 @@ function localeScopeLabel(dataset: Seed): string {
  * - Topological dependency ordering (parents before children)
  * - Multi-pass loading for circular references — pass 2 writes a deferred
  *   reference back through the source row's INTERNAL id captured at insert
- *   time (#11674), so it heals KEYLESS datasets (`mode: 'insert'`, no
+ *   time (commit 9a884c6e4), so it heals KEYLESS datasets (`mode: 'insert'`, no
  *   `externalId`) the same as keyed ones
  * - Dry-run validation mode
  * - Upsert support honoring SeedSchema mode
@@ -438,7 +438,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private seedExternalIdByObject = new Map<string, string | string[]>();
   /**
-   * [#11674] Per seeded object, the fields the WRITE CONTRACT requires a value
+   * [commit 1cba33f16] Per seeded object, the fields the WRITE CONTRACT requires a value
    * for **on insert** — the subset a pass-1 deferral cannot survive.
    *
    * Pass 1 defers an unresolvable reference by DELETING the column from the
@@ -613,7 +613,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // `referenceVia` on other types at authoring, and metadata at rest that
     // predates that check must not have non-text columns resolved as ids.
     //
-    // [#11674] The same pass also records which fields the write contract
+    // [commit 1cba33f16] The same pass also records which fields the write contract
     // requires on insert — the subset a deferral cannot survive. One
     // definition read answers both questions, so the early signal costs no
     // extra metadata round-trip. See {@link requiredOnInsertByObject}.
@@ -832,7 +832,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     const summariesStaleAtStart = this.summariesStale;
     const errors: ReferenceResolutionError[] = [];
     /**
-     * [#11674] The early signal's state, for this dataset only.
+     * [commit 1cba33f16] The early signal's state, for this dataset only.
      *
      * `requiredOnInsert` is what the write contract requires a value for on
      * insert (see {@link SeedLoaderService.requiredOnInsertByObject}); an
@@ -888,7 +888,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // logical/validation failure. See framework#2678.
     const pendingInserts: Array<{ recordIndex: number; externalIdValue: string; record: Record<string, unknown> }> = [];
     const opts = SeedLoaderService.SEED_OPTIONS as any;
-    // [#11674] Internal ids captured at write time, keyed by record index.
+    // [commit 9a884c6e4] Internal ids captured at write time, keyed by record index.
     // Every write site below records the id it learned here — unconditionally,
     // unlike the `insertedRecords` registrations, which need a non-empty
     // natural key. Once the dataset has fully written, the deferred updates it
@@ -990,7 +990,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (res.ok) {
           inserted++;
           const internalId = this.extractId(res.record);
-          if (internalId) internalIdByRecordIndex.set(recordIndex, internalId); // [#11674]
+          if (internalId) internalIdByRecordIndex.set(recordIndex, internalId); // [commit 9a884c6e4]
           if (externalIdValue && internalId) {
             insertedRecords.get(objectName)!.set(externalIdValue, internalId);
           }
@@ -1077,7 +1077,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
       /**
-       * [#11674] Deferrals this row took on a column the write contract
+       * [commit 1cba33f16] Deferrals this row took on a column the write contract
        * requires on insert. Collected during resolution, reported once the
        * write ACTION for this row is known (below) — the deferral itself is
        * harmless on an update, where the deleted column is simply an omitted
@@ -1351,7 +1351,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               recordIndex: i,
             });
             referencesDeferred++;
-            // [#11674] Deferring DELETED a column the write contract requires
+            // [commit 1cba33f16] Deferring DELETED a column the write contract requires
             // on insert. Note it now; the signal is emitted once this row's
             // write action is known — see `signalRequiredDeferrals` below.
             if (requiredOnInsert?.has(ref.field)) {
@@ -1416,7 +1416,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
 
-      // [#11674] EARLY SIGNAL — emitted here, before this row reaches the
+      // [commit 1cba33f16] EARLY SIGNAL — emitted here, before this row reaches the
       // engine, for the deferrals it took on columns the write contract
       // requires on INSERT.
       //
@@ -1476,7 +1476,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
             const externalIdValue = this.externalIdKey(record, externalId);
             const internalId = result.id;
-            if (internalId) internalIdByRecordIndex.set(i, String(internalId)); // [#11674]
+            if (internalId) internalIdByRecordIndex.set(i, String(internalId)); // [commit 9a884c6e4]
             if (externalIdValue && internalId) {
               insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
             }
@@ -1487,7 +1487,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // mapping alive for downstream reference resolution.
             const externalIdValue = this.externalIdKey(record, externalId);
             const existingId = this.extractId(existingRecords?.get(externalIdValue));
-            if (existingId) internalIdByRecordIndex.set(i, existingId); // [#11674]
+            if (existingId) internalIdByRecordIndex.set(i, existingId); // [commit 9a884c6e4]
             if (externalIdValue && existingId) {
               insertedRecords.get(objectName)!.set(externalIdValue, existingId);
             }
@@ -1510,7 +1510,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
           if (decision.action === 'skip') {
             skipped++;
-            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [#11674]
+            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [commit 9a884c6e4]
             if (decision.id && externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
@@ -1522,7 +1522,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // sever downstream natural-key resolution — that cascade is what
             // turned one legitimate validation error into NULLed-out child
             // references on every dev-server restart.
-            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [#11674] same rationale
+            if (decision.id) internalIdByRecordIndex.set(i, decision.id); // [commit 9a884c6e4] same rationale
             if (externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
@@ -1567,7 +1567,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       await flushPendingInserts();
     }
 
-    // [#11674] Annotate this dataset's deferred updates with the internal id
+    // [commit 9a884c6e4] Annotate this dataset's deferred updates with the internal id
     // their source row got when it was written — the id pass 2 writes the
     // resolved reference back through. Runs after the final flush so batched
     // inserts have reported their ids; datasets load sequentially, so the
@@ -1624,7 +1624,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         return id ? String(id) : undefined;
       }
     } catch (error) {
-      // [#12852] Discriminate by error TYPE, the same repair PR #9817 made to
+      // [#12852] Discriminate by error TYPE, the same repair commit 855591fe7 made to
       // `ObjectQL.probeInstallOrganizations` — the sibling probe with this
       // exact shape, on the other side of the engine boundary. This site was
       // missed by that pass.
@@ -1827,7 +1827,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     organizationId?: string,
   ): Promise<void> {
     for (const deferred of deferredUpdates) {
-      // [#16488] How the messages below NAME this record. `recordExternalId`
+      // [commit 460d4b807] How the messages below NAME this record. `recordExternalId`
       // is a map KEY joined with `\u0000` (see {@link externalIdKey}) and stays
       // one — the `insertedRecords` fallback lookup below depends on it — but a
       // raw NUL in a log line turns the whole log binary for `grep`, so every
@@ -1863,7 +1863,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       const resolvedValue: unknown = deferred.multiple ? resolvedItems : resolvedItems[0];
 
       if (!stillUnresolved && resolvedItems.length > 0) {
-        // [#11674] Write back through the internal id captured at insert time
+        // [commit 9a884c6e4] Write back through the internal id captured at insert time
         // — the handle that exists for every row this load actually wrote,
         // keyed or KEYLESS, so the declared deferral property ("pass 2 heals
         // an out-of-order reference") holds without requiring the dataset to
@@ -1936,15 +1936,15 @@ export class SeedLoaderService implements ISeedLoaderService {
               `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${quotableSeedFailureDetail(err) ?? WITHHELD_WRITE_REASON}`);
           }
         } else {
-          // THE TARGET RESOLVED BUT THE SOURCE ROW HAS NO ID (#5127, #11674).
+          // THE TARGET RESOLVED BUT THE SOURCE ROW HAS NO ID (#5127, commit 9a884c6e4).
           //
           // Pass 2 did its job — `resolvedValue` is a real internal id — and
-          // then found no internal id to write it ONTO. Since #11674 captures
+          // then found no internal id to write it ONTO. Since commit 9a884c6e4 captures
           // the internal id AT INSERT TIME for every row this load writes
           // (keyed or keyless), the one way left to get here is that the
           // source row NEVER LANDED: its pass-1 write failed (already
           // reported at `error` by the write site, #4729) or returned no id.
-          // The pre-#11674 "pure silent loss" — row written fine but its key
+          // The "pure silent loss" before commit 9a884c6e4 — row written fine but its key
           // evaluated empty, so pass 2's externalId re-resolution had no
           // handle — no longer exists: such a row now heals through its
           // captured internal id.
@@ -2394,7 +2394,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * from the seed declaration and the record, never from the caught error, so
    * "which record, which key" is untouched by the withhold. For a single-field
    * key the authored prefix is unchanged byte for byte too (two runtime pins
-   * read it); #16488 renders the VALUE side of a COMPOSITE key — see
+   * read it); commit 460d4b807 renders the VALUE side of a COMPOSITE key — see
    * {@link externalIdDisplay} — so its `\u0000` joiner cannot reach the log.
    * What #8442 changes is only what follows the colon: a DECLARED refusal — a 4xx, or the data
    * engine's `VALIDATION_FAILED` shape, which is where "which field and why"
@@ -2417,7 +2417,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       field: '(write)',
       targetObject: objectName,
       targetField: label,
-      // [#16488] The STRUCTURED key keeps the real key — a datum a machine
+      // [commit 460d4b807] The STRUCTURED key keeps the real key — a datum a machine
       // reads, and JSON / util.inspect escape a control character rather than
       // emitting it. Only the message is rendered.
       attemptedValue: keyValue || null,
@@ -2857,7 +2857,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * `grep` classify the whole server log as binary, so every later `grep -n` /
    * `grep -c` over it silently returns nothing until the reader remembers
    * `-a`: the reader's main instrument disabled by one byte, at the moment
-   * someone is diagnosing a failed boot (#16488, measured while investigating
+   * someone is diagnosing a failed boot (commit 460d4b807, measured while investigating
    * objectstack-ai/ats#20).
    *
    * A key with no `\u0000` in it — every single-field key — is returned
@@ -2966,7 +2966,7 @@ interface DeferredUpdate {
   objectName: string;
   /**
    * The source record's INTERNAL id, captured at the moment its pass-1 write
-   * landed (#11674). This is the handle pass 2 writes the resolved reference
+   * landed (commit 9a884c6e4). This is the handle pass 2 writes the resolved reference
    * back through: it exists for every row this load actually wrote —
    * including rows of a KEYLESS dataset (`mode: 'insert'`, no `externalId`)
    * and rows whose composite key evaluated to the empty string — so the
@@ -2986,13 +2986,13 @@ interface DeferredUpdate {
    * when {@link internalId} is absent, and the name error messages call the
    * record by. It is the KEY, `\u0000` joiner and all; the messages render it
    * through {@link SeedLoaderService.externalIdDisplay} rather than pasting it
-   * (#16488).
+   * (commit 460d4b807).
    *
    * May legitimately be `''`: `externalIdKey` returns the empty string when the
    * dataset declares no `externalId` and the row carries no `name`, when the
    * key field is absent or blank, and when ANY ONE component of a composite
    * externalId is. An empty key is never registered in `insertedRecords`, so
-   * it can never find a record — since #11674 that only matters when
+   * it can never find a record — since commit 9a884c6e4 that only matters when
    * `internalId` is ALSO absent (the row never landed). Carried verbatim (not
    * normalised to `undefined`) so pass 2 can address the record by index
    * rather than by a key it does not have.

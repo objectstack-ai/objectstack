@@ -14,7 +14,7 @@ import { SchemaRegistry } from './registry.js';
  * never reaches this predicate — `'objects'` arrives here as `'object'`.
  * `SchemaRegistry.getItem` / `listItems` still special-case BOTH spellings to
  * the contributor path (their own callers are not all folded), which is the
- * read-side alias #6725's write fix had to match; the fold upstream makes the
+ * read-side alias commit 1507ba356's write fix had to match; the fold upstream makes the
  * two layers agree instead of merely overlapping.
  */
 function isObjectType(type: string): boolean {
@@ -124,7 +124,7 @@ export class MetadataFacade {
   }
 
   /**
-   * [#6725] An `object` lives in TWO places in a `SchemaRegistry`, and this
+   * [commit 1507ba356] An `object` lives in TWO places in a `SchemaRegistry`, and this
    * write has to reach both of them.
    *
    * `SchemaRegistry.unregisterObject`'s header states the invariant directly:
@@ -260,7 +260,7 @@ export class MetadataFacade {
   /**
    * Unregister a metadata item
    *
-   * [#6725] An object leaves both places it was written into, for the same
+   * [commit 1507ba356] An object leaves both places it was written into, for the same
    * reason {@link register} writes both: `unregisterItem` only empties the
    * generic `metadata` map, which no object read consults. Removing one half is
    * the exact shape of #6808 — the row was gone and `metadata['object']` was

@@ -20,6 +20,10 @@
  *   column, a cube-qualified spelling, a dataset dimension, an ad-hoc
  *   (inferred) cube, and a bucketed time dimension;
  * - no statement and no aggregate reaches the host bridges on a refusal;
+ * - [#21232] a relationship path the cube declares no join for is judged on
+ *   the object the one hop resolver (`hop-object.ts`) names — the field's
+ *   declared reference, else the alias — and stands down only where the host
+ *   describes nothing there;
  * - GUARD: the judged types are exactly `@objectstack/spec/data`'s
  *   `STRUCTURED_JSON_TYPES` and `isMultiValueField`, over every `FieldType` —
  *   the predicates the engine's door reads, never a second list.
@@ -99,7 +103,16 @@ interface Refusal extends Error {
   cube?: string;
 }
 
-function makeService(face: Face, opts: { sourceFieldMeta?: boolean } = {}) {
+/**
+ * `describes`: the object whose fields the host describes as {@link JOINED_FIELDS}
+ * (`null`: none). `reference`: the target a relationship resolver declares for
+ * `ledger.account` (absent: no resolver is wired).
+ */
+function makeService(
+  face: Face,
+  opts: { sourceFieldMeta?: boolean; describes?: string | null; reference?: string } = {},
+) {
+  const described = opts.describes === undefined ? JOINED : opts.describes;
   const calls = { raw: [] as string[], aggregate: [] as unknown[] };
   const service = new AnalyticsService({
     logger: silentLogger,
@@ -117,7 +130,10 @@ function makeService(face: Face, opts: { sourceFieldMeta?: boolean } = {}) {
     getObjectFieldNames: (n: string) => (n === OBJECT ? Object.keys(FIELDS) : undefined),
     ...(opts.sourceFieldMeta === false
       ? {}
-      : { sourceFieldMeta: (o: string, f: string) => (o === OBJECT ? FIELDS[f] : o === JOINED ? JOINED_FIELDS[f] : undefined) }),
+      : { sourceFieldMeta: (o: string, f: string) => (o === OBJECT ? FIELDS[f] : o === described ? JOINED_FIELDS[f] : undefined) }),
+    ...(opts.reference === undefined
+      ? {}
+      : { relationshipResolver: (o: string, rel: string) => (o === OBJECT && rel === 'account' ? opts.reference : undefined) }),
   });
   return { service, calls };
 }
@@ -218,6 +234,52 @@ describe('a dimension on a structured-JSON field is refused at the analytics doo
   });
 });
 
+describe('[#21232] a dotted path the cube declares no join for is judged on the object the one hop resolver names', () => {
+  // `ledger_cube` declares no join; `account.hq` is an undeclared member, so
+  // its column is the path itself. The live-driver pins over the plugin's own
+  // composition are `json-stored-door-undeclared-join.test.ts`.
+  const REFERENCED = 'crm_account';
+
+  for (const face of ['native', 'objectql'] as const) {
+    it(`${face}: the relationship field's declared reference names the object — INVALID_FIELD / 400, nothing read`, async () => {
+      const { service, calls } = makeService(face, { describes: REFERENCED, reference: REFERENCED });
+      const err = await rejection(service.query({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] }));
+      expect(envelopeOf(err)).toEqual({
+        code: 'INVALID_FIELD', status: 400, member: 'account.hq', param: 'dimensions', field: 'account.hq', object: REFERENCED,
+      });
+      expect(calls.raw, 'no statement reached the raw-SQL bridge').toEqual([]);
+      expect(calls.aggregate, 'no aggregate reached the engine bridge').toEqual([]);
+    });
+  }
+
+  it('the reference, not the alias: an alias that names a described object is not what the door reads', async () => {
+    // The host describes `account` (the alias) with `hq` json, but the lookup
+    // declares `crm_account`, which it does not describe: the strategy joins
+    // `crm_account`, so the door has nothing to answer and stands down.
+    const { service, calls } = makeService('native', { describes: JOINED, reference: REFERENCED });
+    await service.query({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] });
+    expect(calls.raw).toHaveLength(1);
+    expect(calls.raw[0]).toContain(`"${REFERENCED}"`);
+  });
+
+  it('a host that names no reference: the hop reads its alias, the table the strategy joins, and is judged there', async () => {
+    const { service, calls } = makeService('native');
+    const err = await rejection(service.query({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] }));
+    expect(envelopeOf(err)).toEqual({
+      code: 'INVALID_FIELD', status: 400, member: 'account.hq', param: 'dimensions', field: 'account.hq', object: JOINED,
+    });
+    const dry = await rejection(service.generateSql({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] }));
+    expect(envelopeOf(dry)).toEqual(envelopeOf(err));
+    expect(calls.raw).toEqual([]);
+  });
+
+  it('CONTROL the referenced object\'s text column is served', async () => {
+    const { service, calls } = makeService('native', { describes: REFERENCED, reference: REFERENCED });
+    await service.query({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.name'] });
+    expect(calls.raw).toHaveLength(1);
+  });
+});
+
 describe('what the door does not judge', () => {
   it('CONTROL a text dimension is served — the native face runs its one statement', async () => {
     const { service, calls } = makeService('native');
@@ -233,8 +295,8 @@ describe('what the door does not judge', () => {
     expect(err.message).toContain("which object 'ledger' does not have");
   });
 
-  it('a dotted path the cube declares no join for is a synthetic traversal: its object is not a declaration, so it is not judged', async () => {
-    const { service, calls } = makeService('native');
+  it('a dotted path whose column the host does not describe cannot be answered, so the door stands down', async () => {
+    const { service, calls } = makeService('native', { describes: null });
     await service.generateSql({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] });
     await service.query({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] });
     expect(calls.raw).toHaveLength(1);

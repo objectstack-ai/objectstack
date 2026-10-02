@@ -76,9 +76,9 @@ export const ProjectDetailPage = definePage({
                   amountField: 'estimate_hours',
                   title: 'Tasks',
                   columns: [
-                    { field: 'title', label: 'Title', type: 'text', required: true },
+                    { name: 'title', label: 'Title', type: 'text', required: true },
                     {
-                      field: 'status',
+                      name: 'status',
                       label: 'Status',
                       type: 'select',
                       options: [
@@ -90,7 +90,7 @@ export const ProjectDetailPage = definePage({
                       ],
                     },
                     {
-                      field: 'priority',
+                      name: 'priority',
                       label: 'Priority',
                       type: 'select',
                       options: [
@@ -100,8 +100,8 @@ export const ProjectDetailPage = definePage({
                         { label: 'Urgent', value: 'urgent' },
                       ],
                     },
-                    { field: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
-                    { field: 'due_date', label: 'Due Date', type: 'date' },
+                    { name: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
+                    { name: 'due_date', label: 'Due Date', type: 'date' },
                   ],
                 },
               },

@@ -732,6 +732,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
       "verb": "delete",
       "pinned": 2
@@ -2462,6 +2467,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3453,36 +3468,6 @@
     },
     {
       "file": "packages/rest/src/meta-published-overlay.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/rest/src/public-form-lookup-picker.test.ts",
       "verb": "update",
       "pinned": 1
     },

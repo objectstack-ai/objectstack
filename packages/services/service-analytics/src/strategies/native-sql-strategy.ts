@@ -30,6 +30,11 @@ import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove }
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
+// [#21042] What each aggregate's operand accumulates in, the PostgreSQL
+// boolean-aggregand cast, and the one column-class predicate both read — the
+// operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
+import { aggregandColumnClass, aggregandOperandSql } from '@objectstack/core';
+import { emptyGroupValueFor } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -135,6 +140,26 @@ export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 
 /**
+ * [#21129] The column a measure's `sql` aggregates, located on the object that
+ * declares it — `undefined` for `'*'` and for an expression. A bare identifier
+ * is a column of `parentTable`; a relationship path is its last segment, on
+ * the object the path's last hop reaches ({@link columnObjectOf}, the one hop
+ * resolver: the object this statement joins for that path). The aggregand's
+ * operand policy and the presenter both read the column here, so the column
+ * whose class shapes the statement and the column whose type presents its
+ * answer are one column.
+ */
+function measureColumnOf(
+  cube: Cube,
+  parentTable: string,
+  sql: string,
+  referenceOf: HopReference | undefined,
+): { readonly object: string; readonly field: string } | undefined {
+  if (sql === '*' || !IDENTIFIER_PATH.test(sql)) return undefined;
+  return { object: columnObjectOf(cube, parentTable, sql, referenceOf), field: sql.slice(sql.lastIndexOf('.') + 1) };
+}
+
+/**
  * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
  * and the object it reads — the object {@link resolvePathHops} named for that
  * hop, which `generateSql` then scopes the alias as. One value for both, so
@@ -145,11 +170,32 @@ const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
  * `relationshipReference`) so every path the statement walks — a dimension, a
  * measure, a filter member, a time dimension — is resolved with the answer the
  * door admitted the query with.
+ *
+ * [#21249] …and whether the statement qualifies its base-table columns:
+ * `true` exactly when this statement joins something, which
+ * {@link NativeSQLStrategy.generateSql} reads off the joins a first compile of
+ * the same query registered. See {@link NativeSQLStrategy.qualifyAndRegisterJoin}.
  */
 class StatementJoins extends Map<string, { readonly sql: string; readonly object: string }> {
-  constructor(readonly referenceOf: HopReference | undefined) {
+  constructor(
+    readonly referenceOf: HopReference | undefined,
+    readonly qualifyBaseColumns: boolean,
+  ) {
     super();
   }
+}
+
+/**
+ * [#21249] The clauses one compile of a query produces, before the join
+ * allowlist and the read scopes are applied and the statement is assembled.
+ */
+interface StatementClauses {
+  readonly tableName: string;
+  readonly params: unknown[];
+  readonly selectClauses: string[];
+  readonly groupByClauses: string[];
+  readonly whereClauses: string[];
+  readonly joins: StatementJoins;
 }
 
 /**
@@ -322,8 +368,59 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // fail-closed. The emitters' refusals stay as the backstop. See
     // {@link jsonConstructOnUnknownDialectIn}.
     if (this.jsonConstructOnUnknownDialectIn(query, ctx)) return false;
+    // ── [#21080] DECLINE an object an engine middleware is registered for ──
+    //
+    // Triage's ruling on #21080 (5925681388): 「The engine answers, read-only,
+    // whether an object carries an engine middleware registered for that
+    // object … The native-SQL strategy's `canHandle` declines such an
+    // object. The declined query routes to the ObjectQL strategy, and the
+    // engine's middlewares run.」 ⛔ No per-object list here, ⛔ no gate
+    // registers twice.
+    //
+    // This strategy executes raw SQL through the driver, so no engine
+    // operation runs and no engine middleware does. It applies the security
+    // service's object admission and read filter (`read-admission.ts`,
+    // `read-scope-sql.ts`) and nothing else, and the per-object read gates
+    // live in the engine as middlewares: a member admitted to such an object
+    // read grouped results and counts over rows the engine never serves it.
+    // Declining hands the query to the ObjectQL strategy, which hands it to
+    // the engine with the caller's context. The mechanism of the declines
+    // above, for the same reason: what this strategy cannot serve as the
+    // engine would, the engine serves.
+    //
+    // ⚠️ It FAILS CLOSED, unlike the "cannot answer, do not block" hooks: an
+    // `undefined` answer (no engine, or one without the member) declines
+    // too. A gate this strategy cannot see is not one it may skip. The cost
+    // is the native fast path for every gated object, and on an engine that
+    // cannot answer, for every object. See {@link readsObjectWithEngineMiddleware}.
+    if (this.readsObjectWithEngineMiddleware(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [#21080] Does this query read an object the engine holds a middleware
+   * for — or one it cannot answer about? See the decline at {@link canHandle}.
+   *
+   * The objects are the ones the statement reads: the set the door admitted
+   * and scoped (`readScopedObjects` — the base object, every declared join and
+   * every object a relationship path reaches), or, for a context built
+   * without that set, the cube's base object and declared joins, as
+   * {@link crossFieldComparisonIn} reads them. Each is asked of the context's
+   * `hasObjectMiddleware`; `true` and `undefined` both decline.
+   *
+   * A context with no hook asks nothing: it is one a host built without the
+   * engine's answer, and `AnalyticsService` says so once when it wires raw SQL.
+   */
+  private readsObjectWithEngineMiddleware(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const scopedCtx = ctx as DatasetScopedStrategyContext;
+    if (typeof scopedCtx.hasObjectMiddleware !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const objects = scopedCtx.readScopedObjects
+      ? [...scopedCtx.readScopedObjects]
+      : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    return objects.some((object) => scopedCtx.hasObjectMiddleware!(object) !== false);
   }
 
   /**
@@ -609,6 +706,35 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     const rows = await ctx.executeRawSql!(objectName, sql, params);
 
+    // [#21042, #15546] A measure whose aggregate answers NULL over nothing — SQL
+    // `SUM` over a group whose aggregand is NULL in every row, or over no row a
+    // measure-scoped filter admits — answers the identity the platform declares
+    // for that aggregate over NOTHING (`emptyGroupValueFor`, spec
+    // `data/aggregation-policy.ts`): summing nothing is `0`, a measured fact.
+    // The engine and the ObjectQL face fold it (`driver-sql`'s
+    // `foldEmptyAggregateAnswers`, the rows path); this face answered `null` for
+    // the same group. Read from the policy, never restated, for EVERY measure —
+    // a measure-scoped one carries its aggregate in the same `type` — so
+    // `avg` / `min` / `max` (no identity) and the expression metric types
+    // (`undefined` too) keep their NULL. Only `null` folds, before the
+    // presenter, in `driver-sql`'s order: an `undefined` would be a column
+    // never projected, a different defect that must stay visible. The dataset
+    // door's `DatasetExecutor` fill still runs after this and is idempotent on
+    // a folded row.
+    const folds: Array<readonly [string, number]> = [];
+    for (const member of query.measures ?? []) {
+      const identity = emptyGroupValueFor(this.lookupMember(cube, member, 'measure')?.type);
+      if (identity !== undefined) folds.push([member, identity]);
+    }
+    if (folds.length > 0 && Array.isArray(rows)) {
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const [member, identity] of folds) {
+          if (row[member] === null) row[member] = identity;
+        }
+      }
+    }
+
     // [#20889] A measure column `fields[]` declares `number` answers a number,
     // on every dialect. The SQL client hands an aggregate back as the wire type
     // of its expression: node-postgres parses `bigint` (`count`, `sum` over an
@@ -625,16 +751,22 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // number whatever the column held; `min` / `max` answer a value OF the
     // column, so they are presented only when that column is declared numeric
     // (`driver-sql`'s `readPresentationKind` rule), asked through
-    // `declaredFieldType` — a host that cannot answer, or a relationship-path
-    // column, leaves the value as the client gave it. Expression metric types
+    // `declaredFieldType` on the object that declares the column
+    // ({@link measureColumnOf}) — [#21129] for a relationship path, the object
+    // its last hop reaches, as the statement joined it. A host that cannot
+    // answer leaves the value as the client gave it. Expression metric types
     // (`number` / `string` / `boolean`) are the author's SQL and stay as they
     // are. Rows are presented in place, as the driver presents its own.
     const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    const referenceOf = relationshipReferenceOf(ctx);
     const numberMeasures = (query.measures ?? []).filter((member) => {
       const measure = this.lookupMember(cube, member, 'measure');
       if (!measure?.type || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)) return false;
       if (AGGREGATE_ANSWER_KIND[measure.type as AggregationFunction] === 'number') return true;
-      const sourceType = typeof declaredType === 'function' ? declaredType.call(ctx, objectName, measure.sql) : undefined;
+      const target = measureColumnOf(cube, objectName, measure.sql, referenceOf);
+      const sourceType = target && typeof declaredType === 'function'
+        ? declaredType.call(ctx, target.object, target.field)
+        : undefined;
       return sourceType !== undefined && NUMERIC_VALUE_TYPES.has(sourceType);
     });
     if (numberMeasures.length > 0 && Array.isArray(rows)) {
@@ -662,6 +794,38 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // See {@link assertNoCrossFieldComparison} for why it is asserted anyway.
     this.assertNoCrossFieldComparison(query, ctx);
 
+    // [#21249] A base-table column is qualified exactly when THIS statement
+    // joins something, and what it joins is known only once every member has
+    // been resolved: joins are registered lazily, by whichever member walks a
+    // relationship path first, and an absorbed `$or` takes back the joins its
+    // branches registered. So the query is compiled once with bare base
+    // columns, and, when that compile registered any join, once more with
+    // every base column qualified. The predicate is the hop resolver's own
+    // answer for this query, never `cube.joins`: a cube that declares no join
+    // still joins a lookup's declared `reference` (`hop-object.ts`, tier 2),
+    // and reading the declaration left `note` bare beside a joined target that
+    // also declares `note` — "ambiguous column" on SQLite and PostgreSQL. Both
+    // compiles walk the same members through the same resolver, so the second
+    // registers the same joins; a statement that joins nothing is compiled
+    // once and keeps its bare columns.
+    let clauses = this.compileClauses(query, ctx, cube, false);
+    if (clauses.joins.size > 0) clauses = this.compileClauses(query, ctx, cube, true);
+    return this.assembleStatement(query, ctx, cube, clauses);
+  }
+
+  /**
+   * [#21249] Compile a query's SELECT, GROUP BY and WHERE clauses — the
+   * dimensions, the measures with their scoped filters, the `where`, the
+   * dataset's own scope and the time-dimension windows — registering the joins
+   * its relationship paths walk. `qualifyBaseColumns` is whether its base-table
+   * columns are written `"<table>"."<column>"`; see {@link generateSql}.
+   */
+  private compileClauses(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+    cube: Cube,
+    qualifyBaseColumns: boolean,
+  ): StatementClauses {
     const params: unknown[] = [];
     const selectClauses: string[] = [];
     const groupByClauses: string[] = [];
@@ -670,7 +834,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // lazily as dotted dimensions/measures/filters are resolved. [#20986] Each
     // hop's object comes from the one resolver, with the host's answer for a
     // relationship field's declared target — the door's own.
-    const joins = new StatementJoins(relationshipReferenceOf(ctx));
+    const joins = new StatementJoins(relationshipReferenceOf(ctx), qualifyBaseColumns);
 
     // Build SELECT for dimensions
     if (query.dimensions && query.dimensions.length > 0) {
@@ -720,7 +884,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
               ctx,
             )
           : null;
-        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate);
+        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate, ctx);
         selectClauses.push(`${aggExpr} AS "${measure}"`);
       }
     }
@@ -823,6 +987,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         }
       }
     }
+
+    return { tableName, params, selectClauses, groupByClauses, whereClauses, joins };
+  }
+
+  /**
+   * [#21249] Enforce the join allowlist, inject the read scopes and assemble
+   * the statement from the clauses {@link compileClauses} produced.
+   */
+  private assembleStatement(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+    cube: Cube,
+    clauses: StatementClauses,
+  ): { sql: string; params: unknown[] } {
+    const { tableName, params, selectClauses, groupByClauses, whereClauses, joins } = clauses;
 
     // ── ADR-0021 D-C — enforce the join allowlist + inject per-object RLS ──
     // 1. Reject any join not backed by a relationship the dataset declared.
@@ -976,7 +1155,8 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * target under the field's alias, `LEFT JOIN "crm_person" "owner" ON …`.
    *
    * Returns the qualified SQL reference (e.g. `"account"."industry"`).
-   * Pure column references (no dot) are returned as-is.
+   * A base-table column (no dot) is returned qualified with the base table
+   * when the statement joins something, and as-is otherwise.
    */
   private qualifyAndRegisterJoin(
     rawSql: string,
@@ -985,14 +1165,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube?: Cube,
   ): string {
     if (!rawSql.includes('.')) {
-      // Base-table column. When the cube can join other tables, a bare column
-      // that also exists on a joined table (e.g. base `status` vs joined
+      // Base-table column. When the statement joins another table, a bare
+      // column that also exists on a joined table (e.g. base `status` vs joined
       // `account.status`) makes the SQL engine raise "ambiguous column name".
       // Qualify plain identifiers with the base table; leave SQL expressions
-      // and `*` untouched. Single-object cubes (no joins) keep bare columns so
-      // their generated SQL is byte-for-byte unchanged.
-      const canJoin = !!cube?.joins && Object.keys(cube.joins).length > 0;
-      if (canJoin && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
+      // and `*` untouched. A statement that joins nothing keeps bare columns,
+      // so its generated SQL is byte-for-byte unchanged.
+      //
+      // [#21249] "Joins something" is THIS statement's joins, as the hop
+      // resolver registered them — `joins.qualifyBaseColumns`, set by
+      // `generateSql` — never whether the cube declares a join. The declaration
+      // answers for the cube, not the statement: a cube declaring no join still
+      // joins a lookup's declared `reference`, and its base columns were left
+      // bare beside it.
+      if (joins.qualifyBaseColumns && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
         return `"${parentTable}"."${rawSql}"`;
       }
       return rawSql;
@@ -1091,13 +1277,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * @param predicate - The measure's own scoped filter, already compiled to a
    *   SQL boolean (`null` = the measure declares none, or declares one that
    *   constrains nothing — `compileFilterNode`'s TRUE). #10298.
+   * @param ctx - [#21042] The host's answers this compile reads for the
+   *   aggregand: the column's declared shape (`declaredValueShape`) and the
+   *   dialect the statement runs on (`sqlDialect`).
    */
   private resolveMeasureSql(
     cube: Cube,
     member: string,
     parentTable: string,
     joins: StatementJoins,
-    predicate: string | null = null,
+    predicate: string | null,
+    ctx: StrategyContext,
   ): string {
     const measure = this.lookupMember(cube, member, 'measure') as
       | { sql: string; type: string }
@@ -1122,9 +1312,36 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       );
     }
 
-    const col = measure.sql === '*'
+    const column = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
+
+    // [#21042] The OPERAND each aggregate wraps, per the engine's own policies
+    // (`aggregandOperandSql`, `@objectstack/core`, the rule `driver-sql`'s
+    // `aggregate()` applies): on PostgreSQL and MySQL `sum` over a fractional
+    // column and `avg` over every numeric or boolean one accumulate in double
+    // (#20387), and on PostgreSQL a boolean aggregand is cast to `int` for
+    // `sum` / `avg` / `min` / `max` (#11635), never for the counts. Without it
+    // this face added exact decimals where the engine adds doubles, and
+    // answered `500` for a boolean `sum` the engine answers. The column's
+    // class is the one predicate's, over the declaration the host relays for
+    // the object the column lives on — the base object, or the object a
+    // relationship path's last hop reads ({@link measureColumnOf}, through the
+    // one hop resolver). An expression, a column the host cannot describe, or a host
+    // that names no dialect gets no class or no policy, and is aggregated as
+    // stored. The expression metric types are not aggregates and are never
+    // wrapped.
+    const target = measureColumnOf(cube, parentTable, measure.sql, joins.referenceOf);
+    const col = column === '*' || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)
+      ? column
+      : aggregandOperandSql(
+          measure.type as AggregationFunction,
+          target
+            ? aggregandColumnClass(declaredValueShapeResolver(ctx, target.object)?.(target.field))
+            : undefined,
+          sqlDialectFor(ctx, parentTable),
+          column,
+        );
 
     if (predicate !== null) {
       const wrapConditional = CONDITIONAL_AGGREGATE_SQL[measure.type];
@@ -1185,7 +1402,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const measure = this.lookupMember(cube, member, 'measure');
     if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
     const fieldName = member.includes('.') ? member.split('.')[1] : member;
-    return fieldName;
+    // [#21249] A member the cube does not declare is a base-table column too
+    // (`where: { id }`), so it takes the same qualification as a declared one:
+    // returned bare it sat beside a joined target's own `id`, ambiguous.
+    return this.qualifyAndRegisterJoin(fieldName, parentTable, joins, cube);
   }
 
   /**

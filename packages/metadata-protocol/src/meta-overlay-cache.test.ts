@@ -176,7 +176,7 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
                     return (r as unknown as Record<string, unknown>)[k] === v;
                 }),
             );
-            // `check:objectql-double-limit` (#10978) — hold the caller's bound,
+            // `check:objectql-double-limit` (commit 4c9780c7a) — hold the caller's bound,
             // applied AFTER the filter and BY PRESENCE. A double that hands
             // back every row it matched cannot tell a dropped bound from no
             // bound at all.
@@ -578,7 +578,7 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
         expect((scoped.items as any[]).map((i) => i.name)).toEqual(['beta']);
     });
 
-    // ⚠️ [#14683] `view`, NOT `object`, and the type is LOAD-BEARING here in a
+    // ⚠️ [commit 96326040f] `view`, NOT `object`, and the type is LOAD-BEARING here in a
     // way it is not in this section's three siblings. `getMetaItems` now
     // resolves its own read scope through `organizationIdForMetaRead`, so a
     // type the registry declares NON-overridable has exactly one partition to

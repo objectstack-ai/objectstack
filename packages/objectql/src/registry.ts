@@ -16,7 +16,7 @@ import {
   // from one place. Re-exported below under its original name.
   ITEM_KEY_DISCRIMINATORS,
   readDiscriminatorValue as discriminatorValue,
-  // [#10062] The ADR-0029 D9.6 provenance pair, sunk into metadata-core for the
+  // [commit fa5d137ab] The ADR-0029 D9.6 provenance pair, sunk into metadata-core for the
   // same reason as the table above: `@objectstack/service-automation`'s flow
   // precedence asks the same question ("does a code package ship this name?")
   // and reached it by importing this package, which it does not declare — so
@@ -36,7 +36,7 @@ import {
   type ObjectFieldTypeRefusal,
   type ObjectFieldTypeViolation,
 } from '@objectstack/metadata-core';
-// [#8460] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
+// [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
 // this scalar been authored away from the packaged default?), and the ruling
 // required the same mechanism, not a second comparison shape.
@@ -171,7 +171,7 @@ export function parseFQN(fqn: string): { namespace: string | undefined; shortNam
 
 /**
  * The three SCALAR props {@link mergeObjectDefinitions} resolves last-writer-wins
- * — the exact set the #8284 and #8460 rulings both cover, and the same three
+ * — the exact set the #8284 ruling and ADR-0029 D9.2a both cover, and the same three
  * {@link scalarOverridesPackagedBase} answers for.
  */
 const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const;
@@ -220,7 +220,7 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
  * priority 140 does not become the base layer") fails if this merge set is
  * widened to copy it through.
  *
- * [#8460] …the SCALAR override above is conditional. `tenantAuthored` names
+ * [ADR-0029 D9.2a] …the SCALAR override above is conditional. `tenantAuthored` names
  * the scalars the fold's BASE has authored away from the packaged owner's
  * value; an extender yields on those. See
  * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
@@ -248,7 +248,7 @@ function mergeObjectDefinitions(
     merged.indexes = [...(base.indexes || []), ...extension.indexes];
   }
 
-  // Override scalar props (last writer wins) — [#8460] unless the base has been
+  // Override scalar props (last writer wins) — [ADR-0029 D9.2a] unless the base has been
   // authored by the tenant, in which case the extender's packaged default yields.
   const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
   if (extension.label !== undefined && !yields('label')) merged.label = extension.label;
@@ -1510,7 +1510,7 @@ export const OBJECT_OWNERSHIP_CONFLICT_CODE = 'OBJECT_OWNERSHIP_CONFLICT' as con
  * install blow up later at table creation. Shareable platform namespaces
  * (`base`/`system`/`sys`) are exempt.
  *
- * [#14474] Carries the ADR-0112 envelope (`code` + `status`), like its sibling
+ * [commit df657d9df] Carries the ADR-0112 envelope (`code` + `status`), like its sibling
  * {@link ArtifactObjectNameConflictError} below. Unlike that sibling, this
  * refusal IS reachable from a wire: `POST /api/v1/packages`
  * (`packages/runtime/src/domains/packages.ts`) calls `installPackage` with no
@@ -1727,7 +1727,7 @@ export class ObjectOwnershipConflictError extends Error {
   }
 }
 
-// [#10062] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
+// [commit fa5d137ab] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
 // They now live in `@objectstack/metadata-core`
 // (`code-artifact-provenance.ts`), imported at the top of this file and
 // re-exported immediately below, so every caller's spelling — including
@@ -2448,7 +2448,7 @@ export class SchemaRegistry {
     contributors: ObjectContributor[],
     baseDefinition: ServiceObject,
   ): ServiceObject {
-    // [#8460] Computed ONCE, over the base the fold starts from — never
+    // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
     // scalar look "authored" to the next extender and silently invert
     // extender-vs-extender precedence (D9.3: declared numbers order peers).
@@ -2466,7 +2466,7 @@ export class SchemaRegistry {
   }
 
   /**
-   * [#8460] Which of the three fold scalars the BASE layer carries a
+   * [ADR-0029 D9.2a] Which of the three fold scalars the BASE layer carries a
    * TENANT-AUTHORED value for — i.e. one that no longer equals the packaged
    * owner's.
    *
@@ -2505,11 +2505,11 @@ export class SchemaRegistry {
    * {@link getPackagedObjectOwner} — whose extra `isCodeArtifactBody` test
    * (D9.8) would make this decline to protect a RUNTIME-authored object, i.e.
    * exactly the object whose owner row the tenant wrote by hand. The two agree
-   * wherever a packaged owner exists, which is every shape #8460 measured; they
+   * wherever a packaged owner exists, which is every shape the ADR-0029 D9.2a amendment records; they
    * differ only on a tenant-authored owner, and there the ruled sentence still
    * reads the same way — the tenant's own row is the explicit override and a
    * package's `objectExtensions` entry is the packaged default. The rejected
-   * alternative is the trap PR #8454 named one layer up, in its own form:
+   * alternative is the trap commit 427344c26 named one layer up, in its own form:
    * comparing against a body that already has extenders folded onto it
    * ({@link resolveOwnerLayer}) would report every extender's scalar as
    * "unchanged" and yield nothing, ever.

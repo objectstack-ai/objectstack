@@ -306,8 +306,10 @@ export * from './search-fields';
 export * from './field-group-layout';
 
 // Default inline-grid columns — the single source of which child fields an
-// inline master-detail grid draws when its author listed none. Consumed by the
-// renderer and credited by lint's `field-no-consumers`, so the two agree.
+// inline master-detail grid draws when its author listed none, and of which
+// fields its per-row expand form draws (and when that form is offered).
+// Consumed by the renderer and credited by lint's `field-no-consumers`, so the
+// two agree.
 export * from './inline-grid-columns';
 
 // record-surface derivation (ADR-0085 §5) — the single source for how a record's
