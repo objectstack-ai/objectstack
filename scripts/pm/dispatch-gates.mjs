@@ -1379,10 +1379,11 @@ export function extractJobOutputSources(jobText) {
  * not. Translating one language with the other is how a derivation goes
  * confidently wrong, so a glob carrying an extglob is DROPPED from the derived
  * population and counted, never approximated. Live specimen and the whole cost
- * of the refusal on this tree: `apps/!(docs)/**` in ci.yml's `core` filter, one
- * entry of six — the other five (`packages/**`, `examples/**`, `package.json`,
- * `pnpm-lock.yaml`, `tsconfig.json`, plus the workflow file itself) carry the
- * filter. A dropped POSITIVE entry can only narrow what is claimed; a dropped
+ * of the refusal on this tree: `apps/!(docs)/**` in ci.yml's `core` filter, its
+ * one extglob entry — the rest (`packages/**`, `examples/**`, `package.json`,
+ * `pnpm-lock.yaml`, `tsconfig.json`, the workflow file itself, and since #21202
+ * the root build inputs turbo.json declares) carry the filter. A dropped
+ * POSITIVE entry can only narrow what is claimed; a dropped
  * NEGATION would WIDEN it, so one of those refuses the whole population instead.
  */
 const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
