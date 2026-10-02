@@ -15,6 +15,9 @@ import {
     // every other rejection stays loud. ⛔ The two wirings themselves are NOT
     // the helper's — see `computeExecCtx`.
     classifyAdmissionTenancyPosture,
+    // The registry's "never registered" brand, asked directly by the public
+    // form doors' tenancy read (see `registerFormEndpoints`).
+    isServiceNotRegisteredError,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
@@ -10587,16 +10590,74 @@ export class RestServer {
             return null;
         };
 
+        // [#21331] WHICH organization's metadata an anonymous form request
+        // reads. A public-form request carries no session, so it carries no
+        // active organization, and `getMetaItems` without one merges only the
+        // env-wide overlays. An administrator's edit of a packaged form is
+        // saved as an overlay of THEIR organization, so that read missed every
+        // such edit, including the one that withdraws the form from anonymous
+        // intake. The editor showed the form closed while both doors kept
+        // serving and accepting it.
+        //
+        // The answer is the tenancy service's `defaultOrgId()`: the
+        // organization a single-posture deployment binds every principal to.
+        // It is the organization the administrator's own session is in, and
+        // the one the engine stamps on the row this request inserts. It is
+        // `undefined` in two cases. Before any organization exists, no
+        // organization overlay can exist either. A walled posture has no
+        // install organization for an org-less request, so the env-wide state
+        // governs there exactly as before.
+        //
+        // Asked ONCE per request, in `resolveFormBySlug`. Every door below
+        // reads the form through that one resolution, so no door keeps its
+        // own copy of "is this form public".
+        //
+        // Fails CLOSED. A tenancy service that is registered but cannot be
+        // reached raises `AuthzStoreUnavailableError`, the classification
+        // `classifyAdmissionTenancyPosture` applies to the same seam. The
+        // door then refuses instead of falling back to the env-wide read.
+        // Only the registry's own "never registered" brand reads as the
+        // supported no-tenancy composition. The wiring mirrors
+        // `resolveProtocol`, so the tenancy service and the protocol always
+        // come from the same kernel.
+        const resolveFormOrganization = async (
+            environmentId: string | undefined,
+            req: any,
+        ): Promise<string | undefined> => {
+            let tenancy: any;
+            try {
+                const envId = environmentId === 'platform'
+                    ? undefined
+                    : await this.resolveRequestEnvironmentId(environmentId, req);
+                if (envId && this.kernelManager) {
+                    const kernel: any = await this.kernelManager.getOrCreate(envId);
+                    tenancy = typeof kernel?.getServiceAsync === 'function'
+                        ? await kernel.getServiceAsync('tenancy')
+                        : undefined;
+                } else if (this.tenancyServiceProvider) {
+                    tenancy = await this.tenancyServiceProvider(environmentId);
+                }
+            } catch (err) {
+                if (isServiceNotRegisteredError(err)) return undefined;
+                throw new AuthzStoreUnavailableError('tenancy', err);
+            }
+            if (!tenancy || typeof tenancy.defaultOrgId !== 'function') return undefined;
+            const organizationId = await tenancy.defaultOrgId();
+            return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
+        };
+
         const resolveFormBySlug = async (
             environmentId: string | undefined,
             req: any,
             slug: string,
-        ): Promise<{ view: any; form: any; object: string } | null> => {
+        ): Promise<{ view: any; form: any; object: string; organizationId: string | undefined } | null> => {
             const p = await this.resolveProtocol(environmentId, req);
             if (typeof (p as any).getMetaItems !== 'function') return null;
+            const organizationId = await resolveFormOrganization(environmentId, req);
             const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                 type: 'view',
                 ...(environmentId ? { environmentId } : {}),
+                ...(organizationId ? { organizationId } : {}),
             };
             const result: any = await p.getMetaItems(viewsRequest);
             const items: any[] = Array.isArray(result?.items)
@@ -10604,7 +10665,8 @@ export class RestServer {
                 : Array.isArray(result)
                     ? result
                     : [];
-            return findPublicFormView(items, slug);
+            const match = findPublicFormView(items, slug);
+            return match ? { ...match, organizationId } : null;
         };
 
         // GET /forms/:slug — resolve and return the public form spec
@@ -10659,9 +10721,13 @@ export class RestServer {
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaItems === 'function') {
+                            // [#21331] The same organization the form itself
+                            // was resolved in, so the published field schema
+                            // matches the form the caller was served.
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
                                 ...(environmentId ? { environmentId } : {}),
+                                ...(match.organizationId ? { organizationId: match.organizationId } : {}),
                             };
                             const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
