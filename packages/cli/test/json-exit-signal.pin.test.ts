@@ -41,11 +41,12 @@
  *      `options` include `'json'` (`--format json`): the same audience, a
  *      program reading stdout and the exit status.
  *
- * There is no roster to update. A command added later — `os secret rewrap`,
- * which an open pull request adds, is the next one — is in the population the
+ * There is no roster to update. A command added later is in the population the
  * moment its module declares either flag, and this file goes red if any of its
  * `this.exit(…)` calls sits in a `try` whose `catch` does not let the signal
- * through.
+ * through. `os secret rewrap` is the first to have entered that way: it landed
+ * beside this pin with its `--json` flag and its rethrow already in place, and
+ * no line here names it.
  *
  * ## The two halves
  *
@@ -381,15 +382,15 @@ const FLOW = new Map(
 
 /**
  * Floors, not counts of today: the population and the `this.exit`-in-`try`
- * sites this landed over (45 JSON-capable commands: 31 `--json`, 14
- * `--format json`; 99 sites, 21 of them `os build`'s through `compile.ts`). A
+ * sites this landed over (46 JSON-capable commands: 32 `--json`, 14
+ * `--format json`; 105 sites, 21 of them `os build`'s through `compile.ts`). A
  * discovery or analyzer that silently stops finding anything returns zero, and
  * zero passes every per-member assertion — these are what notice. A drop below
  * them is a broken detector or a deliberate removal; say which when you lower
  * one.
  */
-const POPULATION_FLOOR = 45;
-const SITE_FLOOR = 99;
+const POPULATION_FLOOR = 46;
+const SITE_FLOOR = 105;
 
 // ---------------------------------------------------------------------------
 // 1. The analyzer, against fixtures — it must be able to fail
