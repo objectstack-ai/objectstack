@@ -217,8 +217,9 @@ export class KnowledgeServicePlugin implements Plugin {
             `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ` +
               `${typeof matched === 'number' ? matched : 'an unreported number of'} record(s). ` +
               'A bulk event carries a count, not records, so the knowledge index for this object ' +
-              'may now be stale and cannot be repaired from the event stream (#4639). ' +
-              'Retention-sweep deletes are covered separately by the lifecycle reap guard (#4672); ' +
+              'may now be stale and cannot be repaired from the event stream. ' +
+              'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
+              'before they are deleted; ' +
               'application-level predicate writes are not, and need an explicit reindexSource.',
             { object, type, matched },
           );

@@ -593,6 +593,26 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
     expect(strictNavKeys).toContain('viewName');
   });
 
+  it('states ONE `label` rule on both sides: the empty spelling inherits, a written label is verbatim', () => {
+    // cloud#2021. The lenient describe said what an absent label means; the
+    // strict mirror — the describe the design model actually reads — said only
+    // "or null", so nothing on the generating side told the model that null is
+    // the choice that follows a rename of the target. Each side spells "empty"
+    // its own way (`absent` / `null`) and "written" its own way (`present` /
+    // `a string`); what each spelling MEANS must be the same text on both.
+    const navLabelDescribe = (schema: any): string =>
+      schema.shape.app.unwrap().shape.nav.unwrap().element.shape.label.description;
+    const rule = (describe: string) => ({
+      empty: describe.match(/\b(?:absent|null) ⇒ ([^;]+);/)?.[1],
+      written: describe.match(/\b(?:present|a string) ⇒ ([^.]+)\./)?.[1],
+    });
+    const lenient = rule(navLabelDescribe(SolutionBlueprintSchema));
+    const strict = rule(navLabelDescribe(SolutionBlueprintStrictSchema));
+    expect(strict.empty).toBeDefined();
+    expect(strict.written).toBeDefined();
+    expect(strict).toEqual(lenient);
+  });
+
   it('round-trips a list + board pair on ONE object through the lenient schema', () => {
     const parsed = SolutionBlueprintSchema.parse({
       summary: 's',

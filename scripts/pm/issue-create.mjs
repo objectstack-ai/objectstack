@@ -44,9 +44,13 @@
  * it as `objectstack-fleet[bot]` — a cloud seat container's proxy replaces the
  * Authorization header, so that is the only way it can create as the fleet.
  * `auto` (the default) takes `dispatch` there and `direct` elsewhere, and says
- * which. Under the relay the new card's number is found by READING it back:
+ * which. Under the relay the new card's number is the one the relay run's
+ * annotation carries — the platform's own answer to the create, reported on
+ * the job's check run because a seat container reads neither the run's log
+ * nor its summary (`fleet-write/dispatch.mjs`, "The run's annotations").
+ * Only when no annotation names it is the number found by READING the board:
  * the newest issue on the target created at or after the dispatch whose title
- * is the one sent — then the same read-back as the direct path.
+ * is the one sent. Either way, then the same read-back as the direct path.
  *
  * ## Read-back
  *
@@ -78,7 +82,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, fallbackText, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { classifyHttp } from './label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
@@ -311,23 +315,31 @@ export async function createIssue(plan, deps = {}) {
     const sent = await (deps.send ?? sendFleetWrite)(packed.payload, { token, log: (line) => lines.push(`  ${line}`) });
     if (sent.ok) {
       relay = sent;
-      // The relay does not hand the number back; the board does. The newest
-      // issue on the target created at or after the dispatch carrying the title
-      // sent is the one — and the ordinary read-back below then judges it.
-      const since = new Date(dispatchedAt - 60_000).toISOString();
-      const listed = await rest(`/repos/${plan.repo}/issues?state=all&sort=created&direction=desc&per_page=30&since=${encodeURIComponent(since)}`, {}, deps);
-      const hit = (Array.isArray(listed.json) ? listed.json : []).find((i) => !i.pull_request && String(i.title ?? '').trim() === plan.payload.title && Date.parse(i.created_at) >= dispatchedAt - 60_000);
-      if (listed.status !== 200 || !hit) {
-        lines.push(
-          `✗ issue-create: UNCONFIRMED — the relay run ${sent.run?.url ?? sent.run?.id ?? ''} completed, but ${listed.status !== 200 ? `${listed.call} → HTTP ${listed.status}` : 'no issue created since the dispatch carries the title sent'}. ` +
-            `Go READ the board; ⛔ do not re-run blind — a second dispatch is a second card. Exit ${EXIT_UNCONFIRMED}.`,
-        );
-        return { exitCode: EXIT_UNCONFIRMED, number: null, url: null, author: null, lines, transport: route.transport, relay };
+      // The number the relay run's annotation carries — the platform's own answer to the create, matched by
+      // `sendFleetWrite` to this stroke's one action and to this repository — is read first (header).
+      const named = (sent.annotations?.rows ?? []).find((a) => a.op === 'issue_create' && a.action === 1) ?? null;
+      if (named) {
+        number = named.number;
+        url = named.url;
+        lines.push(`✓ issue-create: created #${number} ${url} — via the relay run ${sent.run?.url ?? sent.run?.id ?? ''}, the number from the run's annotation`);
+      } else {
+        // No annotation names it, so the board does: the newest issue on the target created at or after the
+        // dispatch carrying the title sent is the one — and the ordinary read-back below then judges it.
+        const since = new Date(dispatchedAt - 60_000).toISOString();
+        const listed = await rest(`/repos/${plan.repo}/issues?state=all&sort=created&direction=desc&per_page=30&since=${encodeURIComponent(since)}`, {}, deps);
+        const hit = (Array.isArray(listed.json) ? listed.json : []).find((i) => !i.pull_request && String(i.title ?? '').trim() === plan.payload.title && Date.parse(i.created_at) >= dispatchedAt - 60_000);
+        if (listed.status !== 200 || !hit) {
+          lines.push(
+            `✗ issue-create: UNCONFIRMED — the relay run ${sent.run?.url ?? sent.run?.id ?? ''} completed, but ${listed.status !== 200 ? `${listed.call} → HTTP ${listed.status}` : 'no issue created since the dispatch carries the title sent'}. ` +
+              `Go READ the board; ⛔ do not re-run blind — a second dispatch is a second card. Exit ${EXIT_UNCONFIRMED}.`,
+          );
+          return { exitCode: EXIT_UNCONFIRMED, number: null, url: null, author: null, lines, transport: route.transport, relay };
+        }
+        number = hit.number;
+        url = hit.html_url ?? null;
+        author = hit.user?.login ?? null;
+        lines.push(`✓ issue-create: created #${number}${url ? ` ${url}` : ''}${author ? ` (as ${author})` : ''} — via the relay run ${sent.run?.url ?? sent.run?.id ?? ''}`);
       }
-      number = hit.number;
-      url = hit.html_url ?? null;
-      author = hit.user?.login ?? null;
-      lines.push(`✓ issue-create: created #${number}${url ? ` ${url}` : ''}${author ? ` (as ${author})` : ''} — via the relay run ${sent.run?.url ?? sent.run?.id ?? ''}`);
     } else if (route.requested === 'auto' && sent.state === 'no-run') {
       lines.push(`  ${fallbackText(sent, 'issue-create')}`);
     } else if (sent.state === 'no-run' || sent.state === 'timeout') {
@@ -359,6 +371,8 @@ export async function createIssue(plan, deps = {}) {
     lines.push(`✗ issue-create: the read-back ${back.call} → HTTP ${back.status}${back.detail ? ` — ${back.detail}` : ''}; #${number} exists but could not be verified.`);
     return { exitCode: EXIT_READ_BACK_MISMATCH, number, url, author, lines };
   }
+  // The author the card answers with, when nothing named it before (a number from the relay run's annotation).
+  author = author ?? back.json.user?.login ?? null;
   const gotTitle = String(back.json.title ?? '').trim();
   if (gotTitle !== plan.payload.title) {
     lines.push(`✗ issue-create: read-back of #${number} disagrees — title ${JSON.stringify(gotTitle)}, wanted ${JSON.stringify(plan.payload.title)}.`);
@@ -379,8 +393,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one POST, on the write verb only': 4,
   'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, auto falls back only on no-run': 8,
+  "the relay annotation: the number the relay run's annotation carries is read first — the card read back at it with NO list; absent, the title finds it as before; the read-back still judges the annotated card": 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -559,6 +574,30 @@ export async function selfTest() {
       t('under AUTO, no run falls back to the direct POST — said out loud — and the card is created and read back', [noRunAuto.exitCode, noRunAuto.number, noRunAuto.lines.some((l) => l.includes('Falling back to DIRECT')), noRunAuto.seen.map((s) => s.call)], [EXIT_OK, 12, true, [`POST /repos/${ORG_REPO}/issues`, `GET /repos/${ORG_REPO}/issues/12`]]);
       const failedRun = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('failure', { run: { ...RUN, conclusion: 'failure' }, detail: 'conclusion failure' }) });
       t('⛔ a run that FAILED is never fallen back from, even under auto: exit 5, no POST', [failedRun.exitCode, failedRun.seen.length], [EXIT_PLATFORM_REFUSAL, 0]);
+
+      // ── the relay annotation ──────────────────────────────────────────────
+      battery("the relay annotation: the number the relay run's annotation carries is read first — the card read back at it with NO list; absent, the title finds it as before; the read-back still judges the annotated card");
+      {
+        const URL12 = `https://github.test/${ORG_REPO}/issues/12`;
+        // The run's annotation, spelled and parsed by the relay's own pair and matched by its own matcher — what `sendFleetWrite` hands on.
+        const annotated = (number = 12) => async (p) => {
+          const parsed = [parseRelayAnnotation(relayAnnotationMessage({ action: 1, op: 'issue_create', number, url: `https://github.test/${ORG_REPO}/issues/${number}` }))];
+          const { rows, ignored } = matchRunAnnotations(p, parsed);
+          return outcome('success', { annotations: { state: 'read', rows, ignored, why: '' } })(p);
+        };
+        const withBot = { ...orgHappy, [`GET /repos/${ORG_REPO}/issues/12`]: { status: 200, json: { number: 12, title: orgPlan.payload.title, state: 'open', labels: [{ name: 'pm:queue' }], user: { login: 'objectstack-fleet[bot]' } } } };
+        // A list that would NOT find the card (the measured lag): only the annotation can.
+        const lagging = listing([{ ...created, number: 13, title: 'another card' }]);
+        const named = await drive({ ...withBot, ...lagging }, { plan: orgPlan, route: dispatchRoute(), now: () => NOW, send: annotated() });
+        t("⭐ the annotation names #12: exit 0 on #12 with its url, read back once — and the issue list is NEVER read, so its lag cannot reach this", [named.exitCode, named.number, named.url, named.seen.map((s) => s.call)], [EXIT_OK, 12, URL12, [`GET /repos/${ORG_REPO}/issues/12`]], named.lines.join(' | '));
+        t('…the transcript says the number came from the run\'s annotation, and the author is read off the card', [named.lines.some((l) => l.includes('created #12') && l.includes("the number from the run's annotation")), named.author], [true, 'objectstack-fleet[bot]']);
+        const control = await drive({ ...withBot, ...lagging }, { plan: orgPlan, route: dispatchRoute(), now: () => NOW, send: outcome('success', { annotations: { state: 'read', rows: [], ignored: [], why: '' } }) });
+        t('the control — no annotation, the same lagging list — is UNCONFIRMED (6): exactly what the annotation spares', [control.exitCode, control.seen.map((s) => s.call)], [EXIT_UNCONFIRMED, [`GET /repos/${ORG_REPO}/issues`]]);
+        const absent = await drive({ ...orgHappy, ...listing([created]) }, { plan: orgPlan, route: dispatchRoute(), now: () => NOW, send: outcome('success', { annotations: { state: 'unread', rows: [], ignored: [], why: 'GET /jobs -> HTTP 403' } }) });
+        t('absent (the annotations unreadable): the title finds the card on the list, exactly as before', [absent.exitCode, absent.number, absent.seen.map((s) => s.call)], [EXIT_OK, 12, [`GET /repos/${ORG_REPO}/issues`, `GET /repos/${ORG_REPO}/issues/12`]]);
+        const disagrees = await drive({ ...orgHappy, [`GET /repos/${ORG_REPO}/issues/12`]: { status: 200, json: { number: 12, title: 'something else' } } }, { plan: orgPlan, route: dispatchRoute(), now: () => NOW, send: annotated() });
+        t('the annotated card is still judged: another title on #12 is exit 4, the number printed', [disagrees.exitCode, disagrees.number], [EXIT_READ_BACK_MISMATCH, 12]);
+      }
     }
 
     // ── the wiring ──────────────────────────────────────────────────────────
@@ -606,7 +645,8 @@ export async function selfTest() {
   }
   console.log(
     `✓ issue-create self-test: ${cases.length} cases pass across ${declared.length} batteries — prose from files and never argv, ` +
-      'one title source, a fake platform through every exit code, a dry run that sends nothing, and both halves of the throttle around the one POST.',
+      "one title source, a fake platform through every exit code, the relay run's annotation read first for the new number, a dry run that sends nothing, " +
+      'and both halves of the throttle around the one POST.',
   );
   selfTestReachedVerdict = true;
   return 0;

@@ -86,15 +86,16 @@ import { flush, handle, run, settings } from '@oclif/core';
  * (`plugin?.type !== 'link'` guards the `isProduction` early return), and this
  * setting is checked ahead of that — so a `plugins link`ed TypeScript plugin
  * would no longer be auto-transpiled through this entry. ⭐ That path is not
- * reachable today: `@oclif/plugin-plugins` sits in `devDependencies`, and
- * oclif's core-plugin loader only matches names under `dependencies`, so
- * `os plugins` is not a registered command at all (measured on this entry —
- * `os --help` lists 34 topics and none of them is `plugins`; the count is the
- * control, so the zero is a reading). `content/docs/plugins/index.mdx` says the
- * same in its own words and tells an extension author to build an `os`
- * distribution listing the package in both places. ⛔ If that is ever fixed,
- * this line is what has to be revisited — the remedy is `bin/run-dev.js`, or
- * building the plugin.
+ * reachable today: this package ships no plugin manager — `package.json`
+ * declares no `oclif.plugins` and does not depend on `@oclif/plugin-plugins` —
+ * so `os plugins` (and with it `os plugins link`) is not a registered command
+ * at all (measured on this entry — `os --help` lists 34 entries, 12 topics and
+ * 22 commands, and none of them is `plugins`; the count is the control, so the
+ * zero is a reading). `content/docs/plugins/index.mdx` says the same in its own
+ * words and tells an extension author to build an `os` distribution listing
+ * the package in both `oclif.plugins` and `dependencies`. ⛔ If a plugin
+ * manager is ever shipped, this line is what has to be revisited — the remedy
+ * is `bin/run-dev.js`, or building the plugin.
  *
  * The other change in behaviour is a convergence, not a loss: on an UNBUILT
  * tree this file now answers oclif's "command not found" under

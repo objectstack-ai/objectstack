@@ -1,7 +1,4 @@
 {
- "packages/connectors/connector-mcp/src/mcp-provider.ts": {
-  "#3055": 2
- },
  "packages/lint/src/authoring-rules.ts": {
   "#4463": 3,
   "#4716": 2,
@@ -176,15 +173,6 @@
  "packages/plugins/plugin-audit/src/translations/zh-CN.objects.generated.ts": {
   "#11507": 1
  },
- "packages/plugins/plugin-email/src/email-service.ts": {
-  "#5172": 1
- },
- "packages/plugins/plugin-email/src/internal-header-readback.ts": {
-  "#8149": 1
- },
- "packages/plugins/plugin-email/src/templates/auth-templates.ts": {
-  "#8019": 4
- },
  "packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts": {
   "#5876": 1,
   "#8552": 2
@@ -343,37 +331,5 @@
  "packages/services/service-datasource/src/external-datasource-service.ts": {
   "#10997": 1,
   "#11000": 1
- },
- "packages/services/service-i18n/src/i18n-route-ledger.ts": {
-  "#3636": 2
- },
- "packages/services/service-knowledge/src/knowledge-service-plugin.ts": {
-  "#4639": 1,
-  "#4672": 1
- },
- "packages/services/service-knowledge/src/knowledge-service.ts": {
-  "#2981": 1
- },
- "packages/services/service-queue/src/db-queue-adapter.ts": {
-  "#5179": 1
- },
- "packages/services/service-queue/src/queue-service-plugin.ts": {
-  "#5195": 1
- },
- "packages/services/service-sms/src/sms-daily-quota.ts": {
-  "#2814": 1
- },
- "packages/services/service-sms/src/sms-plugin.ts": {
-  "#2814": 1
- },
- "packages/services/service-storage/src/attachment-lifecycle.ts": {
-  "#4797": 1
- },
- "packages/services/service-storage/src/storage-route-ledger.ts": {
-  "#3584": 1,
-  "#3689": 2
- },
- "packages/triggers/trigger-record-change/src/record-change-trigger.ts": {
-  "#3457": 1
  }
 }

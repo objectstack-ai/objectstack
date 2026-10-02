@@ -1483,6 +1483,7 @@ os g flow customer          # Generate a flow that runs when a Customer changes
 os g dashboard sales        # Generate a dashboard
 os g app customer           # Generate an app whose navigation opens Customer
 os g skill lead_qual        # Generate an AI skill
+os g picklist industry      # Generate a shared option list select fields name
 
 os g object task -d lib/    # Override target directory
 os g object task --dry-run  # Preview without writing
@@ -1499,6 +1500,7 @@ os g object task --dry-run  # Preview without writing
 | `dashboard` | `src/dashboards/` | `NAME.dashboard.ts` | `dashboards` | Analytics dashboard |
 | `app` | `src/apps/` | `NAME.app.ts` | `apps` | Application navigation |
 | `skill` | `src/skills/` | `NAME.skill.ts` | `skills` | AI skill — the ADR-0063 extension primitive |
+| `picklist` | `src/picklists/` | `NAME.picklist.ts` | `picklists` | Shared option list that select fields reference by name |
 
 <Callout type="info" title="Why generated files carry a type infix">
 Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
@@ -1555,7 +1557,7 @@ the rules a JSON Schema can express and names the rest under
 
 **What it does:**
 1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it (see above)
-2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
+2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`
 

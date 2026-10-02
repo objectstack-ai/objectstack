@@ -236,7 +236,8 @@ export class RecordChangeTrigger implements FlowTrigger {
                 this.logger.warn(
                     `[record-change] flow '${binding.flowName}' has an ARRAY trigger event ${JSON.stringify(rawTriggerType)} — ` +
                         `multi-event arrays are not supported, so the flow is NOT bound and will never fire. ` +
-                        `For "created or updated" use a single 'record-after-write'; for any other combination author one flow per event (#3457).`,
+                        `For "created or updated" use a single 'record-after-write'; for any other combination author one flow per event — ` +
+                        `multi-event arrays are deferred until two independent projects need a combination other than created-or-updated.`,
                 );
             } else {
                 this.logger.warn(

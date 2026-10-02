@@ -163,8 +163,8 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
     await deliver(BULK_DELETED);
 
     const [message] = harness.ctx.logger.warn.mock.calls.at(-1) as [string];
-    expect(message).toContain('#4639');
-    expect(message).toContain('lifecycle reap guard (#4672)');
+    expect(message).toContain('cannot be repaired from the event stream');
+    expect(message).toContain('the lifecycle reap guard de-indexes those rows before they are deleted');
     expect(message).toContain('application-level predicate writes are not');
   });
 });
