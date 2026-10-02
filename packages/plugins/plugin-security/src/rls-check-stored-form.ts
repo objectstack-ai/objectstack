@@ -249,16 +249,23 @@ export interface JsonColumnCheckRefusal {
   readonly field: string;
   /** The operator as written in the compiled check; `=` for implicit equality. */
   readonly operator: string;
-  /** Where it sits: `check[<part>]`, then the path through the compiled filter. */
+  /**
+   * Where it sits: `<root>[<part>]` (`check[<part>]` for the write check), then
+   * the path through the compiled filter.
+   */
   readonly path: string;
   /** The policy the offending node was compiled from, when the compiler marked one. */
   readonly policy: string | undefined;
   /** What the caller is told: core's message, which names neither the field nor the operator. */
   readonly message: string;
   /**
-   * Core's full diagnostic, the field and the operator named. SERVER-SIDE ONLY:
-   * the policy is an administrator's, so it goes to a log, never into an error
-   * message (see {@link jsonColumnCheckRefusalCarriedBy}).
+   * Core's full diagnostic, the field and the operator named. SERVER-SIDE ONLY
+   * for the write check and the read: the policy is an administrator's, so it
+   * goes to a log, never into the error message either of them answers (see
+   * {@link jsonColumnCheckRefusalCarriedBy}). [#21319] `security/explain`
+   * carries it in its error message, because its report already publishes the
+   * predicate to the same caller (`jsonColumnRefusalForExplain` in
+   * `explain-engine.ts`).
    */
   readonly diagnostic: string;
 }
@@ -288,10 +295,17 @@ function isImplicitEquality(condition: unknown): boolean {
  * a column and is left to the evaluator, and so is a column the declaration
  * does not name JSON-stored. The words are core's
  * (`jsonColumnOperatorRefusalText`); the bare spelling's operator is `=`.
+ *
+ * [#21319] `root` names the parts in the refusal's `path`: `check` for the
+ * write check, and whatever the other judge of the same policy calls them —
+ * `security/explain` asks this same rule of the row filters it explains
+ * (`explain-engine.ts`), so the read, the write and the explanation refuse one
+ * operator set by one traversal.
  */
 export function findJsonColumnCheckRefusal(
   parts: readonly Record<string, unknown>[],
   jsonStored: DeclaredJsonStoredColumns,
+  root = 'check',
 ): JsonColumnCheckRefusal | null {
   if (jsonStored.size === 0) return null;
   const refusal = (
@@ -331,7 +345,7 @@ export function findJsonColumnCheckRefusal(
     return null;
   };
   for (let i = 0; i < parts.length; i++) {
-    const found = walk(parts[i], `check[${i}]`, undefined);
+    const found = walk(parts[i], `${root}[${i}]`, undefined);
     if (found) return found;
   }
   return null;
@@ -352,8 +366,12 @@ const JSON_COLUMN_CHECK_REFUSAL = Symbol.for('objectstack.plugin-security.jsonCo
  * read gives the same policy, `INVALID_FILTER` / 400 (and `httpStatus`, the
  * same number under ADR-0112 D5's spelling, as the engine's own filter
  * refusals carry it).
+ *
+ * [#21319] Exported for `security/explain`, whose answer to the same refusal
+ * carries this error as its `cause` and takes its code and status from it, so
+ * the envelope has one constructor in this package.
  */
-function jsonColumnCheckRefusalError(refusal: JsonColumnCheckRefusal): Error {
+export function jsonColumnCheckRefusalError(refusal: JsonColumnCheckRefusal): Error {
   const err = new Error(refusal.message) as Error & { code?: string; status?: number; httpStatus?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;

@@ -215,7 +215,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `options` | `SelectOption[]` | — | **Required.** Static option list |
+| `options` | `SelectOption[]` | — | **Required** — a non-empty static option list, or a `picklist` naming a shared list instead. With neither (or `options: []`) the field is refused at parse. |
 | `defaultValue` | `string` | — | Must match an option `value` |
 
 **Option validation:** Each option `value` must be a lowercase system identifier — starts with a letter, then letters/digits/underscores/dots (`^[a-z][a-z0-9_.]*$`), minimum 2 characters.
@@ -224,7 +224,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `options` | `SelectOption[]` | — | **Required.** Static option list |
+| `options` | `SelectOption[]` | — | Static option list. Optional: without options the field takes free-form values (tags mode). |
 
 **Default constraints:** Stores array of selected option values. Each value validated against options.
 
@@ -232,7 +232,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `options` | `SelectOption[]` | — | **Required.** Static option list |
+| `options` | `SelectOption[]` | — | **Required** — as for `select`: a non-empty list or a `picklist`, refused at parse with neither. |
 
 **Default constraints:** Single-value selection. Same validation as `select` with radio button UI.
 
@@ -240,7 +240,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `options` | `SelectOption[]` | — | **Required.** Static option list |
+| `options` | `SelectOption[]` | — | Static option list. Parses without one, but draws a completeness warning: a checkbox group with no boxes renders nothing. |
 
 **Default constraints:** Multi-value selection. Same validation as `multiselect` with checkbox group UI.
 

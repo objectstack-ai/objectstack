@@ -105,6 +105,13 @@ export * from './filter-cross-field-comparison-class';
 // which the record validator's number arm reads on the write side. The engine
 // door is its own card; this module is the contract only.
 export * from './filter-number-comparand-declared-type';
+// [#21333] The BOOLEAN twin of the door above — the contract half of the
+// triage ruling: a comparand against a declared boolean field accepts true /
+// false, 1 / 0, "1" / "0" and "true" / "false" (the record validator's
+// write-side set), each narrowed to its boolean at the engine's field-aware
+// seam, and any other string is refused with INVALID_FILTER 400. The engine
+// door is objectql's; this module is the contract only.
+export * from './filter-boolean-comparand-declared-type';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result

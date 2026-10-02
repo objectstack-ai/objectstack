@@ -51,15 +51,15 @@ The custom error map provides "Did you mean?" suggestions for common typos.
 
 ---
 
-### "Required property missing: options"
+### "A `select` field needs its choices"
 
-**Symptom:** A `select`, `multiselect`, `radio`, or `checkboxes` field fails validation.
+**Symptom:** A `select` or `radio` field is refused at parse (on save, publish, `os validate` or `os build`), with the issue on its `options` path.
 
-**Cause:** Selection-type fields require an `options` array.
+**Cause:** A single-choice field needs an option source: a non-empty `options` array, or a `picklist` naming a shared list. With neither — and `options: []` counts as neither — the form control would offer nothing and server-side value validation would be off, so any value would write through. `multiselect`, `tags` and `checkboxes` may omit both (the first two are free-form without options; `checkboxes` draws a completeness warning).
 
 **Fix:**
 ```typescript
-// ❌ Missing options
+// ❌ No option source
 { name: 'status', type: 'select' }
 
 // ✅ With options
@@ -70,7 +70,12 @@ The custom error map provides "Did you mean?" suggestions for common typos.
     { label: 'Closed', value: 'closed' }
   ]
 }
+
+// ✅ Or with a shared list
+{ name: 'industry', type: 'select', picklist: 'industry' }
 ```
+
+A row stored before this check keeps its bytes: it is still served, with `_diagnostics` naming the field, listed by `/meta/diagnostics`, and named at boot by the `field/choice-without-options` log line. A later save of its object is refused until an option or a `picklist` is added.
 
 ---
 

@@ -10,6 +10,11 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 // `shared/visibility.ts`, which imports nothing at runtime.
 import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+// The ADR-0078 completeness predicate the choice door below applies, read
+// rather than restated: one notion of "a choice with no option source" for
+// the author-time finding and the parse refusal. No cycle: that module
+// imports nothing at runtime.
+import { checkFieldCompleteness, FIELD_CHOICE_WITHOUT_OPTIONS } from '../kernel/functional-completeness';
 import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
@@ -1341,8 +1346,20 @@ export const FieldSchema = lazySchema(() => {
     + 'the stored file size, not just checked in the browser.',
   ),
 
-  /** Selection Options */
-  options: z.array(SelectOptionSchema).optional().describe('Static options for select/multiselect'),
+  /**
+   * Selection Options — the field's own inline option list.
+   *
+   * A `select` / `radio` field needs an option source: a non-empty `options`
+   * list here, or a `picklist` reference below. With neither (an empty
+   * `options: []` included) it is refused at parse — the form control would
+   * offer nothing and server-side value validation would be off. The
+   * free-form option types (`multiselect`, `tags`) and `checkboxes` may omit
+   * both.
+   */
+  options: z.array(SelectOptionSchema).optional().describe(
+    'Static options for the option types. A `select` / `radio` field needs a non-empty list here or a '
+    + '`picklist` — with neither (or `options: []`) it is refused at parse.',
+  ),
 
   /**
    * Reference to a shared option list — a `picklist` item, by name — in place
@@ -1351,7 +1368,8 @@ export const FieldSchema = lazySchema(() => {
    * Mutually exclusive with `options`, refused at this door when both are
    * written: the field's options come from exactly one source. Valid only on
    * the option types (`select`, `radio`, `multiselect`, `checkboxes`,
-   * `tags`), the types whose value is an option code.
+   * `tags`), the types whose value is an option code. A `select` / `radio`
+   * must declare one of the two: with neither it is refused at parse.
    *
    * `PicklistServedFieldSchema` declares the served form.
    * Option labels translate under `picklists.<name>.options.<value>`, which
@@ -1359,7 +1377,8 @@ export const FieldSchema = lazySchema(() => {
    */
   picklist: SnakeCaseIdentifierSchema.optional().describe(
     'Name of a shared `picklist` whose options this field offers — instead of `options`, never with it. '
-    + 'Option types only (select, radio, multiselect, checkboxes, tags).',
+    + 'Option types only (select, radio, multiselect, checkboxes, tags). A select / radio declares this or a '
+    + 'non-empty `options`; with neither it is refused at parse.',
   ),
 
   /**
@@ -2127,11 +2146,53 @@ export const FieldSchema = lazySchema(() => {
     });
   }
 
+  // A single-choice field (`select` / `radio`) with NO option source — neither
+  // a non-empty `options` list nor a `picklist` reference — is a choice with
+  // nothing to choose: the form control offers nothing, and server-side value
+  // validation is off (`record-validator.ts` checks membership only against a
+  // non-empty allowed list), so any value writes through the API. ADR-0078's
+  // author-time gate has always graded this an error
+  // (`field/choice-without-options`), and the registry warns on it at boot;
+  // this door is one more gate beside those two, not a replacement for either,
+  // on the `reference` precedent above (ruling record 5910124148): the
+  // publish seam was the one door that let the hole through, exactly where
+  // AI-authored metadata that omits the list would otherwise parse cleanly.
+  //
+  // The predicate is the completeness module's own, applied rather than
+  // restated (`checkFieldCompleteness`, its error-severity finding), so the
+  // two gates cannot drift apart. That fixes three facts: `options: []` is
+  // the same hole spelled out, as `''` is for `reference`; a `picklist`
+  // reference IS a source; and the types are exactly `select` / `radio` —
+  // `checkboxes` is a warning there (it degrades to free-form) and
+  // `multiselect` / `tags` are free-form by design (the module's NON-rule), so
+  // all three keep parsing with neither key.
+  //
+  // A stored row carrying the hole is not rewritten by anything — no migration
+  // can invent the options an author meant. It is still read and named
+  // (`_diagnostics.valid: false`, `/meta/diagnostics`, the boot log's
+  // `field/choice-without-options` line), and a later save of its object is
+  // refused here until a source is added.
+  if (
+    checkFieldCompleteness(field).some(
+      (finding) => finding.rule === FIELD_CHOICE_WITHOUT_OPTIONS && finding.severity === 'error',
+    )
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['options'],
+      message:
+        `A \`${field.type}\` field needs its choices: declare a non-empty \`options\` list ` +
+        "(e.g. `options: [{ label: 'Open', value: 'open' }]`), or `picklist: '<name>'` to offer a shared " +
+        'list. Without either it is a choice with nothing to choose: the form control is empty and ' +
+        'server-side value validation is off, so any value writes through. An empty `options: []` is the ' +
+        'same gap. Declare `options` or `picklist`, or use a `text` field if any value is meant to be allowed.',
+    });
+  }
+
   // A field's options come from exactly ONE source: inline `options`, or the
   // shared list `picklist` names (`data/picklist.zod.ts`). Both is refused —
-  // two sources, one of them silently ignored. (Neither, on a single-choice
-  // type, stays the error-severity `FIELD_CHOICE_WITHOUT_OPTIONS` finding of
-  // `kernel/functional-completeness.ts`, whose prescription names both.)
+  // two sources, one of them silently ignored. Neither, on a single-choice
+  // type, is refused by the check directly above.
   if (field.picklist !== undefined) {
     if (!SINGLE_OPTION_TYPES.has(field.type) && !MULTI_OPTION_TYPES.has(field.type)) {
       ctx.addIssue({

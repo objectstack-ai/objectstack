@@ -234,7 +234,7 @@ Single-choice dropdown.
 
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
-| `options` | `SelectOption[]` | **required** | List of available options |
+| `options` | `SelectOption[]` | **required** (or `picklist`) | List of available options — non-empty. Name a shared list with `picklist: 'NAME'` instead, never both. With neither, a `select` (or `radio`) is refused at parse. |
 
 **SelectOption properties:**
 
