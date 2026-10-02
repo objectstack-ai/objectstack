@@ -1538,9 +1538,11 @@ async function runMetadataGeneration(
     // namespace is how a typed object name is resolved, and above the render,
     // the parse check and the dry-run branch, so a preview never shows a file
     // bound to something the stack does not declare.
-    const resolved = generator.binds
+    const verdict = generator.binds
       ? resolveScaffoldBindings({ type, name, binds: generator.binds, project, namespace, objectName, flags })
       : undefined;
+    if (verdict && !verdict.ok) refuseGeneration(verdict.headline, verdict.lines);
+    const resolved = verdict?.ok ? verdict : undefined;
     const bindings = resolved?.bindings;
 
     const dir = flags.dir || generator.defaultDir;
@@ -1894,10 +1896,19 @@ function listed(names: readonly string[]): string {
   return quoted.length <= 1 ? quoted.join('') : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
 }
 
+/** What {@link resolveScaffoldBindings} answers: the bindings, or why there are none. */
+export type ScaffoldBindingVerdict =
+  /** Every reference resolved; `said` is the header lines naming each and where it came from. */
+  | { ok: true; bindings: ScaffoldBindings; said: string[] }
+  /** A refusal, for the caller to print: a headline completing "Refusing to generate — …" and its body. */
+  | { ok: false; headline: string; lines: string[] };
+
 /**
  * Resolve every reference a binding scaffold writes against the project's
- * loaded stack, or refuse — say why, name the remedy, exit 1, write nothing
- * (#21325).
+ * loaded stack, or answer why it cannot — the refusal names the remedy, and
+ * `runMetadataGeneration` prints it and exits 1 with nothing written (#21325).
+ * Pure: it prints nothing and exits nothing, so every branch is pinned
+ * in-process (`generate-binds-from-stack.test.ts`).
  *
  * ## Where each reference comes from
  *
@@ -1923,7 +1934,7 @@ function listed(names: readonly string[]): string {
  * does not load never reaches here: it was refused above, for every generator
  * that names an object.
  */
-function resolveScaffoldBindings(args: {
+export function resolveScaffoldBindings(args: {
   type: string;
   name: string;
   binds: ScaffoldBinds;
@@ -1932,13 +1943,14 @@ function resolveScaffoldBindings(args: {
   /** The object named by the item's own name, for `binds.object === 'name'`. */
   objectName: string | undefined;
   flags: { object?: string; flow?: string };
-}): { bindings: ScaffoldBindings; said: string[] } {
+}): ScaffoldBindingVerdict {
   const { type, name, binds, project, namespace, objectName, flags } = args;
   const g = `${CLI_ALIAS} g`;
   const what = binds.flow ? 'an object and a flow' : 'an object';
+  const refuse = (headline: string, lines: string[]): ScaffoldBindingVerdict => ({ ok: false, headline, lines });
 
   if (project.kind !== 'loaded') {
-    refuseGeneration(
+    return refuse(
       `\`${g} ${type}\` binds ${what}, and there is no objectstack.config.{ts,js,mjs} here to bind in`,
       [
         `A ${type} is written against metadata the project's stack declares, and what it binds`,
@@ -1962,7 +1974,7 @@ function resolveScaffoldBindings(args: {
   if (binds.object === 'name') {
     const object = objects.find((o) => o.name === objectName);
     if (!object) {
-      refuseGeneration(
+      return refuse(
         `\`${g} ${type} ${name}\` binds object '${objectName}', which this stack does not declare`,
         [
           `A ${type} is named after the object it binds, and that object has to be one the stack`,
@@ -1981,7 +1993,7 @@ function resolveScaffoldBindings(args: {
       const object = objects.find((o) => o.name === typed)
         ?? objects.find((o) => o.name === prefixedObjectName(typed, namespace));
       if (!object) {
-        refuseGeneration(
+        return refuse(
           `--object ${typed} names no object this stack declares`,
           [
             `A ${type} is bound to an object the stack declares, so it is checked before anything`,
@@ -2003,7 +2015,7 @@ function resolveScaffoldBindings(args: {
           + chalk.dim('(the only object this stack declares; --object binds another)'),
       );
     } else if (objects.length === 0) {
-      refuseGeneration(
+      return refuse(
         `a ${type} binds an object, and this stack declares none`,
         [
           `Generate the object first, then bind the ${type} to it. Nothing was written.`,
@@ -2013,7 +2025,7 @@ function resolveScaffoldBindings(args: {
         ],
       );
     } else {
-      refuseGeneration(
+      return refuse(
         `a ${type} binds an object, and this stack declares ${objects.length}: name one with --object`,
         [
           `Which object a ${type} acts on is yours to say, so it is not picked for you. Nothing`,
@@ -2031,10 +2043,11 @@ function resolveScaffoldBindings(args: {
     const declaredFlows = flows.length > 0
       ? `Flows this stack declares: ${listed(flows)}.`
       : 'This stack declares no flow.';
+    const objectArg = flags.object !== undefined ? ` --object ${flags.object}` : '';
     if (flags.flow !== undefined) {
       const flow = flows.find((f) => f === flags.flow);
       if (!flow) {
-        refuseGeneration(
+        return refuse(
           `--flow ${flags.flow} names no flow this stack declares`,
           [
             `A ${type} runs a flow the stack declares, so it is checked before anything is`,
@@ -2054,17 +2067,17 @@ function resolveScaffoldBindings(args: {
           + chalk.dim('(the only flow this stack declares; --flow runs another)'),
       );
     } else if (flows.length === 0) {
-      refuseGeneration(
+      return refuse(
         `a ${type} runs a flow, and this stack declares none`,
         [
           `Generate the flow first, then the ${type} that runs it. Nothing was written.`,
           '',
           `    ${g} flow <name> --object <object>`,
-          `    ${g} ${type} ${name}${flags.object !== undefined ? ` --object ${flags.object}` : ''} --flow <name>_flow`,
+          `    ${g} ${type} ${name}${objectArg} --flow <name>_flow`,
         ],
       );
     } else {
-      refuseGeneration(
+      return refuse(
         `a ${type} runs a flow, and this stack declares ${flows.length}: name one with --flow`,
         [
           `Which flow a ${type} runs is yours to say, so it is not picked for you. Nothing was`,
@@ -2072,13 +2085,13 @@ function resolveScaffoldBindings(args: {
           '',
           declaredFlows,
           '',
-          `    ${g} ${type} ${name}${flags.object !== undefined ? ` --object ${flags.object}` : ''} --flow ${flows[0]}`,
+          `    ${g} ${type} ${name}${objectArg} --flow ${flows[0]}`,
         ],
       );
     }
   }
 
-  return { bindings, said };
+  return { ok: true, bindings, said };
 }
 
 /**
@@ -3993,30 +4006,36 @@ function typesBinding(key: keyof ScaffoldBinds, source: 'name' | 'flag'): string
 }
 
 /**
- * Refuse `--object` / `--flow` on a type that does not take them (#21325).
- * A type with no generator and no sub-command route is left to the
- * unknown-type answer, which is the more useful one.
+ * The refusal for `--object` / `--flow` on a type that does not take them, or
+ * `undefined` (#21325). A type with no generator and no sub-command route is
+ * left to the unknown-type answer, which is the more useful one. Pure, like
+ * {@link resolveScaffoldBindings}: `Generate.run` prints and exits.
  */
-function refuseUnusedBindingFlags(type: string, given: { object?: string; flow?: string }): void {
+export function unusedBindingFlagRefusal(
+  type: string,
+  given: { object?: string; flow?: string },
+): { headline: string; lines: string[] } | undefined {
   const generator = Object.prototype.hasOwnProperty.call(GENERATORS, type) ? GENERATORS[type] : undefined;
-  if (!generator && !Object.prototype.hasOwnProperty.call(SUB_COMMANDS, type)) return;
+  if (!generator && !Object.prototype.hasOwnProperty.call(SUB_COMMANDS, type)) return undefined;
   for (const key of ['object', 'flow'] as const) {
     if (given[key] === undefined || generator?.binds?.[key] === 'flag') continue;
-    printHeader('Generate');
-    const takers = typesBinding(key, 'flag');
-    refuseGeneration(`\`${CLI_ALIAS} g ${type}\` takes no --${key}`, [
-      generator?.binds?.[key] === 'name'
-        ? `A ${type} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
-        : `A ${type} binds no ${key}, so --${key} would name nothing it writes.`,
-      `--${key} is read by: ${takers}. Nothing was written.`,
-    ]);
+    return {
+      headline: `\`${CLI_ALIAS} g ${type}\` takes no --${key}`,
+      lines: [
+        generator?.binds?.[key] === 'name'
+          ? `A ${type} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
+          : `A ${type} binds no ${key}, so --${key} would name nothing it writes.`,
+        `--${key} is read by: ${typesBinding(key, 'flag')}. Nothing was written.`,
+      ],
+    };
   }
+  return undefined;
 }
 
 /**
  * The types `Generate.run` routes to a sub-command instead of a scaffold
  * generator. One table, read by the routing and by
- * {@link refuseUnusedBindingFlags}, so the set of types neither `--object`
+ * {@link unusedBindingFlagRefusal}, so the set of types neither `--object`
  * nor `--flow` reaches cannot drift from the set that is routed.
  */
 const SUB_COMMANDS: Record<
@@ -4087,7 +4106,11 @@ export default class Generate extends Command {
     // ignored (#21325): a reference the author named and the command dropped
     // would land as a file bound to something else, or to nothing, with the
     // flag reading as honoured. An unknown type still meets the roster below.
-    refuseUnusedBindingFlags(args.type, { object: flags.object, flow: flags.flow });
+    const unusedFlag = unusedBindingFlagRefusal(args.type, { object: flags.object, flow: flags.flow });
+    if (unusedFlag) {
+      printHeader('Generate');
+      refuseGeneration(unusedFlag.headline, unusedFlag.lines);
+    }
 
     // Route to sub-commands by type name
     const subCommand = Object.prototype.hasOwnProperty.call(SUB_COMMANDS, args.type)
