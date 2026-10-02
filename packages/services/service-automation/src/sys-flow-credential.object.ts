@@ -20,7 +20,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `(flow_name, state, node_id, credential_key)`. `node_id` because a flow's
  * node ids are one space across every region (the carry-forward walks them the
  * same way), and `state` because a DRAFT save must not rotate the live hook —
- * a draft's row is promoted when the draft is published.
+ * a draft's row is promoted when the draft is published. The unique index
+ * keys on `position`, a fixed-width digest of the `(node_id, credential_key)`
+ * pair, because a node id is author text with no declared bound and an index
+ * key must have one (MySQL refuses an unbounded keyed column).
  *
  * `value` is `type: 'secret'` — the #7799 seam, unchanged: the engine encrypts
  * it on write through the host's `ICryptoProvider` (fail-closed with no
@@ -59,6 +62,8 @@ export const SysFlowCredential = ObjectSchema.create({
       label: 'Flow',
       required: true,
       readonly: true,
+      // The producer is the stored flow row's name — `sys_metadata.name`, 255.
+      maxLength: 255,
       description: 'The machine name of the flow this credential belongs to.',
     }),
 
@@ -83,6 +88,15 @@ export const SysFlowCredential = ObjectSchema.create({
       description: "The node config key that holds this credential (`secret` on a start node, `signingSecret` on an http node).",
     }),
 
+    position: Field.text({
+      label: 'Position',
+      required: true,
+      readonly: true,
+      // The producer is the channel: a SHA-256 hex digest, 64 characters.
+      maxLength: 64,
+      description: 'SHA-256 of the (node id, credential key) pair, computed by the channel — the bounded key the unique index carries.',
+    }),
+
     value: Field.secret({
       label: 'Value',
       required: true,
@@ -100,7 +114,7 @@ export const SysFlowCredential = ObjectSchema.create({
 
   indexes: [
     // One credential per position per state — the channel's upsert key.
-    { fields: ['flow_name', 'state', 'node_id', 'credential_key'], unique: true },
+    { fields: ['flow_name', 'state', 'position'], unique: true },
   ],
 
   enable: {

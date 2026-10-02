@@ -52,6 +52,7 @@
  * takes effect on the next post.
  */
 
+import { createHash } from 'node:crypto';
 import type { FlowCredentialSource } from './engine.js';
 import {
     FLOW_METADATA_TYPE,
@@ -143,6 +144,11 @@ interface ChannelRow {
 /** The identity of a position within one flow and state. */
 function positionKey(nodeId: string, key: string): string {
     return JSON.stringify([nodeId, key]);
+}
+
+/** The bounded column the unique index keys on: SHA-256 hex of {@link positionKey}. */
+function positionDigest(nodeId: string, key: string): string {
+    return createHash('sha256').update(positionKey(nodeId, key), 'utf8').digest('hex');
 }
 
 function rowsOf(found: unknown): Record<string, unknown>[] {
@@ -339,6 +345,7 @@ export class FlowCredentialChannel implements FlowCredentialSource {
                             state: args.state,
                             node_id: position.nodeId,
                             credential_key: position.key,
+                            position: positionDigest(position.nodeId, position.key),
                             [FLOW_CREDENTIAL_VALUE_FIELD]: position.value,
                         },
                         { context: SYSTEM_CONTEXT },
