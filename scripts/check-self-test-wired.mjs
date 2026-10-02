@@ -322,9 +322,10 @@ const SELF_TEST_RUN_OTHERWISE = [
  * build, a live service or the network, say. A row is `{ alias, why }`, and
  * `why` is the reason in writing: an empty one is a finding.
  *
- * Measured when this list was introduced: 170 aliases carry `--self-test`,
- * and every one of them has that self-test run by some workflow step. No alias
- * qualified, so the list is EMPTY, and empty is its intended steady state.
+ * Measured when this list was introduced (objectstack `main` at 23365eaedf):
+ * 170 root aliases carry `--self-test`, and every one of them has that
+ * self-test run by some workflow step. No alias qualified, so the list is
+ * EMPTY, and empty is its intended steady state.
  *
  * A row is checked on every run, and FAILS when its alias no longer exists,
  * when that alias's expansion no longer carries `--self-test`, or when a
@@ -542,7 +543,8 @@ export function auditAliasPopulation({ aliasDeclarations, unattributedAliasFlags
   const ledgered = new Set(ledger.map((row) => row.script));
   const allowlisted = new Set(allowlist.map((row) => row.alias));
   const findings = [];
-  for (const [alias, scripts] of [...aliasDeclarations].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const alias of [...aliasDeclarations.keys()].sort()) {
+    const scripts = aliasDeclarations.get(alias);
     const missed = unattributedAliasFlags.get(alias) ?? 0;
     if (missed > 0) {
       findings.push({
@@ -568,8 +570,8 @@ export function auditAliasPopulation({ aliasDeclarations, unattributedAliasFlags
         '    step runs that self-test: not through this alias, not through any alias a step names,\n' +
         '    and not by the script path. A self-test CI never runs is a phantom check, and deleting\n' +
         '    the only step that ran one is exactly the act this gate exists to make visible.\n' +
-        `    Wire \`pnpm ${alias}\` into the workflow step that already runs its neighbours. That is\n` +
-        '    the whole remedy, and it is the landing author\'s.\n' +
+        `    Wire \`pnpm ${alias}\` into the workflow step that already runs its\n` +
+        '    neighbours. That is the whole remedy, and it is the landing author\'s.\n' +
         '    ⛔ Do not add a SELF_TEST_ALIASES_OUTSIDE_CI row to clear this. A row records a\n' +
         '    self-test that genuinely cannot run in CI — it needs a full build, a live service or\n' +
         '    the network — with that reason in writing, and judging that is\n' +
