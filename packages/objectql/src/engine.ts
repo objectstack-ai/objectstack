@@ -17318,6 +17318,10 @@ export class ObjectQL implements IObjectQLEngine {
               having,
               aggregatedRowColumns(query.groupBy, query.aggregations),
               havingColumnClasses,
+              // [#21255] …and each column's TYPE, which a plain `{ $field }`
+              // reference's class rule asks the spec's verdict of — the rule
+              // `where` applies to every reference, not only an `addDays` pair.
+              aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields),
           );
           // [#20263] …and last, the TEMPORAL-comparand door `where` (#8690) and
           // the per-aggregation `filter` (#20148) take: the same walk and the
