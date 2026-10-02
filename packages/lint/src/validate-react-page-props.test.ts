@@ -1199,7 +1199,7 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     expect(hit.length).toBe(1);
     expect(hit[0].severity).toBe('warning');
     expect(hit[0].message).toContain('aggregate.groupBy is not set');
-    expect(hit[0].hint).toContain('5583');
+    expect(hit[0].hint).toContain('groupBy stays required, and a single number belongs in an object-metric block instead');
     expect(hit[0].hint, 'the hint must carry the RULING, not an open question').toContain('NOT a supported');
     expect(
       validateReactPageProps(agg(`{ function: 'count' }`)).filter((x) => x.severity === 'error'),
