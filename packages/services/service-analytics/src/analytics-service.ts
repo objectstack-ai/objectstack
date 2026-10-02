@@ -4071,7 +4071,9 @@ function measureNamesNoFieldError(
       ? `it aggregates the row wildcard '*' under '${type}', and only a count reads '*'`
       : suffix
         ? `nothing precedes the suffix '${suffix}'`
-        : 'the spelling is empty';
+        : spelling.member === ''
+          ? 'the spelling is empty'
+          : `nothing follows the '${spelling.cube}.' qualifier`;
   const suffixes = INFERRED_MEASURE_SUFFIXES.map(([s]) => `'${s}'`).join(' / ');
   return invalidMemberError(
     `[Analytics] Measure '${spelling.member}' on cube '${spelling.cube}' names no field to ` +
