@@ -282,13 +282,14 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
     // directly on the parsed cube. Before #21000 the engine path refused it and
     // the raw-SQL path served it, so the route a declared default chose decided
     // the answer; now both refuse it by type, before anything executes.
-    const withExpression: Cube = {
+    // `as unknown as Cube`: `tsc` refuses the retired type at a typed cube too.
+    const withExpression = {
       ...authored,
       measures: {
         ...authored.measures,
         done_rate: { label: 'Done', type: 'number', sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)" },
       },
-    };
+    } as unknown as Cube;
     expect(CubeSchema.safeParse(withExpression).success).toBe(false);
     const aggregated: string[] = [];
     const sqls: string[] = [];

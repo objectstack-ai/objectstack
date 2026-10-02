@@ -6,8 +6,10 @@ import { DATE_RANGE_PRESETS } from './date-range-presets';
 import { DateGranularity } from './query.zod';
 
 /**
+ * @module data/analytics
+ *
  * Analytics/Semantic Layer Protocol
- * 
+ *
  * Defines the "Business Logic" for data analysis.
  * Inspired by Cube.dev, LookML, and dbt MetricFlow.
  * 
