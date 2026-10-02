@@ -694,7 +694,7 @@
         {
           "name": "navigation",
           "type": "object",
-          "description": "What a card click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`; write it whenever the block is written, because a block without `mode` takes the spec’s `page` default and `page` opens nothing on a board no parent view navigates for. `openNewTab: true` opens the record page in a new tab and outranks the mode, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
+          "description": "What a card click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `page` opens the record page through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, there is no record page to open and the click opens nothing. `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
         },
         {
           "name": "dataSource",
@@ -761,7 +761,7 @@
         {
           "name": "navigation",
           "type": "object",
-          "description": "What an event click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`; write it whenever the block is written, because a block without `mode` takes the spec’s `page` default and `page` opens nothing on a calendar no parent view navigates for. `openNewTab: true` opens the record page in a new tab and outranks the mode, `preventNavigation: true` opens nothing, and `size` sets the overlay width. An overlay mode wins over a parent view’s click handler; any other mode hands the click to it."
+          "description": "What an event click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `page` opens the record page through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, there is no record page to open and the click opens nothing. `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, `preventNavigation: true` opens nothing, and `size` sets the overlay width. An overlay mode wins over a parent view’s click handler; any other mode hands the click to it."
         },
         {
           "name": "dataSource",
@@ -783,7 +783,7 @@
         {
           "name": "gantt",
           "type": "object",
-          "description": "startDateField, endDateField, titleField, progressField, percentageField, colorField, dependenciesField"
+          "description": "Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored. The spec requires `startDateField`, `endDateField` and `titleField`, which name the record fields a task's bar starts at, ends at and is titled by; the other members (`progressField`, `colorField`, `dependenciesField`, `parentField`, `viewMode`, `exportFileName`, …) are optional."
         },
         {
           "name": "data",
@@ -806,6 +806,65 @@
           "description": "Task order in `[{ field, order }]` form, ordering the rows the gantt charts. Lowered to `$orderby` on the same query."
         },
         {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a task click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the task's record in a drawer, this renderer's own default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec's `page` default. `drawer`, `modal` and `popover` open the task's record in that overlay, and `split` opens it beside the chart, which stays drawn; `none` opens nothing. `page` opens the task's record page in the same tab and `new_window` opens it in a new tab. The gantt builds that address itself from the page it is on and does not use a record navigator the host publishes, so a host that publishes one changes nothing: on the object's own list or view route (`…/OBJECT/view/VIEW`) the address is the record page `…/OBJECT/record/ID`, while on any other page, such as a custom page, `/OBJECT/record/ID` is appended to the current address. The object is `data.object` when `data` is the object provider, else `objectName`; on inline rows that name neither there is no record to open, and every mode, the default drawer included, opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width."
+        },
+        {
+          "name": "label",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label. A string is used as written, and an inline locale map (`{ en, \"zh-CN\", … }`) gives the entry for the display locale. The chart draws it nowhere else."
+        },
+        {
+          "name": "skipWeekends",
+          "type": "boolean",
+          "description": "Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays. The day view also folds the Saturday and Sunday columns out of its axis."
+        },
+        {
+          "name": "holidays",
+          "type": "array",
+          "of": "string",
+          "description": "Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math. A non-empty list turns the working calendar on by itself, without `skipWeekends`, and the day view folds each listed date's column out of its axis."
+        },
+        {
+          "name": "persistLayout",
+          "type": "boolean",
+          "description": "Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName`. The object half is `objectName`, else `data.object`, and `gantt` on inline rows that name neither. With `false` the toolbar has no save-layout button and nothing is stored."
+        },
+        {
+          "name": "viewName",
+          "type": "string",
+          "description": "Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`). Two gantts on the same object with different names keep separate saved layouts, and a gantt restores only the layout saved under its own name."
+        },
+        {
+          "name": "markers",
+          "type": "array",
+          "description": "Extra vertical reference lines drawn like the Today marker ({ date, label?, color? }). `date` places the line, and a date outside the chart's range draws none; `label` is the text drawn against it; `color` is its CSS colour, the theme's primary colour when omitted."
+        },
+        {
+          "name": "criticalPath",
+          "type": "boolean",
+          "description": "Seed the critical-path highlight ON; the toolbar toggle stays available either way"
+        },
+        {
+          "name": "showBaselines",
+          "type": "boolean",
+          "description": "Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it. A task draws one only when `gantt.baselineStartField` and `gantt.baselineEndField` give it both baseline dates."
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "description": "Disable every write path on this gantt and lock the record drawer. A task click still opens the record, read-only."
+        },
+        {
+          "name": "mobileReadOnly",
+          "type": "boolean",
+          "description": "Auto read-only on narrow viewports — ON unless an explicit `false` disables it. Narrow is under 640px: the chart's own width once it is measured, the viewport's until then. A narrow chart's own write paths are gated as under `readOnly`, read-only badge included, but the record drawer is locked by `readOnly` alone, so a task's record still opens writable. `false` keeps a narrow chart editable, and `readOnly: true` locks the chart and the drawer at any width."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -820,7 +879,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node. A timeline drawn from `items`, `data` or a `bind` path issues no query and needs none to draw, but `navigation` still reads it: without it `page` opens nothing and `new_window` / `openNewTab` open no record page."
         },
         {
           "name": "variant",
@@ -839,12 +898,67 @@
         {
           "name": "sort",
           "type": "array",
-          "description": "Entry order in `[{ field, order }]` form, ordering the records the timeline fetches. Lowered to `$orderby` on the same query."
+          "description": "Order of the records the timeline fetches, in `[{ field, order }]` form, lowered to `$orderby` on the same query. The rail draws entries composed from records by their start date, earliest first, whatever this order. Authored `items` or `data` suppress the query, so the key then orders nothing."
         },
         {
           "name": "navigation",
           "type": "object",
-          "description": "What an entry click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. Write it with `mode`: with the key ABSENT, or with a block that omits `mode` (it takes the spec’s `page` default), a click opens nothing on a timeline no parent view navigates for. `drawer`, `modal` and `popover` open the entry’s record in that overlay; `new_window` opens the record page in a new tab; `page`, `none` and `split` open nothing here, because the timeline hands the split shell no main panel. `openNewTab: true` opens the record page in a new tab and outranks the mode, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
+          "description": "What an entry click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `drawer`, `modal` and `popover` open the entry’s record in that overlay, but `split` opens nothing, because the timeline hands the split shell no main panel; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of the timeline’s `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a timeline that names no `objectName`, there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. On a timeline that names no `objectName`, `new_window` and `openNewTab` open no record page either: the new tab’s address is a slash and the entry’s `id` alone (its `_id` when it has no `id`, `undefined` when it has neither). A click handler from a parent view outranks the whole key."
+        },
+        {
+          "name": "timeline",
+          "type": "object",
+          "description": "Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. On entries composed from records, `startDateField` is the entry’s date, `endDateField` the end printed after it, `titleField` the title, `groupByField` the field whose value heads each group (without it, entries group into date buckets), and `colorField` the field whose option colour, or the value itself when it is a colour literal, paints the marker. Each outranks the flat key of the same binding, and `titleField` / `startDateField` outrank `mapping`’s `title` / `date`. `scale` sets the axis unit of the gantt branch, which on this block draws authored `items` only."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size. A value that is not a positive integer is ignored with a console warning, and the default cap applies."
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written."
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "description": "Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each element is objectui's declared timeline element, `@object-ui/types`'s `TimelineFeedItem` (`variant` absent / `vertical` / `horizontal`) or `TimelineGanttItem` (`variant: 'gantt'`), the arm this node's `variant` selects. They are drawn as written: the `timeline` block’s field bindings, `mapping` and `descriptionField` do not apply to them."
+        },
+        {
+          "name": "dateFormat",
+          "type": "enum",
+          "enum": [
+            "short",
+            "long",
+            "iso"
+          ],
+          "description": "How each entry's date is rendered (renderer default `short`): `short` / `long` are locale-formatted, `iso` is the locale-free machine form."
+        },
+        {
+          "name": "rowLabel",
+          "type": "string",
+          "description": "Header label for the gantt row column — read by the gantt branch only, which on this block needs authored `items`. Without it the header shows the default label."
+        },
+        {
+          "name": "minDate",
+          "type": "string",
+          "description": "Pin the gantt axis start (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured. A value that is not a date, or a `minDate` after `maxDate`, refuses the chart with a diagnostic naming it."
+        },
+        {
+          "name": "maxDate",
+          "type": "string",
+          "description": "Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured. A value that is not a date, or a `maxDate` before `minDate`, refuses the chart with a diagnostic naming it."
+        },
+        {
+          "name": "descriptionField",
+          "type": "string",
+          "description": "Field rendered as each entry's description (renderer default `description`). It is declared flat because the `timeline` block has no member for it, and `mapping.description` outranks it when both are written."
+        },
+        {
+          "name": "mapping",
+          "type": "object",
+          "description": "Record-to-entry field mapping ({ title, date, description, variant }) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has. On the vertical rail a colour that `timeline.colorField` resolves for an entry outranks that marker colour."
         },
         {
           "name": "dataSource",
@@ -866,7 +980,7 @@
         {
           "name": "map",
           "type": "object",
-          "description": "latitudeField, longitudeField, titleField"
+          "description": "The field configuration: `latitudeField` / `longitudeField` (or one `locationField` holding a `\"lat,lng\"` string, a `{ lat, lng }` object or a `[lat, lng]` pair) place each record’s marker, and a record with no readable coordinates is not plotted; `titleField` and `descriptionField` name what the marker popup shows; `zoom` and `center` (`[latitude, longitude]`) set the initial camera, which otherwise fits the markers; `style` is a MapLibre style URL, read after the node’s `mapStyle`."
         },
         {
           "name": "data",
@@ -889,6 +1003,21 @@
           "description": "Marker order in `[{ field, order }]` form, ordering the rows the map plots. Lowered to `$orderby` on the same query."
         },
         {
+          "name": "mapStyle",
+          "type": "string",
+          "description": "MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record"
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a marker click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `drawer`, `modal` and `popover` open the marker’s record in that overlay, but `split` opens nothing, because the map hands the split shell no main panel; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of the map’s `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a map that names no `objectName`, there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
+        },
+        {
+          "name": "enableClustering",
+          "type": "boolean",
+          "description": "Group nearby markers into one numbered cluster. Absent, the map clusters only above 100 markers; `false` turns clustering off at any count."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -903,12 +1032,32 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`, read in that order: a tree on `data` or `staticData` never queries this object. On a tree whose rows are inline it still names the record page a new-tab click opens."
         },
         {
           "name": "tree",
           "type": "object",
-          "description": "parentField, labelField, fields, defaultExpandedDepth"
+          "description": "The field configuration: `parentField` names the field holding each record’s parent id (auto-detected from the object’s self-referencing field when omitted), `labelField` the field drawn indented in the first column (default `name`), `fields` the further fields drawn as flat columns after it, and `defaultExpandedDepth` how many levels open on first draw (`0` shows roots only; omitted, every level is open)."
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a tree carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` draws those records and `{ provider: 'object', object }` queries that object, both narrowed by `filter`. The `api` and `schema` providers draw no rows on the tree. A bare array is not this key’s shape and is not a record source: the tree falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a tree carrying both draws these rows and never queries that object. Each record is placed under the record its `parentField` value names, and one naming no record is drawn as a root. `filter` narrows these rows exactly as it does fetched ones."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the records the tree draws — fetched rows and inline (`staticData`, `{ provider: 'value' }`) rows alike. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. A record whose parent the filter removed is drawn as a root. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a row click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `page` default. `drawer`, `modal` and `popover` open the row’s record in that overlay, and `split` opens it beside the tree; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of `data.object` when `data` is the object provider, else of the tree’s `objectName`, through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a tree that names neither (inline rows with no `objectName`), there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
         }
       ]
     },

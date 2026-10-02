@@ -5909,12 +5909,14 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * This was also the one block of the three whose type was absent from the
  * tracked `sdui.manifest.json`, so `check:react-declaration-parity` reported
  * it as missing from the registry rather than comparing it. ⚠️ Re-read at
- * `89cad75d5`: the tracked manifest is not yet regenerated on this hop
- * (`scripts/sdui-manifest.record.json` still names `31971ff1e`, whose
- * manifest carries an `object-tree` entry, as the ones at `db11afd49` and
- * `e420df310` did); its source at this pin still registers `object-tree`, and
- * `core/src/registry/public-blocks.ts`, byte-identical across the hop, still
- * lists it — only the bare `tree` key, never a public block, is gone. The derivation above is from
+ * `89cad75d5`: the tracked manifest regenerated at this pin
+ * (`scripts/sdui-manifest.record.json` names `89cad75d5570`) carries an
+ * `object-tree` entry, as the ones at `31971ff1e`, `db11afd49` and
+ * `e420df310` did, now publishing `data`, `filter`, `navigation`,
+ * `objectName`, `staticData` and `tree`; its source at this pin still
+ * registers `object-tree`, and `core/src/registry/public-blocks.ts`,
+ * byte-identical across the hop, still lists it — only the bare `tree` key,
+ * never a public block, is gone. The derivation above is from
  * the renderer's sources at the pin either way, which is what #7751's method
  * asks for.
  *
