@@ -134,7 +134,7 @@ See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/
 
 | Type | Sanctioned path the refusal names |
 | :--- | :--- |
-| `flow` | Clone it under a new name (`POST /api/v1/automation/:name/clone`, body `{name, label}`), or switch it off (`POST /api/v1/automation/:name/toggle`, body `{enabled: false}`). |
+| `flow` | Clone it under a new name (`POST /api/v1/automation/:name/clone`, body `{name, label}`), or switch it off (`POST /api/v1/automation/:name/toggle`, body `{enabled: false}`). A flow that holds a credential (an inbound hook's `secret`, an `http` node's `signingSecret`) is not cloned in one step: the clone door refuses it with `409`, because a copy would share the secret, and the copy is authored as a new flow with its own. |
 | `action` | Switch it off (`POST /api/v1/actions/_activation/:object/:action`, body `{enabled: false}`; `:object` is `global` for an object-less action). No clone is offered. |
 | `permission` | Clone it under a new name: the "Clone" action on the permission set, or `POST /api/v1/data/sys_permission_set` with a new name. |
 

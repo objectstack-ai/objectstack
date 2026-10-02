@@ -21,6 +21,18 @@ import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.j
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
 import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
+import { SysFlowCredential } from './sys-flow-credential.object.js';
+import {
+    FlowCredentialChannel,
+    storedFlowStates,
+    type FlowCredentialEngine,
+    type FlowCredentialState,
+} from './flow-credential-channel.js';
+import {
+    migrateFlowCredentialsIntoChannel,
+    type FlowCredentialMigrationEngine,
+    type FlowCredentialMigrationProtocol,
+} from './flow-credential-migration.js';
 import {
     ObjectStoreSuspendedRunStore,
     DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW,
@@ -603,6 +615,15 @@ export class AutomationServicePlugin implements Plugin {
     private runObjectRegistered = false;
     /** The context `init()` received — what {@link pullConnectorSource} resolves its services through. */
     private ctx?: PluginContext;
+    /**
+     * [#20790] The write-only flow credential channel: the engine's credential
+     * source, and the `flow` credential channel of the metadata save door.
+     */
+    private credentialChannel?: FlowCredentialChannel;
+    /** [#20790] Serializes the one-time credential move — see {@link scheduleCredentialMigration}. */
+    private credentialMigration: Promise<void> = Promise.resolve();
+    /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
+    private unsubscribeCryptoProvider?: () => void;
 
     constructor(options: AutomationServicePluginOptions = {}) {
         this.options = options;
@@ -639,7 +660,10 @@ export class AutomationServicePlugin implements Plugin {
     /**
      * Register {@link SysAutomationRun} and {@link SysFlowDispatch} with the
      * `manifest` service so the suspended-run and dispatch-ledger tables
-     * migrate like every other `sys_*` object (ADR-0019, #10220).
+     * migrate like every other `sys_*` object (ADR-0019, #10220) — and
+     * [#20790] {@link SysFlowCredential}, the write-only flow credential
+     * channel, in the same registration, so one manifest answer (and at most
+     * one warning) covers all three.
      *
      * Returns whether it landed. Callers must honour a `false` — a durable
      * store attached over an unregistered object writes to a table that does
@@ -655,7 +679,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun, SysFlowDispatch],
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential],
             });
             return true;
         } catch (err) {
@@ -674,6 +698,150 @@ export class AutomationServicePlugin implements Plugin {
         }
     }
 
+    /**
+     * [#20790] The data engine the credential channel, its index and the
+     * one-time move read and write through — ObjectQL, resolved at call time
+     * (it may register after this plugin inits).
+     */
+    private resolveDataEngine(ctx: PluginContext): (FlowCredentialEngine & FlowCredentialMigrationEngine) | undefined {
+        for (const name of ['objectql', 'data']) {
+            try {
+                const engine = ctx.getService<FlowCredentialEngine & FlowCredentialMigrationEngine>(name);
+                if (engine && typeof engine.find === 'function' && typeof engine.insert === 'function') return engine;
+            } catch {
+                /* not registered under this name */
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * [#20790] Register {@link SysFlowCredential} ALONE with the `manifest`
+     * service — the `suspendedRunStore: 'memory'` composition, which registers
+     * no run object: a flow credential has nowhere else to go, so the channel
+     * needs its table on every composition. Every other composition registers
+     * it with the run objects ({@link registerRunObject}).
+     */
+    private registerCredentialObject(ctx: PluginContext): boolean {
+        try {
+            ctx.getService<{ register(m: unknown): void }>('manifest').register({
+                id: 'com.objectstack.service-automation.flow-credentials',
+                name: 'Automation Flow Credentials',
+                version: '1.0.0',
+                type: 'plugin',
+                scope: 'system',
+                defaultDatasource: 'cloud',
+                namespace: 'sys',
+                objects: [SysFlowCredential],
+            });
+            return true;
+        } catch (err) {
+            ctx.logger.warn(
+                '[Automation] manifest service unavailable; sys_flow_credential not registered yet.',
+                describeThrownForLog(err),
+            );
+            return false;
+        }
+    }
+
+    /**
+     * [#20790] Make the channel the `flow` credential channel of the metadata
+     * save door, its publish promotion and its delete — on the protocol, which
+     * every metadata write reaches. Resolved at `start()`, once every plugin
+     * has inited, so a protocol that registers after this plugin is seen.
+     */
+    private registerCredentialChannelOnProtocol(ctx: PluginContext): void {
+        const channel = this.credentialChannel;
+        if (!channel) return;
+        let protocol: {
+            registerCredentialChannel?(type: string, channel: unknown): void;
+            registerPublishMaterializer?(type: string, materializer: (args: { body: unknown }) => Promise<unknown>): void;
+            registerMutationProjector?(type: string, projector: (evt: { name?: unknown; state?: unknown }) => Promise<void>): void;
+        } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            protocol = undefined;
+        }
+        if (!protocol) {
+            // No metadata store: flows come from code only, and nothing stores one.
+            ctx.logger.debug('[Automation] no metadata protocol — no flow credential channel to register');
+            return;
+        }
+        if (typeof protocol.registerCredentialChannel !== 'function') {
+            ctx.logger.warn(
+                '[Automation] the metadata protocol offers no credential channel registration — a flow saved through it ' +
+                    'is stored WITH its credentials in the definition. Run a metadata protocol that registers credential channels.',
+            );
+            return;
+        }
+        protocol.registerCredentialChannel('flow', {
+            store: (args: { name: string; state: FlowCredentialState; body: unknown }) => channel.store(args),
+            heldPaths: (args: { name: string; state: FlowCredentialState; item: unknown }) => channel.heldPaths(args),
+            strip: (body: unknown) => channel.strip(body),
+        });
+        // Publishing a draft promotes the draft's credentials into the live ones.
+        protocol.registerPublishMaterializer?.('flow', async ({ body }) => {
+            const name = (body as { name?: unknown } | null)?.name;
+            if (typeof name !== 'string' || name === '') {
+                return { success: false, inserted: 0, updated: 0, error: 'the published flow body names no flow' };
+            }
+            const { promoted } = await channel.promote({ name, body });
+            return { success: true, inserted: 0, updated: promoted };
+        });
+        // Deleting a stored row drops the credentials of every state whose row is gone.
+        protocol.registerMutationProjector?.('flow', async (evt) => {
+            if (evt?.state !== 'deleted' || typeof evt.name !== 'string') return;
+            const engine = this.resolveDataEngine(ctx);
+            if (!engine) return;
+            await channel.prune({ name: evt.name, liveStates: await storedFlowStates(engine, evt.name) });
+        });
+    }
+
+    /**
+     * [#20790] (Re)load which live credentials the channel holds, before flows
+     * are registered — a flow stored through the save door registers on the
+     * strength of it. A failed read is loud: every such flow is refused until
+     * the next load.
+     */
+    private async loadCredentialIndex(ctx: PluginContext, moment: string): Promise<void> {
+        if (!this.credentialChannel) return;
+        try {
+            await this.credentialChannel.loadIndex();
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] the flow credential store could not be read at ${moment} — an inbound flow whose secret it ` +
+                    'holds is refused at registration until it can be.',
+                describeThrownForLog(err),
+            );
+        }
+    }
+
+    /**
+     * [#20790] Run the one-time move of stored flow credentials into the
+     * channel — at `kernel:ready`, and again whenever a crypto provider
+     * registers (the host injects one only after `kernel:ready`, so the first
+     * attempt usually defers). Serialized, idempotent and never fatal.
+     */
+    private scheduleCredentialMigration(ctx: PluginContext): void {
+        this.credentialMigration = this.credentialMigration.then(async () => {
+            if (this.destroyed) return;
+            const engine = this.resolveDataEngine(ctx);
+            let protocol: FlowCredentialMigrationProtocol | undefined;
+            try {
+                protocol = ctx.getService<FlowCredentialMigrationProtocol>('protocol');
+            } catch {
+                protocol = undefined;
+            }
+            if (!engine || typeof protocol?.saveMetaItem !== 'function') return;
+            try {
+                await migrateFlowCredentialsIntoChannel({ engine, protocol, logger: ctx.logger });
+            } catch (err) {
+                ctx.logger.warn('[Automation] the stored flow credential move failed', describeThrownForLog(err));
+            }
+        });
+    }
+
     async init(ctx: PluginContext): Promise<void> {
         this.ctx = ctx;
         this.engine = new AutomationEngine(ctx.logger, undefined, {
@@ -681,6 +849,12 @@ export class AutomationServicePlugin implements Plugin {
             runSummaryLog: this.options.runSummaryLog,
             scheduledWorkPolicy: this.options.scheduledWorkPolicy,
         });
+
+        // [#20790] The write-only flow credential channel — the engine reads a
+        // flow's credentials from it at verification and execution, and the
+        // metadata save door stores them in it (registered at `start()`).
+        this.credentialChannel = new FlowCredentialChannel(() => this.resolveDataEngine(ctx));
+        this.engine.setFlowCredentialSource(this.credentialChannel);
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
@@ -702,7 +876,10 @@ export class AutomationServicePlugin implements Plugin {
         // like other sys_* tables (ADR-0019). Best-effort: a host without the
         // manifest service still runs in-memory. Skipped when persistence is off.
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
+            // [#20790] The channel's table rides the same registration.
             this.runObjectRegistered = this.registerRunObject(ctx);
+        } else {
+            this.registerCredentialObject(ctx);
         }
 
         // Seed the platform's built-in node executors. A bare
@@ -732,6 +909,12 @@ export class AutomationServicePlugin implements Plugin {
         ctx.logger.info(
             `[Automation] Engine started with ${nodeTypes.length} node types: ${nodeTypes.join(', ') || '(none)'}`,
         );
+
+        // [#20790] The flow credential channel joins the metadata save door
+        // BEFORE the inert-mode return below: a one-shot tool that rewrites
+        // stored rows (`os migrate meta --stored`) must not store a flow
+        // credential back into a definition either. Registering it arms nothing.
+        this.registerCredentialChannelOnProtocol(ctx);
 
         // ── Inert mode (#4454) — an engine, and nothing armed ─────────────────
         // A one-shot tool (`os migrate meta --stored`) needs this engine for one
@@ -1031,6 +1214,10 @@ export class AutomationServicePlugin implements Plugin {
             ctx.logger.debug(`[Automation] runAs:user grant resolver not wired: ${(err as Error).message}`);
         }
 
+        // [#20790] Which live credentials the channel holds, before any flow is
+        // registered from a stored row that no longer carries its own.
+        await this.loadCredentialIndex(ctx, 'start');
+
         // Pull flow definitions from the ObjectQL schema registry. AppPlugin.init()
         // calls manifest.register(payload), which routes to ql.registerApp() and
         // stores each inline flow under type 'flow'. By the time start() runs,
@@ -1162,6 +1349,8 @@ export class AutomationServicePlugin implements Plugin {
         // idempotently — ScheduleTrigger.start cancels + reschedules) and unregister
         // flows that vanished so their jobs stop.
         ctx.hook('metadata:reloaded', async (payload?: unknown) => {
+            // [#20790] A publish may have promoted credentials on another replica.
+            await this.loadCredentialIndex(ctx, 'metadata:reloaded');
             await this.resyncFlowsFromProtocol(ctx);
             // #7742 — take the connector collection off the payload FIRST. The
             // reconcile below used to read `listItems('connector')` alone, and
@@ -1203,11 +1392,25 @@ export class AutomationServicePlugin implements Plugin {
         // [#20913] …and it arms what the boot pull armed: both resolve through
         // the one precedence decision ({@link resolveFlowContenders}).
         ctx.hook('kernel:ready', async () => {
+            // [#20790] Reloaded first: the protocol's view binds stored rows,
+            // whose credentials the channel holds.
+            await this.loadCredentialIndex(ctx, 'kernel:ready');
             await this.syncFlowsFromProtocol(ctx);
             // Every plugin's init()/start() has completed here, so connector
             // plugins have registered their runtime connectors — the earliest
             // point the declared-vs-registered comparison is meaningful.
             await this.auditDeclaredConnectors(ctx);
+            // [#20790] Move stored flow credentials into the channel, once — and
+            // again on every crypto-provider registration, since the host
+            // injects the provider only after this hook (the first attempt then
+            // defers without writing anything).
+            this.scheduleCredentialMigration(ctx);
+            const dataEngine = this.resolveDataEngine(ctx) as
+                | { onCryptoProviderChange?(listener: () => void): () => void }
+                | undefined;
+            if (!this.unsubscribeCryptoProvider && typeof dataEngine?.onCryptoProviderChange === 'function') {
+                this.unsubscribeCryptoProvider = dataEngine.onCryptoProviderChange(() => this.scheduleCredentialMigration(ctx));
+            }
         });
 
         // ── Silent-miss audit: unbound triggered flows (2026-07-17 eval) ──────
@@ -2225,6 +2428,10 @@ export class AutomationServicePlugin implements Plugin {
         // Stop the degraded-instance retry loop first (#3017): mark destroyed so
         // an already-queued reconcile no-ops, and cancel any armed timer.
         this.destroyed = true;
+        // [#20790] No credential move after shutdown, and none left in flight.
+        this.unsubscribeCryptoProvider?.();
+        this.unsubscribeCryptoProvider = undefined;
+        await this.credentialMigration.catch(() => undefined);
         this.clearDeclarativeRetryTimer();
         this.degradedInstances.clear();
         // Tear down materialized provider-bound connectors (ADR-0097) — e.g. an

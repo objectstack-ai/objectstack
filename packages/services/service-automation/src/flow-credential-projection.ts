@@ -50,14 +50,21 @@
  * exits reach the same registry entry through `redactMetadataItem('flow', …)`.
  * One helper, applied where each surface's definition leaves the process.
  *
- * It is NOT applied to anything the engine EXECUTES. The flow map the engine
- * arms triggers from keeps the stored secrets, and so does the in-process
- * `getFlow` (the clone door copies a whole definition through it, ADR-0126
- * §7.1): redaction is a serving act, and a raw-record consumer keeps reading
- * the stored body (`spec/kernel/metadata-type-redaction.ts`). That is also why
- * this plugin binds flows from the protocol's EXECUTION read
- * (`getMetaItemsForExecution`) rather than the served one — a binder reading
- * the served view would register every `api` flow without its secret.
+ * It is NOT applied to anything the engine EXECUTES: redaction is a serving
+ * act, and a raw-record consumer keeps reading the stored body
+ * (`spec/kernel/metadata-type-redaction.ts`). That is why this plugin binds
+ * flows from the protocol's EXECUTION read (`getMetaItemsForExecution`) rather
+ * than the served one — a packaged flow's literal reaches the engine only
+ * through it.
+ *
+ * [#20790] And a STORED flow no longer carries its credentials at all: the
+ * metadata save door moves every explicit value into the write-only flow
+ * credential channel (`flow-credential-channel.ts`), using
+ * {@link flowCredentialPositions} and {@link stripFlowCredentialValues} below,
+ * so the stored row, its history and its hash hold exactly what a read serves.
+ * The engine reads a channel-held credential only at verification (an inbound
+ * post) and execution (an `http` node signing); the clone door refuses a
+ * source that holds one, literal or channel-held.
  *
  * ## Dropped, not masked
  *
@@ -131,6 +138,28 @@ export const FLOW_NODE_CREDENTIAL_KEYS: ReadonlyMap<string, readonly string[]> =
 ]);
 
 /**
+ * [#20790] What each credential key in {@link FLOW_NODE_CREDENTIAL_KEYS} is,
+ * in an administrator's words — the CLASS a refusal or a rotation notice names
+ * instead of a node id, a path or a value. Beside the table, so a key added to
+ * it gets its label in the same place; a key with no label is named by its
+ * spelling.
+ */
+export const FLOW_CREDENTIAL_CLASS_LABELS: ReadonlyMap<string, string> = new Map<string, string>([
+    [FLOW_HOOK_SECRET_KEY, 'the inbound hook secret'],
+    [HTTP_SIGNING_SECRET_KEY, 'an outbound signing secret'],
+]);
+
+/** The class label of a credential key — {@link FLOW_CREDENTIAL_CLASS_LABELS}, else the key's spelling. */
+export function flowCredentialClassLabel(key: string): string {
+    return FLOW_CREDENTIAL_CLASS_LABELS.get(key) ?? `the credential at \`${key}\``;
+}
+
+/** The class labels of a set of credential keys, deduplicated and joined for a sentence. */
+export function flowCredentialClassList(keys: Iterable<string>): string {
+    return [...new Set([...keys].map(flowCredentialClassLabel))].sort().join(' and ');
+}
+
+/**
  * The explicit clearing value: a credential key set to it holds no credential,
  * so it is served as written rather than withheld — the one unambiguous way to
  * remove an optional credential across a round trip whose absent key means
@@ -140,6 +169,99 @@ export const FLOW_CREDENTIAL_CLEARED = '';
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * [#20790] One credential POSITION of a flow definition: a node of a kind
+ * {@link FLOW_NODE_CREDENTIAL_KEYS} lists, one of its keys, and what the
+ * definition carries there.
+ *
+ *  - `absent`   — the key is not written: the served (withheld) form, so it
+ *                 means "unchanged" on a write, and on a stored row it means
+ *                 the credential, if any, is held by the write-only channel;
+ *  - `cleared`  — {@link FLOW_CREDENTIAL_CLEARED}: no credential, on purpose;
+ *  - `value`    — a non-empty string: an explicit credential (a literal);
+ *  - `unusable` — anything else: no credential a door can use, and the engine
+ *                 refuses it where one is required.
+ */
+export interface FlowCredentialPosition {
+    /** Dotted, item-relative (`nodes.0.config.secret`) — the path spelling `redactedKeys` and the runtime gate use. */
+    readonly path: string;
+    readonly nodeId: string;
+    readonly nodeType: string;
+    readonly key: string;
+    readonly form: 'absent' | 'cleared' | 'value' | 'unusable';
+    /** The literal, for `form: 'value'` only. */
+    readonly value?: string;
+}
+
+function collectNodePositions(nodes: readonly unknown[], path: string, out: FlowCredentialPosition[]): void {
+    nodes.forEach((node, index) => collectNodePosition(node, `${path}.${index}`, out));
+}
+
+function collectRegionPositions(region: unknown, path: string, out: FlowCredentialPosition[]): void {
+    if (isPlainRecord(region) && Array.isArray(region.nodes)) collectNodePositions(region.nodes, `${path}.nodes`, out);
+}
+
+function collectNodePosition(node: unknown, path: string, out: FlowCredentialPosition[]): void {
+    if (!isPlainRecord(node) || typeof node.type !== 'string') return;
+    const config = isPlainRecord(node.config) ? node.config : undefined;
+    // `FlowNodeSchema` requires a string id, and every write reaches the
+    // channel after the schema gate; a node without one is not a position.
+    if (typeof node.id === 'string') {
+        for (const key of FLOW_NODE_CREDENTIAL_KEYS.get(node.type) ?? []) {
+            const has = !!config && Object.prototype.hasOwnProperty.call(config, key);
+            const raw = has ? config![key] : undefined;
+            const form: FlowCredentialPosition['form'] = !has
+                ? 'absent'
+                : raw === FLOW_CREDENTIAL_CLEARED
+                    ? 'cleared'
+                    : typeof raw === 'string'
+                        ? 'value'
+                        : 'unusable';
+            out.push({
+                path: `${path}.config.${key}`,
+                nodeId: node.id,
+                nodeType: node.type,
+                key,
+                form,
+                ...(form === 'value' ? { value: raw as string } : {}),
+            });
+        }
+    }
+    if (!config) return;
+    for (const slot of FLOW_REGION_SLOTS_BY_TYPE.get(node.type) ?? []) {
+        const value = config[slot.key];
+        const slotPath = `${path}.config.${slot.key}`;
+        if (slot.arity === 'one') collectRegionPositions(value, slotPath, out);
+        else if (Array.isArray(value)) value.forEach((region, i) => collectRegionPositions(region, `${slotPath}.${i}`, out));
+    }
+}
+
+/**
+ * [#20790] Every credential position of a flow definition, at every depth a
+ * node can sit — the same table and the same region walk the projection below
+ * uses, so the write-only channel and the read projection cannot disagree
+ * about where a credential is. Pure.
+ */
+export function flowCredentialPositions(definition: unknown): FlowCredentialPosition[] {
+    const out: FlowCredentialPosition[] = [];
+    if (isPlainRecord(definition) && Array.isArray(definition.nodes)) collectNodePositions(definition.nodes, 'nodes', out);
+    return out;
+}
+
+/**
+ * [#20790] `definition` with every credential key that is not the cleared
+ * form removed — the `value` and `unusable` positions of
+ * {@link flowCredentialPositions}; `absent` and `cleared` are left as written.
+ * Copy-on-write: the input is never mutated, and it is returned by reference
+ * when there is nothing to remove. It IS the projection's removal, so a
+ * stripped definition is byte-identical to what a read serves, and a stored
+ * definition never carries a credential key other than the cleared form.
+ */
+export function stripFlowCredentialValues<T>(definition: T): T {
+    if (!isPlainRecord(definition)) return definition;
+    return redactFlowCredentials(definition).item as T;
 }
 
 /** Project a list of nodes; `undefined` when nothing in it was withheld. */

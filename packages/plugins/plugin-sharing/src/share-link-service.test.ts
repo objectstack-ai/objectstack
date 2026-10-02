@@ -451,6 +451,170 @@ describe('ShareLinkService', () => {
         ),
       ).rejects.toMatchObject({ status: 404 });
     });
+
+    // [#21328] The creator half of revoke authority is the one creator rule
+    // `listLinks` also reads, and that rule names no creator for a context
+    // without a user identity. Compared bare, `undefined === undefined` let an
+    // identity-less (non-system) caller revoke a link whose `created_by` the
+    // driver omitted. Neither HTTP door reaches this — both answer 401 first —
+    // so it is the internal-caller edge of the same rule, pinned fail-closed.
+    it('a caller with no user identity is the creator of nothing', async () => {
+      engine._tables.sys_share_link = [
+        { id: 'shl_omitted', token: 'tok_omitted_0001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null },
+        { id: 'shl_empty', token: 'tok_empty_000001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null, created_by: '' },
+      ];
+      await expect(service.revokeLink('shl_omitted', {})).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      await expect(service.revokeLink('shl_empty', { userId: '' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      expect(engine._tables.sys_share_link.map((r) => r.revoked_at)).toEqual([null, null]);
+    });
+  });
+
+  // ── [#21328] the caller's OWN list is self-scoped (ADR-0111 surface table) ──
+  //
+  // ADR-0111 rules the list "self-scoped", and both doors force `createdBy` to
+  // the caller — but the read ran under the caller's context, so it demanded an
+  // object-level grant on `sys_share_link` the member baseline does not carry,
+  // and every plain member's list was refused. The fix reads the caller's OWN
+  // list under the system context; every other shape keeps the caller's
+  // context. The double below overrides only `find`, to model the one gate
+  // that matters: a non-system context whose sets grant nothing on
+  // `sys_share_link` is refused the way the security middleware refuses it
+  // (`PERMISSION_DENIED`, 403).
+  describe('[#21328] listLinks: the caller\'s own list is self-scoped', () => {
+    const CONVO = { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' } as const;
+    const ON_C1 = { object: 'ai_conversations', recordId: 'c1' } as const;
+
+    /** Every `find` the service issues, with the context it ran under. */
+    let seen: Array<{ object: string; where: any; context: any }>;
+    let svc: ShareLinkService;
+    let mine: string[];
+    let theirs: string[];
+    let admins: string[];
+
+    /** `who` hold an object-level read grant on `sys_share_link`; nobody else does. */
+    const grantedTo = (who: string[]) => ({
+      ...engine,
+      async find(object: string, options?: any) {
+        const ctx = options?.context ?? {};
+        seen.push({ object, where: options?.where, context: ctx });
+        if (object === 'sys_share_link' && ctx.isSystem !== true && !who.includes(ctx.userId)) {
+          throw Object.assign(
+            new Error('You do not have permission to perform this action.'),
+            { code: 'PERMISSION_DENIED', statusCode: 403 },
+          );
+        }
+        return engine.find(object, options);
+      },
+    });
+
+    const listed = (links: Array<{ id: string }>) => links.map((l) => l.id).sort();
+    const shareLinkReads = () => seen.filter((s) => s.object === 'sys_share_link');
+
+    beforeEach(async () => {
+      // Three creators' links on the SAME record, so a record filter cannot
+      // separate them — only the creator rule can.
+      mine = [
+        (await service.createLink(CONVO, { userId: 'alice' })).id,
+        (await service.createLink({ ...CONVO, label: 'second' }, { userId: 'alice' })).id,
+      ].sort();
+      theirs = [(await service.createLink(CONVO, { userId: 'bob' })).id];
+      admins = [(await service.createLink(CONVO, { userId: 'admin' })).id];
+      // Rows no caller's identity can match: one whose `created_by` the driver
+      // omitted, one minted under an empty identity.
+      engine._tables.sys_share_link.push(
+        { id: 'shl_omitted', token: 'tok_omitted_0001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null },
+        { id: 'shl_empty', token: 'tok_empty_000001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null, created_by: '' },
+      );
+      seen = [];
+      svc = new ShareLinkService({ engine: grantedTo(['admin']) as any });
+    });
+
+    it('a member with no sys_share_link grant lists exactly their own links', async () => {
+      const links = await svc.listLinks({ createdBy: 'alice' }, { userId: 'alice' });
+      expect(listed(links)).toEqual(mine);
+
+      const [read] = shareLinkReads();
+      expect(read.context.isSystem, 'the own list is the one read that runs under the system context').toBe(true);
+      expect(read.where.created_by, 'constrained server-side to the caller').toBe('alice');
+    });
+
+    it('the system read trusts no query predicate alone: a dropped created_by constraint still leaks no foreign row', async () => {
+      // A driver that silently drops a `where` key answers with the WIDER set —
+      // under the system context, every creator's tokens. The rows that leave
+      // must still pass the creator rule.
+      const dropsCreator = {
+        ...engine,
+        async find(object: string, options?: any) {
+          const where = { ...(options?.where ?? {}) };
+          delete where.created_by;
+          return engine.find(object, { ...options, where });
+        },
+      };
+      const leaky = new ShareLinkService({ engine: dropsCreator as any });
+      expect(listed(await leaky.listLinks({ ...ON_C1, createdBy: 'alice' }, { userId: 'alice' }))).toEqual(mine);
+    });
+
+    it('through the record filter, other creators\' links on the same record are absent', async () => {
+      const links = await svc.listLinks({ ...ON_C1, createdBy: 'alice' }, { userId: 'alice' });
+      expect(listed(links)).toEqual(mine);
+      // Each listed row still carries its token — the console builds the URL from it.
+      expect(links.every((l) => typeof l.token === 'string' && l.token.length > 0)).toBe(true);
+    });
+
+    it('a foreign creator filter keeps the caller\'s context, and is refused', async () => {
+      await expect(svc.listLinks({ ...ON_C1, createdBy: 'bob' }, { userId: 'alice' }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(shareLinkReads()).toHaveLength(1);
+      expect(shareLinkReads()[0].context).toMatchObject({ userId: 'alice' });
+      expect(shareLinkReads()[0].context.isSystem).toBeUndefined();
+    });
+
+    it('an unfiltered list keeps the caller\'s context, and is refused', async () => {
+      await expect(svc.listLinks({}, { userId: 'alice' }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(shareLinkReads()).toHaveLength(1);
+      expect(shareLinkReads()[0].context.isSystem).toBeUndefined();
+    });
+
+    it('a caller with no user identity never takes the elevated path', async () => {
+      // Absent identity and absent creator filter: `undefined === undefined`.
+      await expect(svc.listLinks({}, {}))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      await expect(svc.listLinks({ ...ON_C1 }, {}))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      // Empty identity and empty creator filter: `'' === ''`.
+      await expect(svc.listLinks({ createdBy: '' }, { userId: '' }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(shareLinkReads()).toHaveLength(3);
+      expect(shareLinkReads().every((r) => r.context.isSystem !== true)).toBe(true);
+    });
+
+    it('the admin path is unchanged: a granted caller lists anyone\'s links under their own context', async () => {
+      const all = await svc.listLinks({}, { userId: 'admin' });
+      expect(listed(all)).toEqual([...mine, ...theirs, ...admins, 'shl_empty', 'shl_omitted'].sort());
+      const bobs = await svc.listLinks({ createdBy: 'bob' }, { userId: 'admin' });
+      expect(listed(bobs)).toEqual(theirs);
+      expect(shareLinkReads().map((r) => r.context.isSystem)).toEqual([undefined, undefined]);
+      // …and the admin's OWN list answers exactly their own links, as it did.
+      expect(listed(await svc.listLinks({ ...ON_C1, createdBy: 'admin' }, { userId: 'admin' }))).toEqual(admins);
+    });
+
+    it('a system caller keeps its bypass', async () => {
+      const links = await svc.listLinks({ object: 'ai_conversations' }, { isSystem: true });
+      expect(listed(links)).toEqual([...mine, ...theirs, ...admins, 'shl_empty', 'shl_omitted'].sort());
+      expect(shareLinkReads()[0].context.isSystem).toBe(true);
+      // A system caller asking for its own links gets the same rows either way.
+      expect(listed(await svc.listLinks({ createdBy: 'alice' }, { isSystem: true, userId: 'alice' }))).toEqual(mine);
+    });
+
+    it('revoke and list read one creator rule: what you may revoke as creator is what your list shows', async () => {
+      const links = await svc.listLinks({ createdBy: 'alice' }, { userId: 'alice' });
+      for (const link of links) await expect(svc.revokeLink(link.id, { userId: 'alice' })).resolves.toBeUndefined();
+      await expect(svc.revokeLink(theirs[0], { userId: 'alice' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      // Revoked links leave the default list and come back under includeRevoked.
+      expect(await svc.listLinks({ createdBy: 'alice' }, { userId: 'alice' })).toEqual([]);
+      expect(listed(await svc.listLinks({ createdBy: 'alice', includeRevoked: true }, { userId: 'alice' }))).toEqual(mine);
+    });
   });
 });
 
