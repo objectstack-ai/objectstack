@@ -2394,11 +2394,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "规划",
-        helpText: "自主推理配置（策略、最大迭代、是否重规划）"
+        helpText: "自主推理配置：代理停止前的最大推理迭代次数（1–100，默认 10）。"
       },
       memory: {
         label: "记忆",
-        helpText: "记忆管理（短期、长期、反思）"
+        helpText: "长期记忆：按用户保存的提炼笔记，在每次会话前召回，并每隔 reflectionInterval 次已送达的交互由一次反思写入。启用长期记忆时，maxEntries 与 reflectionInterval 为必填。由云端 AI 运行时强制执行。"
       },
       lifecycle: {
         label: "生命周期",

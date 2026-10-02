@@ -2394,11 +2394,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "計画",
-        helpText: "自律推論設定（strategy, max iterations, replan）"
+        helpText: "自律推論設定: エージェントが停止するまでの最大推論反復回数（1〜100、既定値 10）。"
       },
       memory: {
         label: "メモリ",
-        helpText: "メモリ管理（short-term, long-term, reflection）"
+        helpText: "長期メモリ: ユーザーごとに保持される要約ノート。各会話の前に呼び出され、配信済みのやり取り reflectionInterval 回ごとに 1 回のリフレクションで書き込まれます。長期メモリを有効にする場合、maxEntries と reflectionInterval は必須です。クラウド AI ランタイムが適用します。"
       },
       lifecycle: {
         label: "ライフサイクル",
