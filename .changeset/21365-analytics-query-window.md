@@ -7,6 +7,8 @@ fix(spec)!: an analytics query's `limit` and `offset` are non-negative integers,
 
 Clause-②: yes (narrowing)
 
+<!-- adr-0087: registered analytics-query-window-non-negative-integer -->
+
 **BREAKING** — an accept-set narrowing of a published request schema, shipped as `minor` under the repo's launch-window convention for accept-set narrowings. What reads it: the `/analytics` doors, which parse every body with `AnalyticsQueryRequestSchema` (`POST /analytics/query`, `POST /analytics/sql`) or `DatasetSelectionSchema` (`POST /analytics/dataset/query`), and answer `400 VALIDATION_FAILED` before any engine runs.
 
 **`@objectstack/spec`**
