@@ -375,10 +375,11 @@ export class PackageServicePlugin implements Plugin {
       await this.ensureTable(objectql, logger);
     } catch (error) {
       logger.error(
-        'Failed to create the sys_packages table — the database refused the DDL, so the `package` service is NOT '
-          + 'registered: packages installed in this process are held in memory only and are gone after a restart. '
-          + 'The refusal is attached here and in the driver\'s log line; make the database accept it (its '
-          + 'permissions, or a dialect the driver names), then restart.',
+        'Failed to create the sys_packages table — the database refused the DDL. This plugin\'s start() fails and '
+          + 'no `package` service is registered: under the kernel\'s default rollback the boot fails, and a kernel '
+          + 'that continues past a failed plugin installs packages in memory only. The refusal is attached here and '
+          + 'in the driver\'s log line; make the database accept it (its permissions, or a dialect the driver '
+          + 'names), then restart.',
         error as Error,
       );
       throw error;
