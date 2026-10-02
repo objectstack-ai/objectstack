@@ -2660,19 +2660,17 @@ jobs:
       # GAP 1 — SCHEDULING. CLOSED by #9829 / #10014. The original claim:
       # `create-objectstack#test` is reachable, at PR time, only from ci.yml's
       # `test` job; that job was gated on the `core` paths-filter ALONE; and
-      # `core` — `packages/**`, `examples/**`, `apps/!(docs)/**`,
-      # `package.json`, `pnpm-lock.yaml`, `tsconfig.json`,
-      # `.github/workflows/ci.yml` — matches no path under `scripts/`, so a diff
-      # confined to scripts/sync-template-versions.mjs skipped Test Core
-      # ENTIRELY, and the vitest with it. `core` is still false on that diff — it
-      # was never widened — but the `test` job now ORs in a SECOND filter output,
-      # `scripts: ['scripts/**']`, which matches, so
-      # `if: ... (core != 'false' || scripts != 'false')` resolves to RUN.
-      # Re-measured against the merged filter with picomatch 2.3.1 — the version
-      # dorny/paths-filter@v4's own package-lock.json resolves, NOT this repo's
-      # 4.0.5, which is what the old text cited; the two agree on these globs, so
-      # the wrong figure never produced a wrong verdict — `core=false`,
-      # `scripts=true`. With the job running the rest of the chain follows:
+      # `core` then matched no path under `scripts/`, so a diff confined to
+      # scripts/sync-template-versions.mjs skipped Test Core ENTIRELY, and the
+      # vitest with it. Two changes closed it, either one enough: the `test` job
+      # ORs in a SECOND filter output, `crosspkg:` (named `scripts:` at #9829),
+      # whose `scripts/**` matches; and `core` itself now names that file,
+      # because it is a declared build input of `create-objectstack#build`
+      # (#21202). So `if: ... (core != 'false' || crosspkg != 'false')` resolves
+      # to RUN. Re-measured against the filter at #21202 with picomatch 2.3.1 —
+      # the version dorny/paths-filter@v4's own package-lock.json resolves, NOT
+      # this repo's 4.0.5; the two agree on these globs — `core=true`,
+      # `crosspkg=true`. With the job running the rest of the chain follows:
       # `--union-into` is a step inside it, so it runs and unions
       # create-objectstack back in off its declared globs; `create-objectstack#test`
       # declares

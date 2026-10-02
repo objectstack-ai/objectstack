@@ -3162,7 +3162,7 @@ describe('ApprovalService — queue approver is unresolved (#3508)', () => {
     // No queue expansion exists: the slot is the raw `type:value` literal,
     // which matches no real user id — the request routes to nobody.
     expect(req.pending_approvers).toEqual(['queue:q_west']);
-    expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('#3508'))).toBe(true);
+    expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('no ownership queue to expand it from'))).toBe(true);
   });
 });
 
@@ -3215,7 +3215,7 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(req.pending_approvers).toEqual([`${type}:${value}`]);
     const hit = warnings.find(([msg]) => String(msg).includes('expanded to nobody'));
     expect(hit, `no warning for ${type}`).toBeTruthy();
-    expect(String(hit[0])).toContain('#3807');
+    expect(String(hit[0])).toContain('cannot advance until someone is added or the approver is re-pointed');
     expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
   });
 

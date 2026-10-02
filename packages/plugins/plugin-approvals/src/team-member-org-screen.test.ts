@@ -245,9 +245,9 @@ describe('#10547 team MEMBER org screen', () => {
     expect(req.pending_approvers).toEqual(['u0', 'u1', 'u2', 'u3', 'u4']);
   });
 
-  it('M9 — the drop is loud: the warning names the users, both organizations and the card', async () => {
+  it('M9 — the drop is loud: the warning names the users and both organizations', async () => {
     await svc.openNodeRequest(input([TEAM_A]), CTX_A);
-    const hit = warnings.find(([msg]) => String(msg).includes('#10547'));
+    const hit = warnings.find(([msg]) => String(msg).includes("member(s) of team 'team_a' were dropped from the approver slate"));
     console.log('[PROBE M9] warning =', hit ? String(hit[0]).slice(0, 100) : 'NONE');
     expect(hit).toBeTruthy();
     expect(String(hit![0])).toContain(ORG_A);

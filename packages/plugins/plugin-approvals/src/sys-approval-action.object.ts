@@ -162,8 +162,9 @@ export const SysApprovalAction = ObjectSchema.create({
       required: false,
       group: 'Action',
       description:
-        'True when the actor was admitted to this action only by the privileged-override path (#3424) — '
-        + 'they held no slot in the request’s pending-approver slate.',
+        'True when the actor held no slot in the request’s pending-approver slate and was admitted to '
+        + 'this action only by the privileged override, which lets a platform or organization admin act '
+        + 'on any pending request so that one nobody in its slate can decide never stays stuck.',
     }),
 
     // Structured hand-off parties for `action: 'reassign'` (#4365). Before
@@ -190,7 +191,7 @@ export const SysApprovalAction = ObjectSchema.create({
       required: false,
       multiple: true,
       group: 'Action',
-      description: 'Files supporting this action — e.g. a signed contract or evidence (#3266).',
+      description: 'Files supporting this action — e.g. a signed contract or evidence.',
     }),
 
     created_at: Field.datetime({

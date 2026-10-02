@@ -260,7 +260,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       via_override: {
         label: "管理员越权操作",
-        help: "为真表示该操作者只是凭特权越权路径（#3424）被放行——他们并不在该请求的待审批人名单中。"
+        help: "为真表示该操作者并不在该请求的待审批人名单中，只是凭特权越权被放行——平台管理员或组织管理员可以处理任何待审批请求，因此名单中无人能决定的请求不会一直卡住。"
       },
       reassign_from: {
         label: "转出人",
@@ -272,7 +272,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments: {
         label: "附件",
-        help: "支持该操作的文件——例如已签署的合同或证明材料（#3266）。"
+        help: "支持该操作的文件——例如已签署的合同或证明材料。"
       },
       created_at: {
         label: "创建时间"
@@ -297,7 +297,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "审批委派",
     pluralLabel: "审批委派",
-    description: "自助不在岗规则：在时间窗内把该用户的审批人槽位改派给候补人（#1322 M1）。",
+    description: "自助不在岗规则：在时间窗内把该用户的审批人槽位改派给候补人。",
     fields: {
       id: {
         label: "委派 ID"

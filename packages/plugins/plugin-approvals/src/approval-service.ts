@@ -1762,7 +1762,9 @@ export class ApprovalService implements IApprovalService {
     // least visible to operators.
     if (type === 'queue') {
       this.logger?.warn?.(
-        `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody (#3508)`,
+        `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody, because the `
+        + `platform has no ownership queue to expand it from (the type is deprecated and no longer offered `
+        + `for authoring). Route this step to a team, department or position instead.`,
         { value: a.value },
       );
     } else if (GRAPH_APPROVER_TYPES.has(type)) {
@@ -1777,7 +1779,7 @@ export class ApprovalService implements IApprovalService {
       // stops being invisible.
       this.logger?.warn?.(
         `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot routes to no one `
-        + `and the request cannot advance until someone is added or the approver is re-pointed (#3807)`,
+        + `and the request cannot advance until someone is added or the approver is re-pointed`,
         { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
@@ -2039,7 +2041,7 @@ export class ApprovalService implements IApprovalService {
     if (!teamOrg) return false;                  // no tenancy fact on this team
     if (teamOrg === requestOrg) return false;    // it is this org's team — route as before
     this.logger?.warn?.(
-      `[approvals] #10230: team '${teamId}' was dropped from the approver slate — `
+      `[approvals] team '${teamId}' was dropped from the approver slate — `
       + `'sys_team.organization_id' is '${teamOrg}', not the request's organization `
       + `'${requestOrg}', so routing this approval to its members would put approval `
       + `authority over the record outside its tenant. Point the approver at a team in `
@@ -2108,7 +2110,7 @@ export class ApprovalService implements IApprovalService {
     if ((rows?.length ?? 0) >= MEMBER_SCREEN_READ_LIMIT) {
       // Possibly truncated ⇒ the evidence is incomplete ⇒ no evidence.
       this.logger?.warn?.(
-        `[approvals] #10547: the membership screen for team '${teamId}' read `
+        `[approvals] the membership screen for team '${teamId}' read `
         + `${rows.length} 'sys_member' rows, at or above its ${MEMBER_SCREEN_READ_LIMIT}-row `
         + `cap, so the result may be truncated. Routing is left unchanged rather than risk `
         + `dropping a member whose proof of membership fell outside the read.`,
@@ -2134,7 +2136,7 @@ export class ApprovalService implements IApprovalService {
     }
     if (dropped.length) {
       this.logger?.warn?.(
-        `[approvals] #10547: ${dropped.length} member(s) of team '${teamId}' were dropped from `
+        `[approvals] ${dropped.length} member(s) of team '${teamId}' were dropped from `
         + `the approver slate — ${dropped.map(d => `'${d.userId}'`).join(', ')} hold membership `
         + `in other organization(s), none of them the request's organization '${requestOrg}', so `
         + `routing this approval to them would put approval authority over the record outside its `
@@ -2469,7 +2471,7 @@ export class ApprovalService implements IApprovalService {
     if (!orgs.length) return false;          // no tenancy fact recorded for this user
     if (orgs.includes(requestOrg)) return false; // he is a member here — route as before
     this.logger?.warn?.(
-      `[approvals] #10153: manager '${managerId}' was dropped from the approver slate — `
+      `[approvals] manager '${managerId}' was dropped from the approver slate — `
       + `'sys_user.manager_id' points across an organization boundary. He holds membership in `
       + `${orgs.length} organization(s), none of them the request's organization '${requestOrg}', `
       + `so routing this approval to him would put approval authority over the record outside its `
@@ -2624,13 +2626,15 @@ export class ApprovalService implements IApprovalService {
       if (live) return live;
       this.logger?.warn?.(
         `[approvals] live record ${object}/${recordId} not found at node entry — `
-        + 'resolving approvers against the trigger snapshot (#3447 fallback).',
+        + 'resolving approvers against the trigger snapshot instead of the live record they are '
+        + 'normally resolved from.',
         { object, recordId },
       );
     } catch (err: any) {
       this.logger?.warn?.(
         `[approvals] live record re-read failed for ${object}/${recordId}: ${err?.message ?? err} — `
-        + 'resolving approvers against the trigger snapshot (#3447 fallback).',
+        + 'resolving approvers against the trigger snapshot instead of the live record they are '
+        + 'normally resolved from.',
       );
     }
     return fallback ?? {};
@@ -3662,7 +3666,7 @@ export class ApprovalService implements IApprovalService {
       // id), kept where a developer reads them and a user never does.
       const developerMessage =
         `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
-        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no #3424 override `
+        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no admin override `
         + `for a '${raw.status}' request (the override reaches pending requests only)`;
       this.logger?.warn?.(developerMessage, {
         request: requestId,
@@ -4238,7 +4242,7 @@ export class ApprovalService implements IApprovalService {
         (targetType === undefined ? ' which the flow does not declare' : ` of type '${targetType || '(untyped)'}'`) +
         `, but the revise window must be an '${APPROVAL_REVISE_NODE_TYPE}' node — that pause continues only ` +
         'through this service (submitter-only, audited, and refusing a colliding pending request), and any ' +
-        `other node type there is resumable by anyone with the run id (amended ADR-0044, #3823). Fix the flow: ` +
+        `other node type there is resumable by anyone with the run id (amended ADR-0044). Fix the flow: ` +
         `set node '${target || '<revise target>'}' to type '${APPROVAL_REVISE_NODE_TYPE}'.`,
       );
     }

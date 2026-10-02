@@ -505,7 +505,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the identifier being verified (computed on read)"
+        help: "Record title: a fixed label (the identifier and token columns are internal and never titled)"
       },
       created_at: {
         label: "Created At"

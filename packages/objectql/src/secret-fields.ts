@@ -295,3 +295,85 @@ export function collectCredentialFields(schema: ServiceObject | undefined | null
   }
   return out;
 }
+
+/**
+ * The engine surface {@link readInternalColumn} needs: the registered schema
+ * (to know whether the strip ran) and the privileged accessor (to recover the
+ * value). Duck-typed so a consumer holding only an engine-shaped handle — a
+ * plugin's own engine interface, a host's resolved service — can call it.
+ */
+export interface InternalColumnSource {
+  getSchema?(object: string): ServiceObject | undefined | null;
+  resolveInternalField?(object: string, recordIds: readonly string[], field: string): Promise<Map<string, unknown>>;
+}
+
+/**
+ * [#21197] Read ONE `internal: true` column for rows a generic engine read
+ * handed back — one value per row, in the rows' order (`null` where the column
+ * is unset).
+ *
+ * The read path omits a flagged column from every row it returns, system
+ * context included (no carve-out, #7728). A consumer that genuinely needs the
+ * stored value back for its OWN purpose-built route — a share link's password
+ * gate, a redemption probe — gets it through the engine's privileged accessor
+ * ({@link InternalColumnSource.resolveInternalField}, #8118). This is that
+ * dereference, written once so no consumer re-derives it:
+ *
+ *  - a row that still CARRIES the column answers from the row (an engine that
+ *    does not strip, e.g. a test double);
+ *  - otherwise whether a missing key means "stripped" or "unset" is read off
+ *    the SAME declaration the strip keys on — {@link collectInternalReadFields}
+ *    over the engine's registered schema. An engine whose registered object
+ *    does not declare the column `internal` cannot have stripped it, so the key
+ *    is unset;
+ *  - otherwise the value is recovered through the accessor, one batched read.
+ *
+ * ⛔ FAIL-CLOSED. When the declaration says the strip ran and the value cannot
+ * be recovered — no accessor, or a row with no id — this THROWS instead of
+ * answering "unset". For a gate column "unset" usually means "no gate" (a share
+ * link's password hash: unset is "no password"), so a degraded answer would
+ * open what the column exists to close, silently. A caller surfaces the throw
+ * as a refused request, never as an open one.
+ *
+ * Not a generic read bypass: it recovers ONLY a declared `internal` column, for
+ * rows the caller already holds — the accessor itself refuses any other field
+ * (ADR-0112 `INVALID_FIELD`).
+ */
+export async function readInternalColumn(
+  engine: InternalColumnSource,
+  object: string,
+  rows: readonly Record<string, unknown>[],
+  field: string,
+): Promise<unknown[]> {
+  const out: unknown[] = rows.map((row) =>
+    row && typeof row === 'object' && field in row ? (row[field] ?? null) : undefined,
+  );
+  const missing = out.flatMap((v, i) => (v === undefined ? [i] : []));
+  if (missing.length === 0) return out;
+
+  if (!collectInternalReadFields(engine.getSchema?.(object)).includes(field)) {
+    return out.map((v) => (v === undefined ? null : v));
+  }
+
+  const refuse = (why: string): never => {
+    throw new Error(
+      `${object} rows were read back without '${field}' (the engine's \`internal: true\` strip ran) `
+        + `but ${why}, so the route that asked cannot answer and refuses. Wire the ObjectQL engine, `
+        + 'which provides the `resolveInternalField` accessor beside the strip.',
+    );
+  };
+  const resolve = engine.resolveInternalField;
+  if (typeof resolve !== 'function') return refuse('this engine offers no accessor to recover it');
+  const ids = missing.map((i) => {
+    const id = rows[i]?.id;
+    if (typeof id !== 'string' && typeof id !== 'number') refuse('a row carries no id to recover it by');
+    return String(id);
+  });
+  const values = await resolve.call(engine, object, ids, field);
+  // A row deleted between the read and the dereference reads as unset; the
+  // caller treats it as the gone record it is.
+  missing.forEach((rowIndex, k) => {
+    out[rowIndex] = values.get(ids[k]) ?? null;
+  });
+  return out;
+}

@@ -118,43 +118,6 @@
  "packages/lint/src/validate-widget-bindings.ts": {
   "#2501": 1
  },
- "packages/plugins/plugin-approvals/src/approval-service.ts": {
-  "#10153": 1,
-  "#10230": 1,
-  "#10547": 2,
-  "#3424": 1,
-  "#3447": 2,
-  "#3508": 1,
-  "#3807": 1,
-  "#3823": 1
- },
- "packages/plugins/plugin-approvals/src/sys-approval-action.object.ts": {
-  "#3266": 1,
-  "#3424": 1
- },
- "packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts": {
-  "#1322": 1
- },
- "packages/plugins/plugin-approvals/src/translations/en.objects.generated.ts": {
-  "#1322": 1,
-  "#3266": 1,
-  "#3424": 1
- },
- "packages/plugins/plugin-approvals/src/translations/es-ES.objects.generated.ts": {
-  "#1322": 1,
-  "#3266": 1,
-  "#3424": 1
- },
- "packages/plugins/plugin-approvals/src/translations/ja-JP.objects.generated.ts": {
-  "#1322": 1,
-  "#3266": 1,
-  "#3424": 1
- },
- "packages/plugins/plugin-approvals/src/translations/zh-CN.objects.generated.ts": {
-  "#1322": 1,
-  "#3266": 1,
-  "#3424": 1
- },
  "packages/plugins/plugin-audit/src/audit-writers.ts": {
   "#5226": 1
  },
@@ -316,20 +279,5 @@
  },
  "packages/services/service-automation/src/sys-flow-dispatch.object.ts": {
   "#10220": 1
- },
- "packages/services/service-datasource/src/datasource-credential-migration.ts": {
-  "#8078": 1,
-  "#8081": 1
- },
- "packages/services/service-datasource/src/datasource-route-ledger.ts": {
-  "#3827": 1,
-  "#4249": 1,
-  "#7744": 1,
-  "#7955": 1,
-  "#8155": 1
- },
- "packages/services/service-datasource/src/external-datasource-service.ts": {
-  "#10997": 1,
-  "#11000": 1
  }
 }

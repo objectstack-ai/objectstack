@@ -52,6 +52,8 @@ import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 // assert the same observable answer on both surfaces, which is what proves the
 // de-duplication did not move the behaviour.
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
+// [#21197] The one dereference of an `internal` column — see the probe below.
+import { readInternalColumn } from '@objectstack/objectql/core';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -202,7 +204,18 @@ export async function handleShareLinksRequest(
                     if (!isPublicSharingEnabled(schema)) return invalidOrExpired();
                 }
                 const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
-                if (live && row.password_hash) {
+                // [#21197] `sys_share_link.password_hash` is `internal: true`, so the
+                // probe row above comes back WITHOUT it; read off the row, every
+                // protected link would answer the unknown-token shape and the
+                // password prompt would never appear. Recovered through objectql's
+                // one dereference (the same rule plugin-sharing's route twin uses):
+                // stripped-versus-unset by the registered declaration, and
+                // FAIL-CLOSED — a strip it cannot undo throws into the catch below,
+                // never reads as "no password".
+                const [passwordHash] = live && engine
+                    ? await readInternalColumn(engine, 'sys_share_link', [row], 'password_hash')
+                    : [null];
+                if (live && passwordHash) {
                     return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
                         providedPassword ? 'Incorrect password' : 'This link requires a password');
                 }

@@ -1267,10 +1267,12 @@ export interface WidgetLike {
   title?: string;
   description?: string;
   /**
-   * The renderer-extras bag (`DashboardWidgetOptionsSchema`). `translateDashboard`
-   * writes exactly one key into it — `description`, the metric widget's
-   * sub-caption slot — when the bundle carries a
-   * `dashboards.<name>.widgets.<id>.subCaption` entry (#5428 item 4, #7862).
+   * The widget options bag (`DashboardWidgetOptionsSchema`). `translateDashboard`
+   * writes nothing into it and carries it through untouched. It used to
+   * overlay `description` here — the metric sub-caption, from a
+   * `dashboards.<name>.widgets.<id>.subCaption` entry — until ruling C on
+   * objectui#11389 retired the sub-caption at both ends: a widget keeps one
+   * authored description, `widget.description`.
    */
   options?: Record<string, any>;
   [key: string]: any;
@@ -1470,7 +1472,7 @@ function lookupWidgetAttr(
   bundle: TranslationBundle | undefined,
   dashboardName: string,
   widgetId: string,
-  attr: 'title' | 'description' | 'subCaption',
+  attr: 'title' | 'description',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1485,15 +1487,14 @@ function lookupWidgetAttr(
 /**
  * Apply the active locale to a dashboard metadata document — translates the
  * dashboard's `label` / `description` and each widget's `title` /
- * `description` / `subCaption` against `dashboards.<name>.widgets.<id>.*`.
- * The input document is not mutated.
+ * `description` against `dashboards.<name>.widgets.<id>.*`. The input
+ * document is not mutated.
  *
- * `subCaption` overlays the widget's `options.description` — the metric
- * widget's sub-caption, a DIFFERENT authored field from `widget.description`
- * (#5428 item 4: two authored fields, two keys; #7862). The `description`
- * key never reaches `options.description`, and `subCaption` never reaches
- * `widget.description`; the other `options` keys are carried through
- * untouched.
+ * A widget's `options` bag is carried through untouched: nothing here writes
+ * into it. The metric sub-caption — a `subCaption` bundle entry overlaid onto
+ * `options.description` — was retired at both ends by ruling C on
+ * objectui#11389 (reversing #5428 item 4); the bundle key is a tombstone and a
+ * widget keeps one authored description, `widget.description`.
  *
  * Global filters are translated too (#16772), against
  * `dashboards.<name>.globalFilters.<key>.label` and
@@ -1581,16 +1582,6 @@ export function translateDashboard<T extends DashboardLike>(
           ? undefined
           : lookupWidgetAttr(bundle, name, w.id, 'description', opts);
         if (desc) next.description = desc;
-        // The sub-caption's packaged counterpart is the packaged widget's own
-        // `options` bag — `{}` when that widget declared none, so an authored
-        // sub-caption on it still counts as diverged.
-        const packagedOptions = packagedWidget === undefined
-          ? undefined
-          : asRecord(packagedWidget.options) ?? {};
-        const subCaption = valueOverridesPackagedBase(packagedOptions, 'description', w.options?.description)
-          ? undefined
-          : lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
-        if (subCaption) next.options = { ...w.options, description: subCaption };
         return next;
       })
     : doc.widgets;

@@ -79,6 +79,7 @@
  */
 
 import type { IDataEngine } from '@objectstack/core';
+import { recoverInternalFieldsForSystemRead, type InternalFieldResolvingEngine } from './internal-field-readback.js';
 
 /** Object whose rows carry the OIDC config. */
 export const SSO_PROVIDER_OBJECT = 'sys_sso_provider';
@@ -276,6 +277,18 @@ export async function migrateLegacySsoClientSecrets(
   let rows: Record<string, unknown>[];
   try {
     rows = await e.find(SSO_PROVIDER_OBJECT, { context: { isSystem: true } });
+    // [#21197] `oidc_config` is `internal: true`, and the engine's strip has
+    // no system carve-out — so this raw read comes back WITHOUT the blob, and
+    // every legacy row would read as "no cleartext secret here": the sweep
+    // would report nothing found and leave the cleartext in place forever,
+    // silently. Recovered through the privileged accessor, the same seam
+    // plugin-auth's other raw-engine readers use.
+    await recoverInternalFieldsForSystemRead(
+      engine as unknown as InternalFieldResolvingEngine,
+      SSO_PROVIDER_OBJECT,
+      rows,
+      [SSO_OIDC_CONFIG_FIELD],
+    );
   } catch (err) {
     result.failures.push(`could not list providers: ${String((err as Error)?.message ?? err)}`);
     return result;
