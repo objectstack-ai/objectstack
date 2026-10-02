@@ -18,8 +18,9 @@
 //
 // ⭐ WHY THIS PACKAGE, AND WHY NOW. `src/engine-filter-array-lowering.test.ts`
 // is the negative pin required by maintainer ruling #13357 execution point 3
-// (landed in #13673): it proves a refused filter shape CANNOT REACH the
-// reference matcher. A pin whose whole job is a security-relevant
+// (landed in #13673): it proves a refused filter shape CANNOT REACH a driver
+// (it was written against `driver-memory`'s reference matcher, which commit
+// `8fec76a2b` has since retired). A pin whose whole job is a security-relevant
 // unreachability guarantee was type-checked by nothing at all.
 //
 // What differs from the build config, and what deliberately does NOT:

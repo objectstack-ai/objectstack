@@ -116,8 +116,8 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   'plugin-sharing': ['sys_record_share', 'sys_share_link', 'sys_sharing_rule'],
   /** `@objectstack/plugin-webhooks` — outbound webhook registrations. */
   'plugin-webhooks': ['sys_webhook'],
-  /** `@objectstack/service-automation` — flow run history + dispatch-idempotency ledger. */
-  'service-automation': ['sys_automation_run', 'sys_flow_dispatch'],
+  /** `@objectstack/service-automation` — flow run history, dispatch-idempotency ledger, write-only flow credentials. */
+  'service-automation': ['sys_automation_run', 'sys_flow_credential', 'sys_flow_dispatch'],
   /** `@objectstack/service-messaging` — notification & delivery pipeline. */
   'service-messaging': [
     'sys_http_delivery',

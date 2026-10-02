@@ -236,8 +236,11 @@ export interface IShareLinkService {
   /**
    * List links for a record, an object, or a creator.
    *
-   * ENFORCEMENT PATH: the listing is read under `context`, so row visibility
-   * is decided by it.
+   * ENFORCEMENT PATH: the caller's OWN list — `createdBy` equal to the
+   * caller's non-empty `context.userId` — is self-scoped (ADR-0111): it needs
+   * no object-level grant on `sys_share_link` and returns only links the
+   * caller created, by the same creator rule `revokeLink` applies. Every other
+   * listing is read under `context`, so row visibility is decided by it.
    */
   listLinks(filter: ListShareLinksFilter, context: ExecutionContext): Promise<ShareLink[]>;
 

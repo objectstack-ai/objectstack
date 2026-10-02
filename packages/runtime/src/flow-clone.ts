@@ -85,7 +85,7 @@
  * rather than only in an ADR.
  */
 
-import { METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
+import { getMetadataTypeRedactor, METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
 
 /**
  * The deployment status a clone is created with.
@@ -244,4 +244,90 @@ export function cloneFlowDefinition(
     copy.label = target.label;
     copy.status = FLOW_CLONE_STATUS;
     return copy;
+}
+
+// ---------------------------------------------------------------------------
+// [#20790] C1 — a source that holds a credential is never cloned in one step
+// ---------------------------------------------------------------------------
+
+/**
+ * One credential the clone's source holds, by class — never the value. The
+ * automation engine answers it (`AutomationEngine.flowCredentialHoldings`):
+ * a literal in the definition (a packaged flow's source), or one the
+ * write-only flow credential channel holds for a position of it.
+ */
+export interface FlowCloneCredentialHolding {
+    /** The node config key (`secret`, `signingSecret`). */
+    readonly key: string;
+    /** What an administrator is told the credential is; the key's spelling when absent. */
+    readonly label?: string;
+    readonly held: 'literal' | 'channel';
+}
+
+/** The slice of the automation service the clone door asks about credentials. */
+export interface FlowCloneCredentialSource {
+    flowCredentialHoldings?(name: string): readonly FlowCloneCredentialHolding[];
+}
+
+/** ADR-0112 pair for the credential refusal: the source's state forbids the copy. */
+export const FLOW_CLONE_CREDENTIAL_REFUSAL_STATUS = 409;
+export const FLOW_CLONE_CREDENTIAL_REFUSAL_CODE = 'RESOURCE_CONFLICT';
+
+/**
+ * The literal credentials a definition carries, through the `flow` redactor
+ * the automation plugin registers in `@objectstack/spec/kernel` — the
+ * projection of the platform's one credential-location table. The clone
+ * door's answer when the automation service does not report holdings itself
+ * (a host that composes another engine); it cannot see a channel-held one,
+ * because such a host has no channel.
+ */
+export function literalFlowCredentialHoldings(source: unknown): FlowCloneCredentialHolding[] {
+    const redactor = getMetadataTypeRedactor('flow');
+    if (!redactor || !source || typeof source !== 'object' || Array.isArray(source)) return [];
+    return redactor(source as Record<string, unknown>).redactedKeys.map((path) => ({
+        key: path.slice(path.lastIndexOf('.') + 1),
+        held: 'literal' as const,
+    }));
+}
+
+/**
+ * The clone door's credential refusal (#20790 C1, Q2 A), or `undefined` when
+ * the source holds none.
+ *
+ * A flow's credentials are its own: an inbound hook's secret authenticates
+ * posts to THAT hook, an `http` node's signing secret proves a delivery came
+ * from THAT flow. A whole-definition copy (§1 above) would carry a literal
+ * one across, and the metadata save door would then store it as the copy's
+ * own — two flows sharing one secret, which is never allowed. A secret the
+ * write-only channel holds is not in the definition at all, so the copy would
+ * arrive without it: an inbound copy refused at registration, an outbound
+ * copy delivering unsigned. Both are refused here instead, with the remedy:
+ * the administrator authors the copy with its own secret.
+ *
+ * ⚠️ So a PACKAGED inbound flow (the ADR-0126 §7.1 customization path) can no
+ * longer be cloned in one step — a cost the ruling accepted. The positions are
+ * named by class only, never by value, node or path.
+ */
+export function flowCloneCredentialRefusal(
+    sourceName: string,
+    holdings: readonly FlowCloneCredentialHolding[],
+): (Error & { code: string; status: number; statusCode: number }) | undefined {
+    if (holdings.length === 0) return undefined;
+    const classes = [...new Set(holdings.map((h) => h.label ?? `the credential at \`${h.key}\``))].sort().join(' and ');
+    const keys = new Set(holdings.map((h) => h.key));
+    const remedies = [
+        keys.has('secret') ? 'a new `config.secret` on its start node' : undefined,
+        keys.has('signingSecret') ? 'a new `config.signingSecret` on each http node that signs' : undefined,
+        [...keys].some((k) => k !== 'secret' && k !== 'signingSecret') ? 'a new value for each credential' : undefined,
+    ].filter((s): s is string => s !== undefined);
+    const err = new Error(
+        `Flow '${sourceName}' cannot be cloned in one step: it holds ${classes}, and a copy would share it — two `
+            + 'flows never share a secret. Author the copy with its own instead: read this flow\'s definition (its '
+            + 'credentials are withheld from it), create a new flow under a new machine name with that definition, '
+            + `and set ${remedies.join(' and ')}.`,
+    ) as Error & { code: string; status: number; statusCode: number };
+    err.code = FLOW_CLONE_CREDENTIAL_REFUSAL_CODE;
+    err.status = FLOW_CLONE_CREDENTIAL_REFUSAL_STATUS;
+    err.statusCode = FLOW_CLONE_CREDENTIAL_REFUSAL_STATUS;
+    return err;
 }

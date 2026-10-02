@@ -5,7 +5,8 @@
  *
  * The namespace is the aggregated row's own columns (aggregation aliases +
  * groupBy projections); operator semantics follow the Filter Protocol, with two
- * deliberate divergences from driver-memory's matcher: an unknown operator
+ * deliberate divergences from driver-memory's reference matcher (retired since by
+ * commit `8fec76a2b`): an unknown operator
  * throws — ignoring one would silently return unfiltered aggregates, the exact
  * silently-inert failure (#4286, ADR-0078) enforcement exists to end — and the
  * negation-carrying operators are NULL-safe per #5298 (see the grid at the
@@ -57,7 +58,7 @@ describe('applyHaving', () => {
     expect(applyHaving(ROWS, { total: { $between: [600, 1300] } }).map((r) => r.customer_id))
       .toEqual(['c2', 'c3']);
     expect(applyHaving(ROWS, { region: { $null: true } }).map((r) => r.customer_id))
-      .toEqual(['c1', 'c2', 'c3']); // absent folds into null, like the memory matcher
+      .toEqual(['c1', 'c2', 'c3']); // absent folds into null, as driver-memory's query path reads `$null`
   });
 
   it('multiple keys on one condition AND together, like `where`', () => {
