@@ -368,7 +368,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           message:
             `body assigns ctx.record.${w.field}, but an action's ctx.record is a plain snapshot the runtime ` +
             `never writes back — the action returns success and the assignment is discarded, whether or not ` +
-            `'${w.field}' is a declared field (#4345).`,
+            `'${w.field}' is a declared field. The snapshot stays read-only by design: an action's ` +
+            `write channel is ctx.api.`,
           hint:
             `To persist it, write through the API: ctx.api.object('<object>').updateById(ctx.recordId, ` +
             `{ ${w.field}: … }). Reported only because ctx.record is never passed anywhere in this body — ` +
@@ -428,7 +429,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           // CALLER-supplied and #8682/#8738 refuse it before any driver.
           `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
           `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
-          `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
+          `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver, before ` +
           `any statement is built. The write lands nothing, and the refusal escapes the body and ` +
           `fails the action.`,
         hint: fixHint(w.field, [...known]),
