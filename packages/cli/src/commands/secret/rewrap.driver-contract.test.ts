@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createCipheriv, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -199,6 +199,42 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
     expect(payload.report.rewrapByScope).toEqual({ settings: 1, object_secret_field: 0, datasource_credential: 1 });
     expect(exitCode).toBe(0);
     expect(await secretDriver.find('sys_secret', {})).toEqual(before);
+  }, 180_000);
+
+  it('with no data key, the run refuses before opening a row, and NO provider in its boot mints one', async () => {
+    // A development posture with no key anywhere: the posture in which a
+    // default provider mints a key file. The settings service the boot
+    // composes is handed this run's provider, so nothing may mint here.
+    const home = mkdtempSync(join(tmpdir(), 'os-rewrap-nokey-'));
+    const saved = { NODE_ENV: process.env.NODE_ENV, OS_SECRET_KEY: process.env.OS_SECRET_KEY, OS_HOME: process.env.OS_HOME };
+    process.env.NODE_ENV = 'development';
+    delete process.env.OS_SECRET_KEY;
+    process.env.OS_HOME = home;
+    try {
+      const before = await secretDriver.find('sys_secret', {});
+      const { payload, exitCode } = await runJson(['--declared-datasources', declaredFile]);
+
+      expect(payload.error, JSON.stringify(payload).slice(0, 400)).toBe('crypto_key_unavailable');
+      expect(exitCode).toBe(1);
+      expect(existsSync(join(home, 'dev-crypto-key'))).toBe(false);
+      expect(await secretDriver.find('sys_secret', {})).toEqual(before);
+
+      // POSITIVE CONTROL for the measurement: a default-posture provider in the
+      // same kind of home does mint, so an absent file above means none did.
+      const control = mkdtempSync(join(tmpdir(), 'os-rewrap-mint-'));
+      try {
+        new LocalCryptoProvider({ env: { OS_HOME: control }, mode: 'development' });
+        expect(existsSync(join(control, 'dev-crypto-key'))).toBe(true);
+      } finally {
+        rmSync(control, { recursive: true, force: true });
+      }
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
   }, 180_000);
 
   it('--apply re-wraps each held row under its holder\'s scope, leaves the orphan as it was, and a re-run is all done', async () => {
