@@ -2365,6 +2365,20 @@ describe('[#21207] stored metadata copies carry no content hash', () => {
     expect(JSON.parse(audit!.row.new_value).change_note).toBe('publish draft (hash (withheld))');
   });
 
+  it('a decision-audit note that quotes a hash (its rewrite, or a row written before) is copied withheld', async () => {
+    const { engine, fire, created } = makeEngine({ ...SCHEMAS, sys_metadata_audit: ['id', 'code', 'note'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata_audit',
+      input: { id: 'd-1', data: { note: 'expected parent (withheld) but current is (withheld)' } },
+      previous: { id: 'd-1', code: 'metadata_conflict', note: `expected parent ${PARENT} but current is ${HASH}` },
+      result: { id: 'd-1', code: 'metadata_conflict', note: 'expected parent (withheld) but current is (withheld)' },
+      session: {},
+    });
+    expect(created.length).toBeGreaterThan(0);
+    for (const c of created) hashFree(JSON.stringify(c.row));
+  });
+
   it('control: another object keeps its own checksum column in the copy', async () => {
     const { engine, fire, created } = makeEngine(SCHEMAS);
     installAuditWriters(engine as any, 'test.audit');

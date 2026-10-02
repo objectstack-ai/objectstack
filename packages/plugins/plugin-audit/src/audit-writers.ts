@@ -46,6 +46,7 @@ import {
 // [#21207] The same rows' stored content-hash columns — defined beside the
 // at-rest rewrite that withholds the copies already written.
 import {
+  METADATA_DECISION_AUDIT_OBJECT,
   STORED_METADATA_HASH_COLUMNS,
   STORED_METADATA_HASH_NOTE_COLUMN,
   withheldStoredHashTokens,
@@ -1439,6 +1440,13 @@ export function installAuditWriters(
       // …and a change note that quotes one keeps its words, not the hash.
       const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
       if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = withheldStoredHashTokens(note);
+    }
+    // The same for a decision-audit row's note: a conflict note written before
+    // the protocol withheld its hashes — and the rewrite of one by
+    // `os migrate audit-metadata-bodies`, whose own ledger copy would otherwise
+    // carry the old note's hashes straight back into the ledger.
+    if (objectName === METADATA_DECISION_AUDIT_OBJECT && typeof out.note === 'string') {
+      out.note = withheldStoredHashTokens(out.note);
     }
     if (dropComputed) {
       const defs = getFieldDefs(objectName);
