@@ -10,7 +10,6 @@
     "api/MetadataImportRequest — no type export",
     "api/MetadataQueryRequest — no type export",
     "automation/FlowVariable — no type export",
-    "automation/StateMachine — no type export",
     "data/ComparisonOperator — no type export",
     "data/DataEngineAggregateRequest — no type export",
     "data/DataEngineCountRequest — no type export",
