@@ -20,9 +20,10 @@
  *
  * ## Why this had no user-visible symptom (the issue's own observation class)
  *
- * `NativeSQLStrategy.resolveFieldSql` falls back to the bare column name for a
- * member the cube does not declare, and `qualifyAndRegisterJoin` leaves bare
- * columns bare on a cube with no `joins` — which an ad-hoc cube never has. So
+ * `NativeSQLStrategy.resolveFieldSql` falls back to the column the member names
+ * for a member the cube does not declare, and `qualifyAndRegisterJoin` leaves
+ * that column bare in a statement that joins nothing ([#21249]: what the
+ * statement joins, not the cube's `joins`, which an ad-hoc cube never has). So
  * both spellings compiled the same SQL before the fix and still do; block 2
  * measures that rather than asserting it. The divergence was confined to the
  * dimension VOCABULARY, which is why this was filed as an observation and fixed
@@ -317,9 +318,9 @@ describe('[#5353] the seeded dimensions change no verdict and no statement', () 
 
     expect(arraySpelling.sqls).toEqual(objectSpelling.sqls);
     // A bare column stays bare: `qualifyAndRegisterJoin` only qualifies when the
-    // cube declares `joins`, and an inferred cube never does. This is the whole
-    // reason #5353 was an observation rather than a defect — and the assertion
-    // that keeps a newly-DECLARED dimension from starting to qualify.
+    // statement joins something ([#21249]), and this one joins nothing. This is
+    // the whole reason #5353 was an observation rather than a defect — and the
+    // assertion that keeps a newly-DECLARED dimension from starting to qualify.
     expect(objectSpelling.sqls[0]).toContain('WHERE stage = ');
     expect(objectSpelling.sqls[0]).not.toContain('"deal"."stage"');
   });
@@ -459,10 +460,11 @@ describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal',
   it('bare and dotted keys reach parity together when both ride along', async () => {
     // Before the ruling only `stage` was unified and the whole query was refused
     // for `region`; now both keys are minted, on both spellings, and the query
-    // runs. The bare column stays BARE in the statement — `qualifyAndRegisterJoin`
-    // qualifies plain identifiers only for a cube declaring `joins`, and minting a
-    // dotted dimension does not give an inferred cube one (block 2's rule, still
-    // holding with a traversal in the same filter).
+    // runs. [#21249] The traversal makes the statement join `owner`, so the base
+    // column is qualified against the base table on both spellings alike —
+    // `qualifyAndRegisterJoin` reads what the statement joins, not whether the
+    // cube declares `joins` (block 2's bare column is the statement that joins
+    // nothing).
     const both = [['stage', '=', 'won'], ['owner.region', '=', 'NA']];
     const array = await inferredDimensions(both, NO_REGION);
     const object = await inferredDimensions(
@@ -473,6 +475,6 @@ describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal',
     expect(array.dimensions).toEqual(['owner.region', 'stage']);
     expect(object.dimensions).toEqual(array.dimensions);
     expect(object.sqls).toEqual(array.sqls);
-    expect(array.sqls[0]).toContain('WHERE (stage = $1 AND "owner"."region" = $2)');
+    expect(array.sqls[0]).toContain('WHERE ("deal"."stage" = $1 AND "owner"."region" = $2)');
   });
 });

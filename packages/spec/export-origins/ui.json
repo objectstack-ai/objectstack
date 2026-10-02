@@ -355,6 +355,8 @@
     "RecordHighlightsField": "src/ui/component.zod.ts#RecordHighlightsField (type)",
     "RecordHighlightsProps": "src/ui/component.zod.ts#RecordHighlightsProps (const)",
     "RecordHistoryProps": "src/ui/component.zod.ts#RecordHistoryProps (type)",
+    "RecordLineItemsProps": "src/ui/component.zod.ts#RecordLineItemsProps (type)",
+    "RecordLineItemsPropsParsed": "src/ui/component.zod.ts#RecordLineItemsPropsParsed (type)",
     "RecordPathProps": "src/ui/component.zod.ts#RecordPathProps (type)",
     "RecordQuickActionsProps": "src/ui/component.zod.ts#RecordQuickActionsProps (type)",
     "RecordReferenceRailProps": "src/ui/component.zod.ts#RecordReferenceRailProps (type)",

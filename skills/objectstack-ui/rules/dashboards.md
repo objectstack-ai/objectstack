@@ -182,7 +182,7 @@ export const SalesDashboard: Dashboard = {
       dataset: 'opportunity_metrics', values: ['total_amount'],
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       layout: { x: 0, y: 0, w: 3, h: 2 },
-      options: { icon: 'DollarSign' },   // the measure's own `format` drives the number
+      colorVariant: 'success',   // the accent; the measure's own `format` + `currency` drive the number
       // Period-over-period: renderer fetches the prior quarter and
       // surfaces a secondary value + delta arrow automatically.
       compareTo: { kind: 'previousPeriod' },
@@ -252,9 +252,9 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 * **Metric widgets** — the prior-period value renders as a small caption
   beneath the headline number, alongside a green/red delta arrow and an
   i18n trend label resolved from the comparison kind (e.g. `vs previous
-  period`, `vs previous year`). Authors should *not*
-  hand-author `options.trend` when `compareTo` is set; the renderer wins
-  and overwrites it.
+  period`, `vs previous year`). Authors do *not*
+  hand-author a trend: `options.trend` reaches no renderer on a
+  dataset-bound widget; `compareTo` is the trend.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
@@ -338,10 +338,10 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
 
 ### Widget `options` — the five declared keys
 
-`options` is an open bag — presentation extras (`icon`, `trend`, `density`, …)
-pass through untouched. These five are **declared** because they change the SQL
-the dataset query compiles to, so a typo (`sortDirection`, `granularity`) is an
-author-time type error rather than an option that silently does nothing.
+`options` is an open bag, but a dataset-bound widget reads no other key: `icon`,
+`trend`, `format`, `color` style nothing, and `os validate` warns on each (`unconsumed-widget-option`).
+Presentation lives on the measure (`format` / `currency`), `colorVariant` and `chartConfig`.
+These five change the dataset SQL; a typo (`sortDirection`) parses too, and draws that warning.
 
 | Key | Value | Effect |
 |:--|:--|:--|
