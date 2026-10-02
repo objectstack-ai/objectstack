@@ -38,6 +38,7 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
+import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -14518,6 +14519,68 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * An organization-scoped `view` write that changes which public forms
+     * accept anonymous intake, on a deployment whose anonymous form doors do
+     * not read that organization. Returns the refusal, or `null` when the
+     * write is fine.
+     *
+     * An anonymous form request carries no session and so no organization.
+     * The doors resolve the form in `tenancy.defaultOrgId()`'s organization
+     * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
+     * write's organization (every walled posture, degraded or not, answers
+     * `null`; so does a composition with no tenancy service), the doors read
+     * the env-wide definition and never see this overlay. Saving it would show
+     * the author a withdrawn (or published) form while the doors kept serving
+     * the env-wide state, so the write is refused instead and the author is
+     * pointed at the env-wide save, which every door honours.
+     *
+     * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
+     * an organization-scoped edit that leaves it as the env-wide definition has
+     * it is unaffected. Same code and status as {@link orgScopedWriteRefusal}:
+     * this item's anonymous intake has no per-org channel on this deployment.
+     */
+    private async anonymousFormIntakeOrgScopeRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string | null | undefined;
+        body: unknown;
+    }): Promise<Error | null> {
+        if (!args.organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
+        if (singular !== 'view') return null;
+        const tenancy = this.getServicesRegistry?.().get('tenancy') as
+            | { defaultOrgId?: () => Promise<string | null> }
+            | undefined;
+        const doorOrganization = typeof tenancy?.defaultOrgId === 'function'
+            ? await tenancy.defaultOrgId()
+            : null;
+        if (doorOrganization === args.organizationId) return null;
+        const proposed = anonymousFormIntakeSlugs(args.body);
+        const served = anonymousFormIntakeSlugs(
+            ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
+        );
+        if (proposed.length === served.length && proposed.every((s, i) => s === served[i])) return null;
+        const list = (slugs: string[]) => (slugs.length ? slugs.map((s) => `'${s}'`).join(', ') : 'none');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot change which public forms accept anonymous intake `
+            + `in organization '${args.organizationId}' (env-wide: ${list(served)}; this write: ${list(proposed)}). `
+            + `An anonymous form request carries no organization, and this deployment resolves `
+            + (doorOrganization
+                ? `it in organization '${doorOrganization}'`
+                : `none for it (a walled tenancy posture never guesses one)`)
+            + `, so the anonymous form doors serve the env-wide definition and would never see this change. `
+            + `Save it env-wide instead (retry with no active organization): that withdraws or publishes the form `
+            + `on every anonymous door. An organization-scoped edit that leaves the form's sharing as the env-wide `
+            + `definition has it is still accepted. See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -17032,6 +17095,18 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
+        // An org-scoped change to a form's anonymous intake that the anonymous
+        // form doors cannot see. Drafts too, so no draft is minted that its
+        // own promotion would refuse. See {@link anonymousFormIntakeOrgScopeRefusal}.
+        {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: request.type,
+                name: request.name,
+                organizationId: request.organizationId,
+                body: request.item,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
 
         if (this.environmentId !== undefined) {
             // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
@@ -18877,6 +18952,17 @@ export class ObjectStackProtocolImplementation implements
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft' },
         );
+        // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
+        // draft saved before that refusal existed must not reach `active`.
+        if (draftForGate) {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: singularType,
+                name: request.name,
+                organizationId: orgId,
+                body: draftForGate.body,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
         // promotion is about to earn, exactly as `saveMetaItem` attaches its
