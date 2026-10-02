@@ -43,9 +43,12 @@ onlyBuiltDependencies:
 #     Node that lacks tsx's registerHooks path (below 22.22.3 on the 22
 #     line, below 24.11.1 on the 24 line, and 25.0.x). The caller here is
 #     @oclif/core's ts-path. It swallows the error, logs "Could not find tsx"
-#     at debug level, and stays on dist/. The CONTROL leg of
-#     packages/cli/test/published-entry-node-env-source-reroute.test.ts then
-#     cannot arm, and that file's absence legs stay green with the guard
+#     at debug level, and stays on dist/. Two things break on such a Node.
+#     packages/cli/bin/run-dev.js, the SOURCE entry that the CLI's spawning
+#     tests run, silently loads dist/commands instead of src/commands. And
+#     the CONTROL leg of
+#     packages/cli/test/published-entry-node-env-source-reroute.test.ts
+#     cannot arm, so that file's absence legs stay green with the guard
 #     they pin deleted. The patch points the three specifiers back at the
 #     files 4.23.14 resolved: dist/esm/index.mjs (two of them) and
 #     dist/loader.mjs. Nothing else in the file changes. It ships nowhere:
