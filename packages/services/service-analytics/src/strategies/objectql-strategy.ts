@@ -31,6 +31,9 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { projectedDimensions } from '../order-key-door.js';
+// [#21316] The package's one row comparator and window, shared with the
+// dataset door's post-pass (#3588) — this face orders by it, never by a copy.
+import { applyOrdering, applyWindow } from '../dataset-executor.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
@@ -355,7 +358,42 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     } catch {
       sql = undefined;
     }
-    return sql ? { rows: mappedRows, fields, sql } : { rows: mappedRows, fields };
+    const answer = this.orderAndWindow(query, mappedRows);
+    return sql ? { rows: answer, fields, sql } : { rows: answer, fields };
+  }
+
+  /**
+   * [#21316] Apply the query's `order`, then its `offset` and `limit`, to the
+   * aggregated answer — the statement {@link generateSql} echoes, and the
+   * clauses `NativeSQLStrategy` compiles from the same three keys.
+   *
+   * `engine.aggregate` has no ordering or window grammar
+   * (`EngineAggregateOptions` declares neither), so the engine returns every
+   * group in its own arrival order and the face is where these keys are
+   * applied. Before this, the face dropped all three: every date-bucketed
+   * query — which the native face declines, so it lands here — answered every
+   * bucket unordered while its echoed `sql` and `/analytics/sql` rendered
+   * `ORDER BY … LIMIT …`.
+   *
+   * It runs on the remapped rows, keyed by the member spellings the caller
+   * selected, so an `order` key names a column exactly as the analytics door's
+   * order-key rule (`order-key-door.ts`, #21267) admitted it. `order` is read
+   * verbatim, in its own key order, and no implicit ordering is added: a bare
+   * `limit` slices the engine's order, as `LIMIT` without `ORDER BY` does.
+   *
+   * The comparison is the package's one row comparator, `applyOrdering`, which
+   * the dataset door's post-pass applies to every grid it assembles; the window
+   * is the same door's `applyWindow`. Where the native face answers the same
+   * query, its `ORDER BY` follows the driver's collation and NULL placement
+   * (SQLite sorts NULL lowest, PostgreSQL highest), while `applyOrdering` keeps
+   * NULL and `''` last in both directions, compares numeric text as numbers and
+   * other text with `localeCompare`. The two faces therefore agree on numbers
+   * and on text of single-case ASCII letters, and can differ on a NULL, an
+   * `''`, numeric text, mixed case or punctuation. (A date bucket key is minted
+   * sort-stable, `2026-03`, so it orders chronologically here.)
+   */
+  private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+    return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);
   }
 
   /**
@@ -1182,7 +1220,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return out;
     });
 
-    return { rows: mappedRows, fields: this.buildFieldMeta(query, cube) };
+    // [#21316] Ordered and windowed after the re-bucket, which is the step
+    // that yields one row per caller group — never before it, where a limit
+    // would cut FK groups that merge into a group it keeps.
+    return { rows: this.orderAndWindow(query, mappedRows), fields: this.buildFieldMeta(query, cube) };
   }
 
   /**

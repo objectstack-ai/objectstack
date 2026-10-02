@@ -60,7 +60,7 @@ const result = AIModelConfigSchema.parse(data);
 | **planning** | `{ maxIterations: integer }` | optional | Autonomous reasoning and planning configuration |
 | **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | [EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet. |
 | **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents. |
-| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | [EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet. |
+| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | Structured output contract for the agent's final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this agent. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -110,19 +110,19 @@ const result = AIModelConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxTokensPerInvocation** | `integer` | optional | Token budget per single invocation |
 | **maxExecutionTimeSec** | `integer` | optional | Max execution time in seconds |
-| **blockedTopics** | `string[]` | optional | Forbidden topics or action names |
+| **blockedTopics** | `string[]` | optional | Forbidden topics or action names: each entry is an exact, case-sensitive match on the tool name, on `action_` plus the action type, or on the tool category |
 
 ### Nested Shape: `Agent.structuredOutput`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
+| **format** | `Enum<'json_object' \| 'json_schema'>` | ✅ | Expected output format |
 | **schema** | `Record<string, any>` | optional | JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
 | **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
 | **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
-| **fallbackFormat** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | optional | Fallback format if primary format fails |
-| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate' \| 'coerce_types'>[]` | optional | Post-processing steps applied to output |
+| **fallbackFormat** | `Enum<'json_object' \| 'json_schema'>` | optional | Fallback format: once the primary format's retries are spent, the last answer is checked against this format instead |
+| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate'>[]` | optional | Post-processing steps applied to output |
 
 ### Nested Shape: `Agent.protection`
 
@@ -143,28 +143,25 @@ Structured output configuration for agent responses
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
+| **format** | `Enum<'json_object' \| 'json_schema'>` | ✅ | Expected output format |
 | **schema** | `Record<string, any>` | optional | JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
 | **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
 | **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
-| **fallbackFormat** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | optional | Fallback format if primary format fails |
-| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate' \| 'coerce_types'>[]` | optional | Post-processing steps applied to output |
+| **fallbackFormat** | `Enum<'json_object' \| 'json_schema'>` | optional | Fallback format: once the primary format's retries are spent, the last answer is checked against this format instead |
+| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate'>[]` | optional | Post-processing steps applied to output |
 
 
 ---
 
 ## StructuredOutputFormat
 
-Output format for structured agent responses
+Output format for structured agent responses (JSON only)
 
 ### Allowed Values
 
 * `json_object`
 * `json_schema`
-* `regex`
-* `grammar`
-* `xml`
 
 
 ---
@@ -178,7 +175,6 @@ Post-processing step for structured output
 * `trim`
 * `parse_json`
 * `validate`
-* `coerce_types`
 
 
 ---
