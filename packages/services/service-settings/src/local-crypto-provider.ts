@@ -130,6 +130,9 @@ const DATA_KEY_BYTES = 32;
  */
 const KEYED_DIGEST_KDF_INFO = 'objectstack/crypto-provider/keyed-digest/v1';
 
+/** HKDF-Expand's first-block input: `info || 0x01` (RFC 5869 §2.3, T(1)). */
+const KEYED_DIGEST_KDF_INPUT = Buffer.concat([Buffer.from(KEYED_DIGEST_KDF_INFO, 'utf8'), Buffer.from([0x01])]);
+
 /** Output prefix the `ICryptoProvider.keyedDigest` contract fixes. */
 const KEYED_DIGEST_PREFIX = 'hmac-sha256:';
 
@@ -496,10 +499,7 @@ export class LocalCryptoProvider implements ICryptoProvider {
     this.keySource = resolved.source;
     this.macKey =
       resolved.key.length === DATA_KEY_BYTES
-        ? createHmac('sha256', resolved.key)
-            .update(KEYED_DIGEST_KDF_INFO, 'utf8')
-            .update(Buffer.from([0x01]))
-            .digest()
+        ? createHmac('sha256', resolved.key).update(KEYED_DIGEST_KDF_INPUT).digest()
         : undefined;
     this.useNoble = isWebContainerRuntime();
   }
