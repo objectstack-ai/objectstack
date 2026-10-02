@@ -462,11 +462,14 @@ describe('[#21391] a no-write mode leaves the database byte-identical, boot incl
 describe('[#21391] a no-write mode does not bring a missing SQLite file into existence', () => {
   it.each(NO_WRITE)('$label', async ({ run, argv }) => {
     const c = prepareCase(argv, { absent: true });
-    await runJson(run, c.argv);
+    const result = await runJson(run, c.argv);
 
     for (const path of [c.dbFile, `${c.dbFile}-wal`, `${c.dbFile}-shm`, `${c.dbFile}-journal`]) {
       expect(existsSync(path), `${path} was created by a no-write mode`).toBe(false);
     }
+    // Nothing to read there: whether the mode reports or refuses, `--json`
+    // still answers with one JSON document (the declared narrowing's face).
+    expect(result.payload?.unparsed, 'no JSON document on stdout').toBeUndefined();
   }, CASE_TIMEOUT_MS);
 });
 
