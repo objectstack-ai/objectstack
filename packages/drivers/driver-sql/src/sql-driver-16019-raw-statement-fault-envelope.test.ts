@@ -139,14 +139,20 @@ describe('[#16019] SqlDriver.execute() declares a backend refusal as DATABASE_ER
     expect(looksLikeInternalErrorLeak('no such column: bogus_dim')).toBe(true);
   });
 
-  it('writes the statement and the dialect message to the server log — after this change, the only copy', async () => {
+  it("writes the dialect's diagnostic to the server log, with the statement cut", async () => {
     await faultOf(() => driver.execute(TRANSLATE_SQL));
 
     const line = driver.warned.find((m) => m.includes('DATABASE_ERROR'));
     expect(line).toBeDefined();
     expect(line).toContain('(SQLITE_ERROR)');
-    expect(line).toContain(TRANSLATE_SQL);
     expect(line).toContain('no such function: translate');
+    // [#21385, maintainer ruling 2026-10-02] The line used to write the
+    // statement too, sent and compiled. Both carry the values a raw statement
+    // binds or spells inline, and a server log leaves the data's trust
+    // boundary, so neither is written: the cut's marker stands in their place.
+    expect(line).not.toContain(TRANSLATE_SQL);
+    expect(line).not.toContain('statement: ');
+    expect(line).toContain('[statement and bound values redacted]');
   });
 
   it('a missing table on the raw path stays classifiable through `cause` (isMissingTableError)', async () => {

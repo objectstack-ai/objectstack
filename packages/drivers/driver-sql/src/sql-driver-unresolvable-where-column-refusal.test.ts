@@ -99,8 +99,9 @@
  *    text entirely — statement, quoted references and `$n` alike;
  *  - `literalWithheldBy` for pg moves from `NEVER_INLINED` to the envelope, and
  *    the knex fact it used to name moves one slot over, to
- *    `dialectTextInlinesLiteral` — asserted now against the SERVER LOG, which
- *    is where the dialect text still goes. The distinction #9108 paid for is
+ *    `dialectTextInlinesLiteral` — asserted now against the dialect text the
+ *    refusal is handed (since #21385 the server-log line is cut, so it no
+ *    longer holds that text whole). The distinction #9108 paid for is
  *    kept, not collapsed: "the value was never in the text" and "the text was
  *    withheld" remain different facts about different strings.
  *
@@ -110,7 +111,7 @@
  * since #8790.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import knex from 'knex';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
@@ -234,7 +235,9 @@ const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuer
  * mechanism distinction — a withheld message carries no literal whatever knex
  * did with the bindings — so the knex fact is kept on its own axis
  * ({@link DottedCell.dialectTextInlinesLiteral}) and asserted where the dialect
- * text still exists: the SERVER LOG line the driver writes on the way out.
+ * text still exists: [#21385] the dialect error the refusal terminal is handed.
+ * The SERVER LOG line it writes on the way out takes the shared driver-fault
+ * cut since the maintainer's ruling of 2026-10-02, so it carries no statement.
  *
  * ⛔ Collapsing the two into "no literal reaches the caller" is exactly what let
  * #8931's false premise stand for a month; the axis is kept for that reason and
@@ -261,11 +264,12 @@ interface DottedCell {
     | typeof NEVER_INLINED
     | typeof BACKEND_FAULT_ENVELOPE;
   /**
-   * [#8931 Q3, re-homed by Q1/Q2] Does the dialect's own text — the string that
-   * now reaches only the server log — carry the caller's bound literal?
+   * [#8931 Q3, re-homed by Q1/Q2] Does the dialect's own text — the string the
+   * refusal terminal is handed, which reaches neither the caller nor (since
+   * #21385) the server log whole — carry the caller's bound literal?
    *
    * The half of `literalWithheldBy` that survives the envelope: `true` means
-   * the log line proves the message COULD have carried the value (sqlite and
+   * that text proves the message COULD have carried the value (sqlite and
    * mysql leave `?` for knex's formatter to substitute), `false` means it never
    * could (pg positions bindings to `$n` first). Asserting only the caller's
    * side would make every cell pass for a different reason and record none of
@@ -310,8 +314,9 @@ const DOTTED_STATUS_QUO: Readonly<Record<string, DottedCell>> = {
     code: 'DATABASE_ERROR',
     status: 500,
     literalWithheldBy: BACKEND_FAULT_ENVELOPE,
-    // Still false, still the #9108 measurement, now asserted on the LOG line —
-    // the only string that still holds the dialect's words.
+    // Still false, still the #9108 measurement, now asserted on the dialect
+    // text the read terminal is handed — the only string that still holds the
+    // dialect's words whole (#21385 cut the LOG line).
     dialectTextInlinesLiteral: false,
     // The composed message names the caller's own object and nothing else: ⛔ no
     // table name, no quoted reference, no `$n`. The negative half of this is
@@ -485,11 +490,22 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     const sink = { warn: (m: string) => logged.push(String(m)), info: () => {}, error: () => {} };
     const original = (driver as unknown as { logger: unknown }).logger;
     (driver as unknown as { logger: unknown }).logger = sink;
+    // [#21385] The dialect's text is read where the refusal is HANDED it — the
+    // two protected terminals this route reaches — because the log line no
+    // longer carries it whole (see below). `vi.spyOn` calls through.
+    const onRefusal = vi.spyOn(driver as any, 'unresolvableFilterColumnRefusal');
+    const onTerminal = vi.spyOn(driver as any, 'backendStatementFault');
     let err: any;
+    let handed: string[];
     try {
       err = await caught(() => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
     } finally {
       (driver as unknown as { logger: unknown }).logger = original;
+      handed = [...onRefusal.mock.calls, ...onTerminal.mock.calls].map((args) =>
+        String((args[1] as { message?: unknown } | null | undefined)?.message),
+      );
+      onRefusal.mockRestore();
+      onTerminal.mockRestore();
     }
 
     expect(err.message).not.toContain(SECRET_LITERAL);
@@ -497,34 +513,40 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     // [#8931 Q1+Q2, ruled 2026-08-17] Since the catch-all, EVERY cell writes
     // the dialect's own text to the server log on the way out — the pg cell
     // included, which before this ruling logged nothing at all because nothing
-    // recognised its error. So the control is now uniform on the log's
-    // EXISTENCE, and the per-cell fact it proves is what that text contains.
-    const dialectText = logged.find((line) => line.includes(' - ') || line.includes('select '));
+    // recognised its error. So the control is uniform on the log's EXISTENCE.
+    const logLine = logged.find((line) => line.startsWith('[sql-driver] '));
     expect(
-      dialectText,
+      logLine,
       'the dialect message must reach the server log — that is what makes this a withholding rather than a deletion',
     ).toBeDefined();
+    // [#21385, maintainer ruling 2026-10-02] …and that line is CUT on every
+    // cell: the statement and its bound values no longer reach the log, which
+    // leaves the data's trust boundary. So the knex fact this control records
+    // is read off the dialect text the refusal was handed, which is where it
+    // still exists, and the log is asserted clean on every cell.
+    expect(handed.length, 'exactly one refusal terminal was handed the dialect error').toBe(1);
+    const dialectText = handed[0];
+    expect(logged.some((line) => line.includes(SECRET_LITERAL)), 'the literal reached the server log').toBe(false);
+    expect(String(logLine)).toContain('[statement and bound values redacted]');
 
     if (expected.dialectTextInlinesLiteral) {
       // sqlite / mysql: knex leaves `?` standing, so its error formatter
-      // substituted the caller's value into the text. The log carrying it is
-      // the proof the caller's message "could have" carried it — without this,
-      // "no literal in the message" is a claim about a string nobody showed
-      // ever held one.
+      // substituted the caller's value into the text. The handed text carrying
+      // it is the proof the caller's message "could have" carried it — without
+      // this, "no literal in the message" is a claim about a string nobody
+      // showed ever held one.
       expect(
-        logged.some((line) => line.includes(SECRET_LITERAL)),
-        'the dialect text should have reached the server log with the literal intact',
+        dialectText.includes(SECRET_LITERAL),
+        'the dialect text should have carried the literal intact',
       ).toBe(true);
     } else {
       // Postgres: the value was parameterised BEFORE the failing statement was
-      // formatted, so a `$n` placeholder stands where it would have been — in
-      // the log, which since the ruling is the only place the dialect text
-      // exists. ⛔ Do not read this cell as "the redaction works here": nothing
-      // was redacted, the value was never in the string. The mechanism pin at
-      // the bottom of this file is why that stays true.
-      expect(String(dialectText), 'the value should stand as a placeholder, not a literal')
-        .toMatch(/\$\d/);
-      expect(logged.some((line) => line.includes(SECRET_LITERAL))).toBe(false);
+      // formatted, so a `$n` placeholder stands where it would have been.
+      // ⛔ Do not read this cell as "the redaction works here": nothing was
+      // redacted, the value was never in the string. The mechanism pin at the
+      // bottom of this file is why that stays true.
+      expect(dialectText, 'the value should stand as a placeholder, not a literal').toMatch(/\$\d/);
+      expect(dialectText.includes(SECRET_LITERAL)).toBe(false);
     }
   });
 
@@ -825,8 +847,9 @@ describe('[#8790] dialect wording — what the refusal recognises and what it na
  * the fact below no longer protects the caller — it protects the SERVER LOG,
  * which is where the driver now writes the dialect's words. A knex upgrade that
  * inlined pg bindings would put the caller's value in that log line, which is
- * precisely the exposure `redactBoundStatement` (`@objectstack/objectql`)
- * closes for the engine's own log slots. The pin therefore stays live and its
+ * precisely the exposure `redactBoundStatement` (`@objectstack/types`) closes
+ * for the engine's own log slots — and, since #21385, the shared cut this
+ * driver's refusal lines take as well. The pin therefore stays live and its
  * red still means "re-measure by hand"; only the string it is a statement about
  * has changed.
  *

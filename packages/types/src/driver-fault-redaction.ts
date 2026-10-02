@@ -320,9 +320,51 @@
  * message LEADS with a statement, and the structural cut needs nothing more.
  * Over-redaction is the only direction this can err in: a message on that
  * chain that carries a separator and no statement loses the text before it.
+ *
+ * ## [#21385] One cutter for every log face, the driver's own lines included
+ *
+ * Everything above stopped at the engine, and the driver underneath wrote
+ * first. `driver-sql`'s refusal terminals log the dialect's own message on the
+ * way to composing their envelope: the read terminal, the raw-statement
+ * terminal (which also logged the statement it ran), and the three refusals
+ * for a WHERE, groupBy / aggregation or listed-distinct column the backend
+ * could not resolve. Their design text said that message was "kept
+ * server-side" for an operator. Measured on better-sqlite3, live PostgreSQL 16
+ * and live MySQL 8.0 with a synthetic sentinel: all five lines carried it on
+ * SQLite and MySQL, where knex inlines the bound values into the statement it
+ * prefixes, and the read and raw terminals carried it on PostgreSQL, through a
+ * value-bearing diagnostic and through the raw statement's own text.
+ *
+ * Ruled by the maintainer on 2026-10-02 (letter A): a server log leaves the
+ * data's trust boundary at every layer, so those lines call THIS module. It
+ * moved here from `@objectstack/objectql` so that the driver, which does not
+ * depend on the engine, imports the same function the engine calls. Nothing
+ * about the cut changed in the move: the same split, the same structural cut,
+ * the same value templates. The engine keeps calling
+ * {@link redactBoundStatement} and {@link redactPropagatedDriverFault}, now
+ * from `@objectstack/types`.
+ *
+ * Why `@objectstack/types`, and not a package above it: it is the LOWEST home
+ * every face of this family can reach. `driver-sql`, `objectql` and `core` all
+ * depend on it; and the family's fourth position, `operatorFacingErrorText`
+ * (`driver-error-classification.ts`, #21418), lives inside it, so a cutter
+ * placed in any package above `types` is one that helper could never call.
+ * The module needs nothing new to live here: its one import, the shared leak
+ * predicate, is a sibling module of this package, and the package depends on
+ * `@objectstack/spec` alone. It is edge-safe like the rest of this entry:
+ * regular expressions and `Error`, no `node:` builtin.
+ *
+ * The driver's lines take the LOG face, {@link redactStatementFromMessage},
+ * with the same `{ statementSent: true }` the engine's raw door passes. Every
+ * one of them writes the text of a fault raised by a statement the driver
+ * itself sent, so a statement may lead that text whatever word it opens with,
+ * exactly as at the raw door. Each line keeps its code, the class of fault it
+ * reports and the dialect's own diagnostic, minus the value slots the
+ * templates above own. The caller-facing envelopes those terminals compose
+ * still carry no dialect text.
  */
 
-import { looksLikeInternalErrorLeak } from '@objectstack/types';
+import { looksLikeInternalErrorLeak } from './error-leak.js';
 
 /**
  * knex joins the bound statement to the database's own message with this
@@ -645,9 +687,9 @@ const END_OF_MESSAGE_ANCHOR = '$()';
  * gets a loud, named throw and its author amends this guard deliberately,
  * rather than the invariant quietly acquiring an exception.
  *
- * Exported for `driver-fault-redaction.test.ts`, which calls it with synthetic
- * rows to prove it FIRES — a guard nobody has watched fail is the same prose
- * this replaced.
+ * Exported for `driver-fault-redaction.test.ts` beside this file (not on the
+ * package entry), which calls it with synthetic rows to prove it FIRES — a
+ * guard nobody has watched fail is the same prose this replaced.
  *
  * @param templates - the table to check; the shipped one is checked at load.
  * @throws when a row declares a `head` whose `whole` is not end-anchored.
@@ -740,11 +782,17 @@ export function redactBoundStatement(error: unknown): unknown {
 }
 
 /**
- * The message half, exported for the cases that pin the cut directly.
- * Returns the input string unchanged when nothing is cut.
+ * The message half: the LOG face of the cut. The engine's own log line reaches
+ * it through {@link redactBoundStatement}; [#21385] `driver-sql`'s refusal
+ * lines call it directly, with `{ statementSent: true }`, because each of them
+ * writes the text of a fault its own statement raised (see the module
+ * header). Returns the input string unchanged when nothing is cut.
+ *
+ * @param message - the text the log line would otherwise write.
+ * @param origin - what the caller knows about where the text came from.
  */
-export function redactStatementFromMessage(message: string): string {
-  const dump = splitDriverDump(message);
+export function redactStatementFromMessage(message: string, origin: DriverFaultOrigin = {}): string {
+  const dump = splitDriverDump(message, origin.statementSent === true);
   if (dump === undefined) return message;
   // No statement to cut — but a dialect may still have inlined a value in the
   // diagnostic itself, and since commit 27a567dd8 taught the shared predicate this
@@ -772,8 +820,9 @@ export function redactStatementFromMessage(message: string): string {
  *
  * [#21345] `statementSent` replaces the predicate's verdict with the door's
  * own knowledge (see the module header): the message is a dump by
- * construction, whatever word it opens with. Only the propagated face takes
- * it; the log line's face asks the predicate as before.
+ * construction, whatever word it opens with. [#21385] Both faces take it now:
+ * the engine's raw door on the propagated face, and `driver-sql`'s refusal
+ * lines on the log face. The engine's own log line still asks the predicate.
  */
 function splitDriverDump(
   message: string,
@@ -939,12 +988,17 @@ export function redactPropagatedDriverFault(error: unknown, origin: DriverFaultO
   return redactFaultAt(error, 0, origin.statementSent === true);
 }
 
-/** [#21345] What the door that rethrows a driver fault knows about its origin. */
+/**
+ * [#21345] What the door that rethrows a driver fault knows about its origin.
+ * [#21385] Also what a driver's own log line knows about the text it writes.
+ */
 export interface DriverFaultOrigin {
   /**
-   * The door handed the driver a raw statement it did not compose, so a
-   * statement may lead every message on the fault's chain whatever word it
-   * opens with. The cut then runs without the shared leak predicate's verdict.
+   * A statement was sent, and the text being cut is what came back: the
+   * engine's door handed the driver a raw statement it did not compose, or a
+   * driver's log line is writing the fault its own statement raised. Either
+   * way a statement may lead that text whatever word it opens with, so the
+   * cut runs without the shared leak predicate's verdict.
    */
   readonly statementSent?: boolean;
 }

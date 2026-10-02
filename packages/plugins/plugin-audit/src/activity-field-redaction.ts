@@ -65,10 +65,44 @@
  *    `metadata.old` / `metadata.new`, if it has them, are narrowed like the
  *    mirror's, because that shape IS record field values.
  *
+ * ## An update whose every recorded change is withheld is withheld as a row (#21388)
+ *
+ * Narrowing key by key leaves one thing behind. An UPDATE row whose recorded
+ * change had keys, every one of which this reader is not served, still reached
+ * the reader as a row with an empty change, and its summary, actor and
+ * timestamp said that the record changed, and when. That is how an org peer
+ * read each sign-in time of a colleague: a sign-in stamps identity fields the
+ * peer is withheld. So such a row is withheld from that reader as a ROW:
+ *
+ *  - An update row is one whose stored change has both sides (`old` and `new`
+ *    are records). A create (`old` null) and a delete (`new` null) keep their
+ *    rows: their existence is the record's own, which the read gate decides.
+ *  - "Had keys" reads the STORED change, never the redacted one. A row whose
+ *    stored change is empty on both sides (an update that touched only
+ *    `internal` fields, which the writer omits) is empty for every reader, and
+ *    is unaffected.
+ *  - "Withheld" is the answer this redaction narrows by: a key this reader is
+ *    not served. One answer for both, so a row is withheld exactly when the
+ *    redaction would leave its change empty. A reader the service gives no
+ *    answer for is narrowed by neither. ⛔ No object or field is named here.
+ *
+ * It is a WHERE, not a post-read drop, built the way the read gate builds its
+ * own and on the same four reads (`find`, `findOne`, `count`, `aggregate`). A
+ * pre-scan of the rows the query would touch, under SYSTEM context and in the
+ * caller's order, judges each one, and the ids it withholds are ANDed out of
+ * the query (`{ id: { $nin: WITHHELD } }`). So a list's `total`, its pages, a
+ * by-id read and a grouped count all agree with the rows served; a count that
+ * kept the row would leak the same timing. A pre-scan that reaches its bound
+ * fails CLOSED, as the read gate's does: the rows beyond the window cannot be
+ * judged, so the read is answered from the judged rows alone
+ * (`{ id: { $in: KEPT } }`), and a warn says so.
+ *
  * ## Fail closed
  *
  * An unexpected failure strips every value-bearing column from the rows of the
- * read rather than serving them unredacted — the sibling read gate's rule. The
+ * read rather than serving them unredacted — the sibling read gate's rule. A
+ * withheld-update pre-scan that fails denies the read, as the read gate does.
+ * The
  * security service's own "no answer" (no service wired, or an unresolvable
  * read projection) passes rows through, exactly as the approval snapshot and
  * the data plane itself do; a reader the service cannot answer MASKING for is
@@ -78,7 +112,9 @@
  * context-less programmatic calls are not redacted, as for the read gate.
  */
 
+import type { CommentAccessEngine } from './comment-access-hooks.js';
 import { parseActivityParentObject, type ActivityMiddlewareEngine } from './activity-read-visibility.js';
+import { PARENT_GATE_READ_OPS, PARENT_GATE_SCAN_LIMIT, andIntoWhere } from './parent-record-read-gate.js';
 import {
   dropUnservedKeys,
   ensureJudgedColumnsProjected,
@@ -166,6 +202,103 @@ function stripValueBearing(row: Record<string, unknown>): void {
   for (const col of VALUE_BEARING_COLUMNS) delete row[col];
 }
 
+/** Names this seam in its log lines and in the served-fields answer's. */
+const REDACTION_SEAM = 'activity field redaction';
+
+/** One read's served-unmasked answer, per parent object. */
+type ServedFor = (object: string) => Promise<string[] | undefined>;
+
+/** The engine slice the withheld-update rule's pre-scan needs. */
+export type ActivityRedactionEngine = ActivityMiddlewareEngine & Pick<CommentAccessEngine, 'find'>;
+
+/** The columns the withheld-update pre-scan reads: the row, its parent object
+ * and its stored change. */
+const WITHHELD_SCAN_COLUMNS = ['id', 'object_name', 'metadata'] as const;
+
+/** No real row matches it: the withheld-update rule's fail-closed answer. */
+const WITHHELD_DENY_ALL = { id: '__activity_withheld_update_denied__' } as const;
+
+/**
+ * [#21388] Whether an activity row's STORED change is an update every one of
+ * whose keys a reader served `served` is withheld. False for a create or a
+ * delete (one side is not a record), for a change empty on both sides (empty
+ * for every reader), and for anything that is not a recorded change.
+ * Exported for direct testing.
+ */
+export function isWithheldOnlyUpdate(metadata: Record<string, unknown> | null, served: ReadonlySet<string>): boolean {
+  if (!metadata) return false;
+  const before = metadata.old;
+  const after = metadata.new;
+  if (!isRecord(before) || !isRecord(after)) return false;
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  if (keys.size === 0) return false;
+  for (const key of keys) if (served.has(key)) return false;
+  return true;
+}
+
+/**
+ * [#21388] The WHERE that withholds, from one read, every update row whose
+ * stored change is withheld whole from the reader `servedFor` answers for:
+ * `null` when the read withholds nothing, `{ id: { $nin: WITHHELD } }` when the
+ * pre-scan saw every row the read can touch, and `{ id: { $in: KEPT } }` when
+ * it reached its bound (fail closed: an unjudged row is never served).
+ * Exported for direct testing.
+ */
+export async function computeWithheldUpdateFilter(
+  engine: Pick<CommentAccessEngine, 'find'>,
+  ast: Record<string, unknown>,
+  servedFor: ServedFor,
+  logger: ActivityRedactionLogger,
+): Promise<unknown | null> {
+  // The rows the read would touch, under SYSTEM context (the reader may not be
+  // served their change; that is what is being decided). The caller's own
+  // order rides along, so a bounded window is the one the caller pages through.
+  const orderBy = ast.orderBy;
+  const candidates = await engine.find(ACTIVITY_OBJECT, {
+    where: (ast.where as Record<string, unknown> | undefined) ?? {},
+    fields: [...WITHHELD_SCAN_COLUMNS],
+    ...(Array.isArray(orderBy) && orderBy.length > 0 ? { orderBy } : {}),
+    limit: PARENT_GATE_SCAN_LIMIT,
+    context: { ...SYSTEM_CTX },
+  });
+  if (!candidates.length) return null;
+
+  const servedSets = new Map<string, Set<string> | undefined>();
+  const withheld: unknown[] = [];
+  const kept: unknown[] = [];
+  for (const row of candidates) {
+    let isWithheld = false;
+    const object = parseActivityParentObject(row);
+    if (object) {
+      if (!servedSets.has(object)) {
+        const answer = await servedFor(object);
+        servedSets.set(object, answer === undefined ? undefined : new Set(answer.map(String)));
+      }
+      const served = servedSets.get(object);
+      isWithheld = served !== undefined && isWithheldOnlyUpdate(parseMetadata(row.metadata), served);
+    }
+    const id = row.id;
+    const usable = (typeof id === 'string' || typeof id === 'number') && String(id) !== '';
+    // A row is excluded by its stored id, so a withheld row without one
+    // cannot be excluded at all: deny the read rather than serve it.
+    if (!usable) {
+      if (isWithheld) return WITHHELD_DENY_ALL;
+      continue;
+    }
+    (isWithheld ? withheld : kept).push(id);
+  }
+
+  if (candidates.length >= PARENT_GATE_SCAN_LIMIT) {
+    logger.warn(
+      `[audit] ${REDACTION_SEAM}: the withheld-update pre-scan hit the ${PARENT_GATE_SCAN_LIMIT}-row cap; ` +
+        'this broad read is answered from the rows it judged (fail-closed) and may omit visible rows — ' +
+        'scope the query by object_name and record_id',
+    );
+    return kept.length ? { id: { $in: kept } } : WITHHELD_DENY_ALL;
+  }
+  return withheld.length ? { id: { $nin: withheld } } : null;
+}
+
 /**
  * Redact the value-bearing columns of the activity rows one read is about to
  * hand back, as `context`. Mutates the rows in place (they are the read's own
@@ -176,11 +309,14 @@ export async function redactActivityRows(
   security: ActivityFieldVisibilitySource | undefined,
   context: unknown,
   logger?: ActivityRedactionLogger,
+  /** The read's own answer, when the caller already holds one: the middleware
+   * shares it with the withheld-update rule, so both judge by ONE answer. */
+  served?: ServedFor,
 ): Promise<void> {
   const list = (Array.isArray(rows) ? rows : rows ? [rows] : []) as unknown[];
   if (list.length === 0) return;
   // One answer per parent object per read, never one per row.
-  const servedFor = servedFieldsPerRead(security, context, logger, 'activity field redaction');
+  const servedFor = served ?? servedFieldsPerRead(security, context, logger, REDACTION_SEAM);
   const restricted = new Map<string, Promise<boolean>>();
   /** Is this reader served fewer fields of `object` than the system is? */
   const restrictedOn = (object: string, servedSet: Set<string>) => {
@@ -257,23 +393,44 @@ const JUDGED_BY = ['object_name', 'metadata'] as const;
  * Install the `sys_activity` field-redaction middleware. `getSecurity` is
  * resolved on every read: the security plugin may register after this one.
  * Inert on an engine without the middleware seam; `AuditPlugin` says so.
+ *
+ * [#21388] Before the read runs, the same middleware withholds every update row
+ * whose stored change is withheld whole from this reader, as a WHERE on all
+ * four reads (`computeWithheldUpdateFilter`). `AuditPlugin` registers it after
+ * the read gate, so the gate's parent filter is already in the WHERE its
+ * pre-scan reads.
  */
 export function installActivityFieldRedaction(
-  engine: ActivityMiddlewareEngine,
+  engine: ActivityRedactionEngine,
   getSecurity: () => ActivityFieldVisibilitySource | undefined,
   logger: ActivityRedactionLogger,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return;
   engine.registerMiddleware(
     async (ctx, next) => {
-      if ((ctx.operation !== 'find' && ctx.operation !== 'findOne') || !ctx.context || ctx.context.isSystem) {
-        return next();
+      if (!ctx.context || ctx.context.isSystem) return next();
+      const security = getSecurity();
+      // One answer per read, shared by the row rule and the redaction below.
+      const servedFor = servedFieldsPerRead(security, ctx.context, logger, REDACTION_SEAM);
+      if (security && ctx.ast && PARENT_GATE_READ_OPS.has(ctx.operation)) {
+        try {
+          const filter = await computeWithheldUpdateFilter(engine, ctx.ast, servedFor, logger);
+          if (filter) andIntoWhere(ctx, filter);
+        } catch (err) {
+          // A pre-scan failure must never fall open into the timing leak.
+          logger.warn(
+            `[audit] ${REDACTION_SEAM}: the withheld-update pre-scan failed, denying all ` +
+              `(${(err as Error)?.message ?? err})`,
+          );
+          andIntoWhere(ctx, WITHHELD_DENY_ALL);
+        }
       }
+      if (ctx.operation !== 'find' && ctx.operation !== 'findOne') return next();
       const added = ensureJudgedColumnsProjected(ctx.ast, VALUE_BEARING_COLUMNS, JUDGED_BY);
       await next();
       const list = (Array.isArray(ctx.result) ? ctx.result : ctx.result ? [ctx.result] : []) as unknown[];
       try {
-        await redactActivityRows(list, getSecurity(), ctx.context, logger);
+        await redactActivityRows(list, security, ctx.context, logger, servedFor);
       } catch (err) {
         // A redaction failure must never fall open into a leak.
         logger.warn(

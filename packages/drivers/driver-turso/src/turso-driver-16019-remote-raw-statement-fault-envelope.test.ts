@@ -56,6 +56,13 @@ interface WireBearingError extends Error {
 
 const TRANSLATE_SQL = "select translate('ABC', 'ABC', 'abc') as x";
 
+/**
+ * [#21385] A synthetic value, spelled inline in a raw statement the engine
+ * refuses with the same bare diagnostic. Asserted ABSENT from the server log.
+ */
+const SENTINEL = 'zz-os21385-turso-sentinel';
+const SENTINEL_SQL = `select translate('${SENTINEL}', 'A', 'a') as x`;
+
 async function faultOf(run: () => Promise<unknown>): Promise<WireBearingError> {
   try {
     await run();
@@ -67,10 +74,21 @@ async function faultOf(run: () => Promise<unknown>): Promise<WireBearingError> {
 
 class LoggedTursoDriver extends TursoDriver {
   readonly warned: string[] = [];
+  /** [#21385] What the base class's raw terminal was HANDED, as booleans only. */
+  readonly handed: Array<{ commandCarriesSentinel: boolean; errorCarriesSentinel: boolean }> = [];
 
   constructor(stub: LibsqlSqliteStub) {
     super({ url: 'libsql://issue-16019.turso.io', client: stub as never });
     this.logger = { warn: (msg: string) => { this.warned.push(msg); } };
+  }
+
+  protected override rawStatementFault(command: string, error: unknown): Error {
+    const message = (error as { message?: unknown } | null | undefined)?.message;
+    this.handed.push({
+      commandCarriesSentinel: command.includes(SENTINEL),
+      errorCarriesSentinel: typeof message === 'string' && message.includes(SENTINEL),
+    });
+    return super.rawStatementFault(command, error);
   }
 }
 
@@ -114,14 +132,29 @@ describe('[#16019] TursoDriver remote — execute() declares a backend refusal a
     expect(JSON.stringify(err)).not.toMatch(/translate/);
   });
 
-  it('writes the statement and the engine text to the server log — the only copy', async () => {
+  it("writes the engine's diagnostic to the server log — the only copy — and not the statement it was sent", async () => {
     driver.warned.length = 0;
-    await faultOf(() => driver.execute(TRANSLATE_SQL));
+    driver.handed.length = 0;
+    await faultOf(() => driver.execute(SENTINEL_SQL));
+
+    // Non-vacuity, read off what the raw terminal was HANDED: the statement it
+    // was sent carried the sentinel. The transport's own error did not — the
+    // bare shape this file is about has no statement in front of it.
+    expect(driver.handed.length, 'the raw terminal was reached once').toBe(1);
+    expect(driver.handed[0].commandCarriesSentinel, 'the sent statement carried the sentinel').toBe(true);
+    expect(driver.handed[0].errorCarriesSentinel, 'the bare transport error carried the sentinel').toBe(false);
 
     const line = driver.warned.find((m) => m.includes('DATABASE_ERROR'));
     expect(line).toBeDefined();
-    expect(line).toContain(TRANSLATE_SQL);
-    expect(line).toContain('no such function: translate');
+    // [#21385, maintainer ruling 2026-10-02] The line used to write the sent
+    // statement as its own field. A raw statement may spell a value inline, and
+    // a server log leaves the data's trust boundary, so it is no longer
+    // written. The engine's diagnostic still is: it carries no statement here,
+    // so the shared cut leaves it whole and adds no marker.
+    expect(String(line).includes(SENTINEL), 'the sentinel reached the server log').toBe(false);
+    expect(String(line).includes('statement: '), 'the line carries no separate statement field').toBe(false);
+    expect(String(line).includes('no such function: translate'), "the line keeps the engine's diagnostic").toBe(true);
+    expect(String(line).includes('the backend refused a raw statement'), 'the line keeps its class of fault').toBe(true);
   });
 
   it('POSITIVE CONTROL: a statement the engine runs still resolves with its rows through the remote transport', async () => {
