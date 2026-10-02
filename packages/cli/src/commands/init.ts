@@ -786,15 +786,28 @@ ${renderWiredStackKeys()}
 const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
+  // Field groups: the sections an item's form and detail page draw, top to
+  // bottom in this order. A field joins one by naming its \`key\` in \`group\`.
+  // That placement is what displays \`description\` and \`status\`.
+  // \`objectstack validate\` and \`objectstack lint\` report a field that
+  // nothing displays or reads (\`field-no-consumers\`) once the project holds
+  // a view, flow, dashboard or anything else that could read it, so give each
+  // field you add a \`group\` as well. Field groups versus a view's own form
+  // sections: https://objectstack.ai/docs/ui/field-grouping-and-order
+  fieldGroups: [
+    { key: 'details', label: 'Details' },
+  ],
   fields: {
     name: {
       type: 'text',
       label: 'Name',
       required: true,
+      group: 'details',
     },
     description: {
       type: 'textarea',
       label: 'Description',
+      group: 'details',
     },
     status: {
       type: 'select',
@@ -805,6 +818,7 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
         { label: 'Archived', value: 'archived' },
       ],
       defaultValue: 'draft',
+      group: 'details',
     },
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is

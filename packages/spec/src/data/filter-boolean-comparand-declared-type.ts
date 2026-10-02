@@ -60,12 +60,56 @@
  *   or a date, never a boolean — the number door argues the same), and so on.
  *   ⛔ No case folding and no trimming: one spelling per value, the write
  *   side's.
- * - **Everything else passes this verdict** — `null` (the null test), a number
- *   other than `1` / `0`, a `bigint`, a `Date`, an array, a plain object, a
- *   `{ $field }` reference. The ruling refuses strings; a non-string outside the
- *   accepted set is answered as written (no stored boolean equals `2`), and
- *   whatever the comparand-type and comparand-shape doors refuse they refuse
- *   in their own words.
+ * - **A number other than `1` / `0`, a `Date`, an array** — refused the same
+ *   way ({@link NonBooleanValueForm}); see the next section.
+ * - **A `bigint`** is read as the number it names: `1n` / `0n` narrow like
+ *   `1` / `0`, and any other `bigint` is refused as a number. That is the
+ *   number the comparand-type door (`filter-comparand-type.ts`) rewrites it to,
+ *   and that door runs BEFORE this one on the `FilterArray` spelling and at
+ *   `having` but AFTER it on the object spelling of `where` and on a
+ *   per-aggregation `filter` — so only reading a `bigint` as its number gives
+ *   one answer at every position. Passed as written, `1n` reached the drivers
+ *   as `1` from the object spelling, unnarrowed (no row on InMemoryDriver, the
+ *   true row on SQLite), and `2n` as `2` (PostgreSQL's server error).
+ * - **`null`** passes: it is the null test (`{ flag: null }`, `{ $ne: null }`).
+ * - **Everything else passes this verdict** — `undefined`, a plain object, a
+ *   `{ $field }` reference, a `Map` or class instance. A `{ $field }` reference
+ *   is not a literal. The rest are outside the comparand-type door's accepted
+ *   set, and that door refuses them with `INVALID_FILTER` / 400 on every field,
+ *   at every position and on both filter spellings, in words that name the
+ *   set; the engine runs the two doors in a different order per position, so a
+ *   second refusal here would answer one mistake in two sets of words
+ *   depending on where it was written. The number door argues the same.
+ *
+ * ## [#21382] The non-string comparands: refused, not answered as written
+ *
+ * Triage's direction (recorded on #21382, inheriting #20502's for the number
+ * door): *the published verdict refuses, with `INVALID_FILTER` / 400 naming
+ * the field, any comparand against a declared boolean field that is outside
+ * its accepted set — another number, a `Date`, an object, and an array at a
+ * scalar slot or as a list member; the engine door consumes that verdict and
+ * nothing else; `null` keeps its meaning.* Until then the verdict judged
+ * strings only, and a non-string outside the accepted set reached the backends
+ * as written. Measured on `69a12a0952` through `engine.find` /
+ * `engine.aggregate`, two rows (one `true`, one `false`); a `where` cell reads
+ * implicit, `$eq`, `$ne`, and a `$in` member beside `false`:
+ *
+ * | comparand, position | InMemoryDriver | SqlDriver, SQLite | SqlDriver, PostgreSQL 16 |
+ * |:--|:--|:--|:--|
+ * | `2`, `-1`, `0.5`, a `Date`, `where` | no row, no row, both, the false row | the same | **500 `DATABASE_ERROR`** at every slot |
+ * | the same, per-aggregation `filter` / `having` | count 0, 0, 2, 1 / the groups alike | the same | the same |
+ * | an array `[true]` as a `$in` member, `where` | **the false row (200)** | 400, the driver's | 400, the driver's |
+ * | the same, per-aggregation `filter` / `having` | count 1 / the false group: the member dropped | the same | the same |
+ *
+ * So one client mistake was a server fault on PostgreSQL and an empty 200
+ * elsewhere, and an array member split 200 / 400 across drivers. Each is now
+ * refused before any read, on every driver and at every position. An array
+ * at an EQUALITY slot (implicit, `$eq`, `$ne`) is refused one door earlier
+ * still, by the comparand-shape door, whose remedy is the one for that slot;
+ * the verdict answers `door-refusal` for it too, and the case table places its
+ * array rows where the shape door does not speak. An object is the
+ * comparand-type door's refusal, as above: refused before this change, and
+ * still refused, in that door's words.
  *
  * ## Which fields, which positions
  *
@@ -99,9 +143,12 @@
  * `status` and no driver read runs; a `narrows` case hands the driver
  * `c.expectedFilter()`; a `passes` / `deferred` case hands it the filter as
  * written. The `formula` rows are refused one door earlier, as noted above.
+ * Every comparand in the table survives `JSON.stringify` (no `bigint` row), so
+ * a suite may print or send any filter it builds.
  *
  * @see NUMBER_COMPARAND_DOOR_CASES — the twin this module is shaped after.
  * @see https://github.com/objectstack-ai/objectstack/issues/21333 (this door)
+ * @see https://github.com/objectstack-ai/objectstack/issues/21382 (the non-string comparands)
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -155,16 +202,22 @@ export type NonBooleanStringForm = (typeof NON_BOOLEAN_STRING_FORMS)[number];
 /**
  * What {@link readBooleanComparand} answers: the boolean a comparand names, why
  * a string names none, or `null` for a comparand that is not this reading's
- * subject (a non-string outside the accepted set — see the module header).
+ * subject (a non-string outside the accepted set, which the verdict judges by
+ * what it IS — {@link NonBooleanValueForm}; see the module header).
  */
 export type BooleanComparandReading =
   | { readonly boolean: true; readonly value: boolean }
   | { readonly boolean: false; readonly form: NonBooleanStringForm }
   | null;
 
-/** Read `comparand` by the accepted spellings. Pure. */
+/**
+ * Read `comparand` by the accepted spellings. Pure. [#21382] A `bigint` is read
+ * as the number it names (`1n` as `1`), the number the comparand-type door
+ * rewrites it to — see the module header.
+ */
 export function readBooleanComparand(comparand: unknown): BooleanComparandReading {
   if (typeof comparand === 'boolean') return { boolean: true, value: comparand };
+  if (typeof comparand === 'bigint') return readBooleanComparand(Number(comparand));
   if (typeof comparand !== 'string' && typeof comparand !== 'number') return null;
   const value = BOOLEAN_COMPARAND_SPELLINGS.get(comparand);
   if (value !== undefined) return { boolean: true, value };
@@ -179,6 +232,55 @@ export function readBooleanComparand(comparand: unknown): BooleanComparandReadin
   if (classifyFilterToken(comparand) !== null) return { boolean: false, form: 'placeholder' };
   if (BOOLEAN_COMPARAND_SPELLINGS.has(comparand.toLowerCase())) return { boolean: false, form: 'letter-case' };
   return { boolean: false, form: 'not-a-boolean' };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * The comparands that are not strings
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * [#21382] The NON-string comparands the verdict refuses against a judged
+ * field, by what they are — the module header says why each is here and why
+ * nothing else is:
+ *
+ * - `number` — a number other than `1` / `0` (`2`, `-1`, `0.5`, `NaN`), or a
+ *   `bigint` naming one.
+ * - `date` — a `Date` instance, valid or not.
+ * - `array` — a list where one value belongs (a scalar operator's comparand,
+ *   or a member of a list operator's list).
+ */
+export const NON_BOOLEAN_VALUE_FORMS = ['number', 'date', 'array'] as const;
+
+export type NonBooleanValueForm = (typeof NON_BOOLEAN_VALUE_FORMS)[number];
+
+/** Every reason the verdict refuses a comparand: a string's form, or a non-string's. */
+export type NonBooleanComparandForm = NonBooleanStringForm | NonBooleanValueForm;
+
+/**
+ * The {@link NonBooleanValueForm} a comparand the reading does not read is, or
+ * `null` for one the verdict passes (`null`, and everything outside the
+ * comparand-type door's accepted set, which that door refuses itself). Asked
+ * only after {@link readBooleanComparand} answered `null`, so a number here is
+ * never `1` / `0`.
+ */
+function nonBooleanValueForm(comparand: unknown): NonBooleanValueForm | null {
+  if (typeof comparand === 'number' || typeof comparand === 'bigint') return 'number';
+  if (comparand instanceof Date) return 'date';
+  if (Array.isArray(comparand)) return 'array';
+  return null;
+}
+
+/**
+ * The comparand as a refusal renders it: {@link shapePreview}, except that a
+ * `Date` is named as one (its JSON form is a quoted string, which would read as
+ * a string the door refuses rather than the instant it is), and a non-finite
+ * number by its own name (its JSON form is `null`, the null test).
+ */
+function comparandPreview(comparand: unknown): string {
+  if (typeof comparand === 'number' && !Number.isFinite(comparand)) return String(comparand);
+  if (!(comparand instanceof Date)) return shapePreview(comparand);
+  const time = comparand.getTime();
+  return `Date(${Number.isNaN(time) ? 'Invalid Date' : comparand.toISOString()})`;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -222,19 +324,20 @@ export function booleanComparandFieldVerdict(
 /**
  * The door's four answers for ONE comparand at a judged position.
  *
- * - `door-refusal` — a string that is not an accepted spelling, refused before
- *   any driver runs (`INVALID_FILTER` / 400).
- * - `narrows` — an accepted non-boolean spelling; the door replaces it with
- *   `value`.
+ * - `door-refusal` — refused before any driver runs (`INVALID_FILTER` / 400):
+ *   a string that is not an accepted spelling, a number other than `1` / `0`,
+ *   a `Date` or an array ({@link NonBooleanComparandForm}).
+ * - `narrows` — an accepted non-boolean spelling (or a `bigint` naming `1` /
+ *   `0`); the door replaces it with `value`.
  * - `passes` — not this door's subject (the field is not boolean, or the
- *   comparand is a boolean, `null`, or a non-string outside the accepted set);
- *   nothing changes.
+ *   comparand is a boolean, `null`, or a value the comparand-type door refuses
+ *   itself — see the module header); nothing changes.
  * - `deferred` — a `formula` whose `returnType` is unreadable; nothing changes.
  */
 export type BooleanComparandDoorVerdict =
   | {
       readonly verdict: 'door-refusal';
-      readonly form: NonBooleanStringForm;
+      readonly form: NonBooleanComparandForm;
       readonly code: 'INVALID_FILTER';
       readonly status: 400;
     }
@@ -253,8 +356,14 @@ export function booleanComparandDoorVerdict(
   const judged = booleanComparandFieldVerdict(field);
   if (judged === 'deferred') return { verdict: 'deferred' };
   if (judged === 'not-judged') return { verdict: 'passes' };
+  if (typeof comparand === 'boolean') return { verdict: 'passes' };
   const reading = readBooleanComparand(comparand);
-  if (reading === null || typeof comparand === 'boolean') return { verdict: 'passes' };
+  if (reading === null) {
+    // [#21382] Not a spelling: judged by what it IS.
+    const form = nonBooleanValueForm(comparand);
+    if (form === null) return { verdict: 'passes' };
+    return { verdict: 'door-refusal', form, code: 'INVALID_FILTER', status: 400 };
+  }
   if (reading.boolean) return { verdict: 'narrows', value: reading.value };
   return { verdict: 'door-refusal', form: reading.form, code: 'INVALID_FILTER', status: 400 };
 }
@@ -263,13 +372,22 @@ export function booleanComparandDoorVerdict(
  * The refusal words
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** What is wrong with the comparand, per form — the clause after "which is not a boolean:". */
-const FORM_SENTENCE: Readonly<Record<NonBooleanStringForm, string>> = {
+/**
+ * What is wrong with the comparand, per form — the clause after "which is not
+ * a boolean:". [#21382] Each non-string clause states only what holds at every
+ * position: PostgreSQL's server error was measured at `where` alone (the
+ * engine evaluates the per-aggregation `filter` and `having` itself), so no
+ * clause names a backend.
+ */
+const FORM_SENTENCE: Readonly<Record<NonBooleanComparandForm, string>> = {
   'empty': 'a blank string names no boolean (to match a missing value, write {"$eq": null}).',
   'padded': 'it carries surrounding whitespace.',
   'letter-case': 'only the lower-case spellings "true" and "false" are read as a boolean.',
   'placeholder': 'a {placeholder} resolves to an id or a date, never to a boolean.',
   'not-a-boolean': 'it has no boolean reading.',
+  'number': 'only the numbers 1 and 0 are read as a boolean; no other number names one.',
+  'date': 'a Date is an instant, not a boolean; compare a Date with a date or datetime field.',
+  'array': 'a list is not one boolean; to match either value use $in, each member a boolean.',
 };
 
 /** The consequence and the remedy, after the load-bearing head. */
@@ -291,10 +409,10 @@ export interface BooleanComparandRefusalSite {
   readonly returnType?: string;
   /** The key path of the comparand, e.g. `where.active.$ne` or `where.active.$in[1]`. */
   readonly path: string;
-  /** The refused comparand — a string. */
+  /** The refused comparand — a string, a number, a `Date` or an array ({@link NonBooleanComparandForm}). */
   readonly value: unknown;
   /** Why it is not a boolean — `door-refusal`'s `form`. */
-  readonly form: NonBooleanStringForm;
+  readonly form: NonBooleanComparandForm;
   /**
    * `true` when `field` names an AGGREGATED-row column (`having`) rather than a
    * declared field of the object: the message then reads "a boolean aggregated
@@ -314,7 +432,7 @@ export function booleanComparandRefusalMessage(site: BooleanComparandRefusalSite
     : `a declared ${site.returnType === undefined ? `${site.declaredType} field` : `${site.declaredType} field returning ${site.returnType}`}`;
   return (
     `${context ? `${context}: ` : ''}filter on '${site.field}' compares ${subject} against `
-    + `${shapePreview(site.value)} at ${site.path}, which is not a boolean: ${FORM_SENTENCE[site.form]}`
+    + `${comparandPreview(site.value)} at ${site.path}, which is not a boolean: ${FORM_SENTENCE[site.form]}`
     + BOOLEAN_COMPARAND_REFUSAL_TAIL
   );
 }
@@ -364,8 +482,9 @@ export const BOOLEAN_COMPARAND_READING_CASES: readonly BooleanComparandReadingCa
   refused('{current_user_id}', 'placeholder', 'Resolves to a user id, never a boolean.'),
   refused('{today}', 'placeholder', 'Resolves to a YYYY-MM-DD day, never a boolean.'),
   unread(null, 'The null test, not a value to read as a boolean.'),
-  unread(2, 'A number other than 1 / 0: answered as written (the ruling refuses strings).'),
-  unread(-1, 'A number other than 1 / 0: answered as written.'),
+  unread(2, 'A number other than 1 / 0 is no spelling; the verdict refuses it as a number.'),
+  unread(-1, 'A number other than 1 / 0 is no spelling; the verdict refuses it as a number.'),
+  unread(0.5, 'A fraction is no spelling; the verdict refuses it as a number.'),
 ];
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -431,7 +550,7 @@ interface BooleanComparandDoorCaseBase {
 /** A case the door must refuse — before any driver runs. */
 export interface BooleanComparandDoorRefusalCase extends BooleanComparandDoorCaseBase {
   readonly verdict: 'door-refusal';
-  readonly form: NonBooleanStringForm;
+  readonly form: NonBooleanComparandForm;
   /** The ADR-0112 code the refusal must carry … */
   readonly code: 'INVALID_FILTER';
   /** … beside this status. */
@@ -479,9 +598,16 @@ function slotPosition(key: string, slot: Slot): string {
   return `${key}.${slot.op}[${slot.index}]`;
 }
 
-/** A `{ $field }` reference is mutable: every filter gets its own, so no suite can move another's. */
-const freshComparand = (comparand: unknown): unknown =>
-  (typeof comparand === 'object' && comparand !== null ? { ...comparand } : comparand);
+/**
+ * A `{ $field }` reference, a `Date` and an array are mutable: every filter
+ * gets its own, so no suite can move another's.
+ */
+function freshComparand(comparand: unknown): unknown {
+  if (comparand instanceof Date) return new Date(comparand.getTime());
+  if (Array.isArray(comparand)) return comparand.map(freshComparand);
+  if (typeof comparand === 'object' && comparand !== null) return { ...comparand };
+  return comparand;
+}
 
 function filterAt(key: string, slot: Slot, given: unknown): FilterCondition {
   const comparand = freshComparand(given);
@@ -497,8 +623,8 @@ function isJudgedSlot(slot: Slot): boolean {
   return (BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS as readonly string[]).includes(slot.op);
 }
 
-/** The four groups of {@link BOOLEAN_COMPARAND_DOOR_CASES}, which also prefix each case name. */
-type CaseGroup = 'census' | 'position' | 'reading' | 'unjudged';
+/** The five groups of {@link BOOLEAN_COMPARAND_DOOR_CASES}, which also prefix each case name. */
+type CaseGroup = 'census' | 'position' | 'reading' | 'unjudged' | 'value';
 
 function caseFor(
   group: CaseGroup,
@@ -512,7 +638,7 @@ function caseFor(
   const position = slotPosition(field.name, slot);
   const declared = field.returnType ? `${field.type} returning ${field.returnType}` : field.type;
   const base = {
-    name: `[${group}] ${position} = ${shapePreview(comparand)} over ${declared} — ${verdict.verdict}`,
+    name: `[${group}] ${position} = ${comparandPreview(comparand)} over ${declared} — ${verdict.verdict}`,
     key: field.name,
     declaredType: field.type,
     ...(field.returnType ? { returnType: field.returnType } : {}),
@@ -528,7 +654,7 @@ function caseFor(
         form: verdict.form,
         code: verdict.code,
         status: verdict.status,
-        mustMention: [field.name, field.type, shapePreview(comparand), position],
+        mustMention: [field.name, field.type, comparandPreview(comparand), position],
       };
     case 'narrows':
       return { ...base, verdict: 'narrows', value: verdict.value, expectedFilter: () => filterAt(field.name, slot, verdict.value) };
@@ -552,6 +678,19 @@ const JUDGED_SLOTS: readonly Slot[] = [
   ]),
 ];
 
+/** The `Date` the `value` rows compare with — any instant; a filter holds a copy of it. */
+const VALUE_DATE = new Date(Date.UTC(2026, 0, 1));
+
+/** The list the `value` rows put where one value belongs — itself a list of a legal member. */
+const VALUE_LIST: readonly boolean[] = [true];
+
+/**
+ * The equality slots — implicit, `$eq`, `$ne` — where an array is the
+ * comparand-SHAPE door's refusal, one door before this one (module header).
+ */
+const isEqualitySlot = (slot: Slot): boolean =>
+  slot.kind === 'implicit' || (slot.kind === 'scalar' && (slot.op === '$eq' || slot.op === '$ne'));
+
 /**
  * The cases, derived rather than hand-kept:
  *
@@ -566,6 +705,11 @@ const JUDGED_SLOTS: readonly Slot[] = [
  *    `$eq` on `f_boolean`.
  * 4. **The unjudged positions** — `$null`, `$exists`, `$empty` and a
  *    `{ $field }` reference on `f_boolean` pass.
+ * 5. **The non-string comparands** ([#21382]) — `-1` at `$ne` on every judged
+ *    field; `2` and a `Date` at every judged position on `f_boolean`, and an
+ *    array at every one but the equality slots (the shape door's); all
+ *    refused. Beside them, what passes: `null` as the null test, and a number
+ *    or a `Date` against a field that is not boolean — not this door's subject.
  */
 export const BOOLEAN_COMPARAND_DOOR_CASES: readonly BooleanComparandDoorCase[] = [
   ...BOOLEAN_COMPARAND_DOOR_FIXTURE_FIELDS.flatMap((field) => [
@@ -584,4 +728,16 @@ export const BOOLEAN_COMPARAND_DOOR_CASES: readonly BooleanComparandDoorCase[] =
   caseFor('unjudged', fixtureField('f_boolean'), { kind: 'scalar', op: '$exists' }, false),
   caseFor('unjudged', fixtureField('f_boolean'), { kind: 'scalar', op: '$empty' }, true),
   caseFor('unjudged', fixtureField('f_boolean'), { kind: 'scalar', op: '$eq' }, { $field: 'f_toggle' }),
+  ...BOOLEAN_COMPARAND_DOOR_FIXTURE_FIELDS
+    .filter((field) => booleanComparandFieldVerdict(field) === 'judged')
+    .map((field) => caseFor('value', field, { kind: 'scalar', op: '$ne' }, -1)),
+  ...JUDGED_SLOTS.flatMap((slot) => [
+    caseFor('value', fixtureField('f_boolean'), slot, 2),
+    caseFor('value', fixtureField('f_boolean'), slot, VALUE_DATE),
+    ...(isEqualitySlot(slot) ? [] : [caseFor('value', fixtureField('f_boolean'), slot, VALUE_LIST)]),
+  ]),
+  caseFor('value', fixtureField('f_boolean'), { kind: 'implicit' }, null),
+  caseFor('value', fixtureField('f_boolean'), { kind: 'scalar', op: '$ne' }, null),
+  caseFor('value', fixtureField('f_text'), { kind: 'scalar', op: '$eq' }, 2),
+  caseFor('value', fixtureField('f_text'), { kind: 'scalar', op: '$ne' }, VALUE_DATE),
 ];
