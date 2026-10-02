@@ -279,8 +279,12 @@ const secretRowsOf = (rt: Runtime): RewrapSecretRow[] =>
     kms_key_id: r.kms_key_id, alg: r.alg, version: r.version, ciphertext: r.ciphertext,
   }));
 
-/** Plan from the store as it stands now, as the command does on every run. */
-async function planNow(rt: Runtime, declaredDatasources: readonly Row[] | undefined = []) {
+/**
+ * Plan from the store as it stands now, as the command does on every run.
+ * `undefined` is the host NOT answering for its code-declared datasources, so
+ * it is passed through as it is, never defaulted to `[]`.
+ */
+async function planNow(rt: Runtime, declaredDatasources: readonly Row[] | undefined) {
   const union = await collectSecretReferenceUnion({
     engine: rt.engine as unknown as SecretReferenceEngineLike,
     declaredDatasources,
