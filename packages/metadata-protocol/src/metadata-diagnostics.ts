@@ -228,8 +228,11 @@ export function computeViewReferenceDiagnostics(
     userFilters?.tabs?.forEach((t, i) =>
         t?.filter?.forEach((r, j) => requireField(r?.field, `userFilters.tabs.${i}.filter.${j}.field`)));
 
-    (view?.tabs as Array<{ filter?: Array<{ field?: string }> }> | undefined)?.forEach((t, i) =>
-        t?.filter?.forEach((r, j) => requireField(r?.field, `tabs.${i}.filter.${j}.field`)));
+    // A list view's OWN `tabs` is not walked: it is a `retiredKey` tombstone on
+    // every list-view shape. The write door refuses it, and a stored or
+    // artifact-shipped body has it stripped by the conversion replay before it
+    // is served. A body that still carries it is already badged by the spec
+    // diagnostics, with the tombstone's prescription.
 
     (view?.filterableFields as string[] | undefined)?.forEach((f, i) =>
         requireField(f, `filterableFields.${i}`));

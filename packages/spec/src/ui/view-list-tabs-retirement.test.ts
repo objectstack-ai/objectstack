@@ -339,19 +339,16 @@ describe('tree-scoped absence: no list-view payload inside the declared radius s
     'packages/spec/liveness/',
   ];
   /**
-   * RESIDUE, declared and self-expiring — not exempted. Test fixtures of the
-   * two author-time reference walks that still read a list view's `tabs` off
-   * RAW input (`packages/lint/src/validate-list-view-field-refs.ts#checkTabs`,
-   * and `computeViewReferenceDiagnostics` in `@objectstack/metadata-protocol`) and
-   * the CLI's negative i18n pin. Removing those walks is outside this
-   * retirement's file surface and is reported as its follow-up; each entry here
-   * is asserted to STILL hold an offender, so the day the follow-up deletes a
-   * fixture this set goes red and the entry leaves with it.
+   * RESIDUE, declared and self-expiring — not exempted: the CLI's negative
+   * i18n pin. Each entry here is asserted to STILL hold an offender, so the day
+   * its fixture stops authoring the key this set goes red and the entry leaves
+   * with it. The two author-time reference walks that once read a list view's
+   * own `tabs` (the lint list-view field-ref rule and
+   * `computeViewReferenceDiagnostics` in `@objectstack/metadata-protocol`) were
+   * deleted as unreachable, and their fixtures and entries left with them.
    */
   const RESIDUE = new Set([
     'packages/cli/test/i18n-tab-coverage.test.ts',
-    'packages/lint/src/validate-list-view-field-refs.test.ts',
-    'packages/objectql/src/metadata-diagnostics.test.ts',
   ]);
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;

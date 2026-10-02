@@ -7,6 +7,7 @@ import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext }
 import {
   declaredDatetimeLowering,
   findNestedRelationCondition,
+  invalidFilterError,
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
@@ -14,6 +15,18 @@ import {
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
+// [#21376] The boolean-comparand verdict the engine's `where` door consults
+// (`@objectstack/objectql`'s `boolean-comparand-declared-type-door.ts`), read
+// from the same spec module — one verdict, one set of accepted spellings, one
+// refusal sentence — and run on every filter this compiler compiles
+// ({@link judgedBooleanComparands}).
+import {
+  BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS,
+  BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS,
+  booleanComparandDoorVerdict,
+  booleanComparandFieldVerdict,
+  booleanComparandRefusalMessage,
+} from '@objectstack/spec/data';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
@@ -258,6 +271,162 @@ interface StatementClauses {
   readonly groupByClauses: string[];
   readonly whereClauses: string[];
   readonly joins: StatementJoins;
+}
+
+// ── [#21376] The boolean-comparand verdict, on every filter this compiler compiles ──
+//
+// The engine judges a comparand against a declared boolean column at its one
+// field-aware filter walk (`@objectstack/objectql`'s
+// `boolean-comparand-declared-type-door.ts`), by the spec's verdict
+// (`booleanComparandDoorVerdict`, `@objectstack/spec/data`): `true` / `false`
+// pass, `"true"` / `"false"`, `"1"` / `"0"` and `1` / `0` narrow to the boolean
+// each names, anything else it refuses (`'yes'`, `2`) is `INVALID_FILTER` / 400. This strategy
+// compiles its filters to SQL itself, past that walk, so a string reached the
+// driver as written: on SQLite a stored boolean is `1` / `0`, and the string
+// `'true'` equals neither — `{ flag: 'true' }` counted no row, `{ flag: { $ne:
+// 'true' } }` counted every row, and `{ flag: 'yes' }` answered 200 with zero
+// where the engine answers 400 (PostgreSQL reads `'yes'` as `true` and counted
+// the true rows). So the same verdict runs here, on the caller's `where` (the
+// dataset door's `runtimeFilter` arrives merged into it), each measure's own
+// `filter` and the dataset's own scope — every filter that reaches
+// `compileFilterNode` — and the strategy answers what the engine door answers.
+// ⛔ Nothing here reads a spelling: the verdict does. ⛔ No second rule.
+
+/**
+ * The declared type of the column a filter member binds against, or
+ * `undefined` when the host cannot answer.
+ */
+type MemberDeclaredType = (member: string) => string | undefined;
+
+/** The operators whose one comparand the verdict judges — the spec's list, never a re-listing. */
+const BOOLEAN_DOOR_SCALAR_OPERATORS: ReadonlySet<string> = new Set(BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS);
+/** The operators each of whose MEMBERS the verdict judges. */
+const BOOLEAN_DOOR_LIST_OPERATORS: ReadonlySet<string> = new Set(BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS);
+
+/** A plain object: a filter node or an operator map, never a comparand (a `Date` is data). */
+function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * The member reader for {@link judgedBooleanComparands}: the declared type the
+ * host's `declaredFieldType` hook answers for the column `target` resolves a
+ * member to — the same (object, column) every other declared-type question in
+ * this compiler asks (the datetime lowering, the text-operator constant,
+ * `$empty`). `null` when the host wired no hook: "cannot answer, do not block",
+ * the tiering every such hook here takes.
+ */
+function memberDeclaredType(
+  ctx: StrategyContext,
+  target: (member: string) => { object: string; field: string },
+): MemberDeclaredType | null {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (typeof declared !== 'function') return null;
+  return (member) => {
+    const { object, field } = target(member);
+    return declared.call(ctx, object, field);
+  };
+}
+
+/**
+ * One comparand at a judged position on a boolean column, by the spec's
+ * verdict: the boolean an accepted spelling names, the comparand unchanged, or
+ * a refusal in the `where` door's envelope (`invalidFilterError`,
+ * `INVALID_FILTER` / 400) carrying the spec's sentence.
+ */
+function judgedBooleanComparand(member: string, declaredType: string, comparand: unknown, path: string): unknown {
+  const verdict = booleanComparandDoorVerdict({ type: declaredType }, comparand);
+  if (verdict.verdict === 'narrows') return verdict.value;
+  if (verdict.verdict !== 'door-refusal') return comparand;
+  throw invalidFilterError(
+    `[analytics] ${booleanComparandRefusalMessage({ field: member, declaredType, path, value: comparand, form: verdict.form })}`,
+  );
+}
+
+/** One judged member's constraint, `{ flag: <spec> }`, with its comparands judged. Copy-on-write. */
+function narrowedBooleanFieldSpec(member: string, declaredType: string, spec: unknown, path: string): unknown {
+  // Not filter structure: the implicit-equality comparand.
+  if (!isPlainFilterNode(spec)) return judgedBooleanComparand(member, declaredType, spec, path);
+  // A `{ $field }` reference is not a literal, and a plain object with no `$`
+  // key is not this verdict's subject — each is left for the face that owns it.
+  if (typeof spec.$field === 'string' || !Object.keys(spec).some((k) => k.startsWith('$'))) return spec;
+  let out: Record<string, unknown> | undefined;
+  for (const [op, comparand] of Object.entries(spec)) {
+    if (BOOLEAN_DOOR_SCALAR_OPERATORS.has(op)) {
+      const judged = judgedBooleanComparand(member, declaredType, comparand, `${path}.${op}`);
+      if (judged !== comparand) (out ??= { ...spec })[op] = judged;
+      continue;
+    }
+    if (!BOOLEAN_DOOR_LIST_OPERATORS.has(op) || !Array.isArray(comparand)) continue;
+    let members: unknown[] | undefined;
+    comparand.forEach((value, index) => {
+      const judged = judgedBooleanComparand(member, declaredType, value, `${path}.${op}[${index}]`);
+      if (judged !== value) (members ??= [...comparand])[index] = judged;
+    });
+    if (members) (out ??= { ...spec })[op] = members;
+  }
+  return out ?? spec;
+}
+
+/**
+ * The lowered condition with every comparand on a declared boolean column
+ * judged: through `$and`, `$or` and `$not`, at every member key (another `$`
+ * key at node level is not a member). The positions are the spec's
+ * (`BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS` / `…_LIST_OPERATORS`). A member is
+ * judged at the column it binds against, so the cube-qualified spelling
+ * (`<cube>.flag`) and a relationship path are judged at their column too.
+ * Copy-on-write: a subtree nothing narrowed is returned by reference, so a
+ * filter the dataset registry holds is never edited.
+ */
+function narrowBooleanComparands(node: unknown, typeOf: MemberDeclaredType, path: string, depth = 0): unknown {
+  if (depth > 32 || !isPlainFilterNode(node)) return node;
+  let out: Record<string, unknown> | undefined;
+  for (const [key, value] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    let next: unknown = value;
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) continue;
+      let arms: unknown[] | undefined;
+      value.forEach((arm, index) => {
+        const walked = narrowBooleanComparands(arm, typeOf, `${here}[${index}]`, depth + 1);
+        if (walked !== arm) (arms ??= [...value])[index] = walked;
+      });
+      if (arms) next = arms;
+    } else if (key === '$not') {
+      next = narrowBooleanComparands(value, typeOf, here, depth + 1);
+    } else {
+      if (key.startsWith('$')) continue;
+      const declaredType = typeOf(key);
+      // The spec's field verdict decides which columns are judged — a `formula`
+      // reaches here with no `returnType` (the host relays none) and is
+      // `deferred`, as the spec defers one; never a list here.
+      if (declaredType === undefined || booleanComparandFieldVerdict({ type: declaredType }) !== 'judged') continue;
+      next = narrowedBooleanFieldSpec(key, declaredType, value, here);
+    }
+    if (next !== value) (out ??= { ...node })[key] = next;
+  }
+  return out ?? node;
+}
+
+/**
+ * `source` (a `{ where }` carrier, as {@link normalizeAnalyticsFilterTree}
+ * takes it) with the spec's boolean verdict applied to its lowered condition:
+ * `source` itself when nothing narrows (or the host cannot answer), else a
+ * `{ where }` carrying the narrowed condition. A refusal is thrown.
+ *
+ * The condition is lowered by `lowerAnalyticsWhere` — the shared comparand
+ * faces' door, which refuses what it refuses first, in its own words — and
+ * `normalizeAnalyticsFilterTree` lowers the narrowed condition again: the
+ * faces are idempotent on their own output.
+ */
+function judgedBooleanComparands(source: unknown, typeOf: MemberDeclaredType | null): unknown {
+  if (!typeOf) return source;
+  const condition = lowerAnalyticsWhere(source);
+  if (!condition) return source;
+  const judged = narrowBooleanComparands(condition, typeOf, 'where');
+  return judged === condition ? source : { where: judged };
 }
 
 /**
@@ -925,6 +1094,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // bare-day copy (`buildFilterClause`'s `lte` arm) stays until its deletion
     // card, and is idempotent on the lowered bound.
     const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf));
+    // [#21376] The boolean-comparand verdict's member reader, asked of the
+    // SAME target, and applied at the same three filter positions, before
+    // each is normalized ({@link judgedBooleanComparands}).
+    const booleanTypeOf = memberDeclaredType(ctx, (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf));
 
     // Build SELECT for measures
     if (query.measures && query.measures.length > 0) {
@@ -938,7 +1111,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         const measureFilter = datasetScope?.measureFilters?.[measure];
         const predicate = measureFilter
           ? this.compileFilterNode(
-              normalizeAnalyticsFilterTree({ where: measureFilter }, lowering),
+              normalizeAnalyticsFilterTree(judgedBooleanComparands({ where: measureFilter }, booleanTypeOf), lowering),
               cube,
               tableName,
               joins,
@@ -956,7 +1129,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // used to be dropped instead of compiled.
     const whereClauses: string[] = [];
     const filterSql = this.compileFilterNode(
-      normalizeAnalyticsFilterTree(query, lowering),
+      normalizeAnalyticsFilterTree(judgedBooleanComparands(query, booleanTypeOf), lowering),
       cube,
       tableName,
       joins,
@@ -973,7 +1146,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // predicate with itself selects the same rows.
     if (datasetScope?.filter) {
       const scopeSql = this.compileFilterNode(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, lowering),
+        normalizeAnalyticsFilterTree(judgedBooleanComparands({ where: datasetScope.filter }, booleanTypeOf), lowering),
         cube,
         tableName,
         joins,
