@@ -6,20 +6,17 @@
 // The showcase ships `showcase_inquiry.contact`, a FormView with
 // `sharing.allowAnonymous: true` at `/forms/contact-us`
 // (`showcase-public-form.dogfood.test.ts` pins that it serves). An
-// administrator withdraws it the way the editor does, with `PUT /meta/view/…`
-// at their own session. The admin is org-bound here (`orgContext: true`), so
-// the save is an overlay of their organization. Both anonymous doors must then
-// refuse, and nothing may land:
+// administrator withdraws it the way the editor does, with `PUT /meta/view/...`
+// at their own session, once env-wide (no active organization) and once in
+// their organization (`orgContext: true` gives the admin one). After either
+// withdrawal both anonymous doors must refuse, and nothing may land:
 //
 //   - `GET /forms/contact-us` and `POST /forms/contact-us/submit` both answer
 //     `404 FORM_NOT_FOUND`;
 //   - no `showcase_inquiry` row is written by the refused submit.
 //
-// Both sides are pinned. Republishing in the same organization restores both
-// doors, and the row lands in that organization (the control). A withdrawal
-// saved env-wide (the admin with no active organization) closes both doors
-// too, while an organization overlay that still publishes is not overruled by
-// it.
+// Both sides are pinned: republishing at the same scope restores both doors,
+// and after the organization republish the row lands in that organization.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
