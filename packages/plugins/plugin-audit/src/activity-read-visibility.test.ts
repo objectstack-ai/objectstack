@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { installActivityReadVisibility, parseActivityParent } from './activity-read-visibility.js';
+import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import type { CommentAccessEngine, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
 
 const DENY = { id: '__activity_parent_denied__' };
@@ -196,6 +197,16 @@ describe('installActivityReadVisibility', () => {
     expect(calls.probes[0].context).toMatchObject({ userId: 'u1', principalKind: 'agent' });
     expect(calls.probes[0].context).not.toHaveProperty('__readScope');
     expect(calls.probes[0].context).not.toHaveProperty('__expandRead');
+  });
+
+  it('[#21260] a holder of the ledger’s audit capability is narrowed here exactly like any caller', async () => {
+    const scan = () => [{ object_name: 'crm_case', record_id: 'c1' }];
+    for (const operation of ['find', 'findOne', 'count', 'aggregate'] as const) {
+      const { mw, calls } = install({ scan, readable: { crm_case: [] } });
+      const holder = { userId: 'u1', systemPermissions: [LEDGER_AUDIT_CAPABILITY] };
+      expect((await read(mw, { operation, context: holder })).where).toEqual(DENY);
+      expect(calls.scans).toHaveLength(1);
+    }
   });
 
   it('is inert on an engine without the middleware seam', () => {

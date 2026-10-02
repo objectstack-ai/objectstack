@@ -48,6 +48,8 @@ const SYS = { isSystem: true } as const;
 const MEMBER = { userId: 'u_member', tenantId: 'org_1', positions: ['org_member'] };
 const OTHER = { userId: 'u_other', tenantId: 'org_1', positions: ['org_member'] };
 const ADMIN = { userId: 'u_admin', tenantId: 'org_1', positions: ['org_admin'] };
+/** [#21260] A member holding the ledger's audit capability, and owning nothing. */
+const HOLDER = { userId: 'u_auditor', tenantId: 'org_1', positions: ['org_member'], systemPermissions: ['view_all_audit_log'] };
 
 const ownedObject = {
   name: OWNED,
@@ -259,5 +261,21 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
   it('a system read is not narrowed', async () => {
     const rows = await engine.find(LEDGER, { context: SYS });
     expect(rows.length).toBe(allRows.length);
+  });
+
+  it('[#21260] a holder of the ledger audit capability is served every row, deleted and unreadable records included', async () => {
+    const rows = await engine.find(LEDGER, { context: HOLDER });
+    expect(keys(rows)).toEqual(keys(allRows));
+    expect(await engine.count(LEDGER, {}, { context: HOLDER })).toBe(allRows.length);
+    expect((await engine.findOne(LEDGER, {
+      where: { object_name: OWNED, record_id: ids.mineGone, action: 'delete' }, context: HOLDER,
+    }))?.record_id).toBe(ids.mineGone);
+  });
+
+  it('[#21260] the same holder is still narrowed on the activity stream', async () => {
+    const aboutGone = { record_id: { $in: [ids.mineGone, ids.boardGone, ids.theirs] } };
+    const atRest = await engine.find('sys_activity', { where: aboutGone, context: SYS });
+    expect(atRest.length).toBeGreaterThan(0);
+    expect(await engine.find('sys_activity', { where: aboutGone, context: HOLDER })).toEqual([]);
   });
 });

@@ -146,6 +146,10 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
     'setup.access',
     'setup.write',
     'studio.access',
+    // [#21260] The compliance ledger's audit capability: its holder is exempt
+    // from the ledger's parent-record read gate. Platform administrators hold
+    // it by default (ruling B on #21175); every other position by explicit grant.
+    'view_all_audit_log',
   ],
 };
 

@@ -21,6 +21,12 @@
 // only for the fixture records named below. The admin, who reads every
 // record, is the control.
 //
+// [#21260] The admin also holds the ledger's audit capability by default, so
+// the gate exempts it: it is served the rows about the deleted record too. The
+// holder's own pins (the deletion and sign-out trail, the broad read, field
+// narrowing, and the non-holder getting exactly this gate) live in
+// `audit-log-audit-capability.dogfood.test.ts`.
+//
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a
 // ledgered pair in `scripts/check-test-source-alias.mjs`), so a verdict on a
 // change to it is a verdict on its last build. ⚠️ No test title states a value.
@@ -186,11 +192,11 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
     expect((await stack.apiAs(readerTok, 'GET', `/data/${LEDGER}/${runLevel.id}`)).status).toBe(200);
   });
 
-  it('a row about a record that no longer exists is served to neither the reader nor the admin', async () => {
-    for (const tok of [readerTok, adminTok]) {
-      const rows = await rowsOf(await stack.apiAs(tok, 'GET', `/data/${LEDGER}?limit=1000`));
-      expect(rows.some((r) => r.record_id === goneId)).toBe(false);
-    }
+  it('a row about a record that no longer exists is not served to the reader; the admin, a default holder of the ledger audit capability, is served it', async () => {
+    const served = async (tok: string) =>
+      (await rowsOf(await stack.apiAs(tok, 'GET', `/data/${LEDGER}?limit=1000`))).filter((r) => r.record_id === goneId);
+    expect(await served(readerTok)).toHaveLength(0);
+    expect(await served(adminTok)).toHaveLength(2);
   });
 
   it('control: the admin, who reads both records, is served the rows about each', async () => {

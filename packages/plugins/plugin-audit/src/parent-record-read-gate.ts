@@ -41,6 +41,16 @@
  * rows that name NO record and that the gate states are not about one. Those
  * are kept by their stored id, so the branch can only match rows the pre-scan
  * saw. A gate that declares none (the activity stream) excludes them too.
+ *
+ * The one declared exemption is a gate's
+ * {@link ParentRecordGate.exemptCapability}: a caller holding that capability
+ * is not narrowed by the gate at all — no pre-scan, so no pre-scan bound, and
+ * nothing ANDed in. Only this gate is skipped: the object's own grant, the other
+ * read seams on it (a field redaction, a query guard) and every other gate
+ * still apply. Held means the caller's resolved `systemPermissions`, the one
+ * capability set the request's authorization resolver stamps on the execution
+ * context and every other capability check reads. A gate that declares none
+ * (the activity stream) exempts no caller.
  */
 
 import {
@@ -92,6 +102,22 @@ export interface ParentRecordGate {
   denyAll: Readonly<Record<string, unknown>>;
   /** Absent: every row that names no parent record is excluded. */
   outsideClass?: OutsideClassRows;
+  /**
+   * A capability whose holder this gate does not narrow. Absent: no caller is
+   * exempt. Must name a capability the platform declares and grants
+   * deliberately; the ledger's is pinned against `PLATFORM_CAPABILITIES`.
+   */
+  exemptCapability?: string;
+}
+
+/**
+ * Whether the caller holds `capability`: its resolved `systemPermissions`, as
+ * the request's authorization resolver stamped them on the execution context.
+ * Absent, or not a list, is not held.
+ */
+function callerHoldsCapability(context: CommentReadMiddlewareCtx['context'], capability: string): boolean {
+  const held = context?.systemPermissions;
+  return Array.isArray(held) && held.includes(capability);
 }
 
 /**
@@ -133,9 +159,9 @@ export function andIntoWhere(ctx: CommentReadMiddlewareCtx, filter: unknown): vo
 
 /**
  * The parent-visibility WHERE for one read of `gate.object`: `null` when the
- * query matches no rows (nothing to narrow), one `$in` branch per parent
- * object holding the readable ids (plus the outside-class rows' ids), or the
- * gate's deny-all sentinel.
+ * caller holds the gate's exempt capability or the query matches no rows
+ * (nothing to narrow), one `$in` branch per parent object holding the readable
+ * ids (plus the outside-class rows' ids), or the gate's deny-all sentinel.
  */
 export async function computeParentRecordFilter(
   engine: CommentAccessEngine,
@@ -143,6 +169,10 @@ export async function computeParentRecordFilter(
   logger: CommentAccessLogger,
   gate: ParentRecordGate,
 ): Promise<unknown | null> {
+  // 0. The gate's declared exemption, decided before anything is scanned, so a
+  //    holder's broad read never meets the pre-scan bound.
+  if (gate.exemptCapability && callerHoldsCapability(ctx.context, gate.exemptCapability)) return null;
+
   // 1. The parent pairs the query would touch, read under SYSTEM context (the
   //    caller may not see the rows yet; that is what is being decided). The
   //    caller's own order rides along, so on a table larger than the scan

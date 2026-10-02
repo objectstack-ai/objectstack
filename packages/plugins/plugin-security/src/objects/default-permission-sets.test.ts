@@ -361,6 +361,11 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
  * exact pre-#11965 inline value (comments elided); if this pin fails, the spec
  * export changed the declared capability set — that is a capability change
  * riding on a refactor card, and it must not land silently.
+ *
+ * One capability change has landed on purpose since, on its own card, and is
+ * written into the literal below: `view_all_audit_log` (#21260, ruling B on
+ * #21175 — platform administrators hold the compliance ledger's audit
+ * capability by default).
  */
 describe('admin_full_access imports the kernel capability declaration unchanged (#11965)', () => {
   it('parsed declaration deep-equals the pre-#11965 inline literal', () => {
@@ -386,9 +391,18 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         'setup.access',
         'setup.write',
         'studio.access',
+        // [#21260] added on purpose — see the docblock above.
+        'view_all_audit_log',
       ],
     });
     expect(setByName('admin_full_access')).toEqual(preMove);
+  });
+
+  it('[#21260] no other shipped set carries the ledger audit capability: every other position holds it only by explicit grant', () => {
+    const holders = (defaultPermissionSets as any[])
+      .filter((s) => (s.systemPermissions ?? []).includes('view_all_audit_log'))
+      .map((s) => s.name);
+    expect(holders).toEqual(['admin_full_access']);
   });
 
   it('the imported spec constant is the declaration content — no local fork', () => {
