@@ -24,7 +24,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *  • ⛔ **Not a metadata type.** It is an ordinary platform object with
  *    ordinary rows and an ordinary read path — declared here beside its
  *    data-plane siblings, so it needs **zero `packages/spec` surface**. The
- *    #11513 deactivation carve-out (row state is not a customization of the
+ *    deactivation carve-out of commit e170b0ae5 (row state is not a customization of the
  *    definition, #4669) is the precedent validating this plane split.
  *
  *  • **Not a central interceptor.** Consult points stay per-runtime: the
@@ -37,7 +37,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *    `replaced_by` / `cloned_from`; amendment ruling 2 removed them
  *    (「行为类 能否搞一个启用停用的功能，我不想要可以停用，然后克隆一个。」).
  *    There is **no recorded link** between a clone and its base — matching the
- *    landed #11513 posture ("an ordinary org-owned set with no upgrade
+ *    landed posture of commit e170b0ae5 ("an ordinary org-owned set with no upgrade
  *    linkage"). Do not re-add them.
  * ─────────────────────────────────────────────────────────────────────
  *

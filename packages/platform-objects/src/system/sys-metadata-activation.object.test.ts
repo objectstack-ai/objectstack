@@ -60,7 +60,7 @@ describe('sys_metadata_activation — the ADR-0126 §4 activation ledger', () =>
     it('carries NO designation linkage — amendment ruling 2 removed it', () => {
       // 「行为类 能否搞一个启用停用的功能，我不想要可以停用，然后克隆一个。」
       // A clone is an ordinary org-owned artifact with no upgrade linkage back
-      // to its base (the landed #11513 posture). Re-adding either column would
+      // to its base (the landed posture of commit e170b0ae5). Re-adding either column would
       // re-introduce the designation model this ADR decided against, so they
       // are named here rather than left to the set-equality above.
       expect(columns).not.toContain('replaced_by');

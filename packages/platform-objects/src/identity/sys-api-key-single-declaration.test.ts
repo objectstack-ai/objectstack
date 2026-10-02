@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { SysApiKey } from './sys-api-key.object.js';
 import * as specIdentity from '@objectstack/spec/identity';
 
-// ─── [#8715] `sys_api_key` has exactly ONE declaration — this object ────────
+// ─── [commit 2c86fe3ea] `sys_api_key` has exactly ONE declaration — this object ────────
 //
 // `@objectstack/spec/identity` used to publish an `ApiKeySchema` that
 // documented better-auth's `apiKey` PLUGIN shape — a plugin this platform

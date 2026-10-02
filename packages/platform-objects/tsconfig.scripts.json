@@ -1,4 +1,4 @@
-// The SCRIPTS-layer type-check program for this package (#11351).
+// The SCRIPTS-layer type-check program for this package (commit cb954f170).
 //
 // `scripts/i18n-extract.config.ts` is the input to this package's i18n
 // extraction: it composes the package's own objects and translation bundles

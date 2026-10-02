@@ -45,7 +45,7 @@ export { SysSsoProvider } from './sys-sso-provider.object.js';
 // ── SCIM 2.0 provisioning (@better-auth/scim) ──────────────────────
 // The stable 1.7.x model set (#3653) — seven library-managed tables plus the
 // ObjectStack-owned credential store the app-owned verifyBearerToken uses.
-// (The rc.1-era `SysScimProvider` connection row retired under #11757.)
+// (The rc.1-era `SysScimProvider` connection row retired under commit 4d25d22d4.)
 export { SysScimConnectionBinding } from './sys-scim-connection-binding.object.js';
 export { SysScimConnectionCredential } from './sys-scim-connection-credential.object.js';
 export { SysScimGroup } from './sys-scim-group.object.js';
