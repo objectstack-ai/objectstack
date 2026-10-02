@@ -460,7 +460,10 @@ function judgedNumberComparand(
     form: verdict.form,
     boundByDriver: clause === 'using',
   });
-  throw new PolicyNumberComparandRefusal(numberRefusalDetail(clause, verdict.code, message), verdict.code, verdict.status);
+  // The envelope is spelled as literals, the ones the spec's verdict types its
+  // refusal with (`code: 'INVALID_FILTER'`, `status: 400`), so the codes this
+  // site stamps are readable at the site (`check:dispatcher-error-vocabulary`).
+  throw new PolicyNumberComparandRefusal(numberRefusalDetail(clause, 'INVALID_FILTER', message), 'INVALID_FILTER', 400);
 }
 
 /** One judged column's constraint, `{ amount: <spec> }`, with its comparands judged. */
