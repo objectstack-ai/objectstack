@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11374 — a text-family field that a declared index KEYS ON.
+ * Commit d0e3a885b — a text-family field that a declared index KEYS ON.
  *
  * ## The defect this pins, and why nothing caught it
  *
@@ -101,7 +101,7 @@ const tooWideObject = () => ({
  * ⚠️ Why this file grew these: the two objects above declare UNIQUE indexes, and
  * #11627 made a UNIQUE index over an unkeyable column expressible — it is now
  * carried on a hash-shadow column instead of being refused. That is a ruled
- * behaviour change (maintainer, 2026-08-24 on #11374), so the assertions that
+ * behaviour change (maintainer, 2026-08-24; landed as commit 107bb4ba4), so the assertions that
  * pinned "unkeyable ⇒ refused" for those objects were pinning a branch that no
  * longer exists for them, and were rewritten rather than deleted or silenced.
  * The refusal itself is NOT gone — it is the disposition for a NON-UNIQUE

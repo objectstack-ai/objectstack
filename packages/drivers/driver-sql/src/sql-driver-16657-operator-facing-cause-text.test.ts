@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16657] The producer↔consumer pin for `operatorFacingErrorText`.
+ * [commit 5a95b0e93] The producer↔consumer pin for `operatorFacingErrorText`.
  *
  * `@objectstack/types` cannot import a driver — every driver depends on it —
  * so the helper that reads the raw-path envelope carries its own copy of the

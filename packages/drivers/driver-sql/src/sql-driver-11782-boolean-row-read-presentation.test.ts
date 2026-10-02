@@ -33,8 +33,8 @@
  *
  * ## [#11152] The `min`/`max` CELLS are superseded — the row-read doors are NOT
  *
- * The maintainer's 2026-08-28 ruling on #11152 (applied in that card's comment
- * 5448627494, verbatim 「12745 A回，其他同意。」, superseding #11249) pins that
+ * The maintainer's 2026-08-28 ruling on #11152 (landed as commit
+ * f6fa22ce1, verbatim 「12745 A回，其他同意。」, superseding #11249) pins that
  * **booleans aggregate as numbers on every face**: `min(flag)`/`max(flag)`
  * answer the JSON NUMBERS `0`/`1`, so the aggregate-result boolean
  * presentation this suite once asserted is deliberately removed again. ⚠️

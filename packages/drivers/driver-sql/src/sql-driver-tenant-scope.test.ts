@@ -516,7 +516,7 @@ describe('SqlDriver tenant scope (organization_id)', () => {
 });
 
 /**
- * [#8778] `tenancy.organizationField` is STAMP-ONLY — the driver's tenant
+ * [commit 7901b2dd2] `tenancy.organizationField` is STAMP-ONLY — the driver's tenant
  * scoping must be blind to it. The key exists for the audit writer alone
  * (which column says who a row is ABOUT); the wall keeps answering a different
  * question (what the object is WALLED by) from `enabled` / `tenantField` /
@@ -585,7 +585,7 @@ describe('tenancy.organizationField is read-neutral in the driver (#8778)', () =
   it('the unwalled credential-table shape stays unwalled: reads unscoped, inserts uninjected', async () => {
     // Pre-#8287-shaped row: no organization at all. Under any wall reading
     // `active_organization_id` or resurrecting a scope, this row vanishes for
-    // its own owner — the defect #8287 removed and #8778 must not reintroduce.
+    // its own owner — the defect #8287 removed and commit 7901b2dd2's stamp-only key must not reintroduce.
     await driver.create('api_key_like', { id: 'k0', name: 'legacy', revoked: false });
     await driver.create('api_key_like', { id: 'k1', name: 'ci', active_organization_id: 'org_b', revoked: false });
 

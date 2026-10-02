@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11067] `updated_at` must advance on a deployment that never runs the
+ * [commit 479fba50d] `updated_at` must advance on a deployment that never runs the
  * driver's DDL — and must keep working on a hand-migrated table that genuinely
  * has no `updated_at` column.
  *

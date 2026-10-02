@@ -63,7 +63,7 @@
  * `engine.syncObjectSchema` → `SqlDriver.syncSchema` → the DDL gate, on a
  * server that is already serving HTTP. That was the exact test #8035 applied
  * when it UNregistered `MONGODB_MULTI_TENANT_UNSUPPORTED` for failing it — a
- * removal #16649 reversed under the #16404 door-or-no-door rule, which takes
+ * removal that commit 613bfbd3d reversed under the #16404 door-or-no-door rule, which takes
  * registration out of that test's reach entirely: every `code` that ships in
  * `dist` carries a ledger row, and wire-reachability now decides only what a
  * door ANSWERS with. This one can be carried, so the door serves it under its

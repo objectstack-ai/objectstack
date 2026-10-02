@@ -333,7 +333,7 @@ const JSON_COLUMN_TYPES = new Set<string>([
  *
  * ⚠️ NOT a taste: it is the width `os generate migration --format sql` already
  * emits for the family (`VARCHAR(2048)` in `packages/cli/src/commands/
- * generate.ts`), and the maintainer ruling on #15041 is that the GENERATOR
+ * generate.ts`), and the maintainer ruling in ADR-0104's 2026-09-05 addendum is that the GENERATOR
  * states the ruled end-state and does not move — the driver is the side that
  * moves to meet it. A driver that created knex's default `varchar(255)` here
  * would open a fresh divergence between the two producers of the same column
@@ -996,7 +996,7 @@ function unresolvableFilterColumnError(object: string, column: string | null): E
  * platform accepts — expressly outside this ruling.
  *
  * That predicate already follows `error.cause` up to four levels, with its own
- * pins (`packages/types/src/driver-error-classification.test.ts` — #13279
+ * pins (`packages/types/src/driver-error-classification.test.ts` — commit 6a180e42d
  * moved it there from `metadata/src/utils/schema-sync-errors.test.ts` —
  * "follows an error wrapped as `cause`"), because "drivers commonly re-throw
  * with the original attached as `cause`" is a case it was built for. So the
@@ -1018,7 +1018,7 @@ function unresolvableFilterColumnError(object: string, column: string | null): E
  * object (ADR-0015) that is not the name in the statement: {@link
  * SqlDriver.getBuilder} targets `external.remoteName`. A genuinely absent
  * remote therefore raised a phrase naming `legacy_orders` against a caller
- * naming `crm_order`, and the #13324 comparison read a real missing table as
+ * naming `crm_order`, and commit 4cda78c9b's comparison read a real missing table as
  * "about something else" — loud, for the one case the licence exists for.
  * Nothing at a call site can fold that away: the mapping lives on this
  * instance.
@@ -1182,7 +1182,7 @@ function insertedRowsNotReadBackError(object: string, missingIds: unknown[], wri
 /**
  * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
  *
- * Named for the seam it arrived on; since #9542 it governs BOTH callers of
+ * Named for the seam it arrived on; since commit 8bbf45947 it governs BOTH callers of
  * {@link SqlDriver.runWideningAlters} — the deferred-DDL flush and boot
  * schema-sync.
  *
@@ -1217,7 +1217,7 @@ function insertedRowsNotReadBackError(object: string, missingIds: unknown[], wri
  *     re-run once the blocker is gone — against an unbounded hang as the cost of
  *     one that never fires.
  *
- * # The same number on boot (#9542)
+ * # The same number on boot (commit 8bbf45947)
  *
  * Boot schema-sync arms this bound too, at the same value rather than a longer
  * one. Everything above is reasoning about how long a legitimate metadata-lock
@@ -5239,7 +5239,7 @@ interface RowWidthContribution {
  * Render the duplicate groups a unique pre-flight probe found, for an operator
  * message: at most five groups, then a count of the rest.
  *
- * Module-local on purpose (#14902). The two sites that report a blocked unique
+ * Module-local on purpose (commit 61821e54c). The two sites that report a blocked unique
  * — the drift entry and the boot-time durability log — must name the SAME rows
  * in the SAME shape, and a second hand-rolled `.slice(0, 5).join('; ')` is
  * exactly how the plain and the NULL-safe path drifted apart in the first
@@ -5439,7 +5439,7 @@ export class SqlDriver implements IDataDriver {
    * registry: its readers present the stored form (SQLite INTEGER 0/1, MySQL
    * `tinyint(1)`) as one JS boolean.
    *
-   * ⚠️ [#17586] SCALAR only. A MULTI-VALUED boolean/toggle is deliberately
+   * ⚠️ [commit d46deba19] SCALAR only. A MULTI-VALUED boolean/toggle is deliberately
    * NOT here — the same carve-out {@link mediaFields} states just above, and
    * the one `numericFields` / `numericValueFields` carry in both fills. Its
    * value is a LIST of booleans in a JSON column, and "present this as ONE
@@ -5469,7 +5469,7 @@ export class SqlDriver implements IDataDriver {
    * 3. `formatOutput`'s row pass — the [#11782] coercion this registry exists
    *    for, and where the collapse was filed;
    * 4. {@link isNonTextColumn} — already carves multi-valued out AT THE READER
-   *    (`&& !this.isJsonColumn(...)`, #17343), so its answer is UNCHANGED by
+   *    (`&& !this.isJsonColumn(...)`, commit 82cb69fed), so its answer is UNCHANGED by
    *    the narrowing rather than merely unharmed by it.
    */
   protected booleanFields: Record<string, string[]> = {};
@@ -5560,7 +5560,7 @@ export class SqlDriver implements IDataDriver {
   protected columnFieldByObject: Record<string, Record<string, string>> = {};
   protected tablesWithTimestamps: Set<string> = new Set();
   /**
-   * [#11067] What is known about `updated_at` on a table this driver was told
+   * [commit 479fba50d] What is known about `updated_at` on a table this driver was told
    * about WITHOUT running DDL against it.
    *
    * ## Why {@link tablesWithTimestamps} could not answer this
@@ -7114,7 +7114,7 @@ export class SqlDriver implements IDataDriver {
   // CRUD — IDataDriver core
   // ===================================
 
-  // [#17690] The return is the contract's own type. It was `Promise<any[]>`, and the
+  // [commit be5c60291] The return is the contract's own type. It was `Promise<any[]>`, and the
   // reason #15267's census never named this door is worth carrying: that census
   // matched the literal string `Promise<any>`, and here the `any` is NESTED
   // inside a wider type, so the characters were not there to match. The door
@@ -8298,7 +8298,7 @@ export class SqlDriver implements IDataDriver {
    * `updated_at` — as opposed to merely presuming it from the declared shape?
    *
    * The stronger of the two answers {@link stampsUpdatedAt} folds together, and
-   * the only one the INSERT door may act on. `presumed` (#11067) is deliberately
+   * the only one the INSERT door may act on. `presumed` (commit 479fba50d) is deliberately
    * excluded: that state exists so an UPDATE can speculate and then RECOVER
    * ({@link updateWithPresumedTimestamp}), and the upsert door has no such
    * recovery — a presumption that turned out wrong there would name a column
@@ -8338,7 +8338,7 @@ export class SqlDriver implements IDataDriver {
    * ## Only an OBSERVED column is stamped
    *
    * {@link observedUpdatedAtColumn}, not {@link stampsUpdatedAt} — see there for
-   * why the #11067 presumption stops at the UPDATE door.
+   * why the commit 479fba50d presumption stops at the UPDATE door.
    */
   protected stampUpsertUpdatedAt(object: string, formatted: Record<string, any>): void {
     if (formatted.updated_at !== undefined && formatted.updated_at !== null) return;
@@ -8411,7 +8411,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#11067] Should an UPDATE to `object` refresh `updated_at`?
+   * [commit 479fba50d] Should an UPDATE to `object` refresh `updated_at`?
    *
    * `true` on the DDL-observed tables exactly as before, and now also on a
    * table whose declared shape says it has the column — see
@@ -8426,7 +8426,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#11067] Is that stamp still a PRESUMPTION — i.e. must this write carry the
+   * [commit 479fba50d] Is that stamp still a PRESUMPTION — i.e. must this write carry the
    * fallback?
    *
    * Only for a table in the `presumed` state and outside `tablesWithTimestamps`.
@@ -8438,7 +8438,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#11067] Ask the DATABASE whether `object`'s physical table carries
+   * [commit 479fba50d] Ask the DATABASE whether `object`'s physical table carries
    * `updated_at`. `null` when the question could not be answered.
    *
    * ⛔ This is deliberately not a read of the failure's message. Every dialect
@@ -8482,7 +8482,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#11067] Issue an UPDATE whose `updated_at` stamp is a PRESUMPTION, and
+   * [commit 479fba50d] Issue an UPDATE whose `updated_at` stamp is a PRESUMPTION, and
    * recover if the column turns out not to be there.
    *
    * ## Why this exists rather than option 1 on its own
@@ -8583,7 +8583,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#14438] Declared as `IDataDriver.update()` declares it: the updated
+   * [commit 2200f8ec8] Declared as `IDataDriver.update()` declares it: the updated
    * record, or `null` when no row carries `id` — the un-rotated path answers
    * `formatOutput(...) || null` and the rotation path answers `null` once
    * every shard has been probed. The annotation used to be an explicit
@@ -9259,7 +9259,7 @@ export class SqlDriver implements IDataDriver {
     throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
   }
 
-  // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
+  // [commit be5c60291] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
   // reason #15267's census never named this door is worth carrying: that census
   // matched the literal string `Promise<any>`, and here the `any` is NESTED
   // inside a wider type, so the characters were not there to match. The door
@@ -9877,7 +9877,7 @@ export class SqlDriver implements IDataDriver {
    * usable — the rollback decision for the caller's OWN work stays the
    * caller's, which is the half of `upsert`'s reasoning that does transfer.
    */
-  // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>[]>`, and the
+  // [commit be5c60291] The return is the contract's own type. It was `Promise<Record<string, any>[]>`, and the
   // reason #15267's census never named this door is worth carrying: that census
   // matched the literal string `Promise<any>`, and here the `any` is NESTED
   // inside a wider type, so the characters were not there to match. The door
@@ -9926,7 +9926,7 @@ export class SqlDriver implements IDataDriver {
    * `updated_at` (list-view sorts, delta/incremental sync, cache invalidation,
    * audit), without erroring.
    *
-   * The decision is #11067's, unchanged and shared rather than re-derived:
+   * The decision is commit 479fba50d's, unchanged and shared rather than re-derived:
    * {@link stampsUpdatedAt} answers whether to stamp, {@link keepSuppliedUpdatedAt}
    * honours an opt-in historical import, and {@link updateWithPresumedTimestamp}
    * carries the speculative case so a hand-migrated table that genuinely lacks
@@ -10027,7 +10027,7 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): Promise<Record<string, unknown> | null> {
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
-    // [#11067] One definition of the decision, shared with {@link update}. No
+    // [commit 479fba50d] One definition of the decision, shared with {@link update}. No
     // fallback is threaded here, and that is a property of the path rather than
     // an omission: `rotationShardsOf` returns shards only once `ensureRotation`
     // has run, and `initObjects` records the stronger `tablesWithTimestamps`
@@ -10460,7 +10460,7 @@ export class SqlDriver implements IDataDriver {
    * `any` here was not "the object name goes unchecked", it was every check off
    * on the members this body READS: `where`'s filter dialect, `groupBy`'s node
    * union, `aggregations`' node shape. #5181 narrowed the six methods it swept
-   * and #6075 followed through on five drivers; this door was reached by
+   * and commit d367f03d6 followed through on five drivers; this door was reached by
    * neither.
    *
    * [#17277] The sentence that used to close the paragraph above —
@@ -11035,7 +11035,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     builder.distinct(field);
-    // [#17639] The THIRD read door joins the other two. `find()` and `count()`
+    // [commit 7c2c5aedd] The THIRD read door joins the other two. `find()` and `count()`
     // have carried the terminal envelope since #8931 and `aggregate()` since
     // #11455; this one still executed BARE, so any dialect refusal the
     // statement raised left the driver as the backend's own object — a raw
@@ -11057,7 +11057,7 @@ export class SqlDriver implements IDataDriver {
     // values of this column — was logged as an UNHANDLED server fault.
     //
     // ⛔ NOT a decision about whether a JSON column should ANSWER a distinct
-    // read; that question is #17590's, on the same columns. Whatever this door
+    // read; that question belonged to the card commit e04a0aff2 closed, on the same columns. Whatever this door
     // ends up doing, it must not leak the backend's own object — so the
     // envelope is the half that lands here, exactly as #11455 landed it for
     // `aggregate()` while its own answer question was still open.
@@ -11068,11 +11068,11 @@ export class SqlDriver implements IDataDriver {
     // `sql-driver-17639-distinct-fault-envelope.test.ts` asserts that on a
     // route (a table that was never provisioned) that has no JSON column in it.
     //
-    // ⛔ And still NO BLANKET `isUnresolvableColumnError` arm — #17857 closed
-    // the gap #17639 left FILED, and it closed it the way #11541 closed the
+    // ⛔ And still NO BLANKET `isUnresolvableColumnError` arm — commit 9ccc4179e closed
+    // the gap commit 7c2c5aedd left FILED, and it closed it the way #11541 closed the
     // `aggregate()` one: by ATTRIBUTING the column to a clause of the caller's
     // own request first. A blanket arm remains forbidden for the reason stated
-    // here since #17639 — it would tell the author of `distinct(o, 'nosuchcol')`,
+    // here since commit 7c2c5aedd — it would tell the author of `distinct(o, 'nosuchcol')`,
     // who passed no filter at all, that their FILTER was wrong — and
     // {@link SqlDriver.distinctBackendFault} is what makes that claim
     // unnecessary rather than what makes it safe.
@@ -11101,7 +11101,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#17857] Which envelope a dialect error leaving {@link SqlDriver.distinct}
+   * [commit 9ccc4179e] Which envelope a dialect error leaving {@link SqlDriver.distinct}
    * deserves — the #8790 unresolvable-column refusal reaching the LAST read
    * door, without the attribution #8931 forbids.
    *
@@ -11124,7 +11124,7 @@ export class SqlDriver implements IDataDriver {
    * distinct(t, 'nosuchcol')                  => DATABASE_ERROR  500  ← this card
    * ```
    *
-   * A BLANKET `isUnresolvableColumnError` arm is still refused, and #17639
+   * A BLANKET `isUnresolvableColumnError` arm is still refused, and commit 7c2c5aedd
    * wrote the reason at the door: this door names columns in TWO clauses — the
    * `field` being listed and the WHERE compiled from `filters` — so the WHERE
    * refusal's words ("Filter on 'x' names a column …") would tell the author of
@@ -11148,7 +11148,7 @@ export class SqlDriver implements IDataDriver {
    *    {@link SqlDriver.unresolvableFilterColumnRefusal} applies verbatim;
    * 3. {@link unresolvableColumnNameOf} answers `null` ⇒ the wording parsed by
    *    nothing. With no name there is no request lookup, so NO attribution is
-   *    supportable — the #17639 terminal envelope stands unchanged. ⛔ Reading
+   *    supportable — commit 7c2c5aedd's terminal envelope stands unchanged. ⛔ Reading
    *    `null` as license for the WHERE arm would attribute a clause on no
    *    evidence, which is arm 2's own justification inverted.
    *
@@ -11203,7 +11203,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#17857] Compose the refusal for the LISTED field of a distinct read whose
+   * [commit 9ccc4179e] Compose the refusal for the LISTED field of a distinct read whose
    * column the backend could not resolve, writing the dialect's own message to
    * the SERVER LOG on the way — the same statement-to-log, name-to-caller split
    * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
@@ -11244,7 +11244,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected unresolvableDistinctColumnRefusal(object: string, column: string, error: unknown): Error {
     const detail = (error as { message?: unknown } | null | undefined)?.message;
-    // The withholding rule is #7929's and this door's arm is #17857's — ids kept
+    // The withholding rule is #7929's and this door's arm is commit 9ccc4179e's — ids kept
     // in the comment, never in the emitted string: a log line reaches operators
     // and generated surfaces, where `#NNNN` resolves against nothing
     // (`pnpm check:doc-authoring`).
@@ -11328,7 +11328,7 @@ export class SqlDriver implements IDataDriver {
     const rows = await builder;
     if (!Array.isArray(rows)) return rows;
 
-    // [#16609] The last read door that returned STORAGE forms. It handed back
+    // [commit 78bc4ad58] The last read door that returned STORAGE forms. It handed back
     // `await builder` with no presentation at all, while `find()`/`findOne()`
     // run every row through `formatOutput` and `aggregate()`/`distinct()` got
     // `presentReadValue` under #3797/#3849 — so one driver answered one
@@ -11771,10 +11771,10 @@ export class SqlDriver implements IDataDriver {
   /** Create/column-sync one physical shard table (mirrors the managed-table
    * branch of {@link initObjects}, scoped to a shard).
    *
-   * #16711: `indexes` and `tenancy` are DECLARED here, on {@link ensureRotation}
+   * Commit 7862fb711: `indexes` and `tenancy` are DECLARED here, on {@link ensureRotation}
    * and on {@link rotateShards}, because this leaf reads both off the object the
    * public entry point was handed — a shard carries the base table's declared
-   * indexes (#11374) and must scope a `unique: 'organization'` index the same
+   * indexes (commit d0e3a885b) and must scope a `unique: 'organization'` index the same
    * way on every shard (ADR-0120 D1). Declaring them only here would leave the
    * two links above still narrowing the same value, so a caller spelling
    * `indexes` in a fresh literal to `rotateShards` would still be refused by a
@@ -11797,7 +11797,7 @@ export class SqlDriver implements IDataDriver {
     // ahead of either.
     this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
     const exists = await this.knex.schema.hasTable(shardName);
-    // #11374: a shard carries the base table's declared indexes (below), so its
+    // Commit d0e3a885b: a shard carries the base table's declared indexes (below), so its
     // columns need the same keyable-text decision the managed path makes.
     const keyedColumns = indexedKeyColumns({
       table: shardName,
@@ -11842,7 +11842,7 @@ export class SqlDriver implements IDataDriver {
       // (ADR-0120 D1) must scope identically on every shard of the base table,
       // so the answer has to come from the base.
       //
-      // [#16729] Keyed by `baseTable`, and through the RECORDING resolver, not
+      // [commit 0f38ab084] Keyed by `baseTable`, and through the RECORDING resolver, not
       // the bare `computeTenantField`. The bare one reads this call's schema
       // alone, so a shard synced from a partial re-registration — one carrying
       // no `tenancy` block — fell through to the implicit `organization_id`
@@ -12024,7 +12024,7 @@ export class SqlDriver implements IDataDriver {
         // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
         // legacy-encoding repair runs on a deployment that has not moved too.
         if (!isMultiValuedColumn(type, field) && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
-        // [#17586] SCALAR only — the house spelling its three neighbours in
+        // [commit d46deba19] SCALAR only — the house spelling its three neighbours in
         // this block already carry, and this line was the single omission. See
         // {@link booleanFields}: every reader of this registry presents its
         // entry as ONE JS boolean, which for a multi-valued (JSON) column
@@ -12128,7 +12128,7 @@ export class SqlDriver implements IDataDriver {
         // `toggle` shares boolean storage/affinity, so it needs the same
         // read coercion (stored 1/0 → JS true/false) or it leaks back as a
         // number/string instead of a boolean (#field-zoo).
-        // [#17586] SCALAR only, like the three neighbours below: a
+        // [commit d46deba19] SCALAR only, like the three neighbours below: a
         // `multiple: true` boolean/toggle is a JSON column, and the read
         // coercion this registry exists for presents ONE JS boolean — which
         // collapses the parsed array to `true` whatever it holds. See
@@ -12180,7 +12180,7 @@ export class SqlDriver implements IDataDriver {
     this.fractionalNumericFields[tableName] = fractionalCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
-    // [#11067] The declared shape's answer to "does this table carry
+    // [commit 479fba50d] The declared shape's answer to "does this table carry
     // `updated_at`?", installed here because here is the one place a managed
     // object reaches the driver on EVERY boot posture — `initObjects` calls
     // this first, and a `skipSchemaSync` boot calls it and stops. Presumed
@@ -12233,7 +12233,7 @@ export class SqlDriver implements IDataDriver {
    * it affordable on exactly the cold-start-sensitive boots `skipSchemaSync`
    * exists to protect: it costs one pass over the object list, in memory.
    *
-   * It is the same ruling #7737/#10629 already made for FEDERATED objects —
+   * It is the same ruling #7737 already made for FEDERATED objects (commit 199ec4712) —
    * `OS_SKIP_SCHEMA_SYNC` is about DDL, and a binding that is DDL-free must
    * not ride on it — extended to the managed ones.
    *
@@ -12265,7 +12265,7 @@ export class SqlDriver implements IDataDriver {
   // correctness. `src/sql-driver-16570-init-objects-indexes-param.test.ts`
   // pins the fresh-literal form so it cannot silently go back.
   //
-  // `lifecycle` was the third instance, and the one that made #16711 file the
+  // `lifecycle` was the third instance, and the one that made the card behind commit 7862fb711 file the
   // CLASS rather than a fourth single-key card: the loop below reads
   // `obj.lifecycle?.storage` to decide whether a table is time-sharded, while
   // the sibling `rotateShards` on this same class had always declared the key.
@@ -12372,7 +12372,7 @@ export class SqlDriver implements IDataDriver {
       // rejects CREATE TABLE with two columns of the same name).
       const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
 
-      // #11374: which columns this object's indexes will KEY ON, resolved before
+      // Commit d0e3a885b: which columns this object's indexes will KEY ON, resolved before
       // any DDL runs. `createColumn` needs it to decide whether a bounded text
       // field takes `varchar(maxLength)` (keyable) or TEXT — a decision that is
       // only makeable at CREATE time, since no dialect turns a TEXT column into
@@ -12488,7 +12488,7 @@ export class SqlDriver implements IDataDriver {
       await this.backfillCanonicalDatetimes(tableName, exists);
       // #3994: the `Field.time` twin of the line above.
       await this.backfillCanonicalTimes(tableName, exists);
-      // #12380: converge this table's `Field.json` columns on the injective
+      // Commit 4045b954d: converge this table's `Field.json` columns on the injective
       // JSON-text storage form the rewritten `formatInput` now writes.
       await this.backfillCanonicalJsonEncoding(tableName, exists);
       // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
@@ -12670,7 +12670,7 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Converge one table's `Field.json` columns on the injective JSON-text
-   * storage form (#12380) — the `Field.json` twin of
+   * storage form (commit 4045b954d) — the `Field.json` twin of
    * {@link backfillCanonicalDatetimes}, built the same way for the same reasons.
    *
    * SQLite only. Postgres and MySQL never had the defect: their half of
@@ -13031,7 +13031,7 @@ export class SqlDriver implements IDataDriver {
    * the lock behaviour of unrelated runtime work. The restore is best-effort:
    * it must never mask the refusal it runs alongside.
    *
-   * # Armed on BOTH callers; only the flush escapes the swallow (#9542)
+   * # Armed on BOTH callers; only the flush escapes the swallow (commit 8bbf45947)
    *
    * The bound is armed unconditionally, because the year-long default is no
    * better for boot than it is for an operator: a boot blocked on another
@@ -13074,7 +13074,7 @@ export class SqlDriver implements IDataDriver {
           try {
             await run(s.sql, s.bindings);
           } catch (err) {
-            // #9542: the bound is armed on both callers, the ESCAPE is not.
+            // Commit 8bbf45947: the bound is armed on both callers, the ESCAPE is not.
             // Off the flush this rethrows the server's own error, which the
             // widening's catch reports and swallows — boot's policy
             // unchanged, now reached by a wait that ends.
@@ -13216,7 +13216,7 @@ export class SqlDriver implements IDataDriver {
    *
    * # The level is `error`, and that is a separate question from the swallow (#9609)
    *
-   * Swallow-vs-throw was adjudicated (#9542) and is unchanged: boot must not go
+   * Swallow-vs-throw was adjudicated (commit 8bbf45947) and is unchanged: boot must not go
    * down over a migration. `warn`-vs-`error` was never separately decided, and
    * AGENTS.md → "Degradation log levels" decides it with one question — after
    * the degradation, does the system still look normal from the outside while
@@ -13572,7 +13572,7 @@ export class SqlDriver implements IDataDriver {
     // #12732: `diffManagedTable`'s varchar-length branch asks `createColumn`'s
     // own read-only mirror (`varcharColumnChars`) whether it would even build
     // a varchar for a given field — and for the text family that answer needs
-    // keyedness (#11374), the same input `initObjects` / `ensureShardTable`
+    // keyedness (commit d0e3a885b), the same input `initObjects` / `ensureShardTable`
     // already resolve via `indexedKeyColumns` before any DDL. Resolved here
     // too so the DIFFER'S expectation, not only the DDL, agrees with keyed
     // columns.
@@ -13658,7 +13658,7 @@ export class SqlDriver implements IDataDriver {
    *     `safe` to blocked with the same row report — the CREATE could only
    *     fail at apply time otherwise, with a raw driver error naming no rows.
    *
-   * ⚠️ #14902 — the second bullet covers the PLAIN unique too: an index with no
+   * ⚠️ Commit 61821e54c — the second bullet covers the PLAIN unique too: an index with no
    * organization key part at all, reached by an object with
    * `tenancy: { enabled: false }` or by any explicit `unique: 'global'`. The
    * `nullSafeColumns.length > 0` guard used to exclude it, so `os migrate plan`
@@ -13691,7 +13691,7 @@ export class SqlDriver implements IDataDriver {
       // keeps its pre-ADR-0120 semantics untouched.
       if (op.type === 'recreate_index' && !tighten) continue;
       // …and a PLAIN unique has no tightening shape at all, so only its CREATE
-      // reaches the probe (#14902).
+      // reaches the probe (commit 61821e54c).
       if (!nullSafeKey && op.type !== 'create_index') continue;
 
       let duplicates: Array<{ key: string; rows: number }>;
@@ -13730,7 +13730,7 @@ export class SqlDriver implements IDataDriver {
           `UNIQUE is NULL-distinct, so it never constrained rows without an organization): ` +
           `${report}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
           `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`
-        : // #14902: the plain unique has no #5030 history behind it — nothing
+        : // Commit 61821e54c: the plain unique has no #5030 history behind it — nothing
           // ever admitted these rows, the constraint is simply newly declared
           // over data that does not satisfy it. So the message says what IS
           // true, and above all withdraws the `safe` claim: this op is not
@@ -14129,7 +14129,7 @@ export class SqlDriver implements IDataDriver {
         // ⚠️ Deliberately HERE and not inside `dropIndexIfExists`. That helper
         // has two other callers and neither is terminal: `recreate_index`
         // drops in order to re-create under the SAME name — routing it through
-        // this cleanup would destroy the survivor #13015's `reusable` branch
+        // this cleanup would destroy the survivor commit cd1348802's `reusable` branch
         // exists to re-key in place, turning every rebuild into a full
         // regeneration of a STORED generated column — and
         // `replace_unique_index` cannot reach a shadow at all (its legacy
@@ -14615,14 +14615,14 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Record, on each #11627 hash-shadow CARRIER, the declared key its shadow
-   * actually hashes (#13015).
+   * actually hashes (commit cd1348802).
    *
    * ## Why introspection and not the differ
    *
    * A carrier is recognisable by name alone — its sole key column is
    * {@link SqlDriver.hashShadowColumnFor} of its own index name — but a NAME
    * cannot say WHAT is hashed, and that difference decides between two
-   * opposite verdicts. A shadow written since #12998 hashes the declared key
+   * opposite verdicts. A shadow written since commit df1c75c4b hashes the declared key
    * with its NULL-safe `COALESCE(organization_id, '__global__')` parts intact
    * and is HEALTHY; one written before it hashes the RAW columns, so `CONCAT`
    * yields NULL for every NULL-organization row and the constraint those rows
@@ -14818,7 +14818,7 @@ export class SqlDriver implements IDataDriver {
    *   at `error` (a declared constraint is not enforced — the
    *   durability-degradation rule) and surfaces as drift with a row report via
    *   the ADR-0120 D4 pre-flight, instead of failing the whole boot.
-   * - #14902: a PLAIN unique — no organization key part, i.e.
+   * - Commit 61821e54c: a PLAIN unique — no organization key part, i.e.
    *   `tenancy: { enabled: false }` or an explicit `unique: 'global'` — over
    *   data that already violates it gets the SAME disposition, where it used to
    *   throw the database's raw error and take the boot down naming no rows and
@@ -14905,7 +14905,7 @@ export class SqlDriver implements IDataDriver {
         // `code` / `errno` / `message` / `cause`; see
         // `@objectstack/types`' `unique-violation.ts` for why it is the one
         // name for this question.
-        // #11374: MySQL's refusal of a TEXT key part names a column in a table
+        // Commit d0e3a885b: MySQL's refusal of a TEXT key part names a column in a table
         // that was just created successfully, which reads as an index quirk
         // rather than what it is — the object is now registered with its
         // declared uniqueness absent. Re-throw the SAME failure carrying the
@@ -14933,7 +14933,7 @@ export class SqlDriver implements IDataDriver {
           // nothing. Those cases stay refused below, and stay tracked.
           if (unique) {
             try {
-              // #12998: the shadow must hash the DECLARED key, so the NULL-safe
+              // Commit df1c75c4b: the shadow must hash the DECLARED key, so the NULL-safe
               // organization key parts (ADR-0120 D3) ride along — without them
               // the generation expression hashed the RAW columns, `CONCAT`
               // returned NULL for every NULL-organization row, and the rows the
@@ -14951,7 +14951,7 @@ export class SqlDriver implements IDataDriver {
                 continue;
               }
               if (nullSafe.size > 0 && isUniqueViolationError(shadowErr)) {
-                // #12998: the shadow ALTER computes the generated column for the
+                // Commit df1c75c4b: the shadow ALTER computes the generated column for the
                 // EXISTING rows, so a database that accumulated duplicates under
                 // the NULL-safe key while the constraint was void fails here
                 // with a uniqueness violation — the same data-dependent
@@ -14999,7 +14999,7 @@ export class SqlDriver implements IDataDriver {
                 // DIED carrying `ER_BLOB_KEY_WITHOUT_LENGTH` -- a message about
                 // an unkeyable TEXT column, telling the operator to declare a
                 // `maxLength` the field already declares, naming NO rows and NO
-                // remedy -- while the actual cause was duplicate rows. #14902
+                // remedy -- while the actual cause was duplicate rows. Commit 61821e54c
                 // fixed exactly that on the direct arm; the two arms of one
                 // `catch` then disagreed about one question.
                 //
@@ -15064,7 +15064,7 @@ export class SqlDriver implements IDataDriver {
           continue;
         }
         if (unique && isUniqueViolationError(e)) {
-          // #14902 — the PLAIN unique: no organization key part at all, reached
+          // Commit 61821e54c — the PLAIN unique: no organization key part at all, reached
           // by `tenancy: { enabled: false }` or by an explicit
           // `unique: 'global'`. It used to fall through to `throw e`, so the
           // boot DIED carrying the database's own error, which names the index
@@ -15779,7 +15779,7 @@ export class SqlDriver implements IDataDriver {
    * author declared non-temporal (`applySystemFields` lets the declaration
    * win; `AUDIT_FIELD_GOVERNANCE` forces only `readonly` / `system`, never
    * `type`) leaves `find()` as the number it is — routed to the datetime fold,
-   * both became ISO text at this door and nowhere else (the #16619 contract
+   * both became ISO text at this door and nowhere else (commit 45cfa1b88's contract
    * review's finding; `sql-driver-13973-canonical-iso-read-door.test.ts` §D
    * pins the agreement).
    *
@@ -15842,7 +15842,7 @@ export class SqlDriver implements IDataDriver {
    * (`16`, `5`, `15`, `Infinity`) and this door as the string; that is
    * reachable through `create()` / `update()` on the driver's own DDL with an
    * author-declared non-temporal audit column, not only through a hand-made
-   * TEXT-affinity column (measured in the #16619 contract review). A decimal
+   * TEXT-affinity column (measured in the contract review commit 45cfa1b88 records). A decimal
    * or exponent spelling (`'1700000000000'`, `'1e3'`, `'.5'`) is folded to
    * INTEGER/REAL by the affinity before it is read back, and a number passes
    * both presenters untouched, so those agree. The B1 ruling did not decide
@@ -16079,7 +16079,7 @@ export class SqlDriver implements IDataDriver {
    * caller flips its operator, which is exactly the ambiguity an
    * operator-sensitive rule avoids.
    */
-  // [#17690] The contract declares this hook `unknown`-returning; the class
+  // [commit be5c60291] The contract declares this hook `unknown`-returning; the class
   // published a bare `any`, which is the same family as the promise-shaped
   // doors above and the one member of it that is synchronous. Pinned through
   // `ReturnType` rather than `Resolved` in
@@ -16164,7 +16164,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#14079/#15683/#17343] Is `localField` a column on `table` a text operator
+   * [#14079/#15683, commit 82cb69fed] Is `localField` a column on `table` a text operator
    * must not be aimed at — a SCALAR column DECLARED numeric, boolean or
    * temporal?
    *
@@ -16222,13 +16222,13 @@ export class SqlDriver implements IDataDriver {
    * - **temporal** [#15683] — HERE. `dateFields` / `datetimeFields` /
    *   `timeFields` serve the read-presentation seam, which DOES apply to a
    *   multi-valued column, so narrowing them would break a seam that is right.
-   * - **boolean** [#17343] — HERE, and this limb had NEITHER until then.
+   * - **boolean** [commit 82cb69fed] — HERE, and this limb had NEITHER until then.
    *   #14079 landed this predicate describing itself as "a declared numeric or
    *   boolean SCALAR" and annotated the numeric registry as non-`multiple`, so
    *   the omission was the gap between that stated scope and `booleanFields`'
    *   silence.
    *
-   *   ⚠️ [#17586] `booleanFields` was SINCE narrowed at both fills, for a
+   *   ⚠️ [commit d46deba19] `booleanFields` was SINCE narrowed at both fills, for a
    *   defect of its own (the read coercion collapsed a parsed array to a
    *   single, inverted `true`).
    *
@@ -16689,11 +16689,11 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#17590, director ruling 2026-09-12] Emit the MEMBERSHIP reading of
+   * [commit e04a0aff2, director ruling 2026-09-12] Emit the MEMBERSHIP reading of
    * `$contains` / `$notContains` when the column they were aimed at is a JSON
    * column, and say whether it did.
    *
-   * Returns `false` — leaving the caller on the pre-#17590 substring emitter —
+   * Returns `false` — leaving the caller on the substring emitter from before commit e04a0aff2 —
    * in exactly two cases, and the two are different in kind:
    *
    * 1. **The column is not a JSON column.** On a scalar string column
@@ -17175,7 +17175,7 @@ export class SqlDriver implements IDataDriver {
               );
               break;
             }
-            // [#17590] The MEMBERSHIP reading first: on a JSON column this
+            // [commit e04a0aff2] The MEMBERSHIP reading first: on a JSON column this
             // operator asks whether the comparand is an ELEMENT of the stored
             // array, not whether it is a substring of the serialization. Falls
             // through to the substring emitter for every scalar string column,
@@ -17195,7 +17195,7 @@ export class SqlDriver implements IDataDriver {
               this.applyLike(builder, method, field, opValue, 'contains', false, true);
               break;
             case '$notContains':
-              // [#17590] The exact complement of the arm above, on the same
+              // [commit e04a0aff2] The exact complement of the arm above, on the same
               // population and the same construct. It moves WITH `$contains`
               // and cannot be deferred: this operator is declared "the negation
               // of $contains, on the same comparand contract", so leaving it on
@@ -18038,7 +18038,7 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * The widest `varchar(n)` one utf8mb4 key part can hold on InnoDB: 3072 bytes
-   * of index key ÷ 4 bytes per character (#11374).
+   * of index key ÷ 4 bytes per character (commit d0e3a885b).
    *
    * Measured on MySQL 8.0.46 (DYNAMIC row format, the 8.0 default) rather than
    * read off a doc page: `varchar(768) UNIQUE` creates, `varchar(769) UNIQUE`
@@ -18055,7 +18055,7 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * The `varchar(n)` a KEYED text-family field should take, or `null` to leave
-   * the column TEXT (#11374).
+   * the column TEXT (commit d0e3a885b).
    *
    * `null` has exactly two causes, and both are deliberate non-events rather
    * than failures here:
@@ -18139,7 +18139,7 @@ export class SqlDriver implements IDataDriver {
    * ⚠️ Deliberately mirrors {@link keyableTextLength} without sharing code
    * with it. The two families answer different questions — that one asks
    * "can this KEY?" and returns `null` for an unbounded field, this one asks
-   * "how wide is this column?" and returns 255 — and #11374's remaining half
+   * "how wide is this column?" and returns 255 — and the half commit d0e3a885b left open
    * may still reshape the text side. A shared helper would couple a settled
    * decision to an unsettled one.
    */
@@ -18163,7 +18163,7 @@ export class SqlDriver implements IDataDriver {
   /**
    * Turn MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY` into a message
    * that names the columns at fault and the remedy that actually applies
-   * (#11374, #12999).
+   * (commits d0e3a885b and ebcc34e89).
    *
    * ## TWO remedies, because the refusal has two causes
    *
@@ -18172,7 +18172,7 @@ export class SqlDriver implements IDataDriver {
    * | **create** | the field declares no usable `maxLength` | declare one — the next create emits `varchar(n)` |
    * | **upgrade** | the field declares one; the COLUMN predates it and is still TEXT | convert the column by hand |
    *
-   * One message served both until #12999, and on the upgrade path both of its
+   * One message served both until commit ebcc34e89, and on the upgrade path both of its
    * halves were false: it diagnosed a missing declaration that was present, and
    * prescribed a declaration that was already made. That is not merely
    * imprecise — it fires once per boot on a production upgrade and reads as the
@@ -18223,7 +18223,7 @@ export class SqlDriver implements IDataDriver {
         ? `Column(s) ${offenders.map((c) => `"${c}"`).join(', ')} are stored as TEXT`
         : 'One or more of its key columns is stored as TEXT';
 
-    // #12999: the SAME refusal has two causes, and the message below is true of
+    // Commit ebcc34e89: the SAME refusal has two causes, and the message below is true of
     // only one of them. On CREATE the field really declares no usable bound, so
     // "declare `maxLength`" is the fix. On an UPGRADE the bound IS declared —
     // the additive sync never rewrites a column's type (#3728), so a column
@@ -18325,7 +18325,7 @@ export class SqlDriver implements IDataDriver {
    * get different shadows.
    */
   protected static hashShadowColumnFor(indexName: string): string {
-    // #13015: DELEGATES rather than re-deriving. The differ has to look for
+    // Commit cd1348802: DELEGATES rather than re-deriving. The differ has to look for
     // exactly the column the sync creates, and the two halves of that question
     // lived in different modules — which is how a healthy shadow-carried
     // UNIQUE came to be reported as destructive drift while the shadow column
@@ -18374,7 +18374,7 @@ export class SqlDriver implements IDataDriver {
    *
    *   - **Distinct values that share a long prefix both insert.** This is the
    *     property that rules OUT the prefix-index alternative and the reason
-   *     this route was chosen over it (maintainer ruling on #11374,
+   *     this route was chosen over it (maintainer ruling recorded in commit 107bb4ba4,
    *     2026-08-24): measured, two distinct tokens sharing their first 191
    *     characters are BOTH accepted here, where `UNIQUE KEY (token(191))`
    *     rejected the second as `ER_DUP_ENTRY` — a valid sign-in refused as a
@@ -18402,7 +18402,7 @@ export class SqlDriver implements IDataDriver {
    * a crash. {@link explainHashShadowDuplicate} exists so the driver can tell
    * the two apart by reading the source columns back, and name whichever it is.
    *
-   * ## The NULL-safe organization key parts ride along (#12998)
+   * ## The NULL-safe organization key parts ride along (commit df1c75c4b)
    *
    * The shadow hashes the DECLARED key, not the raw columns. For a key part
    * `normalizeDeclaredIndex` marked NULL-safe (ADR-0120 D3 — the organization
@@ -18427,7 +18427,7 @@ export class SqlDriver implements IDataDriver {
     if (!this.isMysql) return false;
     const shadow = SqlDriver.hashShadowColumnFor(indexName);
     const ref = (c: string) => `\`${c.replace(/`/g, '``')}\``;
-    // The DECLARED key part: NULL-safe parts in their COALESCE form (#12998),
+    // The DECLARED key part: NULL-safe parts in their COALESCE form (commit df1c75c4b),
     // plain parts as the bare column.
     const part = (c: string) =>
       nullSafeColumns?.has(c) ? `COALESCE(${ref(c)}, '${GLOBAL_TENANT}')` : ref(c);
@@ -18440,7 +18440,7 @@ export class SqlDriver implements IDataDriver {
     const addColumn =
       `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED`;
     const addKey = `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
-    // #13015: the shadow column OUTLIVES the index it carries. Dropping a
+    // Commit cd1348802: the shadow column OUTLIVES the index it carries. Dropping a
     // UNIQUE key by name does not drop the generated column keyed by it, so
     // every path that drops and re-syncs — `recreate_index` above all — arrives
     // back here with the survivor still on the table. The unconditional
@@ -18454,7 +18454,7 @@ export class SqlDriver implements IDataDriver {
     if (state === 'foreign') {
       // A real, non-generated column already owns the name. It is not ours to
       // drop — it may hold data — so this route is refused and the caller falls
-      // through to the named #11374 refusal, which is the honest outcome.
+      // through to the refusal commit d0e3a885b named, which is the honest outcome.
       this.logDurabilityFailure(
         `[sql-driver] cannot carry UNIQUE index '${indexName}' on "${tableName}" on a hash shadow — the ` +
           `column "${shadow}" already exists and is NOT a generated column, so it is not the driver's to ` +
@@ -18468,7 +18468,7 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addKey}`);
     } else if (state === 'stale') {
       // The survivor hashes a DIFFERENT key than metadata now declares — the
-      // pre-#12998 raw-column shadow is exactly this case. Reusing it would
+      // raw-column shadow from before commit df1c75c4b is exactly this case. Reusing it would
       // re-enforce the old constraint under the new name, which is the silent
       // wrong answer; the column carries no user data (it is derived), so it is
       // dropped and re-generated. Two statements rather than one ALTER: the
@@ -18481,7 +18481,7 @@ export class SqlDriver implements IDataDriver {
     }
     // The boot log describes the key the shadow actually enforces — the
     // NULL-safe parts in their COALESCE spelling — so "carried" can be read
-    // literally (#12998).
+    // literally (commit df1c75c4b).
     const described = columns
       .map((c) => (nullSafeColumns?.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
       .join(', ');
@@ -18501,13 +18501,13 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * What is already sitting where this index's hash shadow goes (#13015)?
+   * What is already sitting where this index's hash shadow goes (commit cd1348802)?
    *
    *  - `absent`   — nothing; create the column and the key together.
    *  - `reusable` — a generated column hashing EXACTLY the declared key. The
    *                 index that keyed it was dropped (a `recreate_index`, a
    *                 manual `DROP INDEX`, a half-applied migration); re-key it.
-   *  - `stale`    — a generated column hashing a DIFFERENT key. The pre-#12998
+   *  - `stale`    — a generated column hashing a DIFFERENT key. The older (before commit df1c75c4b)
    *                 shadow over RAW columns is this case: reusing it would
    *                 re-enforce the OLD constraint under the new name — green,
    *                 silent, and wrong — so it is re-generated instead.
@@ -18577,7 +18577,7 @@ export class SqlDriver implements IDataDriver {
    *
    * ## Ownership is ESTABLISHED, never assumed
    *
-   * Two refusals, in the shape of #13015's `foreign` guard — a column we have
+   * Two refusals, in the shape of commit cd1348802's `foreign` guard — a column we have
    * not proved is ours is left alone and named in the log, never dropped:
    *
    *  - a column of this name that is **not generated** may hold user data;
@@ -18715,7 +18715,7 @@ export class SqlDriver implements IDataDriver {
     if (sources.length === 0) return null;
     // Only the source columns the failing write actually supplied; a partial
     // update cannot be re-selected on columns it never mentioned. A NULL-safe
-    // key part (#12998) is exempt: the enforced key COALESCEs an absent or
+    // key part (commit df1c75c4b) is exempt: the enforced key COALESCEs an absent or
     // NULL value into the '__global__' bucket, so its key part is knowable
     // without the write mentioning the column.
     if (
@@ -18727,7 +18727,7 @@ export class SqlDriver implements IDataDriver {
     }
     let existing = 0;
     try {
-      // Re-select by the key the index ENFORCES, not by raw equality (#12998):
+      // Re-select by the key the index ENFORCES, not by raw equality (commit df1c75c4b):
       // a NULL-safe part compares through the same COALESCE the generation
       // expression carries (NULL and absent both land in the global bucket),
       // and plain parts use `<=>` — MySQL's NULL-safe equality; this whole
@@ -18749,7 +18749,7 @@ export class SqlDriver implements IDataDriver {
       return null;
     }
     // Describe the key parts as enforced — NULL-safe parts in their COALESCE
-    // spelling — so the message names the actual constraint (#12998).
+    // spelling — so the message names the actual constraint (commit df1c75c4b).
     const described = sources
       .map((s) => (s.nullSafe ? `COALESCE(${s.column}, '${GLOBAL_TENANT}')` : s.column))
       .join(', ');
@@ -18809,7 +18809,7 @@ export class SqlDriver implements IDataDriver {
    * generation expression the server stores, so the disambiguating select
    * above filters on the same key the shadow was generated from. Per part:
    * the column identity, and whether the expression wraps it in the NULL-safe
-   * `COALESCE(col, …)` form (ADR-0120 D3 via #12998) — the read side must
+   * `COALESCE(col, …)` form (ADR-0120 D3 via commit df1c75c4b) — the read side must
    * compare through the same fold the enforced key applies.
    */
   protected async hashShadowSourceColumns(
@@ -18829,7 +18829,7 @@ export class SqlDriver implements IDataDriver {
       const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
       // `unhex(sha2(`a`,256))`, `unhex(sha2(concat(`a`,0x1f,`b`),256))`, or with
       // a NULL-safe part: `…concat(coalesce(`org`,_utf8mb4'__global__'),0x1f,`b`)…`
-      // (#12998). #13015 moved the parse itself next to the shadow vocabulary
+      // (commit df1c75c4b). Commit cd1348802 moved the parse itself next to the shadow vocabulary
       // in `schema-drift.ts`: the differ reads the same expression to decide
       // whether a shadow-carried index enforces what metadata declares, and two
       // copies of this regex would be two answers to one question.
@@ -19214,7 +19214,7 @@ export class SqlDriver implements IDataDriver {
    * is what SQLite's own JSON1 functions operate on, so this is the type the
    * database actually means.
    *
-   * That exposure is the one #12380 had to defeat on this driver's SQLite half
+   * That exposure is the one commit 4045b954d had to defeat on this driver's SQLite half
    * by making the `Field.json` codec injective. This change removes it at the
    * ROOT for new columns instead of encoding around it.
    *
@@ -19245,7 +19245,7 @@ export class SqlDriver implements IDataDriver {
    *
    * It changes what NEW columns are declared as. It never rewrites an existing
    * column: the schema sync is additive, and a legacy `json` column keeps its
-   * declared type, its NUMERIC affinity, and the #12380 encoding that defeats
+   * declared type, its NUMERIC affinity, and the commit 4045b954d encoding that defeats
    * it. Nothing starts reporting drift over the difference either — the base-
    * type finding in `schema-drift.ts` is gated on
    * `multiValueColumnTypeIsLoadBearing(dialect)`, which is `postgres || mysql`
@@ -19418,7 +19418,7 @@ export class SqlDriver implements IDataDriver {
       // is enforced at the write seam, and the data-URI refusal goes away.
       case 'signature':
       case 'qrcode': {
-        // #11374: a text-family column that some declared index KEYS ON is
+        // Commit d0e3a885b: a text-family column that some declared index KEYS ON is
         // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
         // declared a bound this dialect can key on.
         //
@@ -20152,7 +20152,7 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    // ── JSON field serialisation: ONE encoding, every dialect (#12380) ──────
+    // ── JSON field serialisation: ONE encoding, every dialect (commit 4045b954d) ──────
     //
     // `JSON.stringify` unconditionally, which is what Postgres and MySQL have
     // always done here. This DELETES the SQLite branch rather than adding one,
@@ -20266,7 +20266,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (this.isSqlite) {
-      // The exact inverse of `formatInput`'s `JSON.stringify` (#12380). Postgres
+      // The exact inverse of `formatInput`'s `JSON.stringify` (commit 4045b954d). Postgres
       // and MySQL need no arm here because their clients already parse a native
       // `json`/`jsonb` column; SQLite hands back the stored TEXT, so the driver
       // parses it. One codec, three dialects, same answer.
@@ -20280,7 +20280,7 @@ export class SqlDriver implements IDataDriver {
       //
       // Nothing this driver writes can reach it: every new value on disk is the
       // output of `JSON.stringify`, so it parses by construction. It is the
-      // READ-SIDE REPAIR for rows written before #12380 — a pre-fix plain string
+      // READ-SIDE REPAIR for rows written before commit 4045b954d — a pre-fix plain string
       // was stored raw (`America/New_York`), and re-quoting it is exactly what
       // {@link backfillCanonicalJsonEncoding} does on the next `syncSchema`.
       // Keeping it here is the same posture `backfillCanonicalDatetimes` takes:
@@ -20295,7 +20295,7 @@ export class SqlDriver implements IDataDriver {
       // INTEGER/REAL cell (a number, a boolean, or a number-like string eaten by
       // NUMERIC affinity) are collisions already resolved on disk. Those rows
       // read exactly as they read before this change — the class stops growing;
-      // it is not retroactively repaired. See the ruling recorded on #12380.
+      // it is not retroactively repaired. See the decision recorded in commit 4045b954d's message.
       const jsonFields = this.jsonFields[object];
       if (jsonFields && jsonFields.length > 0) {
         for (const field of jsonFields) {
@@ -20303,7 +20303,7 @@ export class SqlDriver implements IDataDriver {
             try {
               data[field] = JSON.parse(data[field]);
             } catch {
-              // Pre-#12380 row: keep the raw string, which IS its value.
+              // Row from before commit 4045b954d: keep the raw string, which IS its value.
             }
           }
         }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #12999 — the refusal message for an unkeyable TEXT column has TWO causes, and
+ * Commit ebcc34e89 — the refusal message for an unkeyable TEXT column has TWO causes, and
  * for one of them the advice it gave was a no-op.
  *
  * ## The defect
@@ -9,7 +9,7 @@
  * `explainUnkeyableTextColumn` rendered every `ER_BLOB_KEY_WITHOUT_LENGTH` /
  * `ER_TOO_LONG_KEY` index refusal as "the field declares no `maxLength` …
  * declare `maxLength` on the field(s)". True at CREATE time. False on the
- * UPGRADE path, in both halves: once a release adds the bound (#12978 did
+ * UPGRADE path, in both halves: once a release adds the bound (commit e4902d2b9 did
  * exactly that for five `sys_notification_*` objects), the field DOES declare
  * one — but the additive sync never rewrites a column's type, so the physical
  * column stays TEXT, the index is refused again on every boot, and the message
@@ -59,7 +59,7 @@ const beforeTheBound = () => ({
   fields: { token: { type: 'text' } },
 });
 
-/** The release that adds it — the #12978 shape, and the one that must not lie. */
+/** The release that adds it — commit e4902d2b9's shape, and the one that must not lie. */
 const afterTheBound = () => ({
   name: TABLE,
   fields: { token: { type: 'text', maxLength: 64 } },

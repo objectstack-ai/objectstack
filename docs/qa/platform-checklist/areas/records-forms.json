@@ -4025,7 +4025,7 @@
       "title": "Import mapping TransformType matrix: each of the 7 declared transforms does exactly its documented conversion, javascript is refused loudly at the door (no sandbox), format mismatch is a named 400",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4054,7 +4054,7 @@
       "steps": [
         "POST /api/v1/data/showcase_inquiry/import with mappingName 'showcase_inquiry_feed' and a CSV whose Channel column carries one mapped code ('Webform') and one unmapped string; read back the created rows",
         "author scratch mappings (one per remaining transform) over PUT /api/v1/meta/mapping/<name>; import a vector file through each and read back the rows",
-        "author a scratch mapping declaring transform 'javascript' on one column; POST an import through it and capture the refusal",
+        "author a scratch mapping declaring transform 'javascript' on one column (bare — the javascript transform takes no params, and an `expression` key is refused 422 at authoring); POST an import through it and capture the refusal",
         "POST a JSON payload through a sourceFormat:'csv' mapping and capture the refusal; POST an xlsx payload through the same and confirm it is ACCEPTED (tabular-compatible)"
       ],
       "acceptance": [
@@ -4065,7 +4065,7 @@
           "evidence": "the vector files + per-variant row reads"
         },
         {
-          "clause": "javascript is declared-but-refused, LOUDLY and BEFORE any row lands: a mapping carrying transform 'javascript' answers 400 code UNSUPPORTED_TRANSFORM whose message names the missing server-side sandbox and framework#2611 — and zero rows are created",
+          "clause": "javascript is declared-but-refused, LOUDLY and BEFORE any row lands: a mapping carrying transform 'javascript' answers 400 code UNSUPPORTED_TRANSFORM whose message names the missing server-side sandbox in words (since f115b1f, #21188, refusals carry no tracker number) — and zero rows are created",
           "oracle": "api",
           "verify": "the refusal (import-mapping.ts — checked per-entry before applyMappingToRows runs) + an unchanged target count; the spec deliberately still admits the value (TransformType), so the DOOR is the contract",
           "evidence": "the 400 body + before/after counts"
@@ -4110,7 +4110,8 @@
           "date": "2026-08-30",
           "change": "initial — sweep gap (spec-enums angle): TransformType's 7 members had no per-variant coverage; named-import-mapping drives only the default copy + upsert path. Authored as a sibling item rather than widening that one (different axis, different fixtures), with the enumSource pin so an 8th transform trips VARIANTS STALE",
           "ref": "#sweep-2026-08-30"
-        }
+        },
+        { "revision": 2, "date": "2026-10-02", "change": "clause 2 no longer requires the refusal to name framework#2611: f115b1f (#21188) made REST refusals state each decision in words instead of a tracker number, and on 17.6.0 the UNSUPPORTED_TRANSFORM message names the missing sandbox without it (measured by the release-verification run, 0 rows landed). Step 3 notes the javascript transform is authored bare", "ref": "#21330" }
       ]
     },
     {

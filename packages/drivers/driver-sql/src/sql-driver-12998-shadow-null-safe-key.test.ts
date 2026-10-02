@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #12998 — the hash shadow must carry the DECLARED key: NULL-safe organization
+ * Commit df1c75c4b — the hash shadow must carry the DECLARED key: NULL-safe organization
  * key parts (ADR-0120 D3) ride into the generation expression.
  *
  * ## The defect
@@ -236,7 +236,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
     /**
      * The OVERFLOW TAIL — the half of that message no test in this repo could
      * see. The report is assembled by the module-local `formatDuplicateGroups`
-     * (#14902), shared with the drift entry and both plain-unique logs, and it
+     * (commit 61821e54c), shared with the drift entry and both plain-unique logs, and it
      * renders at most FIVE groups before counting the rest. Every duplicate
      * fixture in this package conflicts a single group, so the tail had never
      * been rendered by a test at all, and the `Conflicting group(s):`
@@ -263,7 +263,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       const bare = orgUniqueOn('os12998_tail');
       // Bound to a variable, like the fixture above: `initObjects`' parameter
       // type does not declare `indexes`, and an inline literal would be
-      // rejected by tsc for a key the driver reads regardless (#16570).
+      // rejected by tsc for a key the driver reads regardless (the gap commit b72226f48 closed).
       const withoutIndex = { ...bare, indexes: [] };
       await driver.initObjects([withoutIndex]);
       const knex = (driver as any).knex;

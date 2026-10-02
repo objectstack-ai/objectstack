@@ -4,7 +4,7 @@
  * objectstack#13438 — the terminal backend-fault envelope DECLARES the table the
  * statement targeted, so a genuinely absent federated remote reads benign again.
  *
- * ## The residual #13324 left behind
+ * ## The residual commit 4cda78c9b left behind
  *
  * `isMissingTableError(error, readObject)` refuses the benign "not provisioned
  * yet" verdict when the dialect phrase names a relation OTHER than the one the
@@ -21,7 +21,7 @@
  *
  * The driver declares the table it targeted on the envelope, and the predicate
  * prefers a declared name over the caller-supplied object name. The predicate's
- * half — precedence, the dialect fixtures, the #13324 fence — is pinned in
+ * half — precedence, the dialect fixtures, commit 4cda78c9b's fence — is pinned in
  * `packages/types/src/driver-error-classification.targeted-table.test.ts`. This
  * suite pins the DRIVER's half, live, on every dialect it speaks:
  *
@@ -181,11 +181,11 @@ for (const cell of DIALECT_CELLS) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SQLITE-ONLY — the #13324 fence, live, WITH the declaration present
+// SQLITE-ONLY — commit 4cda78c9b's fence, live, WITH the declaration present
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * The defect #13324 closed, reproduced live: a VIEW whose base table is gone
+ * The defect commit 4cda78c9b closed, reproduced live: a VIEW whose base table is gone
  * raises `no such table: main.<base>` — a phrase that answers the shape test
  * perfectly and names a relation the statement did NOT target. The envelope
  * now declares the view (what `getBuilder` targeted); the phrase names the

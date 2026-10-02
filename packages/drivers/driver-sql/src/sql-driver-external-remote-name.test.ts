@@ -90,7 +90,7 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
       expect(rows).toHaveLength(2);
 
       const acme = rows.find((r) => r.name === 'Acme');
-      // [#17690] `find()` publishes `Record<string, unknown>[]`, so
+      // [commit be5c60291] `find()` publishes `Record<string, unknown>[]`, so
       // `Array.prototype.find` answers `… | undefined` and the absent arm is
       // narrowed away before any field is read. Through the old
       // `Promise<any[]>` the four reads below compiled against nothing.

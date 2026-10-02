@@ -7,15 +7,15 @@
  *
  * ## Why this file is matrix-routed and not SQLite-only
  *
- * The defect that produced the table (#12380) was a *dialect* defect: SQLite's
+ * The defect that produced the table (fixed in commit 4045b954d) was a *dialect* defect: SQLite's
  * `Field.json` codec was not injective while Postgres and MySQL were faithful,
  * and the difference was invisible to a suite pinned to one client. So the
  * dialect axis is the whole point here, not a formality — this cell is the one
  * `MATRIXED` (#12136) exists to make real, and a SQLite-only version of this
- * file would restate exactly the coverage that let #12380 survive.
+ * file would restate exactly the coverage that let the defect commit 4045b954d fixed survive.
  *
  * PG and MySQL are also the **regression control**: they were faithful before
- * #12380's fix and must stay faithful after it. If a future change to the codec
+ * commit 4045b954d and must stay faithful after it. If a future change to the codec
  * moves the defect onto them instead of closing it, it goes red here first.
  *
  * ## Its relationship to `sql-driver-12380-json-roundtrip.test.ts`
@@ -82,7 +82,7 @@ function declareRoundTrip(cell: DialectCell): void {
         } as DriverQuery)) as any[];
         expect(rows).toHaveLength(1);
         const read = rows[0][c.column];
-        // The type pin comes first: `'123'` read back as `123` is #12380's
+        // The type pin comes first: `'123'` read back as `123` is commit 4045b954d's
         // exact before-state, and it survives every value-only comparison.
         expect(typeof read, `typeof for ${c.name}`).toBe(typeof c.wrote);
         expect(read, `value for ${c.name}`).toStrictEqual(c.wrote);

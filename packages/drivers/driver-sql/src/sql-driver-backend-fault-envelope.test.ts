@@ -74,7 +74,7 @@
  * the platform ACCEPTS and is expressly outside this ruling.
  *
  * The predicate already follows `error.cause` four levels deep, with its own
- * pins (`packages/types/src/driver-error-classification.test.ts` — #13279
+ * pins (`packages/types/src/driver-error-classification.test.ts` — commit 6a180e42d
  * moved it there from `metadata/src/utils/schema-sync-errors.test.ts` —
  * "follows an error wrapped as `cause`"), because "drivers commonly re-throw
  * with the original attached as `cause`" is a case it was built for. So the

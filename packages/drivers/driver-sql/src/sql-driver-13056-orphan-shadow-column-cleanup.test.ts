@@ -28,11 +28,11 @@
  *  - `drop_index` — TERMINAL. The declaration is gone; nothing will re-create
  *    the name, so the shadow derived from it is dead. This is the leak.
  *  - `recreate_index` — drops in order to re-create under the SAME name. Its
- *    shadow is deliberately kept: #13015's `reusable` branch re-keys the
+ *    shadow is deliberately kept: commit cd1348802's `reusable` branch re-keys the
  *    survivor in place instead of rebuilding the table around a regenerated
  *    STORED column. A cleanup inside `dropIndexIfExists` would destroy exactly
  *    that survivor on every rebuild.
- *  - `replace_unique_index` — cannot reach a shadow at all. #13015 already
+ *  - `replace_unique_index` — cannot reach a shadow at all. Commit cd1348802 already
  *    excludes `isHashShadowCarrier` from legacy detection, in `diffManagedIndexes`,
  *    with a comment saying it does so *because* that op drops the legacy name.
  *    A shadow-aware step there would be enforcement for a state the producer
@@ -331,7 +331,7 @@ describe('the drop_index op collects the shadow it retires (#13056)', () => {
   });
 
   /**
-   * #13015's `foreign` guard is the precedent, and this is the same refusal in
+   * Commit cd1348802's `foreign` guard is the precedent, and this is the same refusal in
    * the removal direction: a column of that name that is not generated may hold
    * user data and is not the driver's to drop.
    */
@@ -415,7 +415,7 @@ describe('the drop_index op collects the shadow it retires (#13056)', () => {
 
   /**
    * `recreate_index` drops and re-creates under the SAME name. Its shadow must
-   * SURVIVE, or #13015's `reusable` branch — which re-keys the survivor in
+   * SURVIVE, or commit cd1348802's `reusable` branch — which re-keys the survivor in
    * place rather than rebuilding the table around a regenerated STORED column —
    * can never be reached again. This is the assertion a cleanup moved into
    * `dropIndexIfExists` would fail.

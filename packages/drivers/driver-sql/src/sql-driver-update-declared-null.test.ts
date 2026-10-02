@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #14438 — `SqlDriver.update()`'s declared return type is the contract's, not
+// Commit 2200f8ec8 — `SqlDriver.update()`'s declared return type is the contract's, not
 // `any`, and it carries the not-found arm.
 //
 // `SqlDriver.update()` has always answered a missing id with `null`
@@ -8,7 +8,7 @@
 // the rotation path's `return null` once every shard has been probed), while
 // its signature was written out as an EXPLICIT `Promise<any>`.
 // `IDataDriver.update()` declares `Promise<Record<string, unknown> | null>`
-// (the arm landed with #13878 / PR #14434 under the maintainer's 2026-09-01
+// (the arm landed with #13878 / commit 93940d492 under the maintainer's 2026-09-01
 // ruling), and an explicit `any` satisfies that structurally — so `tsc` said
 // nothing, the published `.d.ts` of `@objectstack/driver-sql` read
 // `Promise<any>`, and no caller holding a `SqlDriver` (or a `SqliteWasmDriver`,
@@ -51,8 +51,8 @@ import { SqlDriver } from './index.js';
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
- * [#17879] MEASURED — `sqlUpdateIsAny` below is a PHANTOM half against a
- * NESTED regression, and `ContainsAny` (#17876) does NOT close it. On disk,
+ * [commit eb9334915] MEASURED — `sqlUpdateIsAny` below is a PHANTOM half against a
+ * NESTED regression, and `ContainsAny` (commit be5c60291) does NOT close it. On disk,
  * reverting only this door in `sql-driver.ts`:
  *
  *   door resolves to  `Record<string, unknown> | null`
@@ -66,7 +66,7 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
  * `Record<string, any> | null` answers `boolean` (`true` for the record arm,
  * `false` for `null`) — and `const leg: boolean = false` compiles. Every
  * door carrying the not-found arm has this shape. No swap was made; the two
- * measured repairs are in the #17879 report.
+ * measured repairs are in commit eb9334915's message.
  */
 /** Exact (mutual, non-`any`) type equality. */
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;

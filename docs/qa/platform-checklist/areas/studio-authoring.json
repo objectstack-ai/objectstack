@@ -169,7 +169,7 @@
       "title": "List + form view authoring goes live in the running app on publish — no server restart",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (consumes the published views)"],
@@ -210,7 +210,7 @@
         {
           "clause": "the published container round-trips through the consumer read door",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/view?object=repair_asset includes qa_repair_asset_views with the authored list/form bodies",
+          "verify": "GET /api/v1/meta/view?object=repair_asset includes the container's EXPANDED items — repair_asset.default (list) and repair_asset.form (form) — carrying the authored list/form config. The object door never returns the container under its own name (expandViewContainer, packages/spec/src/ui/view.zod.ts; #7163, #7736, #13407), so the container name's absence is not a fail; an expanded item missing or carrying the old config is",
           "evidence": "the object-scoped view read"
         },
         {
@@ -231,7 +231,8 @@
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (publish→live launcher/list inside one server session)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: list/form view authoring through the ?mode=draft door with live-in-app verification, grounded in ViewSchema's container contract and the audit's zero-restart loop", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: list/form view authoring through the ?mode=draft door with live-in-app verification, grounded in ViewSchema's container contract and the audit's zero-restart loop", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-02", "change": "re-pointed clause 4 at the object door's designed shape. It expected the container name qa_repair_asset_views in GET /meta/view?object=repair_asset; the door serves the container's expanded <object>.<key> items instead, by design since #7163 (runtime door #7736 / #13407). The 17.6.0 release-verification run measured the authored bodies round-tripping as repair_asset.default / repair_asset.form with the container name appearing 0 times", "ref": "#21330" }
       ]
     },
     {

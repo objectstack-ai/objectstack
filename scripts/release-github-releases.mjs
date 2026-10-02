@@ -50,6 +50,30 @@
  *     POST when it does not. A re-run is a no-op-shaped update, never an
  *     `already_exists` 422 — which matters because a partial failure is the
  *     normal state to recover from (rc.2 left ~69 of 70 releases created).
+ *   - **Safe under a concurrent writer.** The read and the POST are two
+ *     requests, and release.yml has two writers of one version's Releases —
+ *     the publish job's own step and the push lane's backfill — that are not
+ *     mutually excluded. On 17.6.0 they overlapped for a minute: nine POSTs
+ *     answered `422 {"code":"already_exists","field":"tag_name"}` because the
+ *     other writer created the release between this script's read and its
+ *     POST, and both runs went red. That 422 now means what it says — the
+ *     release exists — so the script re-reads it by tag and PATCHes it, and
+ *     two writers converge on one release per tag. Any OTHER 422 (the body
+ *     limit above) still fails the release exactly as before.
+ *   - **Duplicates are reported, never deleted.** The same race also proved
+ *     the API will ACCEPT two creates for one tag inside one second: 17.6.0
+ *     has five tags carrying two Release objects each. No request sequence on
+ *     this side can prevent that, so after its writes the script reads the
+ *     Releases list and names every tag it released that has more than one.
+ *     A duplicate this run CREATED one of fails the run (`::error::`) — the
+ *     race was this run's, and without the failure the convergence above
+ *     would turn a red race into a green run with a duplicate in it. A
+ *     duplicate that predates this run's writes is a `::warning::`: it was
+ *     the creating run's to fail, and failing every later backfill over it
+ *     would hold that lane's ADR-0087 D4 step on a state only the maintainer
+ *     can clear. Either way the report names each Release id, its assets and
+ *     the id the by-tag endpoint resolves to. Deleting a Release is a release
+ *     act (AGENTS.md Prime Directive 15) — this script never sends a DELETE.
  *   - **Per-package isolation.** The action ran the whole set through one
  *     `Promise.all`, so the first rejection abandoned the rest. This runs them
  *     sequentially, collects failures, and still exits non-zero — one package's
@@ -107,11 +131,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '8. Every package gets a release; existing ones are updated, not retried ─': 7,
   '9. Idempotent re-run': 2,
   '10. One package\'s failure does not abandon the others': 3,
+  '11. A racing writer\'s create converges instead of failing (422 already_exists)': 8,
+  '12. Two concurrent invocations leave exactly one release per tag': 6,
+  '13. Any other 422 still fails; a racer the read cannot see fails loudly, bounded': 8,
+  '14. Duplicate releases for one tag are reported, never deleted': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -462,6 +490,44 @@ export function planRelease({ target, serverUrl, repository, ref, root = REPO_RO
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Thrown by `create` when the POST answered `422` because a Release for the tag
+ * already exists — `{"code":"already_exists","field":"tag_name"}` in the
+ * response's `errors[]`, exactly as the 17.6.0 runs logged it. Nothing else
+ * raises it: a 422 for any other field or code stays a plain failure.
+ */
+export class ReleaseAlreadyExistsError extends Error {
+  /**
+   * @param {string} tagName
+   * @param {string} detail the API's answer, for the log
+   */
+  constructor(tagName, detail) {
+    super(`POST release ${tagName} failed: ${detail}`);
+    this.name = 'ReleaseAlreadyExistsError';
+    this.tagName = tagName;
+  }
+}
+
+/**
+ * Whether a failed POST's answer is the Releases API saying the tag already
+ * has a Release. Judged on the structured `errors[]` entry, never on prose.
+ *
+ * @param {number} status
+ * @param {string} text the response body
+ * @returns {boolean}
+ */
+export function isTagAlreadyExists(status, text) {
+  if (status !== 422) return false;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  const errors = Array.isArray(parsed?.errors) ? parsed.errors : [];
+  return errors.some((e) => e && e.code === 'already_exists' && e.field === 'tag_name');
+}
+
+/**
  * Thin Releases client. `fetchImpl` is injected so the self-test drives the
  * real request/response handling without a network.
  *
@@ -480,15 +546,15 @@ export function createReleasesClient({ apiUrl, repository, token, fetchImpl = fe
     'x-github-api-version': '2022-11-28',
   };
 
-  const readError = async (res) => {
-    let detail = '';
+  const readText = async (res) => {
     try {
-      detail = (await res.text()).slice(0, 500);
+      return await res.text();
     } catch {
-      /* body already consumed or unreadable */
+      return ''; /* body already consumed or unreadable */
     }
-    return `${res.status} ${res.statusText || ''} ${detail}`.trim();
   };
+  const describe = (res, text) => `${res.status} ${res.statusText || ''} ${text.slice(0, 500)}`.trim();
+  const readError = async (res) => describe(res, await readText(res));
 
   return {
     /**
@@ -508,6 +574,7 @@ export function createReleasesClient({ apiUrl, repository, token, fetchImpl = fe
 
     /**
      * @param {{ tagName: string; body: string; prerelease: boolean; targetCommitish: string }} rel
+     * @throws {ReleaseAlreadyExistsError} when the tag already has a Release
      */
     async create({ tagName, body, prerelease, targetCommitish }) {
       const res = await fetchImpl(base, {
@@ -521,7 +588,28 @@ export function createReleasesClient({ apiUrl, repository, token, fetchImpl = fe
           target_commitish: targetCommitish,
         }),
       });
-      if (!res.ok) throw new Error(`POST release ${tagName} failed: ${await readError(res)}`);
+      if (!res.ok) {
+        const text = await readText(res);
+        if (isTagAlreadyExists(res.status, text)) throw new ReleaseAlreadyExistsError(tagName, describe(res, text));
+        throw new Error(`POST release ${tagName} failed: ${describe(res, text)}`);
+      }
+      return await res.json();
+    },
+
+    /**
+     * One page of the repository's Releases, newest first. The list orders by
+     * `created_at`, which for a Release on a pushed tag is the TAG's date —
+     * measured on 17.6.0: all 74 Release objects carry 02:49:42Z, the tagger
+     * date `changeset publish` wrote, while their `published_at` spans two
+     * minutes — so one version's Releases sit in one contiguous run of the
+     * list, duplicates beside their twins.
+     *
+     * @param {{ page: number; perPage: number }} opts
+     * @returns {Promise<{ id: number; tag_name: string; assets?: { name: string }[] }[]>}
+     */
+    async listPage({ page, perPage }) {
+      const res = await fetchImpl(`${base}?per_page=${perPage}&page=${page}`, { headers });
+      if (!res.ok) throw new Error(`GET releases page ${page} failed: ${await readError(res)}`);
       return await res.json();
     },
 
@@ -541,18 +629,44 @@ export function createReleasesClient({ apiUrl, repository, token, fetchImpl = fe
 }
 
 /**
+ * After a `422 already_exists`, how long to wait before each by-tag re-read.
+ * The 422 proves the other writer's Release is in the store; the first read is
+ * immediate, and the two later ones absorb a read path that has not caught up
+ * with that write yet. Bounded: a Release the by-tag read still cannot see
+ * after the last one fails that package loudly rather than retrying forever.
+ */
+export const RACE_REREAD_DELAYS_MS = Object.freeze([0, 1_000, 3_000]);
+
+/**
  * Create or update every release in `plans`, sequentially, isolating failures.
+ *
+ * A POST that answers `422 already_exists` lost a race with a concurrent
+ * writer (see the header): the Release it meant to create now exists, so the
+ * package converges by re-reading it by tag and PATCHing it, and is counted
+ * as updated (and in `converged`), not failed.
  *
  * @param {object} opts
  * @param {ReturnType<typeof createReleasesClient>} opts.client
  * @param {{ tagName: string; body: string; prerelease: boolean; truncated: boolean; originalLength: number }[]} opts.plans
  * @param {string} opts.targetCommitish
  * @param {(msg: string) => void} [opts.log]
- * @returns {Promise<{ created: string[]; updated: string[]; failed: { tagName: string; error: string }[] }>}
+ * @param {(ms: number) => Promise<void>} [opts.sleep] injected so the self-test does not wait
+ * @param {readonly number[]} [opts.rereadDelaysMs]
+ * @returns {Promise<{ created: string[]; updated: string[]; converged: string[]; createdIds: number[]; failed: { tagName: string; error: string }[] }>}
  */
-export async function publishReleases({ client, plans, targetCommitish, log = console.log }) {
+export async function publishReleases({
+  client,
+  plans,
+  targetCommitish,
+  log = console.log,
+  sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
+  rereadDelaysMs = RACE_REREAD_DELAYS_MS,
+}) {
   const created = [];
   const updated = [];
+  const converged = [];
+  /** @type {number[]} */
+  const createdIds = [];
   const failed = [];
 
   for (const plan of plans) {
@@ -565,11 +679,39 @@ export async function publishReleases({ client, plans, targetCommitish, log = co
         await client.update({ id: existing.id, ...plan });
         updated.push(plan.tagName);
         log(`updated  ${plan.tagName} (${size})`);
-      } else {
-        await client.create({ ...plan, targetCommitish });
-        created.push(plan.tagName);
-        log(`created  ${plan.tagName} (${size})`);
+        continue;
       }
+      let release;
+      try {
+        release = await client.create({ ...plan, targetCommitish });
+      } catch (err) {
+        if (!(err instanceof ReleaseAlreadyExistsError)) throw err;
+        // Another writer created this tag's Release between the read above and
+        // this POST. It exists, so this package's job is now an update of it.
+        let racing = null;
+        for (const delay of rereadDelaysMs) {
+          if (delay > 0) await sleep(delay);
+          racing = await client.findByTag(plan.tagName);
+          if (racing) break;
+        }
+        if (!racing) {
+          throw new Error(
+            `${err.message} — the tag already has a Release, but ${rereadDelaysMs.length} by-tag ` +
+              're-read(s) still answered 404, so there is nothing this run can update.',
+          );
+        }
+        await client.update({ id: racing.id, ...plan });
+        updated.push(plan.tagName);
+        converged.push(plan.tagName);
+        log(
+          `updated  ${plan.tagName} (${size}) — a concurrent writer created release ${racing.id} between ` +
+            "this run's read and its POST (422 already_exists); converged onto it",
+        );
+        continue;
+      }
+      created.push(plan.tagName);
+      if (release && typeof release.id === 'number') createdIds.push(release.id);
+      log(`created  ${plan.tagName} (${size})`);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       failed.push({ tagName: plan.tagName, error });
@@ -577,7 +719,150 @@ export async function publishReleases({ client, plans, targetCommitish, log = co
     }
   }
 
-  return { created, updated, failed };
+  return { created, updated, converged, createdIds, failed };
+}
+
+/** Releases per list page the duplicate audit asks for — the API's maximum. */
+export const AUDIT_PER_PAGE = 100;
+
+/**
+ * How many list pages the duplicate audit reads at most: a thousand Releases,
+ * about fourteen versions of 69 packages back from the newest.
+ */
+export const AUDIT_MAX_PAGES = 10;
+
+/**
+ * Find every tag in `tagNames` that carries more than one Release object.
+ *
+ * Reads the Releases list newest first. One version's Releases are one
+ * contiguous run of that list (see `listPage`), so the walk stops at the first
+ * page holding none of `tagNames` after one that did, or at the end of the
+ * list, and is `complete` only when it stopped for one of those two reasons.
+ * Every tag it never saw is returned in `unseen`: the audit cannot vouch for
+ * those. Read-only — it never deletes, and nothing in this file does.
+ *
+ * @param {object} opts
+ * @param {ReturnType<typeof createReleasesClient>} opts.client
+ * @param {string[]} opts.tagNames
+ * @param {number[]} [opts.createdIds] ids this run's own POSTs created
+ * @param {number} [opts.perPage]
+ * @param {number} [opts.maxPages]
+ * @returns {Promise<{
+ *   duplicates: { tagName: string; releases: { id: number; assets: string[] }[]; byTagId: number | null; createdByThisRun: number[] }[];
+ *   unseen: string[];
+ *   pagesRead: number;
+ *   complete: boolean;
+ * }>}
+ */
+export async function auditDuplicateReleases({
+  client,
+  tagNames,
+  createdIds = [],
+  perPage = AUDIT_PER_PAGE,
+  maxPages = AUDIT_MAX_PAGES,
+}) {
+  const wanted = new Set(tagNames);
+  /** @type {Map<string, { id: number; assets: string[] }[]>} */
+  const byTag = new Map();
+  let seenAny = false;
+  let complete = false;
+  let pagesRead = 0;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const releases = await client.listPage({ page, perPage });
+    pagesRead += 1;
+    let hits = 0;
+    for (const rel of Array.isArray(releases) ? releases : []) {
+      if (!wanted.has(rel.tag_name)) continue;
+      hits += 1;
+      const list = byTag.get(rel.tag_name) ?? [];
+      list.push({ id: rel.id, assets: (rel.assets ?? []).map((a) => a.name) });
+      byTag.set(rel.tag_name, list);
+    }
+    if (hits > 0) seenAny = true;
+    else if (seenAny) {
+      complete = true; // walked past this version's run of the list
+      break;
+    }
+    if (!Array.isArray(releases) || releases.length < perPage) {
+      complete = true; // the end of the list
+      break;
+    }
+  }
+
+  const ours = new Set(createdIds);
+  const duplicates = [];
+  for (const tagName of tagNames) {
+    const releases = byTag.get(tagName);
+    if (!releases || releases.length < 2) continue;
+    releases.sort((a, b) => a.id - b.id);
+    // Which one `gh release view` / `gh release upload` resolve the tag to,
+    // and so where the ADR-0087 D4 asset lands: the report's cleanup anchor.
+    let byTagId = null;
+    try {
+      byTagId = (await client.findByTag(tagName))?.id ?? null;
+    } catch {
+      byTagId = null;
+    }
+    duplicates.push({
+      tagName,
+      releases,
+      byTagId,
+      createdByThisRun: releases.filter((r) => ours.has(r.id)).map((r) => r.id),
+    });
+  }
+
+  return { duplicates, unseen: tagNames.filter((t) => !byTag.has(t)), pagesRead, complete };
+}
+
+/**
+ * Turn an audit into the lines `main` prints: `errors` fail the run,
+ * `warnings` do not. A duplicate this run created one of is an error; one that
+ * predates this run's writes is a warning (the header says why).
+ *
+ * @param {Awaited<ReturnType<typeof auditDuplicateReleases>>} audit
+ * @returns {{ errors: string[]; warnings: string[] }}
+ */
+export function describeDuplicates(audit) {
+  const errors = [];
+  const warnings = [];
+  for (const d of audit.duplicates) {
+    const list = d.releases
+      .map((r) => `${r.id} (${r.assets.length ? `assets: ${r.assets.join(', ')}` : 'no assets'})`)
+      .join(', ');
+    const anchor =
+      d.byTagId === null
+        ? 'The by-tag endpoint could not be read, so which one `gh release view` resolves the tag to is unknown.'
+        : `The by-tag endpoint — what \`gh release view\` and \`gh release upload\` resolve the tag to, and so ` +
+          `where the ADR-0087 D4 asset is attached — answers ${d.byTagId}; the other(s), ` +
+          `${d.releases.filter((r) => r.id !== d.byTagId).map((r) => r.id).join(', ')}, are the surplus.`;
+    const head = `${d.tagName} has ${d.releases.length} GitHub Releases: ${list}. ${anchor}`;
+    const tail =
+      'This script never deletes a Release; deleting the surplus is a release act and the maintainer\'s call ' +
+      '(AGENTS.md Prime Directive 15).';
+    if (d.createdByThisRun.length > 0) {
+      errors.push(
+        `${head} This run created ${d.createdByThisRun.join(', ')}: the Releases API accepted a second create ` +
+          `for one tag from a concurrent writer. ${tail}`,
+      );
+    } else {
+      warnings.push(
+        `${head} None of them was created by this run, so it is reported, not failed: the run that created ` +
+          `them was the place to fail. ${tail}`,
+      );
+    }
+  }
+  if (audit.unseen.length > 0 || !audit.complete) {
+    const unseen = audit.unseen.length
+      ? `${audit.unseen.length} tag(s) this run released never appeared in it (${audit.unseen.slice(0, 5).join(', ')}` +
+        `${audit.unseen.length > 5 ? ', …' : ''})`
+      : `it stopped at its ${audit.pagesRead}-page cap before walking past this version's Releases`;
+    warnings.push(
+      `the duplicate-Release audit read ${audit.pagesRead} page(s) of the Releases list and ${unseen}; ` +
+        'whether those tags carry more than one Release is UNVERIFIED by this run.',
+    );
+  }
+  return { errors, warnings };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -637,21 +922,47 @@ async function main({ dryRun = false } = {}) {
   if (!token) throw new Error('GITHUB_TOKEN is required');
 
   const client = createReleasesClient({ apiUrl, repository, token });
-  const { created, updated, failed } = await publishReleases({
+  const { created, updated, converged, createdIds, failed } = await publishReleases({
     client,
     plans,
     targetCommitish: ref,
   });
 
+  // After the writes, never instead of them: a duplicate is made by a
+  // concurrent writer's create, and this run's last POST may be the one that
+  // completed the pair.
+  /** @type {{ errors: string[]; warnings: string[] }} */
+  let duplicateReport = { errors: [], warnings: [] };
+  try {
+    const audit = await auditDuplicateReleases({ client, tagNames: plans.map((p) => p.tagName), createdIds });
+    duplicateReport = describeDuplicates(audit);
+  } catch (err) {
+    duplicateReport.warnings.push(
+      `could not read the Releases list to audit for duplicate Releases ` +
+        `(${err instanceof Error ? err.message : String(err)}); whether any tag this run released carries ` +
+        'more than one Release is UNVERIFIED by this run.',
+    );
+  }
+  for (const w of duplicateReport.warnings) console.log(`::warning::${w}`);
+  for (const e of duplicateReport.errors) console.log(`::error::${e}`);
+
   const truncatedCount = plans.filter((p) => p.truncated).length;
   console.log(
-    `\n${created.length} created, ${updated.length} updated, ${failed.length + planFailures.length} failed ` +
+    `\n${created.length} created, ${updated.length} updated ` +
+      `(${converged.length} after a concurrent writer's create), ${failed.length + planFailures.length} failed, ` +
+      `${duplicateReport.errors.length} duplicated by this run ` +
       `(${truncatedCount} body/bodies truncated to fit the ${BODY_LIMIT}-character limit).`,
   );
 
   const allFailures = [...planFailures, ...failed];
-  if (allFailures.length) {
-    console.error(`::error::${allFailures.length} GitHub Release(s) could not be published.`);
+  if (allFailures.length || duplicateReport.errors.length) {
+    if (allFailures.length) console.error(`::error::${allFailures.length} GitHub Release(s) could not be published.`);
+    if (duplicateReport.errors.length) {
+      console.error(
+        `::error::${duplicateReport.errors.length} tag(s) carry more than one GitHub Release after this run's ` +
+          'creates (named above). Nothing was deleted.',
+      );
+    }
     process.exit(1);
   }
 }
@@ -682,35 +993,112 @@ function stubResponse(status, payload) {
   };
 }
 
+/** The tag date every stub Release of the version under test carries. */
+const STUB_TAG_DATE = '2026-10-02T02:49:42Z';
+
 /**
- * Records every call and answers from a set of pre-existing releases.
+ * A stateful Releases store behind a `fetch`: records every call, answers the
+ * by-tag read, the list, POST and PATCH from the store, and enforces the tag's
+ * uniqueness the way the API usually does — a POST for a tag that already has
+ * a Release answers `422 already_exists`.
  *
  * @param {object} opts
- * @param {Record<string, number>} [opts.existing] tag -> release id
- * @param {Set<string>} [opts.failCreateFor]
+ * @param {Record<string, number>} [opts.existing] tag -> release id, present before the run
+ * @param {Set<string>} [opts.failCreateFor] POST answers the body-limit 422 (a non-race 422)
+ * @param {Set<string>} [opts.raceCreateFor] a concurrent writer creates the tag's Release
+ *   between this run's by-tag read and its POST
+ * @param {Set<string>} [opts.acceptDuplicateCreateFor] the API accepts a second create for the
+ *   tag instead of answering 422 — the same-second case 17.6.0 measured
+ * @param {Map<string, number>} [opts.hideAfterRace] the racing writer's Release stays invisible
+ *   to this many by-tag reads after the race (Infinity: never visible to them)
+ * @param {{ id: number; tag_name: string; created_at: string; assets?: { name: string }[] }[]} [opts.seed]
+ *   further Releases already in the store (older versions, pre-existing duplicates)
+ * @param {boolean} [opts.tick] yield a macrotask per request, so two concurrent runs interleave
  */
-function stubFetch({ existing = {}, failCreateFor = new Set() } = {}) {
+function stubFetch({
+  existing = {},
+  failCreateFor = new Set(),
+  raceCreateFor = new Set(),
+  acceptDuplicateCreateFor = new Set(),
+  hideAfterRace = new Map(),
+  seed = [],
+  tick = false,
+} = {}) {
   /** @type {{ method: string; url: string; body: any }[]} */
   const calls = [];
+  /** @type {{ id: number; tag_name: string; created_at: string; assets: { name: string }[]; by: string; name?: string; body?: string; prerelease?: boolean }[]} */
+  const releases = [];
+  let nextId = 5000;
+  const insert = (tagName, by, extra = {}) => {
+    const rel = { id: nextId, tag_name: tagName, created_at: STUB_TAG_DATE, assets: [], by, ...extra };
+    nextId += 1;
+    releases.push(rel);
+    return rel;
+  };
+  for (const [tag, id] of Object.entries(existing)) releases.push({ id, tag_name: tag, created_at: STUB_TAG_DATE, assets: [], by: 'before the run' });
+  for (const rel of seed) releases.push({ assets: [], by: 'seed', ...rel });
+  const forTag = (tagName) => releases.filter((r) => r.tag_name === tagName).sort((a, b) => a.id - b.id);
+  const hidden = new Map();
+
   const impl = async (url, init = {}) => {
+    if (tick) await new Promise((resolveTick) => setImmediate(resolveTick));
     const method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(init.body) : undefined;
-    calls.push({ method, url: String(url), body });
+    const u = String(url);
+    calls.push({ method, url: u, body });
 
     if (method === 'GET') {
-      const m = /\/releases\/tags\/(.+)$/.exec(String(url));
-      const tag = decodeURIComponent(m[1]);
-      return tag in existing ? stubResponse(200, { id: existing[tag] }) : stubResponse(404, { message: 'Not Found' });
+      const byTag = /\/releases\/tags\/(.+)$/.exec(u);
+      if (byTag) {
+        const tag = decodeURIComponent(byTag[1]);
+        if ((hidden.get(tag) ?? 0) > 0) {
+          hidden.set(tag, hidden.get(tag) - 1);
+          return stubResponse(404, { message: 'Not Found' });
+        }
+        // The lowest id — what the live by-tag endpoint answered for all three
+        // 17.6.0 duplicate pairs read while writing this.
+        const [first] = forTag(tag);
+        return first ? stubResponse(200, first) : stubResponse(404, { message: 'Not Found' });
+      }
+      const list = /\/releases\?per_page=(\d+)&page=(\d+)$/.exec(u);
+      if (list) {
+        const perPage = Number(list[1]);
+        const page = Number(list[2]);
+        const ordered = [...releases].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+        return stubResponse(200, ordered.slice((page - 1) * perPage, page * perPage));
+      }
+      return stubResponse(404, { message: 'Not Found' });
     }
     if (method === 'POST') {
-      if (failCreateFor.has(body.tag_name)) {
-        return stubResponse(422, { message: 'Validation Failed', errors: [{ field: 'body' }] });
+      const tag = body.tag_name;
+      if (failCreateFor.has(tag)) {
+        return stubResponse(422, {
+          message: 'Validation Failed',
+          errors: [{ resource: 'Release', code: 'custom', field: 'body', message: 'body is too long (maximum is 125000 characters)' }],
+        });
       }
-      return stubResponse(201, { id: 999 });
+      if (raceCreateFor.has(tag) && forTag(tag).length === 0) {
+        insert(tag, 'racing writer');
+        if (hideAfterRace.has(tag)) hidden.set(tag, hideAfterRace.get(tag));
+      }
+      if (forTag(tag).length > 0 && !acceptDuplicateCreateFor.has(tag)) {
+        return stubResponse(422, {
+          message: 'Validation Failed',
+          errors: [{ resource: 'Release', code: 'already_exists', field: 'tag_name' }],
+        });
+      }
+      return stubResponse(201, insert(tag, 'this run', { name: body.name, body: body.body, prerelease: body.prerelease }));
     }
-    return stubResponse(200, { id: body?.id ?? 1 });
+    if (method === 'PATCH') {
+      const id = Number(/\/releases\/(\d+)$/.exec(u)?.[1]);
+      const rel = releases.find((r) => r.id === id);
+      if (!rel) return stubResponse(404, { message: 'Not Found' });
+      Object.assign(rel, { name: body.name, body: body.body, prerelease: body.prerelease });
+      return stubResponse(200, rel);
+    }
+    return stubResponse(405, { message: `stub: ${method} is not a request this script may send` });
   };
-  return { impl, calls };
+  return { impl, calls, releases, forTag };
 }
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -1015,6 +1403,292 @@ async function selfTest() {
   assert(
     partialResult.failed[0].error.includes('422'),
     'the failure carries the API status through to the log',
+  );
+
+  const clientOver = (stub) =>
+    createReleasesClient({ apiUrl: 'https://api.github.com', repository: CTX.repository, token: 't', fetchImpl: stub.impl });
+  const noSleep = async () => {};
+  const [specTag, cliTag, runtimeTag] = plans.map((p) => p.tagName);
+
+  // ── 11. A racing writer's create converges instead of failing ───────────
+  // The 17.6.0 shape: this run reads the tag (404), the other writer's create
+  // lands, this run's POST answers 422 already_exists on tag_name.
+  battery('11. A racing writer\'s create converges instead of failing (422 already_exists)');
+  const raced = stubFetch({ raceCreateFor: new Set([cliTag]) });
+  /** @type {string[]} */
+  const racedLog = [];
+  const racedResult = await publishReleases({
+    client: clientOver(raced),
+    plans,
+    targetCommitish: CTX.ref,
+    log: (m) => racedLog.push(m),
+    sleep: noSleep,
+  });
+  const [racer] = raced.forTag(cliTag);
+  assert(
+    raced.calls.some((c) => c.method === 'POST' && c.body.tag_name === cliTag),
+    'the fixture really raced: this run POSTed the tag the other writer created first',
+  );
+  assert(
+    racedResult.failed.length === 0,
+    `a 422 already_exists from a racing writer fails no release (got ${racedResult.failed.length}: ${racedResult.failed.map((f) => f.error).join(' | ')})`,
+  );
+  assert(
+    racedResult.converged.length === 1 && racedResult.converged[0] === cliTag,
+    `the raced tag is reported as converged (got ${JSON.stringify(racedResult.converged)})`,
+  );
+  assert(
+    racedResult.created.length === 2 && racedResult.updated.length === 1 && racedResult.updated[0] === cliTag,
+    'the two unraced tags are created and the raced one is counted as an update',
+  );
+  assert(
+    raced.calls.some((c) => c.method === 'PATCH' && c.url.endsWith(`/releases/${racer?.id}`)),
+    "it converges by PATCHing the racing writer's own release, found by a by-tag re-read",
+  );
+  assert(
+    plans.every((p) => raced.forTag(p.tagName).length === 1),
+    'the run converges to exactly one release per tag',
+  );
+  assert(
+    racer?.body === plans[1].body && racer?.by === 'racing writer',
+    "the racing writer's release now carries this run's body",
+  );
+  assert(
+    racedLog.some((l) => l.includes(cliTag) && l.includes('422 already_exists') && l.includes(String(racer?.id))),
+    'the log names the convergence, the 422 and the release it converged onto',
+  );
+
+  // ── 12. Two concurrent invocations leave exactly one release per tag ────
+  // Both writers over ONE store, interleaved request by request — release.yml's
+  // publish-job step and push-lane backfill, minus the clock.
+  battery('12. Two concurrent invocations leave exactly one release per tag');
+  const shared = stubFetch({ tick: true });
+  const writer = () =>
+    publishReleases({ client: clientOver(shared), plans, targetCommitish: CTX.ref, log: () => {}, sleep: noSleep });
+  const [writerA, writerB] = await Promise.all([writer(), writer()]);
+  assert(
+    writerA.failed.length + writerB.failed.length === 0,
+    `neither concurrent writer fails a release (got ${writerA.failed.length} + ${writerB.failed.length}: ` +
+      `${[...writerA.failed, ...writerB.failed].map((f) => f.error).join(' | ')})`,
+  );
+  assert(
+    plans.every((p) => shared.forTag(p.tagName).length === 1),
+    `two concurrent invocations leave exactly one release per tag (got ${plans.map((p) => shared.forTag(p.tagName).length).join('/')})`,
+  );
+  assert(
+    writerA.converged.length + writerB.converged.length > 0,
+    'the two invocations really raced — at least one POST answered 422 already_exists (otherwise this battery proves nothing)',
+  );
+  assert(
+    writerA.created.length + writerB.created.length === plans.length,
+    'across both writers every tag is created exactly once',
+  );
+  assert(
+    writerA.created.length + writerA.updated.length === plans.length &&
+      writerB.created.length + writerB.updated.length === plans.length,
+    'each writer accounts for every tag as created or updated',
+  );
+  assert(
+    shared.calls.every((c) => c.method !== 'DELETE'),
+    'converging never deletes anything',
+  );
+
+  // ── 13. Any other 422 still fails; an invisible racer fails loudly ──────
+  battery('13. Any other 422 still fails; a racer the read cannot see fails loudly, bounded');
+  const tooLong = stubFetch({ failCreateFor: new Set([cliTag]) });
+  const tooLongResult = await publishReleases({
+    client: clientOver(tooLong),
+    plans,
+    targetCommitish: CTX.ref,
+    log: () => {},
+    sleep: noSleep,
+  });
+  assert(
+    tooLongResult.failed.length === 1 &&
+      tooLongResult.failed[0].tagName === cliTag &&
+      tooLongResult.failed[0].error.includes('422') &&
+      tooLongResult.failed[0].error.includes('"field":"body"'),
+    'the body-limit 422 still fails that package, with the API answer in the error',
+  );
+  assert(tooLongResult.converged.length === 0, 'the body-limit 422 is not mistaken for a race');
+  assert(
+    tooLong.calls.filter((c) => c.method === 'GET' && c.url.includes(encodeURIComponent(cliTag))).length === 1 &&
+      tooLong.calls.every((c) => c.method !== 'PATCH'),
+    'the body-limit 422 triggers no re-read and no PATCH',
+  );
+  assert(
+    isTagAlreadyExists(422, JSON.stringify({ errors: [{ code: 'already_exists', field: 'tag_name' }] })),
+    'the classifier recognises the 17.6.0 answer, 422 already_exists on tag_name',
+  );
+  assert(
+    !isTagAlreadyExists(422, JSON.stringify({ errors: [{ code: 'already_exists', field: 'name' }] })) &&
+      !isTagAlreadyExists(409, JSON.stringify({ errors: [{ code: 'already_exists', field: 'tag_name' }] })) &&
+      !isTagAlreadyExists(422, 'already_exists tag_name'),
+    'only the structured tag_name entry on a 422 counts — another field, another status or bare prose does not',
+  );
+  /** @type {number[]} */
+  const slept = [];
+  const ghost = stubFetch({ raceCreateFor: new Set([cliTag]), hideAfterRace: new Map([[cliTag, Infinity]]) });
+  const ghostResult = await publishReleases({
+    client: clientOver(ghost),
+    plans,
+    targetCommitish: CTX.ref,
+    log: () => {},
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+  });
+  assert(
+    ghostResult.failed.length === 1 &&
+      ghostResult.failed[0].tagName === cliTag &&
+      ghostResult.failed[0].error.includes('already_exists') &&
+      ghostResult.failed[0].error.includes('404'),
+    'a 422 already_exists whose release no by-tag re-read can see fails that package, saying both',
+  );
+  assert(
+    ghost.calls.filter((c) => c.method === 'GET' && c.url.includes(encodeURIComponent(cliTag))).length ===
+      1 + RACE_REREAD_DELAYS_MS.length &&
+      JSON.stringify(slept) === JSON.stringify(RACE_REREAD_DELAYS_MS.filter((d) => d > 0)),
+    `the re-read is bounded: ${RACE_REREAD_DELAYS_MS.length} attempts after the first read, waiting the declared delays`,
+  );
+  const lagging = stubFetch({ raceCreateFor: new Set([cliTag]), hideAfterRace: new Map([[cliTag, 1]]) });
+  const laggingResult = await publishReleases({
+    client: clientOver(lagging),
+    plans,
+    targetCommitish: CTX.ref,
+    log: () => {},
+    sleep: noSleep,
+  });
+  assert(
+    laggingResult.failed.length === 0 && laggingResult.converged.length === 1 && lagging.forTag(cliTag).length === 1,
+    'a racer the first re-read misses is found by a later one, and the run converges',
+  );
+
+  // ── 14. Duplicate releases are reported, never deleted ──────────────────
+  // The other 17.6.0 shape: the API ACCEPTED both creates. Older versions'
+  // Releases sit below this version's in the list, so the walk has to stop.
+  battery('14. Duplicate releases for one tag are reported, never deleted');
+  const OLDER_TAG_DATE = '2026-09-29T07:54:50Z';
+  const olderVersion = Array.from({ length: 12 }, (_, i) => ({
+    id: 100 + i,
+    tag_name: `@objectstack/older-${i}@17.5.0`,
+    created_at: OLDER_TAG_DATE,
+  }));
+  const dup = stubFetch({
+    raceCreateFor: new Set([specTag]),
+    acceptDuplicateCreateFor: new Set([specTag]),
+    seed: olderVersion,
+  });
+  const dupResult = await publishReleases({
+    client: clientOver(dup),
+    plans,
+    targetCommitish: CTX.ref,
+    log: () => {},
+    sleep: noSleep,
+  });
+  // The ADR-0087 D4 step attaches onto whichever release the tag resolves to.
+  const [specFirst, specSecond] = dup.forTag(specTag);
+  specFirst.assets = [{ name: 'spec-changes.json' }];
+  const dupAudit = await auditDuplicateReleases({
+    client: clientOver(dup),
+    tagNames: plans.map((p) => p.tagName),
+    createdIds: dupResult.createdIds,
+    perPage: 2,
+  });
+  assert(
+    dupResult.failed.length === 0 && dup.forTag(specTag).length === 2,
+    'the fixture really holds a duplicate: the API accepted a second create for the spec tag',
+  );
+  assert(
+    dupAudit.duplicates.length === 1 && dupAudit.duplicates[0].tagName === specTag,
+    `the audit names exactly the duplicated tag (got ${JSON.stringify(dupAudit.duplicates.map((d) => d.tagName))})`,
+  );
+  assert(
+    JSON.stringify(dupAudit.duplicates[0]?.releases.map((r) => r.id)) === JSON.stringify([specFirst.id, specSecond.id]),
+    'the audit lists both release ids of the pair',
+  );
+  assert(
+    dupAudit.duplicates[0]?.byTagId === specFirst.id,
+    'the audit names the id the by-tag endpoint resolves to — where the D4 asset lands',
+  );
+  assert(
+    JSON.stringify(dupAudit.duplicates[0]?.createdByThisRun) === JSON.stringify([specSecond.id]),
+    'the audit knows which release of the pair this run created',
+  );
+  assert(
+    dupAudit.unseen.length === 0 && dupAudit.complete,
+    'every tag this run released was seen and the walk completed',
+  );
+  assert(
+    dupAudit.pagesRead === 3,
+    `the walk stops at the first page past this version's releases, never reading the whole list (read ${dupAudit.pagesRead} of 8 pages)`,
+  );
+  const dupReport = describeDuplicates(dupAudit);
+  assert(
+    dupReport.errors.length === 1 &&
+      dupReport.errors[0].includes(specTag) &&
+      dupReport.errors[0].includes(`${specFirst.id} (assets: spec-changes.json)`) &&
+      dupReport.errors[0].includes(`${specSecond.id} (no assets)`) &&
+      dupReport.errors[0].includes(`are the surplus`),
+    'a duplicate this run created one of is an ERROR naming both ids, their assets and the surplus',
+  );
+  assert(
+    dupReport.errors[0]?.includes('never deletes') && dupReport.warnings.length === 0,
+    'the error says nothing was deleted, and there is no stray warning',
+  );
+  assert(
+    [...shared.calls, ...dup.calls, ...raced.calls, ...ghost.calls].every((c) => ['GET', 'POST', 'PATCH'].includes(c.method)),
+    'no request this script sends is anything but GET, POST or PATCH — it never DELETEs a release',
+  );
+  const preexisting = stubFetch({
+    seed: [
+      { id: 7001, tag_name: specTag, created_at: STUB_TAG_DATE, assets: [{ name: 'spec-changes.json' }] },
+      { id: 7002, tag_name: specTag, created_at: STUB_TAG_DATE },
+      ...olderVersion,
+    ],
+  });
+  const preResult = await publishReleases({
+    client: clientOver(preexisting),
+    plans,
+    targetCommitish: CTX.ref,
+    log: () => {},
+    sleep: noSleep,
+  });
+  const preReport = describeDuplicates(
+    await auditDuplicateReleases({
+      client: clientOver(preexisting),
+      tagNames: plans.map((p) => p.tagName),
+      createdIds: preResult.createdIds,
+    }),
+  );
+  assert(
+    preResult.updated.includes(specTag) &&
+      preexisting.calls.some((c) => c.method === 'PATCH' && c.url.endsWith('/releases/7001')) &&
+      preexisting.calls.every((c) => c.method !== 'PATCH' || !c.url.endsWith('/releases/7002')),
+    'a run over a pre-existing pair updates the one the tag resolves to and leaves the other alone',
+  );
+  assert(
+    preReport.errors.length === 0 && preReport.warnings.length === 1 && preReport.warnings[0].includes('7002'),
+    'a duplicate that predates this run is a WARNING naming the surplus, not a failure',
+  );
+  const capped = describeDuplicates(
+    await auditDuplicateReleases({
+      client: clientOver(dup),
+      tagNames: plans.map((p) => p.tagName),
+      createdIds: dupResult.createdIds,
+      perPage: 1,
+      maxPages: 2,
+    }),
+  );
+  assert(
+    capped.warnings.some((w) => w.includes('UNVERIFIED')),
+    'an audit that ran out of pages before seeing every tag says what it could not verify',
+  );
+  assert(
+    describeDuplicates(
+      await auditDuplicateReleases({ client: clientOver(stubFetch({ seed: olderVersion })), tagNames: [specTag], perPage: 5 }),
+    ).warnings.some((w) => w.includes('never appeared')),
+    'a tag the list never shows is reported unseen, not silently cleared',
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
