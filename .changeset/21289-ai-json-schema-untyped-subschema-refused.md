@@ -17,7 +17,7 @@ Clause-②: yes (narrowing)
   - **where:** the schema root, every value of `properties`, `patternProperties`, `$defs`, `definitions` and `dependentSchemas`, and the subschema (or each array entry) of `items`, `additionalProperties`, `contains`, `propertyNames`, `not`, `if`, `then`, `else`, `unevaluatedProperties`, `unevaluatedItems`, `anyOf`, `oneOf`, `allOf` and `prefixItems` — under typed parents too; `$ref` is not followed;
   - **accepted:** boolean subschemas, `{}`, a node with any `type` value, and an untyped node carrying only keywords outside the list (`enum`, `const`, `$ref`, `anyOf`, `title`, `description`, `default`, …);
   - each offending subschema is its own issue, located at the slot path plus the subschema path (`ai.outputSchema.properties.customer`), and the message names the keyword and the `type` to declare.
-- The TypeScript types of both slots are unchanged (`Record<string, unknown>`). The published JSON Schema for both slots is unchanged too: the rule is a refinement, which the JSON Schema projection does not carry, and the affected schemas record it as `x-dropped-refinements`.
+- The TypeScript types of both slots are unchanged (`Record<string, unknown>`). The published JSON Schema does not state the rule: it is a refinement, which the JSON Schema projection does not carry, so a JSON Schema validator still accepts such a schema in either slot. The affected published schemas name the slot in their `x-dropped-refinements` list.
 
 ## FROM → TO
 
