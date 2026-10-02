@@ -4,7 +4,7 @@
 
 feat(spec)!: an `object-grid` page block's props type the seven members the grid reads with a fixed shape, and the legacy `resizableColumns` spelling is retired in favour of `resizable` (#21445)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered object-grid-resizable-columns-removed, object-grid-resizable-columns-retired, ui-object-grid-row-members-typed -->
 
