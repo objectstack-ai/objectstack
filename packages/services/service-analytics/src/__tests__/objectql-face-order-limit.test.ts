@@ -76,15 +76,16 @@ const PEOPLE = [
   { id: 'p3', email: 'c@x' },
 ] as const;
 
-// By note: w 20 (1 row), x 15 (2), y 7 (1), z 1 (1). By month: 03 (2 rows),
-// 04, 05, 06. By owner: a@x 15, b@x 8, c@x 20. No order key's requested order
-// is the insertion order or its reverse.
+// By note: w 7 (1 row), x 15 (2), y 20 (1), z 1 (1). By month: 03 (2 rows,
+// 15), 04 (1), 05 (20), 06 (7). By owner: a@x 15, b@x 21, c@x 7. SQLite
+// answers a grouping in ascending key order, so every ordered pin below asks
+// for an order, and a window, that ascending key order does not already give.
 const DEALS = [
   { id: 'd1', note: 'x', amount: 10, closed_on: '2026-03-01', owner: 'p1' },
   { id: 'd2', note: 'x', amount: 5, closed_on: '2026-03-02', owner: 'p1' },
-  { id: 'd3', note: 'y', amount: 7, closed_on: '2026-05-03', owner: 'p2' },
+  { id: 'd3', note: 'y', amount: 20, closed_on: '2026-05-03', owner: 'p2' },
   { id: 'd4', note: 'z', amount: 1, closed_on: '2026-04-01', owner: 'p2' },
-  { id: 'd5', note: 'w', amount: 20, closed_on: '2026-06-01', owner: 'p3' },
+  { id: 'd5', note: 'w', amount: 7, closed_on: '2026-06-01', owner: 'p3' },
 ] as const;
 
 /** It declares NO join, so `owner.email` is served by FK-expand on the ObjectQL face and by a JOIN on the native face. */
@@ -242,16 +243,16 @@ for (const cell of CELLS) {
           }
         });
 
-        it('ordered asc with offset 1 and limit 2, it answers the second and third buckets', async () => {
+        it('ordered desc with offset 1 and limit 2, it answers the second and third newest buckets', async () => {
           const { res } = await ask('objectql', {
             cube: CUBE,
             measures: ['amount_sum'],
             timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }],
-            order: { closed_on: 'asc' },
+            order: { closed_on: 'desc' },
             offset: 1,
             limit: 2,
           });
-          expect(tuples(res.rows, ['closed_on', 'amount_sum'])).toEqual([['2026-04', 1], ['2026-05', 7]]);
+          expect(tuples(res.rows, ['closed_on', 'amount_sum'])).toEqual([['2026-05', 20], ['2026-04', 1]]);
         });
       });
 
@@ -268,7 +269,7 @@ for (const cell of CELLS) {
           await equalToNative(
             { cube: CUBE, measures: ['amount_sum'], dimensions: ['note'], order: { amount_sum: 'desc' }, offset: 1, limit: 2 },
             ['note', 'amount_sum'],
-            [['x', 15], ['y', 7]],
+            [['x', 15], ['w', 7]],
           );
         });
 
@@ -292,7 +293,7 @@ for (const cell of CELLS) {
           await equalToNative(
             { cube: CUBE, measures: ['amount_sum'], dimensions: ['owner.email'], order: { amount_sum: 'desc' }, limit: 2 },
             ['owner.email', 'amount_sum'],
-            [['c@x', 20], ['a@x', 15]],
+            [['b@x', 21], ['a@x', 15]],
           );
         });
 
@@ -300,7 +301,7 @@ for (const cell of CELLS) {
           await equalToNative(
             { cube: CUBE, measures: ['amount_sum'], dimensions: ['owner.email'], order: { 'owner.email': 'desc' }, offset: 1, limit: 2 },
             ['owner.email', 'amount_sum'],
-            [['b@x', 8], ['a@x', 15]],
+            [['b@x', 21], ['a@x', 15]],
           );
         });
       });
@@ -312,7 +313,7 @@ for (const cell of CELLS) {
         const ran = (await driver.execute(res.sql)) as unknown;
         const echoed = Array.isArray(ran) ? ran : (ran as { rows: Row[] }).rows;
         expect(tuples(res.rows, ['note', 'amount_sum'])).toEqual(tuples(echoed, ['note', 'amount_sum']));
-        expect(tuples(res.rows, ['note', 'amount_sum'])).toEqual([['x', 15], ['y', 7]]);
+        expect(tuples(res.rows, ['note', 'amount_sum'])).toEqual([['x', 15], ['w', 7]]);
       });
 
       describe('CONTROL with no order, offset or limit the answer is the engine aggregate, unchanged', () => {
@@ -343,7 +344,7 @@ for (const cell of CELLS) {
               offset: 1,
               limit: 2,
             } as any);
-            expect(tuples(res.rows, ['note', 'amount_sum']), face).toEqual([['x', 15], ['y', 7]]);
+            expect(tuples(res.rows, ['note', 'amount_sum']), face).toEqual([['x', 15], ['w', 7]]);
           }
         });
 
@@ -357,7 +358,7 @@ for (const cell of CELLS) {
               offset: 1,
               limit: 2,
             } as any);
-            expect(tuples(res.rows, ['closed_on', 'amount_sum']), face).toEqual([['2026-05', 7], ['2026-04', 1]]);
+            expect(tuples(res.rows, ['closed_on', 'amount_sum']), face).toEqual([['2026-05', 20], ['2026-04', 1]]);
           }
         });
       });
