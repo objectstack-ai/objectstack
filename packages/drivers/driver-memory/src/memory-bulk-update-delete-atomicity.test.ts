@@ -15,7 +15,7 @@
  * are the third and fourth batch doors it did not reach.
  *
  * ⛔ Asserting "the refusal still happens" proves NOTHING here — the refusal
- * was already correct (#13197/#13239 pin `assertUnique`, `delete`'s own
+ * was already correct (commit 56c093c4d and #13239 pin `assertUnique`, `delete`'s own
  * strict-mode throw predates this file). **The discriminating fact is that
  * the TABLE DOES NOT MOVE**, so every test below reads the store back after
  * the refusal — full rows, not just a count — rather than stopping at the

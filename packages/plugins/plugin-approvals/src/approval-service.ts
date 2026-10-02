@@ -70,6 +70,9 @@ import {
   type ApproverOrgScopeDeps,
   type ApproverOrgScopeEngine,
 } from './approver-org-scope.js';
+// The ONE spelling equivalence for a position's slot address — read by the
+// acting path, the "My Pending" filter and the participant gate alike.
+import { equivalentApproverAddresses, positionAddresses } from './approver-address.js';
 import {
   redactSnapshot,
   resolveReadableSnapshotFields,
@@ -1529,10 +1532,12 @@ export class ApprovalService implements IApprovalService {
     // Named something else — allow it ONLY if the server can prove the caller
     // holds that identity. `positions` is resolved by the shared authz resolver
     // (never client-supplied); `role:` is the ADR-0090 D3 deprecated spelling
-    // that 15.x-era slots and the Console's own identity list still carry.
+    // that 15.x-era slots and the Console's own identity list still carry. The
+    // spellings come from `positionAddresses` — the one equivalence the list
+    // filter and the participant gate read too (`approver-address.ts`).
     const named = String(actorId);
     for (const position of context.positions ?? []) {
-      if (named === `position:${position}` || named === `role:${position}`) return named;
+      if (positionAddresses(position).includes(named)) return named;
     }
     // Email last — it costs a read, so only when nothing cheaper matched.
     if (named.includes('@') && await this.callerHasEmail(uid, named)) return named;
@@ -6228,17 +6233,26 @@ export class ApprovalService implements IApprovalService {
    * `sys_approval_approver` index — the indexed replacement for the old
    * in-memory CSV scan, and what makes approver-filtered pagination correct
    * past any scan window (issue #1745). A request matches when ANY of the
-   * caller's identities (user id / email / role:<r>) holds a pending slot.
-   * Returns null when the filter is absent (callers skip the id constraint).
+   * caller's identities (user id / email / a position address) holds a pending
+   * slot. Returns null when the filter is absent (callers skip the id
+   * constraint).
+   *
+   * A position address matches under EVERY spelling of that position — the
+   * index stores the slot as it was written (`position:<p>` for a slot opened
+   * on an unstaffed position, `role:<p>` for a 15.x-era one), while a client
+   * may ask under either. The spellings come from `equivalentApproverAddresses`,
+   * the same equivalence `resolveActor` admits a caller under; ⛔ never a
+   * second fold written here.
    */
   private async approverRequestIds(
     targets: string[],
     tenantOrg: string | null,
   ): Promise<string[] | null> {
     if (!targets.length) return null;
-    const where: any = targets.length === 1
-      ? { approver: targets[0] }
-      : { approver: { $in: targets } };
+    const addresses = [...new Set(targets.flatMap(equivalentApproverAddresses))];
+    const where: any = addresses.length === 1
+      ? { approver: addresses[0] }
+      : { approver: { $in: addresses } };
     if (tenantOrg) where.organization_id = tenantOrg;
     const rows = await this.engine.find('sys_approval_approver', {
       where, fields: ['request_id'],
@@ -6269,12 +6283,19 @@ export class ApprovalService implements IApprovalService {
    * commenter). Admins with override authority keep the unrestricted view the
    * "all requests" console surface depends on.
    *
-   * Keying on the concrete user id is sufficient rather than an approximation:
-   * position/team/manager/field approvers are resolved to concrete user ids at
-   * open time, and the `type:value` literal is only the fallback for a spec
-   * that resolved to NOBODY — a slot no one can act on either way (`can_act`
-   * is a plain membership test over the resolved ids). So this cannot hide a
-   * request from someone who could actually act on it.
+   * "Current approver" means a pending slot the caller could ACT under, which
+   * is wider than their concrete user id: position/team/manager/field
+   * approvers are resolved to concrete user ids at open time, but a position
+   * that nobody held at open time leaves the literal `position:<p>` slot (and a
+   * 15.x-era slot reads `role:<p>`), and `resolveActor` lets a caller who holds
+   * `p` — server-resolved `context.positions`, never client-supplied — act
+   * under either spelling. Keying on the user id alone hid exactly those
+   * requests from the people who could decide them: absent from "My Pending"
+   * under every spelling the client asked for, `404` on the request itself,
+   * while the approve call succeeded. So the probe asks for the user id AND
+   * every address of every position the caller holds, from the same
+   * `positionAddresses` equivalence the acting path reads — no request becomes
+   * visible here that the caller could not decide.
    */
   private async visibleRequestIds(
     context: ExecutionContext,
@@ -6301,8 +6322,10 @@ export class ApprovalService implements IApprovalService {
 
     try {
       // Current approver — via the normalized index, so every identity form
-      // the write path recorded is covered.
-      for (const id of (await this.approverRequestIds([uid], tenantOrg)) ?? []) ids.add(id);
+      // the write path recorded is covered: the user id, and every slot
+      // address of a position the caller holds (see the doc block above).
+      const actingAddresses = [uid, ...(context.positions ?? []).flatMap(positionAddresses)];
+      for (const id of (await this.approverRequestIds(actingAddresses, tenantOrg)) ?? []) ids.add(id);
 
       const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
       add(

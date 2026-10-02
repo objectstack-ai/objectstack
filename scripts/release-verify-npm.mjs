@@ -203,7 +203,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '9. The job summary is written SYNCHRONOUSLY, before process.exit': 4,
   '10. The probe: the whole group in one read, three answers': 9,
   '11. The 17.5.0 publish window, replayed on npm\'s own clock': 7,
-  '12. The audit step backfills only a version whose whole group is on npm': 14,
+  '12. The audit step backfills only a version whose whole group is on npm': 17,
   '13. The backfill builds from the version commit\'s tree, as the publish does': 11,
 });
 
@@ -1648,9 +1648,17 @@ export async function selfTest() {
       writeFileSync(join(repo, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
       writePkg('cli', '@objectstack/cli', '1.0.0');
       writePkg('spec', '@objectstack/spec', '1.0.0');
+      mkdirSync(join(repo, '.changeset'));
+      writeFileSync(join(repo, '.changeset', 'README.md'), 'what a changeset is\n');
+      writeFileSync(join(repo, '.changeset', 'consumed.md'), "---\n'@objectstack/cli': minor\n---\n\nconsumed\n");
       const base = commit('base');
+      // A landing the Version Packages PR was never refreshed over: the
+      // version commit carries its changeset and does not consume it.
+      writeFileSync(join(repo, '.changeset', 'landed-behind.md'), "---\n'@objectstack/cli': patch\n---\n\nbehind\n");
+      const behind = commit('a landing behind the Version Packages PR');
       writePkg('cli', '@objectstack/cli', '1.1.0');
       writePkg('spec', '@objectstack/spec', '1.1.0');
+      rmSync(join(repo, '.changeset', 'consumed.md'));
       const vc = commit('chore: version packages');
       writeFileSync(join(repo, 'one.txt'), 'one\n');
       const landing = commit('a landing during the publish');
@@ -1730,6 +1738,26 @@ export async function selfTest() {
       const versionPush = await audit({ before: base, head: vc, present: ['@objectstack/cli@1.0.0', '@objectstack/spec@1.0.0'] });
       t('the version push, cli absent: the publish predicate still queues the publish', versionPush.status === 0 && versionPush.outputs['publish-pending'] === 'true', said(versionPush));
       t('...and neither backfills nor reads the group', !backfills(versionPush) && versionPush.asked.length === 0, said(versionPush));
+      // The publish moment names what the version commit ships without a
+      // CHANGELOG entry -- reported, never refused.
+      const unconsumedLine = versionPush.stdout.split('\n').find((line) => line.startsWith('::warning::')) ?? '';
+      t(
+        "the version push warns of the changeset its version commit did not consume, naming the commit that added it, and still queues",
+        versionPush.outputs['publish-pending'] === 'true' &&
+          unconsumedLine.startsWith('::warning::1 changeset(s) from 1 commit(s)') &&
+          unconsumedLine.endsWith(`.changeset/landed-behind.md (${behind.slice(0, 10)})`),
+        said(versionPush),
+      );
+      t(
+        '...neither the changeset it consumed nor README.md is named, and the job summary carries the section',
+        !/consumed\.md|README/.test(unconsumedLine) && /### 1 changeset\(s\) ship in 1\.1\.0 without a CHANGELOG entry/.test(versionPush.summary),
+        said(versionPush),
+      );
+      t(
+        'a landing that does not queue the publish reports no changesets: the list belongs to the run the approver opens',
+        !/CHANGELOG entry|Changesets:/.test(inWindow.stdout + inWindow.summary + done.stdout + complete.stdout),
+        said(inWindow),
+      );
 
       // The set is the VERSION COMMIT's workspace: a package that landed after
       // it, and that no release of 1.1.0 contains, is not asked about.

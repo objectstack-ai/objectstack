@@ -1407,6 +1407,238 @@ describe('audit writers — reported once per CAUSE, not once per process (#1516
 });
 
 /**
+ * [#21262] The line names the table whose insert was REFUSED, and the row that
+ * is lost.
+ *
+ * Measured on MySQL: `sys_activity` was never created because its DDL was
+ * refused at boot, every `sys_audit_log` row LANDED, and the line said "only
+ * the `sys_audit_log` row that records who did it never landed", sent the
+ * operator to the telemetry-datasource split, and printed four times under the
+ * words "reported ONCE" — once per audited object.
+ *
+ * The fixture refuses ONE table's insert, from that table's own `create`, the
+ * way a real driver does — unlike the #15166 block above, whose engine refuses
+ * the ledger insert whatever the error names. Its pins stay as they are.
+ */
+describe('audit writers — the line names the refused table and the lost row (#21262)', () => {
+  interface LogLine { level: string; message: string; meta?: any }
+
+  /**
+   * Engine whose `refusing` table rejects every insert with `nextError(n)`; the
+   * other table accepts. Records which rows LANDED, so a line's claim about
+   * them can be checked against what happened.
+   */
+  function makeRefusingEngine(
+    refusing: 'sys_audit_log' | 'sys_activity' | ((n: number) => 'sys_audit_log' | 'sys_activity'),
+    nextError: (n: number) => unknown,
+    objectDefs: Record<string, any> = {},
+  ) {
+    const hooks = new Map<string, Array<(ctx: any) => any>>();
+    const logs: LogLine[] = [];
+    const landed: string[] = [];
+    let n = 0;
+    const sudoApi = {
+      object(name: string) {
+        return {
+          async create(_row: Record<string, any>) {
+            const refused = typeof refusing === 'function' ? refusing(n) : refusing;
+            if (name === refused) throw nextError(n++);
+            landed.push(name);
+            return { id: 'generated-id' };
+          },
+        };
+      },
+    };
+    const api = { sudo: () => sudoApi };
+    const engine = {
+      getSchema(name: string) {
+        const fields = (SINGLE_TENANT as Record<string, string[]>)[name];
+        const base = fields
+          ? { name, fields: Object.fromEntries(fields.map((f) => [f, { type: 'text' }])) }
+          : { name, fields: { id: { type: 'text' }, name: { type: 'text' } } };
+        return { ...base, ...(objectDefs[name] || {}) };
+      },
+      registerHook(event: string, fn: (ctx: any) => any) {
+        const list = hooks.get(event) ?? [];
+        list.push(fn);
+        hooks.set(event, list);
+      },
+      unregisterHooksByPackage() { /* no-op */ },
+      logger: {
+        error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); },
+        warn(message: string, meta?: any) { logs.push({ level: 'warn', message, meta }); },
+        debug(message: string, meta?: any) { logs.push({ level: 'debug', message, meta }); },
+        info() { /* unused */ },
+      },
+    };
+    installAuditWriters(engine as any, 'test.audit');
+    const fire = async (object: string, id: string, name = 'Acme') => {
+      for (const fn of hooks.get('afterInsert') ?? []) {
+        await fn({
+          event: 'afterInsert',
+          api,
+          object,
+          input: { id },
+          result: { id, name },
+          session: { organizationId: 'org-1', userId: 'user-1' },
+        });
+      }
+    };
+    const at = (level: string) => logs.filter((l) => l.level === level);
+    const landedIn = (table: string) => landed.filter((t) => t === table).length;
+    return { fire, at, logs, landedIn };
+  }
+
+  /** The measured shape: mysql2's `ER_NO_SUCH_TABLE` (errno 1146) naming the table. */
+  const mysqlNoSuchTable = (table: string) => () => {
+    const e = new Error(`Table 'objectstack.${table}' doesn't exist`) as Error & { code?: string; errno?: number };
+    e.code = 'ER_NO_SUCH_TABLE';
+    e.errno = 1146;
+    return e;
+  };
+  const coded = (message: string, code: string) => () => {
+    const e = new Error(message) as Error & { code?: string };
+    e.code = code;
+    return e;
+  };
+
+  it('names `sys_activity` when its insert is refused, and says the ledger row LANDED', async () => {
+    const { fire, at, landedIn } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    await fire('crm_lead', 'l-1');
+
+    // What happened: the ledger row is on disk, only the activity row is lost.
+    expect(landedIn('sys_audit_log')).toBe(1);
+    expect(landedIn('sys_activity')).toBe(0);
+    const [line] = at('error');
+    expect(line.meta).toMatchObject({ object: 'crm_lead', action: 'create', table: 'sys_activity' });
+    expect(line.message).toMatch(/^Audit write FAILED on `sys_activity` \(ER_NO_SUCH_TABLE: /);
+    // The lost row is the activity row; the ledger row is said to have landed.
+    expect(line.message).toMatch(/only the `sys_activity` row/);
+    expect(line.message).toMatch(/so did its `sys_audit_log` row/);
+    // ⛔ The measured falsehood, by the subject it names.
+    expect(line.message).not.toMatch(/`sys_audit_log` row that records who did it never landed/);
+    expect(line.message).not.toMatch(/compliance trail is now INCOMPLETE/);
+  });
+
+  it('names `sys_audit_log` when its insert is refused, and the activity row due after it as lost too', async () => {
+    const { fire, at, landedIn } = makeRefusingEngine('sys_audit_log', mysqlNoSuchTable('sys_audit_log'));
+
+    await fire('crm_lead', 'l-1');
+
+    // The activity row is written only after the ledger row, so it never ran.
+    expect(landedIn('sys_audit_log')).toBe(0);
+    expect(landedIn('sys_activity')).toBe(0);
+    const [line] = at('error');
+    expect(line.meta).toMatchObject({ object: 'crm_lead', action: 'create', table: 'sys_audit_log' });
+    expect(line.message).toMatch(/^Audit write FAILED on `sys_audit_log` \(ER_NO_SUCH_TABLE: /);
+    expect(line.message).toMatch(/compliance trail is now INCOMPLETE/);
+    expect(line.message).toMatch(/`sys_audit_log` row that records who did it never landed/);
+    expect(line.message).toMatch(/neither did its `sys_activity` timeline row/);
+  });
+
+  it('does not claim an activity row was lost for an object that writes none', async () => {
+    // `enable.activities: false` — no activity row was ever due.
+    const { fire, at } = makeRefusingEngine('sys_audit_log', mysqlNoSuchTable('sys_audit_log'), {
+      crm_lead: { enable: { activities: false } },
+    });
+
+    await fire('crm_lead', 'l-1');
+
+    const [line] = at('error');
+    expect(line.message).toMatch(/`sys_audit_log` row that records who did it never landed/);
+    expect(line.message).not.toMatch(/neither did its `sys_activity`/);
+  });
+
+  it('gives a missing table BOTH causes it cannot tell apart, naming that table in each', async () => {
+    // A table is as missing when schema sync's DDL for it was refused at boot
+    // as when it was created on another datasource, and nothing in hand tells
+    // the two apart — so the remedy names both, the boot's own line first.
+    const { fire, at } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/`sys_activity` does not exist on the connection this write reached/);
+    expect(msg).toMatch(/Schema sync FAILED for object 'sys_activity'/);
+    expect(msg).toMatch(/OS_TELEMETRY_DB=0/);
+    expect(msg.indexOf('Schema sync FAILED')).toBeLessThan(msg.indexOf('OS_TELEMETRY_DB=0'));
+  });
+
+  it('gives any other refusal the driver-fault remedy, with neither missing-table cause', async () => {
+    const { fire, at } = makeRefusingEngine(
+      'sys_activity',
+      coded('NOT NULL constraint failed: sys_activity.summary', 'SQLITE_CONSTRAINT_NOTNULL'),
+    );
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/^Audit write FAILED on `sys_activity` \(SQLITE_CONSTRAINT_NOTNULL: /);
+    expect(msg).toMatch(/Fix: resolve the driver fault/);
+    expect(msg).not.toMatch(/Schema sync/);
+    expect(msg).not.toMatch(/telemetry/i);
+  });
+
+  it('reads the missing table from the REFUSED write, not from a list, when the code alone says "missing"', async () => {
+    // SQLSTATE 42P01 with no phrase naming a relation is a missing-table
+    // verdict for ANY table name. Asked in list order, the ledger table would
+    // answer first and be named for a refused `sys_activity` insert.
+    const { fire, at } = makeRefusingEngine('sys_activity', coded('statement refused', '42P01'));
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/`sys_activity` does not exist on the connection this write reached/);
+    expect(msg).not.toMatch(/`sys_audit_log` does not exist/);
+  });
+
+  it('prints once per audited object, refused table and code — and the line says so', async () => {
+    // The measured boot: one missing table, four audited objects, four lines.
+    // That count is the declared key, not a defect — what was wrong was the
+    // sentence calling it "reported ONCE".
+    const objects = ['crm_lead', 'crm_account', 'crm_contact', 'crm_opportunity'];
+    const { fire, at } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    for (const object of objects) for (let i = 0; i < 3; i += 1) await fire(object, `r-${i}`);
+
+    const errors = at('error');
+    expect(errors).toHaveLength(objects.length);
+    expect(errors.map((l) => l.meta.object)).toEqual(objects);
+    expect(at('debug')).toHaveLength(objects.length * 3 - objects.length);
+    expect(errors[0].message).toMatch(/ONCE per audited object, refused table and error code/);
+  });
+
+  it('keys on the refused TABLE too: the other table refusing with the same code is its own line', async () => {
+    // Same object, same code, the two tables refusing in turn. Without the
+    // table in the key the second refusal folds into a line naming the first
+    // table and the first table's lost row.
+    const { fire, at } = makeRefusingEngine(
+      (n) => (n === 0 ? 'sys_activity' : 'sys_audit_log'),
+      coded('constraint failed', 'SQLITE_CONSTRAINT'),
+    );
+
+    await fire('crm_lead', 'l-1');
+    await fire('crm_lead', 'l-2');
+
+    const errors = at('error');
+    expect(errors.map((l) => l.meta.table)).toEqual(['sys_activity', 'sys_audit_log']);
+    expect(at('debug')).toEqual([]);
+  });
+
+  it('carries no stored value — operator text only', async () => {
+    const STORED = 'stored-value-7f3c';
+    const { fire, logs } = makeRefusingEngine('sys_activity', mysqlNoSuchTable('sys_activity'));
+
+    await fire('crm_lead', 'l-1', STORED);
+    await fire('crm_lead', 'l-2', STORED);
+
+    expect(logs.length).toBeGreaterThan(0);
+    expect(JSON.stringify(logs)).not.toContain(STORED);
+  });
+});
+
+/**
  * [commit 1408fe385] Which organization an audit row is stamped with — the RECORD'S own,
  * honouring the maintainer's ruling on #8287.
  *
