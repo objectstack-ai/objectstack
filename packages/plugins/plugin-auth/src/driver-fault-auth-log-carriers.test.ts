@@ -176,15 +176,25 @@ const CELLS: readonly Cell[] = [
 
 const SYSTEM = { context: { isSystem: true } } as never;
 
+interface RecordedCall {
+  readonly level: string;
+  readonly args: unknown[];
+}
+
+interface RecordingLogger {
+  readonly calls: RecordedCall[];
+  readonly [method: string]: unknown;
+}
+
 /** A logger that keeps every call, so each line can be rendered and searched. */
-function recordingLogger() {
-  const calls: Array<{ level: string; args: unknown[] }> = [];
+function recordingLogger(): RecordingLogger {
+  const calls: RecordedCall[] = [];
   const push = (level: string) => (...args: unknown[]) => void calls.push({ level, args });
-  const logger: any = {
+  const logger: RecordingLogger = {
     calls,
     trace: push('trace'), fatal: push('fatal'),
     debug: push('debug'), info: push('info'), warn: push('warn'), error: push('error'),
-    child() { return logger; },
+    child: () => logger,
   };
   return logger;
 }
@@ -203,9 +213,9 @@ function renderCall(args: readonly unknown[]): string {
 }
 
 interface Captured {
-  readonly console: Array<{ level: string; args: unknown[] }>;
-  readonly engine: ReturnType<typeof recordingLogger>;
-  readonly manager: ReturnType<typeof recordingLogger>;
+  readonly console: RecordedCall[];
+  readonly engine: RecordingLogger;
+  readonly manager: RecordingLogger;
 }
 
 /** Run `fn` with the auth library's console carriers captured. */
