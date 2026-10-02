@@ -352,10 +352,11 @@ describe('[#5739] the object and array `where` spellings converge on one travers
     );
 
     expect(dimensions).toEqual(['industry', 'owner.region']);
-    // The bare column stays BARE: `qualifyAndRegisterJoin` qualifies plain
-    // identifiers only when the cube declares `joins`, and an inferred cube never
-    // does — minting a dotted dimension does not change that (#5353's block 2).
-    expect(sqls[0]).toContain('WHERE (industry = $1 AND "owner"."region" = $2)');
+    // [#21249] The base column is qualified: the statement joins `owner`, so
+    // `industry` beside it is written against the base table, whether or not
+    // the cube declares `joins` — an inferred cube never does. Left bare, a
+    // joined target that also declares `industry` makes it ambiguous.
+    expect(sqls[0]).toContain('WHERE ("crm_account"."industry" = $1 AND "owner"."region" = $2)');
   });
 });
 

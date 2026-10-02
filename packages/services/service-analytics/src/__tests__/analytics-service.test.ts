@@ -247,7 +247,9 @@ describe('NativeSQLStrategy', () => {
 
     expect(sql).toContain('LEFT JOIN "account" ON "opportunity"."account" = "account"."id"');
     expect(sql).toContain('"account"."industry" AS "account.industry"');
-    expect(sql).toContain('SUM(amount)');
+    // [#21249] The cube declares no join, but the statement joins `account`, so
+    // the base column the measure sums is qualified against the base table.
+    expect(sql).toContain('SUM("opportunity"."amount")');
   });
 
   it('should execute query and return structured result', async () => {
