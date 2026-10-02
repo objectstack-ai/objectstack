@@ -74,7 +74,9 @@ TO    -> refused at measures.total.sql (custom) and dimensions.everything.sql (i
 `…field` naming `'*'` is one member to change — declare a `count` to count rows,
 or name the column the measure aggregates (a dimension names the column it
 groups by). On a `derived` dataset measure, delete `field`: nothing read it.
-There is no mechanical rewrite, so `os migrate meta` lists nothing for it.
+There is no mechanical rewrite: `os migrate meta` rewrites nothing for it, and
+lists the entry `analytics-row-wildcard-outside-count-refused` as a manual
+change that requires your judgment.
 
 **What a stored document meets.** A metadata read still serves it as stored,
 with the refusal on its read diagnostics (`_diagnostics`), and a re-save through
