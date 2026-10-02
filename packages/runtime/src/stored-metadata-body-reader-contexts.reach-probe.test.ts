@@ -70,6 +70,14 @@ const actionBody = {
   timeoutMs: 5000,
 };
 
+/** The family's second table, read the same way. */
+const historyActionBody = {
+  language: 'js',
+  source: `const rows = await ctx.api.object('sys_metadata_history').find({ where: { type: 'datasource', name: '${DS_NAME}' } });\nreturn { rows };`,
+  capabilities: ['api.read'],
+  timeoutMs: 5000,
+};
+
 const PROBE_APP: any = {
   manifest: { id: 'com.probe.reach21454', name: 'Reach probe', version: '1.0.0' },
   objects: [
@@ -83,8 +91,10 @@ const PROBE_APP: any = {
       actions: [
         // ①a — a sandboxed action body.
         { name: 'probe_body_reads_family', label: 'Probe body read', type: 'script', body: actionBody },
-        // ② — declared here; its handler is code registered by PROBE_HANDLER_PLUGIN.
+        { name: 'probe_body_reads_history', label: 'Probe body history read', type: 'script', body: historyActionBody },
+        // ② — declared here; their handlers are code registered by PROBE_HANDLER_PLUGIN.
         { name: 'probe_handler_reads_family', label: 'Probe handler read', type: 'script' },
+        { name: 'probe_handler_reads_history', label: 'Probe handler history read', type: 'script' },
       ],
     },
   ],
@@ -119,17 +129,22 @@ const PROBE_HANDLER_PLUGIN: any = {
   init: async () => {},
   start: async (ctx: any) => {
     const ql: any = ctx.getService('objectql');
-    ql.registerAction(
-      'probe_note',
-      'probe_handler_reads_family',
-      async (actionCtx: any) => {
-        const rows = await actionCtx.engine.find('sys_metadata', {
-          where: { type: 'datasource', name: DS_NAME },
-        });
-        return { rows };
-      },
-      'probe.reach21454.handler',
-    );
+    for (const [action, object] of [
+      ['probe_handler_reads_family', 'sys_metadata'],
+      ['probe_handler_reads_history', 'sys_metadata_history'],
+    ] as const) {
+      ql.registerAction(
+        'probe_note',
+        action,
+        async (actionCtx: any) => {
+          const rows = await actionCtx.engine.find(object, {
+            where: { type: 'datasource', name: DS_NAME },
+          });
+          return { rows };
+        },
+        'probe.reach21454.handler',
+      );
+    }
   },
 };
 
@@ -154,6 +169,8 @@ let adminToken: string;
 let memberToken: string;
 let storedRow: Record<string, any>;
 let storedHistory: { rows: number; carriesCredential: boolean };
+/** Every stored content hash of the probe row, both tables (`checksum`, `previous_checksum`). */
+const storedHashes = new Set<string>();
 let prevNodeEnv: string | undefined;
 
 const req = (path: string, init?: RequestInit) => app.request(`${ORIGIN}${API}${path}`, init);
@@ -203,7 +220,7 @@ function hashFormOf(status: number, payload: unknown): Form {
   if (rows.length === 0) return 'no-row';
   const served = rows.map((r) => r.checksum);
   if (served.every((c) => c === undefined || c === null)) return 'withheld';
-  if (served.some((c) => c === storedRow.checksum)) return 'stored-cleartext';
+  if (served.some((c) => typeof c === 'string' && storedHashes.has(c))) return 'stored-cleartext';
   return 'keyed';
 }
 
@@ -326,6 +343,11 @@ beforeAll(async () => {
     rows: history.length,
     carriesCredential: history.some((h) => String(h.metadata ?? '').includes(SENTINEL)),
   };
+  for (const row of [storedRow, ...history]) {
+    for (const column of ['checksum', 'previous_checksum']) {
+      if (typeof row?.[column] === 'string' && row[column].length > 0) storedHashes.add(row[column]);
+    }
+  }
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
@@ -346,6 +368,11 @@ describe('[#21454] precondition — the fixture stores what the family protects'
     expect(String(storedRow.metadata)).toContain(SENTINEL);
     expect(typeof storedRow.checksum).toBe('string');
     expect(storedRow.checksum.length).toBeGreaterThan(0);
+  });
+
+  it('the save also left a history row carrying the credential (the family\'s second table)', () => {
+    expect(storedHistory.rows).toBeGreaterThan(0);
+    expect(storedHistory.carriesCredential).toBe(true);
   });
 });
 
@@ -371,6 +398,16 @@ describe('[#21454] CONTROL — the same row through a family door (generic data 
     expect(reading.hashForm).toBe('keyed');
   });
 
+  it('administrator, history list: the body is projected and the hash keyed', async () => {
+    const res = await as(adminToken, 'GET', `/data/sys_metadata_history?type=datasource&name=${DS_NAME}`);
+    const payload = await readJson(res);
+    const reading = record('control', 'data door list (history)', 'administrator', res.status, payload);
+    expect(reading.status).toBe(200);
+    expect(reading.bodyForm).toBe('projected');
+    expect(reading.hashForm).toBe('keyed');
+    expect(JSON.stringify(familyRowsIn(payload).map((r) => r.metadata))).toContain('probe.example.invalid');
+  });
+
   it('member, list: refused (or no row served)', async () => {
     const res = await as(memberToken, 'GET', `/data/sys_metadata?type=datasource&name=${DS_NAME}`);
     const reading = record('control', 'data door list', 'member', res.status, await readJson(res));
@@ -388,6 +425,12 @@ describe('[#21454] ① a sandboxed body\'s object API (ctx.api.object)', () => {
   it('①a action body via /actions — member invoking (the body runs elevated)', async () => {
     const res = await as(memberToken, 'POST', '/actions/probe_note/probe_body_reads_family', { params: {} });
     record('①a action body ctx.api', '/actions', 'member', res.status, await readJson(res));
+  });
+
+  it('①a action body via /actions, history table — administrator invoking', async () => {
+    const res = await as(adminToken, 'POST', '/actions/probe_note/probe_body_reads_history', { params: {} });
+    const reading = record('①a action body ctx.api (history)', '/actions', 'administrator', res.status, await readJson(res));
+    expect(reading.status).toBeLessThan(300);
   });
 
   it('①b hook body fired by a data-door insert — administrator writing', async () => {
@@ -465,6 +508,12 @@ describe('[#21454] ② an action handler\'s engine handle (ctx.engine.find)', ()
   it('② code handler via /actions — administrator invoking', async () => {
     const res = await as(adminToken, 'POST', '/actions/probe_note/probe_handler_reads_family', { params: {} });
     const reading = record('② action handler ctx.engine', '/actions', 'administrator', res.status, await readJson(res));
+    expect(reading.status).toBeLessThan(300);
+  });
+
+  it('② code handler via /actions, history table — administrator invoking', async () => {
+    const res = await as(adminToken, 'POST', '/actions/probe_note/probe_handler_reads_history', { params: {} });
+    const reading = record('② action handler ctx.engine (history)', '/actions', 'administrator', res.status, await readJson(res));
     expect(reading.status).toBeLessThan(300);
   });
 
