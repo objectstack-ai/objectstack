@@ -37,9 +37,33 @@
  * statement, printed the way knex prints one on SQLite. The envelope's shape is
  * pinned against the real producer by `driver-sql`'s
  * `sql-driver-16657-operator-facing-cause-text.test.ts`.
+ *
+ * ## Why the oclif `Config` is loaded at MODULE SCOPE
+ *
+ * The case used to hand `DbClean.run` a `{ root }`, so oclif loaded its
+ * `Config` inside the clocked case. With this package built and no
+ * `oclif.manifest.json`, that load imports every command module to build the
+ * manifest, and it was the whole cost of the case. Measured on a shared
+ * 4-vCPU container at 24db8a1c, phase timers in a throwaway copy, the busy
+ * loops being CPU-bound `node` processes:
+ *
+ *     load              Config.load        the command's own run
+ *     idle, 5 runs      3214-3681 ms       11-13 ms
+ *     8 busy loops, 3   8709-9712 ms       29-57 ms
+ *     24 busy loops, 3  26017-36325 ms     56-119 ms
+ *
+ * The case as it stood took 3427-3829 ms idle, and timed out at vitest's
+ * default 5000 ms in 3 of 3 runs at 8 busy loops and 3 of 3 at 24: the CI
+ * signature. The cost is LOADING, so it is paid once here, during collection,
+ * which vitest clocks against nothing ("clocked windows measure behaviour,
+ * never loading", AGENTS.md). ⛔ Not a hook with a bigger timeout: at 24 busy
+ * loops the load alone took up to 36 s, so any budget around it is a load
+ * sensor. `src/commands/datasource/envelope-unwrap.test.ts` records the same
+ * measurement and the same placement for this package.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Config } from '@oclif/core';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -102,6 +126,12 @@ import DbClean from './clean.js';
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 /**
+ * Paid HERE, at module scope and not in a hook or a case: see "Why the oclif
+ * `Config` is loaded at MODULE SCOPE" in this file's header.
+ */
+const config = await Config.load({ root: CLI_ROOT });
+
+/**
  * `chalk` may or may not emit SGR codes depending on TTY detection. The escape
  * is spelled as an escape, never as the byte itself.
  */
@@ -120,7 +150,7 @@ async function runClean(argv: string[]): Promise<{ out: string; exitCode: number
   const savedExitCode = process.exitCode;
   let exitCode = 0;
   try {
-    await DbClean.run(argv, { root: CLI_ROOT });
+    await DbClean.run(argv, config);
   } catch (error: unknown) {
     const oclif = (error as { oclif?: { exit?: number } })?.oclif;
     exitCode = typeof oclif?.exit === 'number' ? oclif.exit : 1;
