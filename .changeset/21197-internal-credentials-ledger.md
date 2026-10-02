@@ -4,14 +4,15 @@
 '@objectstack/plugin-auth': minor
 '@objectstack/plugin-sharing': minor
 '@objectstack/plugin-approvals': minor
-'@objectstack/objectql': patch
+'@objectstack/objectql': minor
+'@objectstack/runtime': patch
 ---
 
 fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half is an added re-export only. -->
+<!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
 
 **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
 
@@ -34,10 +35,15 @@ Clause-②: no (narrowing)
   privileged accessor rather than the generic path: JWT signing, password reset and the other
   one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
   migration, OAuth client authentication, share-link redemption (the password gate is held)
-  and the creator's share-link list, which keeps returning each link's token.
+  and the creator's share-link list, which keeps returning each link's token. The runtime's
+  share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+  required" for a protected link rather than the unknown-link shape.
 - The one-time verification object's record title is now the fixed label `Verification`; it no
   longer shows the identifier column.
-- `@objectstack/objectql` exports `collectInternalReadFields` from its main and `/core` entries.
+- `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+  `collectInternalReadFields` (the names of an object's `internal` fields) and
+  `readInternalColumn` (recovers one `internal` column for rows already read, through the
+  engine's privileged accessor, and fails closed when the value cannot be recovered).
 
 **What to do after upgrading.**
 

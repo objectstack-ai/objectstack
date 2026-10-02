@@ -31,7 +31,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 // published from the lean `./core` entry, so there is no structural reason to
 // keep a copy. `declared-fields.ts`'s doc comment is the canonical statement of
 // the rule; this seam defers to it instead of restating it.
-import { materializeDeclaredFields } from '@objectstack/objectql/core';
+import { materializeDeclaredFields, readInternalColumn } from '@objectstack/objectql/core';
 // [#14935] The ONE reading of `publicSharing.enabled`, imported from the
 // package that DECLARES the key rather than spelled out again here. This file
 // exported its own copy (#14637) and `@objectstack/runtime` kept a documented
@@ -71,61 +71,24 @@ const SHARE_LINK_SWEEP_SUBJECT = {
  * (`token`, `password_hash`) for rows the engine handed back — one value per
  * row, in the rows' order (`null` where the column is unset).
  *
- * Both columns are declared `internal`, so the engine's generic read path —
- * every `engine.find` in this plugin, system context included (the strip has
- * no carve-out, #7728) — returns rows WITHOUT them. This plugin's own routes
- * still need them: redemption must verify a password against the stored hash,
- * and the creator's link list must hand back each token so the console can
- * build the URL. They come back through the engine's privileged accessor
- * (`resolveInternalField`, #8118), the one door to a flagged column, one
- * batched read per column.
- *
- * Whether a missing key means "stripped" or "unset" is read off the same
- * declaration the strip itself keys on: the engine's registered schema. A row
- * that still carries the column answers from the row. An engine whose
- * registered `sys_share_link` does not declare the column `internal` cannot
- * have stripped it, so a missing key there is an unset column.
- *
- * ⛔ FAIL-CLOSED when the declaration says the strip ran and the value cannot
- * be recovered (no accessor, or a row with no id): it throws instead of
- * answering "unset". For `password_hash` "unset" means "no password", so a
- * degraded answer would open every password-protected link without its
- * password — the gate this column exists for, silently gone. Every caller sits
- * inside a try/catch that answers an error, so the refusal surfaces as a
- * refused request, never as an open link.
+ * Both columns are declared `internal`, so every `engine.find` in this plugin,
+ * system context included, returns rows WITHOUT them. This plugin's own routes
+ * still need them: redemption verifies a password against the stored hash, and
+ * the creator's link list hands back each token so the console can build the
+ * URL. The dereference is objectql's one `readInternalColumn` — stripped
+ * versus unset decided by the engine's registered declaration, recovery
+ * through the privileged accessor, and FAIL-CLOSED where the strip ran and the
+ * value cannot be recovered (for `password_hash`, "unset" would mean "no
+ * password"). Named here so the routes and the service read the two columns
+ * one way; the runtime's dispatcher twin of the redemption probe calls the
+ * same objectql helper.
  */
-export async function readShareLinkInternalColumn(
+export function readShareLinkInternalColumn(
   engine: Pick<SharingEngine, 'resolveInternalField' | 'getSchema'>,
   rows: readonly Record<string, unknown>[],
   field: 'token' | 'password_hash',
 ): Promise<unknown[]> {
-  const out: unknown[] = rows.map((row) =>
-    row && typeof row === 'object' && field in row ? (row[field] ?? null) : undefined,
-  );
-  const missing = out.flatMap((v, i) => (v === undefined ? [i] : []));
-  if (missing.length === 0) return out;
-
-  const declaredInternal = engine.getSchema?.('sys_share_link')?.fields?.[field]?.internal === true;
-  if (!declaredInternal) return out.map((v) => (v === undefined ? null : v));
-
-  const refuse = (why: string): never => {
-    throw new Error(
-      `sys_share_link rows were read back without '${field}' (the engine's \`internal: true\` strip ran) `
-        + `but ${why}, so the share-link route that asked cannot answer and refuses. Wire the ObjectQL `
-        + 'engine, which provides the `resolveInternalField` accessor beside the strip.',
-    );
-  };
-  if (typeof engine.resolveInternalField !== 'function') refuse('this engine offers no accessor to recover it');
-  const ids = missing.map((i) => {
-    const id = rows[i]?.id;
-    if (typeof id !== 'string' && typeof id !== 'number') refuse('a row carries no id to recover it by');
-    return String(id);
-  });
-  const values = await engine.resolveInternalField!('sys_share_link', ids, field);
-  // A row deleted between the read and the dereference reads as unset; the
-  // caller treats it as the gone link it is.
-  missing.forEach((rowIndex, k) => { out[rowIndex] = values.get(ids[k]) ?? null; });
-  return out;
+  return readInternalColumn(engine, 'sys_share_link', rows, field);
 }
 
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
