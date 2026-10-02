@@ -56,7 +56,6 @@
     "automation/RetryPolicy:maxRetries = 0",
     "automation/RetryPolicy:maxRetryDelayMs = 30000",
     "automation/ScreenConfig:mode = \"create\"",
-    "automation/StateNode:type = \"atomic\"",
     "automation/TryCatchConfig:errorVariable = \"$error\"",
     "automation/WaitExecutorConfig:conditionMaxPolls = 0",
     "automation/WaitExecutorConfig:conditionPollIntervalMs = 30000",

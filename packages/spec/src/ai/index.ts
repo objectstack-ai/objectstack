@@ -39,9 +39,10 @@ export * from './solution-blueprint.zod';
 export * from './build-progress.zod';
 
 // [#12414] entry-nameability: these factories' return types expand to mention
-// `/data`'s `FilterCondition` and `/automation`'s `StateNodeConfig` — both
-// public on their own subpaths but not nameable from `/ai`. Same invariant
-// (maintainer ruling recorded in commit ece4dad31), same repair: re-export from the
-// declaring module.
+// `/data`'s `FilterCondition` — public on its own subpath but not nameable
+// from `/ai`. Same invariant (maintainer ruling recorded in commit ece4dad31),
+// same repair: re-export from the declaring module. The second name this
+// carried, `/automation`'s `StateNodeConfig`, left the package with the
+// `StateMachineSchema` family (#21320): `defineAgent`'s return type mentioned
+// it only through the tombstoned `agent.lifecycle`.
 export type { FilterCondition } from '../data/filter.zod';
-export type { StateNodeConfig } from '../automation/state-machine.zod';

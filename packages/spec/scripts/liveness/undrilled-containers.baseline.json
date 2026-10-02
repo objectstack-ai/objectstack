@@ -61,7 +61,6 @@
     "action/params",
     "action/resultDialog",
     "agent/guardrails",
-    "agent/lifecycle",
     "agent/memory",
     "agent/model",
     "agent/planning",

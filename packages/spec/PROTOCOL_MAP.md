@@ -64,7 +64,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 
 | File | Status | Description |
 | :--- | :--- | :--- |
-| [`state-machine.zod.ts`](src/automation/state-machine.zod.ts) | ⭐ | **State Machines**. Strict lifecycle transitions and guards. |
 | [`flow.zod.ts`](src/automation/flow.zod.ts) | ⭐ | **Visual Flow**. Complex orchestration logic (decisions, loops, CRUD). |
 | [`approval.zod.ts`](src/automation/approval.zod.ts) | ⭐ | **Approval Node**. Flow node config for human approval pauses. |
 | [`webhook.zod.ts`](src/automation/webhook.zod.ts) | ⭐ | **Webhooks**. Outbound HTTP notification configuration. |
