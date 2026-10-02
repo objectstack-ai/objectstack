@@ -40,7 +40,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, childEnv } from './helpers/serve-process.js';
+import { CLI, TSX, childEnv } from './helpers/serve-process.js';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 /** The three rules the card's planted mistakes trip, in the order the registry reports them. */
@@ -114,12 +114,15 @@ interface Run {
 }
 
 function runCli(dir: string, args: string[]): Run {
-  const r = spawnSync(process.execPath, [CLI, ...args], {
+  // Through tsx, so the child runs this checkout's `src/` — under plain node
+  // oclif resolves the command from `dist/`, and the pin would measure
+  // whatever was last built.
+  const r = spawnSync(TSX, [CLI, ...args], {
     cwd: dir,
     encoding: 'utf8',
     // Every spawned child under this directory declares its environment at the
     // call site (#11595).
-    env: childEnv(),
+    env: childEnv({ NO_COLOR: '1' }),
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
+import { dirname } from 'node:path';
 import chalk from 'chalk';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -19,9 +20,16 @@ import {
   type RlsProbeDescriptor,
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
+import { authoringRulesFor } from '@objectstack/lint';
 import { loadConfig } from '../utils/config.js';
+import { judgeAuthorTimeRules, VERIFY_RULE_COMMAND } from '../utils/author-time-rules.js';
 import {
   printError,
+  printStep,
+  printSuccess,
+  printAuthoringRuleErrors,
+  formatZodErrors,
+  JSON_FULL_LIST_REMEDY,
   emitJson,
   isExitSignal,
   errorCodeFields,
@@ -60,16 +68,22 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
 }
 
 /**
- * `objectstack verify` — boot the app in-process and exercise it through the
- * real HTTP stack, asserting runtime behavior the static gates can't see:
- *   - data fidelity: author → write → read → assert, per object/field type
- *   - authorization (--rls): "you can't write what you can't read" (#1994 class)
+ * `objectstack verify` — two stages, in order:
  *
- * Exits non-zero on real failures so it drops straight into CI.
+ *   1. the author-time rules — the registry `os validate` runs, over the stack
+ *      prepared the way `os validate` prepares it (`utils/author-time-rules.ts`).
+ *      A gating finding fails the run with those findings, and stage 2 never
+ *      starts (#21323);
+ *   2. boot the app in-process and exercise it through the real HTTP stack,
+ *      asserting runtime behavior the static gates can't see:
+ *        - data fidelity: author → write → read → assert, per object/field type
+ *        - authorization (--rls): "you can't write what you can't read" (#1994 class)
+ *
+ * Exits non-zero on either stage's failures so it drops straight into CI.
  */
 export default class Verify extends Command {
   static override description =
-    'Boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity + the cross-owner RLS invariant)';
+    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity + the cross-owner RLS invariant)';
 
   static override examples = [
     '<%= config.bin %> verify',
@@ -147,6 +161,10 @@ export default class Verify extends Command {
     json: boolean;
   }): Promise<void> {
     const { config, absolutePath } = await loadConfig(flags.app);
+
+    // Stage 1 — the author-time rules, before anything boots. A failure here
+    // exits inside the call; see `runAuthorTimeStage`.
+    await this.runAuthorTimeStage(config as Record<string, unknown>, absolutePath, flags.json);
 
     const multiTenant = resolveVerifyMultiTenant(flags);
 
@@ -262,5 +280,78 @@ export default class Verify extends Command {
     // sqlite-wasm, better-auth timers) that keep the event loop alive after
     // stop(), so a bare return would hang. exit() also encodes the CI contract.
     this.exit(hardFailures > 0 ? 1 : 0);
+  }
+
+  /**
+   * Stage 1 — the author-time rule registry `os validate` runs, over the stack
+   * prepared the way `os validate` prepares it (#21323).
+   *
+   * `os verify` used to start at the boot. A stack `os validate`, `os build`
+   * and `os lint` all refuse — a lookup to an object that does not exist, an
+   * action `visible` naming a field without `record.`, a list column naming no
+   * field — booted, round-tripped its records and printed `✓ verify passed`:
+   * none of the three is a runtime FAILURE, each is metadata the runtime
+   * silently does nothing with. That made the documented done-bar a false
+   * green. So the rules run first, and a gating finding stops the run before
+   * the runtime stage starts — "verify is green" now implies the rule stage of
+   * `os validate` is green.
+   *
+   * Exits 1 on a refusal (`this.exit` throws, so the call never returns then).
+   * The `--json` face keeps this command's failure envelope — `error`, the
+   * sentence — and adds `errors`, carrying the findings in the shape
+   * `os validate --json` carries them under the same key: rule findings on a
+   * rule refusal (each per-package one with its `package`), Zod issues on a
+   * schema refusal. Advisories never fail the stage; the text face counts them
+   * and points at `os validate`, which prints them.
+   */
+  private async runAuthorTimeStage(
+    config: Record<string, unknown>,
+    absolutePath: string,
+    json: boolean,
+  ): Promise<void> {
+    const ruleCount = authoringRulesFor(VERIFY_RULE_COMMAND).length;
+    if (!json) printStep(`Running author-time rules (${ruleCount})...`);
+    const { refusal, advisories } = judgeAuthorTimeRules(VERIFY_RULE_COMMAND, config, dirname(absolutePath));
+
+    if (refusal === null) {
+      if (!json) {
+        printSuccess(`Author-time rules passed (${ruleCount} rules)`);
+        if (advisories.length > 0) {
+          this.log(chalk.dim(`    ${advisories.length} advisory finding(s) — \`os validate\` prints them`));
+        }
+        this.log('');
+      }
+      return;
+    }
+
+    const STAGE_2_SKIPPED = 'the runtime stage did not run';
+    let sentence: string;
+    let errors: unknown[];
+    if (refusal.stage === 'schema') {
+      errors = refusal.error.issues;
+      sentence = `Validation failed (${errors.length} issue${errors.length > 1 ? 's' : ''}) — ${STAGE_2_SKIPPED}`;
+    } else {
+      errors = refusal.errors;
+      const n = `${errors.length} issue${errors.length > 1 ? 's' : ''}`;
+      sentence =
+        refusal.stage === 'rules'
+          ? `Author-time rules failed (${n}) — ${STAGE_2_SKIPPED}`
+          : `Author-time rules failed inside the artifact's packages (${n}) — ${STAGE_2_SKIPPED}`;
+    }
+
+    if (json) {
+      await emitJson({ error: sentence, errors }, 0, { compact: true });
+      this.exit(1);
+    }
+    this.log('');
+    printError(sentence);
+    if (refusal.stage === 'schema') {
+      formatZodErrors(refusal.error);
+    } else {
+      // `--json` on this same exit publishes every one of them as `errors`, so
+      // the pointer resolves to the complete list.
+      printAuthoringRuleErrors(refusal.errors, { remedy: JSON_FULL_LIST_REMEDY });
+    }
+    this.exit(1);
   }
 }
