@@ -74,7 +74,8 @@
  *
  * `describe('the polarity table …')` covers the second half of the change —
  * `nullValueSatisfiesOperator`'s `$null` / `$exists` arms moving from truthiness
- * to identity — and is honest about what can and cannot be observed from
+ * to identity (this compiler's own table then; the shared lowering's since
+ * #5930 step 4 deleted the copy, which reads them by identity too) — and is honest about what can and cannot be observed from
  * outside; see its own comment.
  */
 
@@ -278,23 +279,23 @@ describe('[#6387] the polarity table moved WITH the emitter (#5146 / #5298)', ()
   const sql = (f: FilterCondition) => compileScopedFilterToSql(f, ALIAS).sql;
 
   it('allowNull polarity: a NULL column satisfies $null: true', () => {
-    // `$nin` makes the constraint non-total, so `nullGuardForFieldSpec` has to
+    // `$nin` makes the constraint non-total, so the `$not` rewrite has to
     // consult the table; `$null: true` says a NULL row DOES satisfy it, so the
     // leaf is guarded with `IS NULL OR (…)`.
-    // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering, at this
-    // compiler's entry, reads the same table and lays the same `allowNull`
-    // guard on first (outer); this compiler's own copy then adds its own
-    // (inner). Same predicate, until the copy's deletion card.
+    // [ADR-0053 D-D1, amended — #5930 step 4] The rewrite and its table are
+    // the shared lowering's, run at this compiler's entry: its one source since
+    // this compiler's own copy (which added a second guard inside) was deleted.
     expect(sql({ $not: { d: { $null: true, $nin: ['x'] } } })).toBe(
-      'NOT ((("t"."d" IS NULL OR (("t"."d" IS NULL OR ("t"."d" IS NULL AND ("t"."d" IS NULL OR "t"."d" NOT IN (?))))))))',
+      'NOT ((("t"."d" IS NULL OR ("t"."d" IS NULL AND "t"."d" NOT IN (?)))))',
     );
   });
 
   it('requireValue polarity: a NULL column does NOT satisfy $null: false', () => {
-    // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's
-    // `requireValue` guard, then this compiler's own — see the row above.
+    // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's
+    // `requireValue` guard, once — see the row above. The second `IS NOT NULL`
+    // is the `$null: false` operator itself.
     expect(sql({ $not: { d: { $null: false, $nin: ['x'] } } })).toBe(
-      'NOT (("t"."d" IS NOT NULL AND ("t"."d" IS NOT NULL AND ("t"."d" IS NOT NULL AND ("t"."d" IS NULL OR "t"."d" NOT IN (?))))))',
+      'NOT (("t"."d" IS NOT NULL AND ("t"."d" IS NOT NULL AND "t"."d" NOT IN (?))))',
     );
   });
 

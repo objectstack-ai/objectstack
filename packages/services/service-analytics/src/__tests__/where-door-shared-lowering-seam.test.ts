@@ -24,8 +24,11 @@
  * F10 can read declared types through the strategy context's
  * `declaredFieldType` hook, so it rewrites the whole-day bound on a member
  * whose column is declared `datetime` and nowhere else — the engine seam's
- * scope, which is what the ObjectQL hand-off meets next. A context with no hook
- * reads no member as `datetime`.
+ * scope, which is what the ObjectQL hand-off meets next. [#5930 step 4] A
+ * column the hook cannot name a type for is read per strategy
+ * (`declaredDatetimeLowering`'s `undeclared` argument): type-blind on the
+ * native strategy, the last seam before its statement runs, and as written on
+ * the ObjectQL strategy, whose engine seam reads the declaration.
  *
  * F11 evaluates drafted rows with no schema. Its lowering reads no member as
  * `datetime`: its own bound copy (`lteBound`) keeps answering the whole-day
@@ -98,18 +101,13 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] F10: the where → tree face 
   });
 
   it('a negative-polarity leaf reaches the tree inside the NULL escape the seam emits, whatever the type', () => {
-    // The outer disjunction is the seam's `{ $or: [{ stage: { $null: true } },
-    // { stage: { $ne: 'won' } }] }`. The inner one is this face's own interim
-    // copy of the same guard (`fieldLeaves`, #5298), which still wraps the
-    // `$ne` it meets: idempotent in rows (a guard of a guarded leaf admits the
-    // same rows), and removed by the face's deletion card — which updates this
-    // row to the single disjunction.
+    // The disjunction is the seam's `{ $or: [{ stage: { $null: true } },
+    // { stage: { $ne: 'won' } }] }`. [#5930 step 4] It is the guard's one
+    // source: this face's own interim copy (`fieldLeaves`' #5298 wrap, which
+    // nested a second disjunction inside it) is deleted.
     expect(tree({ stage: { $ne: 'won' } }, UNTYPED)).toEqual({
       kind: 'or',
-      children: [
-        leaf('stage', 'notSet', []),
-        { kind: 'or', children: [leaf('stage', 'notSet', []), leaf('stage', 'notEquals', ['won'])] },
-      ],
+      children: [leaf('stage', 'notSet', []), leaf('stage', 'notEquals', ['won'])],
     });
   });
 
