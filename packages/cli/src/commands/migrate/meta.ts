@@ -830,10 +830,20 @@ export default class MigrateMeta extends Command {
       // for the conflict guard, and `armRuntime: false` means taking it arms
       // nothing. No storage adapter: unlike the file migration, nothing here
       // reads bytes.
+      //
+      // [#21349] The preview boots READ-ONLY — the same boot `os migrate plan`
+      // takes. A plain boot runs schema sync and the artifact's inline seed
+      // loader, and the seed upserts every seeded row of the app's tables
+      // (`updated_at` bumped, `organization_id` stamped, relative-date values
+      // re-evaluated) before the report says "writes nothing". `deferSchemaDdl`
+      // holds the DDL back and suppresses the seed; `readOnlyProbe` keeps a
+      // missing sqlite file from being created. `--apply` keeps the plain boot:
+      // it is the writing mode, and its behaviour is unchanged.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         extraPlugins: await buildDataMigrationPlugins({ automation: true }),
+        ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); return; }
