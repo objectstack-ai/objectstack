@@ -3645,6 +3645,38 @@ describe('translateFlow (#11287)', () => {
     expect(screen.config.description).toBe('Review the details below.');
   });
 
+  it('translates a field\'s help text (`inlineHelpText`) key by key, beside its label and placeholder', () => {
+    // #17306: the screen dialog draws `inlineHelpText` under the control, and
+    // the per-field face carries it under the same key. A field whose bundle
+    // entry omits it keeps the authored help line; one with no help authored
+    // gets none invented from the bundle's neighbours.
+    const doc = leadConversion();
+    const fields = screenOf(doc).config.fields;
+    fields.find((f: any) => f.name === 'opportunityName').inlineHelpText = 'Shown on the quote';
+    fields.find((f: any) => f.name === 'opportunityAmount').inlineHelpText = 'Between 1 and 10';
+    const withHelp: FlowTestBundle = {
+      'zh-CN': {
+        flows: {
+          lead_conversion: {
+            screens: {
+              screen_1: {
+                fields: {
+                  opportunityName: { label: '商机名称', inlineHelpText: '显示在报价单上' },
+                  opportunityAmount: { label: '商机金额' },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const out = translateFlow(doc, withHelp, { locale: 'zh-CN' });
+    const byName = (n: string) => screenOf(out).config.fields.find((f: any) => f.name === n);
+    expect(byName('opportunityName')).toMatchObject({ label: '商机名称', inlineHelpText: '显示在报价单上' });
+    expect(byName('opportunityAmount')).toMatchObject({ label: '商机金额', inlineHelpText: 'Between 1 and 10' });
+    expect(byName('createOpportunity').inlineHelpText).toBeUndefined();
+  });
+
   it('negative control — a flow the bundle does not carry comes back unchanged (same reference)', () => {
     const doc = { ...leadConversion(), name: 'other_flow' };
     expect(translateFlow(doc, bundle, { locale: 'zh-CN' })).toBe(doc);

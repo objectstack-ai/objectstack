@@ -698,32 +698,6 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  * exist for.
  */
 /**
- * The two measured exclusions on `flows.<flow>.screens.<node>.fields.<field>`.
- *
- * Both are keys an author reaches for from a neighbouring surface — `help` is
- * correct on an object FIELD translation and on a settings key, `options` on
- * both of those too.
- *
- * ⚠️ The REASON for the help exclusion changed with #17306 and the message
- * below changed with it. It used to be that `ScreenFieldConfig` declared
- * nothing help-shaped, so a `help` key here would have translated a string that
- * did not exist. The schema now declares `inlineHelpText`, so the string is
- * real; what is still absent is this TRANSLATION face's key for it, which is a
- * ruled widening of its own (the #7646 enumeration) and not something a
- * resolver-side accretion may grow. Until that lands, a `help` entry here would
- * still translate nothing — the same refusal, on an honest reason.
- *
- * Written as `guidance` rather than an alias because there is still no right
- * key on THIS surface to send them to: pointing `help` at `placeholder` would
- * translate the in-input hint, a different string that means something else.
- */
-const FLOW_SCREEN_FIELD_NO_HELP =
-  'the flows translation face carries `label` and `placeholder` only, so a help entry here would '
-  + 'translate nothing. The screen field itself does declare help copy '
-  + '(`ScreenFieldConfig.inlineHelpText`); what is missing is a translation key for it, not the '
-  + 'string. ⛔ Do not use `placeholder` instead — that is the in-input hint, a different string.';
-
-/**
  * The measured exclusion on `datasets.<name>.dimensions.<d>` and
  * `.measures.<m>`.
  *
@@ -740,6 +714,19 @@ const DATASET_MEMBER_NO_DESCRIPTION =
   + '`description` is declared on the DATASET itself: translate it at '
   + "'datasets.<dataset_name>.description'.";
 
+/**
+ * The measured exclusion on `flows.<flow>.screens.<node>.fields.<field>`.
+ *
+ * `options` is a key an author reaches for from a neighbouring surface — an
+ * object FIELD translation and a settings key both carry it. There is no right
+ * key on THIS surface to send them to, which is why this is `guidance` and not
+ * an alias.
+ *
+ * The face's other neighbouring-surface miss, the help spellings, is no longer
+ * an exclusion: the face carries `inlineHelpText`, the screen field's own key
+ * for its help line, so `help` / `helpText` / `hint` / `tooltip` /
+ * `description` are aliases onto it (#17306).
+ */
 const FLOW_SCREEN_FIELD_NO_OPTIONS =
   'select-option labels are not translatable on a screen field: `ScreenFieldConfig.options[].value` is '
   + 'unconstrained (numbers and booleans are legal), so an option map keyed by value — the shape '
@@ -1199,6 +1186,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.title
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.label
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.placeholder
+   *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.inlineHelpText
    *
    * **The hole this closes (#7646).** A `type: 'screen'` flow is a wizard the
    * user reads — a heading, a list of labelled inputs — and the bundle had no
@@ -1226,20 +1214,20 @@ const appTranslationDataShape = () => ({
    * keep out.
    *
    * **The key face is measured against the flow schema, not mirrored from the
-   * report.** Two of the three per-field keys the issue proposed are real
-   * (`label`, `placeholder`); `help` is not:
+   * report.** The per-field keys are the screen field's own copy keys, spelled
+   * as `ScreenFieldConfigSchema` spells them, because the overlay writes each
+   * translation back onto the key it names: `label`, `placeholder` and
+   * `inlineHelpText`.
    *
-   * - **`help` is not here.** Originally because `ScreenFieldConfigSchema`
-   *   declared nothing help-shaped at all, so the key would have parsed clean
-   *   and translated nothing — the ADR-0078 shape #6080 removed from the page
-   *   component face for exactly this reason. ⚠️ That premise expired with
-   *   #17306, which gave the screen field `inlineHelpText` (the object field's
-   *   own spelling). The copy now exists; this face's key for it does not, and
-   *   growing the face is a ruled step against the #7646 enumeration rather
-   *   than a resolver-side accretion. So the exclusion stands and the outcome
-   *   is unchanged — a `help` entry still translates nothing — but it is now a
-   *   NOT-YET, and the guidance says so rather than telling an author the field
-   *   has no help copy when it has.
+   * - **Help text is `inlineHelpText`, not the report's `help`.** When #7646
+   *   ruled the face, the screen field declared nothing help-shaped, so a
+   *   `help` key would have parsed clean and translated nothing — the ADR-0078
+   *   shape #6080 removed from the page component face for exactly this
+   *   reason. #17306 gave the screen field `inlineHelpText` (the object
+   *   field's own spelling), and the face gained the key once the console's
+   *   screen dialog drew it, under the control. `help` / `helpText` / `hint` /
+   *   `tooltip` / `description` are aliases onto it, so an author holding a
+   *   neighbouring surface's spelling is told the rename.
    *
    * ⛔ **Runner chrome is NOT here** — the Cancel/Submit buttons the wizard
    * draws around the author's screen belong to the console's own message
@@ -1249,8 +1237,9 @@ const appTranslationDataShape = () => ({
    *
    * The runner half was a separate, downstream change, and it has landed
    * client-side for the per-screen copy. objectui's `FlowRunner` reads
-   * `screens` (each screen's `title`, and each field's `label` and
-   * `placeholder`), measured at the `.objectui-sha` pin `f8a9d0fb`. The flow's own
+   * `screens`: each screen's `title`, and each field's copy over
+   * `FLOW_SCREEN_FIELD_COPY_KEYS` (`label`, `placeholder`, `inlineHelpText`),
+   * measured at the `.objectui-sha` pin `31971ff1e`. The flow's own
    * `label` is read by nothing yet. See the `flows` rows in
    * `liveness/translation.json`: `screens` is `live`, `label` stays `planned`,
    * and the group's author warning names the unread half.
@@ -1294,13 +1283,15 @@ const appTranslationDataShape = () => ({
       fields: z.record(z.string(), strictObject({
         surface: 'this flow screen field translation',
         history: TRANSLATION_HISTORY,
-        aliases: { name: 'label', title: 'label', text: 'label' },
+        // The help spellings are the ones `ScreenFieldConfigSchema` renames
+        // onto `inlineHelpText` (the object field's table), plus
+        // `description`, which an object field uses for its tooltip copy.
+        aliases: {
+          name: 'label', title: 'label', text: 'label',
+          help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
+          description: 'inlineHelpText',
+        },
         guidance: {
-          help: FLOW_SCREEN_FIELD_NO_HELP,
-          helpText: FLOW_SCREEN_FIELD_NO_HELP,
-          hint: FLOW_SCREEN_FIELD_NO_HELP,
-          tooltip: FLOW_SCREEN_FIELD_NO_HELP,
-          description: FLOW_SCREEN_FIELD_NO_HELP,
           options: FLOW_SCREEN_FIELD_NO_OPTIONS,
           choices: FLOW_SCREEN_FIELD_NO_OPTIONS,
           values: FLOW_SCREEN_FIELD_NO_OPTIONS,
@@ -1308,6 +1299,7 @@ const appTranslationDataShape = () => ({
       }, {
         label: z.string().optional().describe('Translated screen field label'),
         placeholder: z.string().optional().describe('Translated screen field placeholder'),
+        inlineHelpText: z.string().optional().describe('Translated screen field help text (drawn under the input)'),
       })).optional().describe('Screen field translations keyed by field name (`ScreenFieldConfig.name`)'),
     })).optional().describe('Screen translations keyed by screen node id (`FlowNode.id`, the client\'s `ScreenSpec.nodeId`)'),
   })).optional().describe('Screen-flow translations keyed by flow name'),
