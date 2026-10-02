@@ -869,6 +869,13 @@ export class SharingServicePlugin implements Plugin {
           canManageShares: this.service
             ? (o, r, c) => this.service!.canManageShares(o, r, c as any)
             : undefined,
+          // [ADR-0111 D8 rule 1, ruling 5950188467 (A′)] The record's owner and
+          // an explicit Modify-All holder may mint where the visibility read
+          // refuses them: `canManageShares`' own owner and bypass branches,
+          // without its hierarchy-depth branch.
+          canMintWithoutVisibility: this.service
+            ? (o, r, c) => this.service!.canMintWithoutVisibility(o, r, c as any)
+            : undefined,
         });
         ctx.registerService('shareLinks', this.linkService);
 

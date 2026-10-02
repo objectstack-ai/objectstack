@@ -2273,3 +2273,124 @@ describe('[#21120] stored metadata body copies are redacted at write time', () =
     expect(JSON.parse(audit!.row.new_value).metadata).toBe(clean);
   });
 });
+
+/**
+ * [#21207] Exit two, fork three: a COPY never carries the stored content hash.
+ *
+ * The ledger snapshot and diff, and the activity copy, of a `sys_metadata` /
+ * `sys_metadata_history` write used to copy the row's `checksum` (and the
+ * history row's `previous_checksum`) whole — a hash over the stored body,
+ * withheld credential material included, i.e. an offline verifier, at rest and
+ * served to every ledger reader. The copy now drops both columns; the history
+ * table itself remains the lineage. Every other column, and every other
+ * object's `checksum`, is copied as before.
+ */
+describe('[#21207] stored metadata copies carry no content hash', () => {
+  const HASH = `sha256:${'a'.repeat(64)}`;
+  const PARENT = `sha256:${'b'.repeat(64)}`;
+  const NEXT = `sha256:${'c'.repeat(64)}`;
+  const SCHEMAS = {
+    ...SINGLE_TENANT,
+    sys_metadata: ['id', 'name', 'type', 'scope', 'metadata', 'checksum'],
+    sys_metadata_history: ['id', 'name', 'type', 'metadata', 'checksum', 'previous_checksum'],
+    file_blob: ['id', 'name', 'checksum'],
+  };
+  const view = (label: string) => JSON.stringify({ name: 'v', type: 'grid', label });
+  const hashFree = (text: string) => {
+    expect(text).not.toContain(HASH);
+    expect(text).not.toContain(PARENT);
+    expect(text).not.toContain(NEXT);
+    expect(text).not.toMatch(/\\?"(previous_)?checksum\\?"/);
+  };
+
+  it('a sys_metadata create: neither the ledger snapshot nor the activity copy carries the hash', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1' },
+      result: { id: 'meta-1', name: 'v', type: 'view', scope: 'platform', metadata: view('one'), checksum: HASH },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    const activity = created.find((c) => c.object === 'sys_activity');
+    hashFree(JSON.stringify(audit!.row));
+    hashFree(JSON.stringify(activity!.row));
+    // The copy still records the change: the other columns survive.
+    const newValue = JSON.parse(audit!.row.new_value);
+    expect(newValue.type).toBe('view');
+    expect(newValue.metadata).toBe(view('one'));
+  });
+
+  it('a sys_metadata update: the diff carries the body change and not the hash change', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1', data: { metadata: view('two') } },
+      previous: { id: 'meta-1', name: 'v', type: 'view', metadata: view('one'), checksum: HASH },
+      result: { id: 'meta-1', name: 'v', type: 'view', metadata: view('two'), checksum: NEXT },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit).toBeDefined();
+    hashFree(JSON.stringify(audit!.row));
+    expect(JSON.parse(audit!.row.new_value).metadata).toBe(view('two'));
+    hashFree(JSON.stringify(created.find((c) => c.object === 'sys_activity')!.row));
+  });
+
+  it('a sys_metadata_history append: neither hash column is copied', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata_history',
+      input: { id: 'h-1' },
+      result: { id: 'h-1', name: 'v', type: 'view', metadata: view('one'), checksum: NEXT, previous_checksum: PARENT },
+      session: { userId: 'admin-1' },
+    });
+    for (const c of created) hashFree(JSON.stringify(c.row));
+  });
+
+  it('a history append whose change note quotes a hash: the copy keeps the note and withholds the quote', async () => {
+    const { engine, fire, created } = makeEngine({ ...SCHEMAS, sys_metadata_history: [...SCHEMAS.sys_metadata_history, 'change_note'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata_history',
+      input: { id: 'h-2' },
+      result: { id: 'h-2', name: 'v', type: 'view', metadata: view('one'), checksum: NEXT, change_note: `publish draft (hash ${NEXT})` },
+      session: { userId: 'admin-1' },
+    });
+    for (const c of created) hashFree(JSON.stringify(c.row));
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).change_note).toBe('publish draft (hash (withheld))');
+  });
+
+  it('a decision-audit note that quotes a hash (its rewrite, or a row written before) is copied withheld', async () => {
+    const { engine, fire, created } = makeEngine({ ...SCHEMAS, sys_metadata_audit: ['id', 'code', 'note'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata_audit',
+      input: { id: 'd-1', data: { note: 'expected parent (withheld) but current is (withheld)' } },
+      // adr0112-ok: D6b persisted audit column
+      previous: { id: 'd-1', code: 'metadata_conflict', note: `expected parent ${PARENT} but current is ${HASH}` },
+      // adr0112-ok: D6b persisted audit column
+      result: { id: 'd-1', code: 'metadata_conflict', note: 'expected parent (withheld) but current is (withheld)' },
+      session: {},
+    });
+    expect(created.length).toBeGreaterThan(0);
+    for (const c of created) hashFree(JSON.stringify(c.row));
+  });
+
+  it('control: another object keeps its own checksum column in the copy', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'file_blob',
+      input: { id: 'f-1' },
+      result: { id: 'f-1', name: 'blob', checksum: HASH },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).checksum).toBe(HASH);
+  });
+});

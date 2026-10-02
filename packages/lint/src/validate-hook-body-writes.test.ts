@@ -107,7 +107,7 @@ describe('validateHookBodyWrites — ctx.input writes', () => {
     expect(findings[0].path).toBe('hooks[0].body.source');
     expect(findings[0].message).toContain("discont_total");
     expect(findings[0].message).toContain('crm_deal');
-    expect(findings[0].message).toContain('#4271');
+    expect(findings[0].message).toContain('INVALID_FIELD / 400, identically on every driver');
     expect(findings[0].hint).toContain("'discount_total'");
   });
 
