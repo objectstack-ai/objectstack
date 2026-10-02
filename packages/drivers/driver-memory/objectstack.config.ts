@@ -16,14 +16,14 @@ const MemoryDriverPlugin: ObjectStackManifest = {
   scope: 'project',
   description: 'A reference specification implementation of the IDataDriver interface using in-memory arrays. Suitable for testing and development.',
   
-  // `configuration` and `capabilities` were retired (#11332, ADR-0049
+  // `configuration` and `capabilities` were retired (commit dce5cd4f0, ADR-0049
   // enforce-or-remove): nothing ever read either container. The settings this
   // driver needs are passed by the host that composes it (the options object
   // handed to its constructor), and protocol/capability discovery never
   // consulted the declaration — dependency resolution runs off top-level
   // `dependencies`.
 
-  // `contributes.drivers` was retired (#10724, ADR-0049): the declaration drove
+  // `contributes.drivers` was retired (commit be21955ba, ADR-0049): the declaration drove
   // nothing — this driver is wired by registering the `driver.memory` kernel
   // service (the objectql plugin calls `registerDriver` on `driver.*` services),
   // which is the enforced channel.

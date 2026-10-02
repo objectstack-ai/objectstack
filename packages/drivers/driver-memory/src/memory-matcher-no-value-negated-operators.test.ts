@@ -29,7 +29,7 @@
  * carrying one reading measures at most one of them. Keep both columns.
  *
  * ⚠️ Do not collapse this into a single case, and do not add `$exists` to it.
- * `$exists` is the neighbouring cell (#13195): this package's live mingo path
+ * `$exists` is the neighbouring cell (the card commit 9dac1ae01 closed): this package's live mingo path
  * and `driver-mongodb` still read it as key-presence rather than has-value, so
  * it is a different, still-open divergence with a different backend list.
  *
@@ -44,7 +44,7 @@
  * cells — and holds the LIVE query path now (`InMemoryDriver.find`, through
  * mingo), every cell and every expectation unchanged: the live path gave each
  * of them already, measured before the move. (The `$exists` caution above is
- * history: #13195 converged the live path on has-value.)
+ * history: commit 9dac1ae01 converged the live path on has-value.)
  */
 
 import { describe, it, expect } from 'vitest';
