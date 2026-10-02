@@ -1606,6 +1606,15 @@ packages on npm also carry the eight commits below. The version commit did not
 consume their changesets, so no 17.5.0 `CHANGELOG.md` entry names them; they
 will be listed again in 17.6.0's `CHANGELOG.md`. The release-pipeline defect
 that let the publish run past its version commit is tracked in #20613.
+**Correction (2026-10-02):** seven more commits shipped in 17.5.0 with no
+17.5.0 `CHANGELOG.md` entry — they landed before the version commit but were
+not in the version PR when it merged. Two are breaking, `e73ee2d` (#20567,
+`RealtimeEventType`) and `c876a74` (#20504, a forced Turso replica with no
+`syncUrl`), and `7a1faf1` (#20579) makes `os validate --strict` fail on a
+live conversion. See
+[Shipped in
+17.5.0](/docs/releases/v17/17-6#shipped-in-1750--listed-again-in-1760s-changelog)
+on the 17.6.0 page.
 
 - `6e3aa75` (#20584) — a permission-set resolution with no active organization
   reads only the organization-less permission sets, the rule the grant

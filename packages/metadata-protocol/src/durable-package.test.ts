@@ -115,17 +115,10 @@ describe('installPackage — durable persistence (#2532)', () => {
     expect((publish.mock.calls[0][0] as any).manifest.version).toBe('2.3.4');
   });
 
-  it('stays non-fatal when the durable write fails (registry install already succeeded)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const { impl } = makeImpl({ publish: async () => ({ success: false, error: 'boom' }) });
-      const res: any = await (impl as any).installPackage({ manifest: { id: 'com.example.fail' } });
-      expect(res.package.status).toBe('installed');
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('persist FAILED'));
-    } finally {
-      warn.mockRestore();
-    }
-  });
+  // A FAILED durable write is no longer "non-fatal": since #21243 it fails the
+  // install and undoes the registry write. That contract, for both verbs and
+  // both failure channels of `publish`, is pinned in
+  // `protocol.package-persist-failure.test.ts`.
 });
 
 describe('deletePackage — durable un-registration (#2532 counterpart)', () => {
