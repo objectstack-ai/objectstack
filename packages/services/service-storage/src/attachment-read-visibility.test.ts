@@ -10,8 +10,9 @@ const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
  * Filter Protocol evaluator for the fake engine below — real `$and` / `$or` /
  * `$not` semantics, not a shape check.
  *
- * Mirrors `driver-memory`'s `memory-matcher.ts` and `formula`'s
- * `matches-filter.ts`: **every key inside one filter object ANDs**, a `$or`
+ * Mirrors `formula`'s `matches-filter.ts` (as `driver-memory`'s
+ * `memory-matcher.ts` did until commit `8fec76a2b` retired it): **every key
+ * inside one filter object ANDs**, a `$or`
  * array ORs its branches, and a branch's own contents still AND.
  *
  * This used to understand neither logical operators nor anything but `$in`,
@@ -323,7 +324,9 @@ describe('installAttachmentReadVisibility', () => {
  * Who tests the test double? The row assertions above are only worth as much
  * as the matcher evaluating them, so it gets the same 2x2 fixture and the same
  * expectations as the three production backends:
- * `driver-memory/memory-matcher-or-semantics.test.ts`,
+ * `driver-memory/memory-driver-filter-logic-conformance.test.ts` (which holds
+ * the cases of `memory-matcher-or-semantics.test.ts`, deleted with the
+ * reference matcher in commit `8fec76a2b`),
  * `formula/matches-filter-or-semantics.test.ts`, and
  * `driver-sql/sql-driver-or-filter.test.ts`. If this harness ever drifts from
  * them, a read scope it declares safe would not be safe in the engine.

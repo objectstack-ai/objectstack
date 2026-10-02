@@ -243,6 +243,16 @@ export default defineConfig({
               find: /^@objectstack\/trigger-schedule$/,
               replacement: path.resolve(__dirname, '../../triggers/trigger-schedule/src/index.ts'),
             },
+            // [#20790] `flow-credential-channel.dogfood.test.ts` drives
+            // `ApiTrigger` itself: the pin's subject is that the inbound door
+            // verifies against the secret the write-only flow credential
+            // channel holds, read at verification time. A dist merely behind
+            // would verify with the trigger's OLD literal-only arming, so the
+            // verdict is aliased to THIS checkout's source.
+            {
+              find: /^@objectstack\/trigger-api$/,
+              replacement: path.resolve(__dirname, '../../triggers/trigger-api/src/index.ts'),
+            },
           ],
         },
         test: {

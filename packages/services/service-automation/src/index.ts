@@ -74,6 +74,11 @@ export type {
     // method is barrel-reachable, so a host building a custom composition
     // needs the name to hand it the loader's set.
     PackagedFlowSource,
+    // [#20790] The write-only flow credential channel's engine port, and what
+    // `AutomationEngine.flowCredentialHoldings` answers — both
+    // barrel-reachable through `setFlowCredentialSource` and that method.
+    FlowCredentialSource,
+    FlowCredentialHolding,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot
@@ -129,6 +134,25 @@ export { SysAutomationRun } from './sys-automation-run.object.js';
 export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
+
+// [#20790] The write-only flow credential channel: where a flow's inbound hook
+// secret and http signing secrets live once they are out of its definition —
+// the object, the channel the plugin registers on the metadata save door, and
+// the one-time move of credentials stored before it.
+export { SysFlowCredential } from './sys-flow-credential.object.js';
+export {
+    FlowCredentialChannel,
+    FlowCredentialChannelRefusal,
+    FlowCredentialUnresolvableError,
+    FLOW_CREDENTIAL_OBJECT,
+    FLOW_CREDENTIAL_VALUE_FIELD,
+} from './flow-credential-channel.js';
+export type { FlowCredentialEngine, FlowCredentialState } from './flow-credential-channel.js';
+export {
+    migrateFlowCredentialsIntoChannel,
+    FLOW_CREDENTIAL_MIGRATION_ID,
+} from './flow-credential-migration.js';
+export type { FlowCredentialMigrationResult } from './flow-credential-migration.js';
 
 // [ADR-0126 §4/§7.2] Packaged-flow enable/disable. The durable ledger behind
 // `AutomationEngine.toggleFlow` — the in-memory store is for tests and hosts

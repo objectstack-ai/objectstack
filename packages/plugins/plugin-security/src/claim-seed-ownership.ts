@@ -87,8 +87,10 @@
  *
  * ⚠️ The order is not cosmetic. Paging unconditionally was measured 13× SLOWER
  * on the sizes every real install has: an `id IN (…)` page is evaluated by
- * `InMemoryDriver` as a linear scan of the id list PER ROW
- * (`memory-matcher.ts`, `target.includes(value)`), so a paged claim is
+ * `InMemoryDriver` as a linear scan of the id list PER ROW (it hands `$in` to
+ * mingo, whose `$in` hashes the whole list again for each row — not the
+ * reference matcher `memory-matcher.ts` this once named, which had no
+ * production caller and which commit `8fec76a2b` retired), so a paged claim is
  * quadratic there, where the natural predicate is linear. 5 000 rows: 528 ms
  * whole-set versus 5 865 ms always-paged, same engine, same driver, same row
  * set. The page is therefore what the engine's refusal buys, not the default.

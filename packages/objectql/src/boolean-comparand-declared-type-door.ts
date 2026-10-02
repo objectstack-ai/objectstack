@@ -19,7 +19,15 @@
  *   `1` matched no row on InMemoryDriver;
  * - any other string (`"yes"`, `"TRUE"`, `""`, a `{placeholder}`) is refused
  *   `INVALID_FILTER` / 400, naming the field and its declared type, before
- *   any driver is resolved.
+ *   any driver is resolved;
+ * - [#21382] and so is a number other than `1` / `0`, a `Date` and an array
+ *   (at a scalar slot or as a list member) — before, each reached the drivers
+ *   as written: PostgreSQL answered `2` or a `Date` with a 500, the others
+ *   with an empty 200, and an array `$in` member split 200 / 400 across
+ *   drivers. A `bigint` is read as the number it names. The spec's verdict
+ *   was widened; this file changed only in these words, because the arm
+ *   already routed every comparand to it and carried the refused value as
+ *   written.
  *
  * The contract — the accepted spellings, the pure verdict, the refusal words,
  * the case table — is lane (1), `@objectstack/spec/data`'s
@@ -77,9 +85,11 @@ export function booleanArmFieldMeta(meta: BooleanComparandDoorFieldMeta | null):
 }
 
 /**
- * One comparand at a judged position: the spec's verdict, routed. `aggregated`
- * is the walk's site fact — `having`'s columns are the aggregated row's, not a
- * declared field — and only ever written when true.
+ * One comparand at a judged position: the spec's verdict, routed. Whatever the
+ * comparand is — a string, a number, a `Date`, an array (#21382) — the verdict
+ * alone decides; this function only turns its answer into an outcome.
+ * `aggregated` is the walk's site fact — `having`'s columns are the aggregated
+ * row's, not a declared field — and only ever written when true.
  */
 export function judgeBooleanComparand(
   meta: BooleanComparandDoorFieldMeta,

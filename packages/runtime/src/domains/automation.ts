@@ -47,6 +47,9 @@ import {
 // not carry forward, the same-name refusal and the references notice.
 import {
     cloneFlowDefinition,
+    flowCloneCredentialRefusal,
+    literalFlowCredentialHoldings,
+    type FlowCloneCredentialSource,
     flowCloneNameTakenMessage,
     FLOW_CLONE_NAME_TAKEN_STATUS,
     FLOW_CLONE_NOTICE,
@@ -2697,6 +2700,17 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     return { handled: true, response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS) };
                 }
 
+                // [#20790] C1 — a source that holds a credential at ANY position
+                // (a literal, or one the write-only channel holds) is refused,
+                // with the prescription: a copy would share it. See
+                // `flowCloneCredentialRefusal`.
+                const credentialSource = automationService as FlowCloneCredentialSource;
+                const holdings = typeof credentialSource.flowCredentialHoldings === 'function'
+                    ? credentialSource.flowCredentialHoldings(name)
+                    : literalFlowCredentialHoldings(source);
+                const credentialRefusal = flowCloneCredentialRefusal(name, holdings);
+                if (credentialRefusal) return { handled: true, response: deps.errorFromThrown(credentialRefusal) };
+
                 // ⛔ SAME-NAME REFUSAL, loudly, naming the sanctioned path.
                 // Checked against the same probe, so "already exists" means the
                 // same thing here as everywhere else on this domain. This also
@@ -2748,9 +2762,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // cheapest place for ancestry to reappear, and a UI that reads
                 // one starts displaying a lineage the platform has ruled it
                 // does not track.
-                // [#20552] The clone carries the source's whole definition into
-                // the engine (secret included — ADR-0126 §7.1); the ANSWER is a
-                // served definition like any other and withholds it.
+                // [#20552] The ANSWER is a served definition like any other. A
+                // source holding a credential never reaches this line (#20790
+                // C1, above), so the clone carries none.
                 return { handled: true, response: deps.success({ flow: servedFlowDefinition(clone), notice: FLOW_CLONE_NOTICE }) };
             }
         }

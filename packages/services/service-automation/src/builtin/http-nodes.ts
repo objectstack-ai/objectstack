@@ -9,6 +9,7 @@ import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-credential-projection.js';
 
 /**
  * HTTP built-in node — canonical `http` (ADR-0018 M3).
@@ -143,7 +144,35 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             },
         }),
         async execute(node, variables, context) {
-            const raw = (node.config ?? {}) as Record<string, unknown>;
+            const authored = (node.config ?? {}) as Record<string, unknown>;
+            // [#20790] A signing secret the write-only credential channel holds
+            // is not in the definition: it is read now, at execution, and takes
+            // the place the literal would have had — so everything below (the
+            // template interpolation, the contract parse, the refusal of a value
+            // that renders to nothing) treats it exactly as an authored one. The
+            // channel's row wins where one exists (a packaged flow's literal is
+            // the fallback). A cleared `''` is the author's "unsigned": the
+            // channel is not asked. A held secret that does not come back
+            // refuses the node — it is never sent unsigned.
+            let raw = authored;
+            const flowName = context.flowName;
+            if (
+                typeof flowName === 'string'
+                && authored.signingSecret !== FLOW_CREDENTIAL_CLEARED
+                && engine.holdsFlowCredential(flowName, node.id, HTTP_SIGNING_SECRET_KEY)
+            ) {
+                let held: string | undefined;
+                try {
+                    held = await engine.resolveFlowCredential(flowName, node.id, HTTP_SIGNING_SECRET_KEY);
+                } catch (err) {
+                    return refuseNode(
+                        `http '${node.id}': its signing secret is held by the flow credential store and could not be ` +
+                            `read (${(err as Error)?.message ?? String(err)}), so the request cannot carry ` +
+                            `${HTTP_SIGNATURE_HEADER} and was not sent.`,
+                    );
+                }
+                if (held !== undefined) raw = { ...authored, signingSecret: held };
+            }
             // Parsed AFTER interpolation — unique among the contract-carrying
             // builtins, because this executor reads the interpolated config
             // wholesale, so that is the shape its contract describes: a `{token}`
