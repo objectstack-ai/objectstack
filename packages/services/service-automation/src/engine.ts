@@ -178,37 +178,39 @@ interface ConfigSchemaNode {
  */
 const BULK_INTENT_GUIDANCE: Record<string, string> = {
     bulk: 'Bulk intent is `multi: true` — the data engine\'s own word for it (`options.multi`), so the concept ' +
-        'keeps one name from node config to driver call (#5393). Without it the write must name one row by ' +
+        'keeps one name from node config to driver call. Without it the write must name one row by ' +
         'scalar `id`; a predicate write is refused by the engine rather than silently widened.',
     all: 'Bulk intent is `multi: true` — the data engine\'s own word for it (`options.multi`), so the concept ' +
-        'keeps one name from node config to driver call (#5393). Without it the write must name one row by ' +
+        'keeps one name from node config to driver call. Without it the write must name one row by ' +
         'scalar `id`; a predicate write is refused by the engine rather than silently widened.',
     multiple: 'Bulk intent is `multi: true` — the data engine\'s own word for it (`options.multi`), so the ' +
-        'concept keeps one name from node config to driver call (#5393). Without it the write must name one row ' +
+        'concept keeps one name from node config to driver call. Without it the write must name one row ' +
         'by scalar `id`; a predicate write is refused by the engine rather than silently widened.',
     options: 'This is the NODE config, not the data engine\'s options bag — declare `multi: true` at the top ' +
         'level of `config`, never `options: { multi: true }`. Translating that declaration into `options.multi` ' +
-        'on the engine call is the executor\'s job (#5393).',
+        'on the engine call is the executor\'s job.',
 };
 
 const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
     create_record: {
         fieldValues:
             'The write map is `fields` — `fieldValues` was an AI-authoring dialect that never had a ' +
-            'runtime reader; the fix is the authoring source + this rejection, not a runtime alias ' +
-            '(#2419, rejected by design).',
+            'runtime reader; the fix is the authoring source + this rejection. A runtime alias for it was ' +
+            'rejected by design: the node keeps one strict `fields` key rather than two spellings.',
     },
     update_record: {
         fieldValues:
             'The write map is `fields` — `fieldValues` was an AI-authoring dialect that never had a ' +
-            'runtime reader (#2419, rejected by design).',
+            'runtime reader, and a runtime alias for it was rejected by design: the node keeps one strict ' +
+            '`fields` key rather than two spellings.',
         ...BULK_INTENT_GUIDANCE,
     },
     delete_record: BULK_INTENT_GUIDANCE,
     screen: {
         visibleIf:
             'The visibility predicate is `visibleWhen` (bare CEL, re-evaluated client-side as the ' +
-            'user types — #3528, the incident this whole check descends from).',
+            'user types). A predicate under any other key is never read, so the field always shows — and a ' +
+            '`required` field meant to stay hidden then blocks the screen from ever being submitted.',
     },
 };
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
@@ -4021,7 +4023,7 @@ export class AutomationEngine implements IAutomationService {
         this.logger.warn(
             `Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — no actions and no handlers ` +
                 `until its upstream is reachable; a connector_action dispatching to it fails with the stored ` +
-                `reason, and the materializer retries with backoff (#3017).`,
+                `reason, and the materializer retries with backoff.`,
             cause === undefined
                 ? { degradedReason: reason }
                 : { degradedReason: reason, ...describeThrownForLog(cause) },
@@ -6064,11 +6066,11 @@ export class AutomationEngine implements IAutomationService {
         if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
             this.logger.warn(
                 `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger resolved no user ` +
-                `— its data operations will be REFUSED (#3760). Running them would execute UNSCOPED ` +
+                `— its data operations will be REFUSED. Running them would execute UNSCOPED ` +
                 `(elevated, RLS-bypassing) rather than restricted, which is the fail-open ADR-0049 ` +
                 `forbids. Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
                 `for the trigger to supply a user. Note a user-less trigger is NOT only a schedule: a ` +
-                `record-change flow fired by a system write carries no user either (ADR-0049, #1888).`,
+                `record-change flow fired by a system write carries no user either (ADR-0049).`,
             );
         }
 
@@ -10263,12 +10265,13 @@ export class AutomationEngine implements IAutomationService {
         }
         if (violations.length > 0) {
             throw new Error(
-                `Flow '${flowName}' rejected: ${violations.length} undeclared config key(s) (#4277).\n` +
+                `Flow '${flowName}' rejected: ${violations.length} undeclared config key(s).\n` +
                 violations.map((v) => `  - ${v}`).join('\n') +
                 `\nAn undeclared key is never read, so it can only be a typo or dead config — fix the ` +
                 `flow's metadata (rename or remove the key). If an executor genuinely reads this key, ` +
-                `declare it on the node type's descriptor configSchema instead; read-but-undeclared ` +
-                `keys are exactly the drift the #4045 reconciliation closed.`,
+                `declare it on the node type's descriptor configSchema instead: the built-in node types were ` +
+                `reconciled so every key their executors read is declared, and a read-but-undeclared key is ` +
+                `exactly the drift that reconciliation removed.`,
             );
         }
     }
@@ -11320,7 +11323,7 @@ export class AutomationEngine implements IAutomationService {
                     `in this record's meta. The branch selection is IGNORED and every out-edge is ` +
                     `evaluated instead, so unconditional siblings run regardless of the decision. ` +
                     `Make an out-edge's \`label\` match the branch, or mark the fallback edge ` +
-                    `\`isDefault: true\`. (#4414)`,
+                    `\`isDefault: true\`.`,
                     {
                         branchLabel,
                         outEdges: allOutEdges.map(e => ({ id: e.id, label: e.label ?? null })),
