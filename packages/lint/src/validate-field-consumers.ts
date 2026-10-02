@@ -128,14 +128,14 @@
  * token and credits none of them — and on a cube not even a bare column, since
  * a cube names its object in its own `sql`, which {@link contextOf} does not
  * read as an object context. So {@link creditAnalyticsColumns} owns these four
- * slots, bare names included, and the general walk skips them. Each hop is resolved the way the
- * analytics door resolves it, by the resolvers this package already shares:
- * a cube's by `resolveCubeColumn` (its declared join for the hop, else the
- * lookup's `reference`), a dataset's by `resolveFieldPath` (the `reference`
- * its compiler joins through). A path the door reads credits every field on
- * it; a path the door refuses is a carrier for each field it names, and one
- * the graph cannot judge credits the fields it can resolve —
- * {@link creditColumnPath} says which is which.
+ * slots, bare names included, and the general walk skips them. Each hop is
+ * resolved the way the analytics door resolves it, by the resolvers this
+ * package already shares: a cube's by `resolveCubeColumn` (its declared join
+ * for the hop, else the lookup's `reference`), a dataset's by
+ * `resolveFieldPath` (the `reference` its compiler joins through). A path the
+ * door reads credits every field on it; a path the door refuses is a carrier
+ * for each field it names, and one the graph cannot judge credits the fields
+ * it can resolve — {@link creditColumnPath} says which is which.
  *
  * ## Advisory, deliberately — and the boundaries, stated
  *
