@@ -2,8 +2,8 @@
   "number": 21321,
   "kind": "issue",
   "title": "os package install (install-local) drops an app's script action bodies: REST 404 and MCP run_action \"No handler registered\" while list_actions advertises the action",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T04:27:11Z",
-  "updated_at": "2026-10-02T07:52:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T12:24:01Z",
+  "closed_at": "2026-10-02T12:19:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21321",
   "body": "QA-source: #21318 · ai.mcp-run-action-exposure-gate · clause 2\n\n## Summary\n\nOn the published 17.6.0 train, an app installed into a running runtime through the documented community path — `os package install ./dist/objectstack.json` (air-gapped inline install, no control plane) — registers its objects, app, flows and permission metadata, but **none of its `type: 'script'` actions with an inline `body` gets a handler**. Every door refuses the action, even after a restart, while MCP `list_actions` keeps advertising it. The same artifact booted with `os start --artifact` dispatches normally.\n\nThis breaks NORTH-STAR path step ④→⑤ (install into an environment, then have an Agent complete a real business operation): the exposed business action cannot run in the environment the app was installed into. It also violates `ai.mcp-run-action-exposure-gate` NEG1 (\"list_actions advertising an action that run_action then refuses is a FAIL\") and NORTH-STAR priority 4 (\"MCP 面暴露的就是应用真能做的\").\n\n## Reproduction (published packages, verified twice plus once by an independent agent)\n\n1. `npm create objectstack@17.6.0 tasks-app`; add an object `tasks_app_task` and an action:\n   ```ts\n   defineAction({ name: 'complete_task', label: 'Complete Task', objectName: 'tasks_app_task', type: 'script',\n     body: { language: 'js', capabilities: ['api.write'],\n       source: \"var id = ctx.recordId; await ctx.api.object('tasks_app_task').update({ id: id, status: 'done', done: true }); return { ok: true, id: id };\" },\n     ai: { exposed: true, description: 'Mark a task as complete: sets its status to Done and ticks the Done box.' } })\n   ```\n   `npx os build` (validate/lint green).\n2. Empty runtime: `OS_CLOUD_URL=off npx os start -p 4340 --home ./home --auth-secret <32+ chars>`; `POST /api/v1/auth/sign-up/email` (with `Origin`) for the first owner.\n3. `npx os package install ./dist/objectstack.json --runtime http://localhost:4340 --email … --password …` → `✓ Package installed into the running kernel`.\n4. `POST /api/v1/data/tasks_app_task {\"name\":\"probe\"}` → 201.\n5. `POST /api/v1/actions/tasks_app_task/complete_task {\"recordId\":\"<id>\"}`\n   - expected: `200 {\"success\":true,\"data\":{\"ok\":true,…}}`\n   - actual: `404 {\"success\":false,\"error\":{\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Action 'complete_task' on object 'tasks_app_task' not found\"}}`\n6. Mint `POST /api/v1/keys`; MCP Streamable HTTP with `x-api-key`: `list_actions` → lists `complete_task`; `run_action {actionName:'complete_task', recordId}` → `isError: true`, `No handler registered for action 'complete_task' on 'tasks_app_task'`. Record unchanged.\n7. Restart the runtime (the cached manifest re-registers on boot): same 404 / same MCP error.\n8. Control: boot the same artifact with `npx os start --artifact ./dist/objectstack.json` → step 5 answers 200 and the record reads `status: done`; MCP `run_action` → `{ok:true}`.\n\n## Mechanism (read from source at the subject, for the fixer to confirm)\n\n- Action body handlers are wired in `AppPlugin` start (`packages/runtime/src/app-plugin.ts`, the block that calls `ql.registerAction(objectKey, action.name, handler, 'app:'+appId)` for actions carrying an extracted `body`).\n- `MarketplaceInstallLocalPlugin` (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`) registers the manifest and then, per its own comment, \"Replicate[s] the AppPlugin start-time side-effects that the manifest service does NOT do on its own\" — translations and seeds only. Action bodies are not among them, on the hot path or on the `kernel:ready` rehydrate.\n- `list_actions` reads action metadata, so it advertises what the dispatcher cannot run.\n\n## Expected\n\nAn installed package's `script`/`body` actions dispatch exactly as they do under `AppPlugin` — through REST `/actions`, MCP `run_action` and the Console button — or the install refuses / says loudly what it did not bring along, and `list_actions` never advertises an action with no handler.\n\nWorkaround for users today: deliver the app as the runtime's pinned artifact (`os start --artifact` / `OS_ARTIFACT_URL`) instead of installing it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

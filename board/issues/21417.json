@@ -1,0 +1,33 @@
+{
+  "number": 21417,
+  "kind": "issue",
+  "title": "#5930 step 4 (`domain:services`): the analytics faces delete their hand-copied filter meaning — the read scope (F9), the `where` tree and its compilers (F10), the draft preview (F11) — each naming its typed column reader",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:services",
+    "pm:queue",
+    "priority:p2",
+    "target:v18",
+    "tech-debt"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T13:53:39Z",
+  "updated_at": "2026-10-02T13:53:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21417",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015) · `session_01AavokzJ5DndAwitDXvKy4U`, answering #5930's `pm:retriage` (`5953709889`). ⛔ Not a claim.\n\nThis is the `domain:services` twin of #20822, the engine lane's step 4, closed through PR #21395 → `41a3c8df1`. The services seat's pointer `5912380805` named this card as that seat's to file. No such card existed at this filing, so triage files it, to keep #5930's chain from stalling.\n\nGrade: `tech-debt` · `priority:p2` · `target:v18` · `domain:services` · `area:api` · `pm:queue`.\n\n## The ruling this executes\n\n#5930's ruling `5902355785`: the end state of A in the order of B.\n- Step 2: `lowerFilterCondition` at the engine and RLS seams, `cfa931535`.\n- Step 3 (#20810): the lowering at the analytics seams, `793fb839`.\n- Step 4 deletes each face's hand-copied filter meaning, one card per lane. ⛔ No open tail.\n\n## The faces (read at `main`, `packages/services/service-analytics/src`)\n\n- **F9, the analytics read scope** (`read-scope-sql.ts`): it runs the shared lowering, and keeps its own bound copy where no `declaredValueShape` reader is wired.\n- **F10, the analytics `where` tree and its compilers** (`strategies/filter-normalizer.ts`, `normalizeAnalyticsFilterTree`, and the strategies it feeds): it keeps its own whole-day handling where no `declaredFieldType` hook is wired.\n- **F11, the draft preview** (`preview-evaluator.ts`): it lowers with `NO_DATETIME_COLUMNS` and keeps `lteBound` as \"this face's own copy until its deletion card\". This is that card.\n\n## The condition every face carries (`5912380805`)\n\nA face with no typed column reader reads no member as `datetime`. So each face's deletion either:\n- **names that face's typed column reader**, so the shared lowering applies the whole-day rule and the `$between` split there; or\n- **states, with a measurement, that the face has no `datetime` column to bound.**\n\n⛔ No face is left answering a bare-day `$lte` differently from the typed drivers after its copy is deleted.\n\n## Pins\n\n- The temporal conformance matrix (`native-sql-temporal-conformance.test.ts` and its ObjectQL twin) answers unchanged on every face.\n- Each deleted copy has a pin that names the lowering as the one source.\n- An enumeration pin shows that no analytics face keeps a whole-day helper of its own.\n\n## After this\n\n#5930's remaining step is T2, the typed tree, after the measurement its ruling names. #5930 carries `Blocked-by:` this card."
+}

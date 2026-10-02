@@ -1,0 +1,35 @@
+{
+  "number": 21382,
+  "kind": "issue",
+  "title": "A non-string comparand outside the accepted set against a declared boolean field answers a PostgreSQL 500 or an empty 200, and an array $in member splits 200/400 across drivers: the non-string half #21333 left out",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T09:43:07Z",
+  "updated_at": "2026-10-02T13:18:29Z",
+  "closed_at": "2026-10-02T13:16:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21382",
+  "body": "Filing gate: **① a defect with a measured reach**, class (a): one client mistake gets different answers across drivers, and PostgreSQL's is a server fault. `reach:` measured at `engine.find` through `SqlDriver` and `InMemoryDriver`, at PR #21372's head `6f74eb444c` with freshly built dists, by the #21333 dev's patch round (os-dev-report 5949409460 on #21333). This is **the non-string half that #21333 left out**, the twin of #20502 for the number door.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`) from #21333's open question, which PR #21372's at-tier contract review (5948769828, ③) escalated as a follow-up card. **Reader who acts:** triage grades and routes. ⛔ Not a claim.\n\n## What is measured\n\nTriage's ruling on #21333 (5946403646) covers strings only: `\"true\"` / `\"false\"` / `\"1\"` / `\"0\"` narrow, and any other string is refused 400. PR #21372 ships that letter. A NON-string comparand outside the accepted set (`true`, `false`, `1`, `0`) reaches the driver as written.\n\nThe probe: a declared boolean field, two rows (`rt` true and `rf` false). Each cell reads implicit | `$eq` | `$ne` | `$in` member.\n\n| comparand | `InMemoryDriver` | `SqlDriver` on SQLite | `SqlDriver` on MySQL 8.0.46 | `SqlDriver` on PostgreSQL 16.14 |\n|---|---|---|---|---|\n| `2`, `-1`, `0.5`, a `Date` | 200 none, 200 none, 200 both, 200 none | the same | the same | **500 `DATABASE_ERROR` at every slot** |\n| an array `[true]` | 400, 400, 400, **200 none** | 400 at every slot | 400 at every slot | 400 at every slot |\n| controls `true` / `false` | right rows | right rows | right rows | right rows |\n\nSo:\n- PostgreSQL answers a server fault for a client error. This is #20502's defect shape on the number door.\n- An array as a `$in` member gets two answers: 200 on memory, 400 on the three SQL cells.\n- Memory, SQLite and MySQL answer a meaningless comparison with an empty 200.\n\nNo in-repo producer is known to write such a comparand. The dev reported none measured.\n\n## Governing text\n\n- The boolean comparand contract PR #21372 adds: `packages/spec/src/data/filter-boolean-comparand-declared-type.ts`, which states the accepted set and the verdict.\n- **The precedent:** #20502 (closed), with triage's direction 5877498426: \"The published contract refuses any comparand against a declared `number` field that is neither a number nor a string the numeric grammar admits: boolean, `Date`, object and array … The engine door consumes that verdict and nothing else. ⛔ No second rule in the door.\" This card is the boolean twin of that branch. Under SKILL.md 〈升级与决策〉's first meta-criterion, a branch of the same family inherits the mother's ruling unless a real semantic difference is measured.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Widen the published boolean verdict: refuse `INVALID_FILTER` / 400, naming the field, any comparand against a declared `boolean` / `toggle` field (or a boolean-returning `formula`) that is not `true`, `false`, `1`, `0`, a string the verdict admits, or `null`. That covers another number, a `Date`, an object, and an array at a scalar slot or as a list member.\n- The engine's boolean arm (the same field-aware filter walk) consumes it, with no second rule in the door.\n- **Pins:** memory, SQLite and PostgreSQL (env-gated live cell), at `where`, the per-aggregation `filter` and `having`, for `2` and a `Date` and an array `$in` member, with the `true` / `1` controls unchanged.\n- **Serial after PR #21372** (#21333), which adds the contract and the arm in the same files.\n- `Clause-②`: the claim decides. The precedent #20502 narrows a published verdict.\n\n## Dedupe\n\nThrough `mcp__github__search_issues`, repo-scoped, open and closed:\n- 「boolean field compared with a number other than 1 or 0 PostgreSQL 500 boolean = integer DATABASE_ERROR」: 5 hits. #21333 and #21376 are open: #21376 is this family's seam card, and #21333 is the string half. #20502 and #20351 are closed: the number door's twin precedents. #4437 is closed and unrelated.\n- 「boolean comparand closed set refuse non-string Date array member declared boolean field」: 1 hit, #21376, which is a different position (seams outside the engine door).\n\nNone covers it.\n\nDedupe words: `boolean comparand non-string` · `boolean field integer comparand 500` · `postgres boolean = integer DATABASE_ERROR` · `boolean comparand closed set` · `array $in member boolean split`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 21394,
+  "kind": "pull_request",
+  "title": "test(cli): drive `migrate audit-metadata-bodies` in the --json stdout-purity family",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T10:20:04Z",
+  "updated_at": "2026-10-02T10:55:34Z",
+  "closed_at": "2026-10-02T10:55:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-02T10:55:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21394",
+  "body": "Fixes #21347\nClause-②: no\n\n## What\n\n`packages/cli/test/json-stdout-purity.e2e.test.ts` discovers its family from the source tree (every command whose comment-masked source calls `bootSchemaStack(` and declares a `json: Flags.boolean(` flag) and reconciles that set against `FAMILY`. `os migrate audit-metadata-bodies` (added by 336e191441, PR #21144) joined the discovered set without joining `FAMILY`, so the nightly `e2e` tier went red on `main` on the reconciliation case.\n\nThis PR lists it in `FAMILY` with its bare argv (`[]`). The command's default is a read-only dry run, so the drive boots the stack with plugin-audit's objects registered, reads `sys_audit_log` / `sys_activity`, and writes nothing. The three per-member purity assertions now run against it: one JSON document on stdout through a bare `JSON.parse`, no kernel-logger record on stdout, and every boot diagnostic on stderr. `discoverFamily` is untouched, and the failing case keeps its name and body.\n\nNo command change was needed. Driven under `--json`, its stdout is exactly one document (measured below), so this PR does not touch `packages/cli/src/commands/migrate/audit-metadata-bodies.ts`, which has another change in flight.\n\n## Measurements\n\nAll readings are at this branch's single commit `105d266829`, unless the table names another tree.\n\n| reading | tree | result |\n|---|---|---|\n| repro: `OS_TEST_TIERS=nightly pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2 test/json-stdout-purity.e2e.test.ts` | `43e928dd4c` (origin/main, unmodified) | 1 failed, 40 passed. `AssertionError: expected [ 'meta resync', …(13) ] to deeply equal [ 'meta resync', …(12) ]`; the extra member is `migrate audit-metadata-bodies` |\n| the same command | `105d266829` | 44 of 44 passed (41 plus this member's 3) |\n| sibling `test/config-miss-stdout-purity.e2e.test.ts`, nightly tier | `105d266829` | 174 of 174 passed |\n| `pnpm --filter @objectstack/cli typecheck` (src plus the test layer) | `105d266829` | exit 0 |\n| `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2` | `105d266829` | 244 files passed. Two `published-subpath-*.pin` files refused because `packages/cli/dist` was absent, which is a prerequisite refusal and not a measurement. After a cached full build, both re-ran green (29 of 29) |\n\nDirect drive of the member (a dry run against the uncompiled fixture and a fresh SQLite file): exit 0. Stdout is one JSON document: `database`, `apply: false`, a `report` with `sys_audit_log` and `sys_activity` each at 0 scanned / 0 rewritten, `failures: 0`, and `duration`. Stderr carries `[StandaloneStack] no compiled artifact`, `Bootstrap complete`, `Graceful shutdown complete` and the runner's own `[stored-metadata-body-migration] would rewrite 0 of 0 …` line.\n\n## Ablation\n\nThe fix was committed first (HEAD `105d266829`). The mutation ran through `node scripts/ablation-replace.mjs --anchor \"  'migrate audit-metadata-bodies': [],\" --delete`, wrapping the nightly command above:\n\n- **Mutation:** it landed on disk. The anchor count went from 1 to 0, and the blob changed from `2b249b4b8c54` to `4389d5638a10`. A grep in the child counted 0 before the suite started.\n- **Suite:** 1 failed, 40 passed, with the original signature: `expected [ 'meta resync', …(13) ] to deeply equal [ 'meta resync', …(12) ]`.\n- **Restore:** the blob after restore, `2b249b4b8c54`, equals the HEAD blob. `git diff HEAD` and `git status --porcelain` are both empty.\n\n## Gates\n\nI ran `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` with no paths. Its change set is this one file against merge base `43e928dd4`. It derived 50 commands, which ran one after another at `105d266829`, with each exit code recorded before any pipe.\n\n- **Exit 0:** 49 commands.\n- **Exit 3:** `pnpm check:dual-build-cjs-loads` (PREREQUISITE NOT MET, because 9 packages had no `dist/`). After a cached full build at the same HEAD, it re-ran with exit 0: 105 require entry points across 66 packages load.\n- **`--ran` reconciliation** over the first sweep: 50 derived, 49 run, 1 NOT-MEASURED (the line above), 0 UNRUN.\n\nThe derivation also printed a stale-tree note. Local origin/main had moved past the base and changed `.github/workflows/release.yml`, `scripts/release-pending-publish.mjs` and `scripts/release-verify-npm.mjs`. The workflow change adds one invocation of a release script inside a release job. No PR gate places it on this path.\n\n**Lint** was narrowed to the one changed file. `eslint --no-inline-config --format json` reported 1 file, 0 errors and 0 warnings. That file is the population eslint's own `--print-config` matches (5 rules). The config enables no type-aware linting (no `parserOptions.project`, no `projectService`), so this diff cannot move any untouched file's verdict. The repo-wide `pnpm lint` belongs to CI.\n\n## Changeset\n\nNone. The diff is test-only, and `@objectstack/cli` publishes only `dist`, `README.md` and `CHANGELOG.md`.\n\n## Acceptance notes\n\n- The reconciliation case is pure source analysis, with no boot behind it. It still lives in a nightly-tier file, so the PR that added this member could not see it go red, and `main` found out only from the nightly. The pre-boot sibling (`config-miss-stdout-purity.e2e.test.ts`) has the same shape. Observation only, nothing filed. Carrier: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VvcEokUG1tvVxkceYfR5XB)_\n"
+}

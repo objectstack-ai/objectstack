@@ -1,0 +1,35 @@
+{
+  "number": 21376,
+  "kind": "issue",
+  "title": "A boolean comparand is judged only at the engine door: the RLS compile seam and analytics NativeSQL pass a string against a declared boolean field as written (the family of #21333)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T09:10:28Z",
+  "updated_at": "2026-10-02T12:52:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21376",
+  "body": "Filing gate: **① a defect family with named positions**, class (b), a Seam: the spec's boolean comparand verdict, which PR #21372 adds, is consumed by the engine's field-aware filter door alone. Two compilers that build filters outside that door skip it.\n- **Position 1:** `reach:` the **security exception**, because a row-level policy's exclusion is not applied. It was measured in-process, not over HTTP.\n- **Position 2:** `reach:` a **public door, measured.**\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`) from #21333's dev report 5948452642 (`out_of_scope_findings` 1 and 2). PR #21372's at-tier contract review 5948769828 (③) judged both reach readings sufficient and one family card the right carrier. **Reader who acts:** triage grades and routes. Both positions are in `domain:services` packages. ⛔ Not a claim.\n\n## The family\n\n#21333 (PR #21372, not yet merged at this filing) makes the engine judge a comparand against a declared `boolean` / `toggle` field (or a `formula` returning boolean):\n- `true` / `false` pass as written;\n- `1` / `0`, `\"1\"` / `\"0\"` and `\"true\"` / `\"false\"` narrow to the boolean they name;\n- any other string is refused `INVALID_FILTER` / 400.\n\nThe verdict and its words are a new `@objectstack/spec/data` contract (`filter-boolean-comparand-declared-type.ts`). Every filter that reaches `engine.find` / `aggregate` / `update` / `delete` passes through it. The two compilers below build their filters themselves, so a string against a boolean column reaches the driver as written. On SQLite (`SqlDriver`) a stored boolean is `1` / `0`, and the string `'true'` equals neither.\n\n## Positions\n\n1. **The RLS compile seam.** `packages/plugins/plugin-security/src/rls-compiler.ts`: the `compileCelToFilter` output, which the security middleware ANDs into the read after the caller-filter door. Measured by the dev with `SecurityPlugin`'s real middleware over a real `ObjectQL` on `SqlDriver` (SQLite), as a member, over two rows (one true, one false), at PR #21372's head:\n   - a `using` comparing the boolean field with the boolean literal `true` shows the true row (the control);\n   - the same comparison with the STRING `'true'` shows no row;\n   - its negation with the string (`!=`) shows BOTH rows. **The exclusion the author wrote is not applied: fail-open on read.**\n   - A non-canonical string (`'yes'`) shows no row, silently.\n\n   No in-repo producer writes such a predicate (git grep over `examples`, `packages` and `skills`: 0). The seam already runs the number arm of the same family since `7aab75920` (#21242): `narrowPolicyNumberComparands` in `judgeCompiledComparands`. The boolean arm is its twin.\n2. **`service-analytics`' NativeSQL strategy.** It compiles a dataset's `runtimeFilter` (and the analytics `where`) to SQL itself, past the engine door. Measured by the dev through `POST /api/v1/analytics/dataset/query`: `RestServer`'s route handler over `AnalyticsServicePlugin`'s own composition on `SqlDriver` (SQLite), NativeSQL answering, two rows. Results:\n\n   | `runtimeFilter` | answer | engine-door answer |\n   |---|---|---|\n   | `{ flag: true }` | 200, count 1 | 1 |\n   | `{ flag: \"true\" }` | 200, count 0 | 1 |\n   | `{ flag: { $ne: \"true\" } }` | 200, count 2 | 1 |\n   | `{ flag: \"yes\" }` | 200, count 0 | 400 `INVALID_FILTER` |\n   | `{ flag: 1 }` | 200, count 1 | 1 |\n\n## Governing text\n\n- `packages/spec/src/data/filter-boolean-comparand-declared-type.ts` (PR #21372): the accepted set, the verdict and its words. It is one grammar, shared with the record validator's write side (`record-validator.ts`'s boolean arm).\n- SKILL.md 〈升级与决策〉, meta-criterion ②: one operation, two implementations, and behaviour that differs ⇒ the side with governance (the engine door) wins, and the other side is rebound to it.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- **Position 1:** the RLS compile seam runs the spec's boolean verdict beside its number arm. It refuses through the existing `refused-comparand` route (read: deny sentinel; write: 403), and narrows a canonical spelling copy-on-write.\n- **Position 2:** the NativeSQL compiler runs the same verdict on `runtimeFilter` and the analytics `where`. It refuses 400 and narrows, as the engine door does.\n- **Pins:**\n  - each table row above answers the engine-door column;\n  - the string-negation RLS cell hides the true row;\n  - the controls (`true`, `1`) are unchanged.\n- `Clause-②: no (narrowing)`, as read today: no new export is expected. The claim measures that.\n- **Wait for #21333:** the verdict lands with PR #21372. A claim before it merges reads the contract from that PR.\n\n## Dedupe\n\nThrough `mcp__github__search_issues`, repo-scoped, open and closed, and a scan of all 150 open issues by title and body:\n- 「RLS policy boolean field compared with string 'true' not narrowed compileCelToFilter」: 2 hits, both closed and on other subjects (#15811, #7929);\n- 「analytics NativeSQL runtimeFilter boolean string comparand wrong count」: 17 hits. #21333 is this family's parent and open. The closed ones are other comparand faces, such as #20035 (the object-form `where` and the shared comparand-TYPE face), #20018, #20068 and #20075;\n- 「declared-type comparand door skipped by filters compiled outside the engine RLS seam analytics」: 43 hits. All but #21333 are closed, and they are precedents of this family's shape: #20212 (the RLS compiled filter skipping the shared comparand-shape faces), #20010, #20733;\n- the open-issue scan: 「boolean comparand」 3 hits (#21333 and two seat posts), 「NativeSQL + boolean」 0, 「runtimeFilter + boolean」 0, 「compileCelToFilter + boolean」 0.\n\nNone covers either position.\n\nDedupe words: `boolean comparand RLS seam` · `using predicate string 'true'` · `NativeSQL runtimeFilter boolean` · `analytics where boolean narrowing` · `boolean declared-type door outside engine`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

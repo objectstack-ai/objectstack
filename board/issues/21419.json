@@ -1,0 +1,32 @@
+{
+  "number": 21419,
+  "kind": "issue",
+  "title": "lint: the cube authoring leg judges `count_distinct` only, so a cube `sum` / `avg` / `min` / `max` over a column the cube door refuses still passes `os validate` — the close-out card for the analytics authoring-leg family",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T13:58:04Z",
+  "updated_at": "2026-10-02T14:10:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21419",
+  "body": "Filing gate: **① a defect with a measured `reach:`**, finding class **(c)**: the authoring check passes what the runtime door refuses. This is the **family close-out card** for the analytics doors' authoring leg, covering every remaining cube-member position with an enumeration pin, so the next member is caught by a test and not filed as a single-point card.\n\n`reach:` `os validate` answers exit 0 (\"Validation passed\") at `07a308acdc` (PR #21416's head) on fixture `oos-cube-sum-text`. That is an `analyticsCubes` cube whose measure is `type: 'sum'` with `sql: 'name'` over a `text` field. Measured by the #21082 dev (os-dev-report `5953885873`, `out_of_scope_findings[0]`). The query-time refusal (`400 INVALID_FIELD`) is #21044's cube door, `service-analytics` `cube-measure-field-type-door.ts`, as its landed pins state. It was not re-run here.\n\nFiled by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The family, and what is left\n\n- #20890 (closed, `5e470f8c1c`): the **dataset** leg. A dataset dimension over a JSON-stored field, and `count_distinct` over a `multiple: true` field. A dataset measure is judged against every row of `AGGREGATE_FIELD_TYPE_COMPATIBILITY` through `acceptsDeclaration`.\n- #21082 (PR #21416, in review): the **cube** leg, scoped by triage `5925818876` to three shapes: a dimension over a structured-JSON or multi-value column, and `count_distinct` over one. It reuses the dataset leg's verdicts and ids.\n- **This card:** every other aggregate × field-type pair the cube door refuses on a cube measure. That is `sum`, `avg`, `min` or `max` over a column type the compatibility table refuses for it, a `text` column under `sum` being the measured instance. The dataset leg already judges these on a dataset measure. The cube leg does not, by its ruling.\n\n## Direction (for triage, not a ruling)\n\n- The cube leg judges a cube measure through the same `acceptsDeclaration` the dataset leg uses, on the column the door reads: the cube's object, or the last hop's declared join or `reference`, as PR #21416 resolves it. ⛔ No second table and no parallel copy.\n- **Enumeration pin:** every row of `AGGREGATE_FIELD_TYPE_COMPATIBILITY`, on a cube measure, crossed with the cube door's verdict. A future row or aggregate is then caught by a test.\n- **Serial:** after PR #21416 (#21082), which adds the cube walk this extends, in `packages/lint/src/validate-dataset-measure-aggregates.ts`.\n\n## Noted, not part of this card\n\nThe runtime `analytics_cube` write door dispatches no authoring rule: no `AUTHORING_RULES` entry declares `analytics_cube`, and `runtime-gate.ts`' `TYPE_TO_STACK_KEY` has no row for it. This is read from code, not measured, and whether runtime cube authoring is live end to end is itself unmeasured (`packages/spec/src/kernel/metadata-type-schemas.ts`). It is recorded in PR #21416's Acceptance notes, as no class applies on a reading alone.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed: 「os validate analyticsCubes cube measure aggregate field type sum text lint authoring」, 20 hits, 10 read. #21082 is the three-shape cube leg. #21409 is the `'*'` count-only boundary. #21044 and #21129 are the runtime cube door's min/max legs, both closed. #20890 is the dataset leg. None covers a cube measure's aggregate × field-type pair at authoring.\n\nDedupe words: `cube measure sum text os validate` · `analyticsCubes measure aggregate field type lint` · `cube-measure-field-type-door authoring leg`"
+}

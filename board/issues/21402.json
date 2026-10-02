@@ -1,0 +1,35 @@
+{
+  "number": 21402,
+  "kind": "pull_request",
+  "title": "docs(skills): the upgrade skill's v17-canonical Lead declares its select options",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T11:52:28Z",
+  "updated_at": "2026-10-02T12:44:40Z",
+  "closed_at": "2026-10-02T12:42:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-02T12:42:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21402",
+  "body": "Fixes #21392\nClause-②: no\n\n## What changed\n\n`skills/objectstack-upgrade/references/examples-upgrade.md`, § The v17-canonical shapes, compiled — two edits, nothing else in the file:\n\n1. The `status` field in the block carrying the `os:check` marker gains a two-entry `options` list (`New` / `Qualified`, CRM-lead vocabulary), in the shape `skills/objectstack-data/references/examples-objects.md:73` already teaches. Every other line of the block is unchanged.\n2. The section's lead sentence is narrowed to what `check:skill-examples` actually does — a type check. The clause claiming the block \"cannot rot into teaching a shape that no longer compiles\" is removed: PR #21390 is the counter-example (the block type-checked green and parsed red at the same time), and the deletion is what pays for the `options` list under the file's token ceiling.\n\nThe section title is untouched (`SKILL.md:461` references it by text). No parse limb is added to `check:skill-examples` — triage 5950866103: not this card, new gates default to no.\n\n## Why\n\nPR #21390 (ruling A on #20827, record 5910124148) is on `main` at `c52c49d9`: `FieldSchema` refuses at parse a `select` / `radio` with neither a non-empty `options` list nor a `picklist` reference. The published block was teaching exactly that shape to every AI author who reads the skill, while the gate watching the block (`tsc --noEmit`) stayed green — `options` is optional in the type, and the refusal is a Zod refine. `ObjectSchema.create()` runs that same parse, so the block as published would also throw at module evaluation.\n\n## Measured\n\nTree: `05733de0` (this PR's head, the branch's only commit). Base: `ecb6ca02`.\n\n**Parse probe (one-shot script in the scratchpad, not committed, no gate added)** — the `Lead` literal extracted from the block and handed to `ObjectSchema.safeParse` from `packages/spec/dist` built at this head:\n\n- before (the block at `ecb6ca02`): `success=false`, one issue, `code=custom path=fields.status.options`, message begins \"A `select` field needs its choices: declare a non-empty `options` list …\"\n- after (this head): `success=true`\n\n**Token ratchet** (`node scripts/check-skills-token-ratchet.mjs`, unit = ceil(utf8 bytes / 4)):\n\n| | bytes | tokens | ceiling | headroom | lines |\n|---|---|---|---|---|---|\n| before | 4751 | 1188 | 1197 | 9 | 119 |\n| after | 4780 | 1195 | 1197 | 2 | 119 |\n\nNet +29 bytes / +7 tokens / 0 lines: the `options` list costs +94 bytes, the lead-sentence narrowing pays −65. The ceiling is not moved, and no re-wrap is used as currency.\n\n**Gates** — the 24 families `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derives at `05733de0` (set-equal to the dispatch's list), each exit captured before any pipe, then `--ran` reconciled: 0 unrun, every family exit 0. Two refused on first run with a printed prerequisite (exit 3 — not a verdict): `check:skill-examples` until `packages/client-react/dist` existed, `check:doc-formula-expressions` until `@objectstack/formula` and `@objectstack/lint` were built. After `turbo run build --filter=@objectstack/client-react --filter=@objectstack/lint` (34 tasks, under the shared verify lock) both ran green: `check:skill-examples` — \"259 prose examples type-check across 3 surface(s) — every marked block parsed, so tsc ran the SEMANTIC pass on all of them\"; `check:doc-formula-expressions` — 22 record-scoped examples and 14 field-level `*When` predicates judged clean.\n\nNot run locally, declared to CI: repo-wide `pnpm lint`; package test suites (the diff touches no package, and `skills/**` is in no package's `files[]`, hence `skip-changeset`).\n\n## Risk and rollback\n\nA two-line example-and-prose change in a published skill reference; no runtime, package or gate code moves. Rollback is a revert of `05733de0`. Governed surface (`skills/**`, Tier H): this PR stays draft until an authorized APPROVED review; no seat readies, queues or arms it.\n\n## Acceptance notes\n\n- The lead sentence overclaimed what the gate checks; the mechanism-level remedy (a parse limb on `check:skill-examples`) is a new gate and explicitly not this card. Noted, not filed; carrier: none.\n- `check:skill-examples` and `check:doc-formula-expressions` each exit 3 with a printed remedy on an unbuilt tree — a prerequisite refusal by design, not a finding.\n- `ObjectSchema.create()` runs the full parse at module evaluation, so the block before this PR would have thrown when executed, not only under `os validate`. Observation only; the gate that reads the block never executes it.\n\n## 维护者速读(草稿)\n\n**改了什么**:升级技能(`skills/objectstack-upgrade`)参考文件里「v17 规范形状」示例中的 `status` 单选字段补上两项 `options`(New / Qualified);该节引导句从「经类型检查所以不会腐烂」收窄为「经类型检查」。文件其余部分、节标题、门禁脚本均未动。\n\n**为什么改**:PR #21390 已合入,spec 现在在 parse 时拒收没有选项的 `select` 字段;这段示例正是在教 AI 写一个会被拒收的形状,而守着它的门禁只做类型检查,看不见这一点。写给 AI 的技能说错一句等于产品缺陷(NORTH-STAR 优先规则 4)。\n\n**风险与代价(含回滚)**:纯文档示例,两处改动,不影响任何运行时与发布包;token 账本余量从 9 降到 2,未抬上限。回滚即 revert 本 PR 的单个 commit。\n\n**席位意见**:(留空)\n\n**你要做的**:审阅通过即在本 PR 上 APPROVE,席位随后落地;本 PR 应与 #21390 同随下一个 Version Packages 发布。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FNKm1SmPpuJASnbjxWGtsJ)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 21409,
+  "kind": "issue",
+  "title": "analytics: `'*'` runs only under `count`, but a cube measure's or dimension's `sql` and a dataset measure's `field` admit it under any aggregate — a summed `'*'` answers 500 at the dataset door (split from #21000)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T12:53:04Z",
+  "updated_at": "2026-10-02T13:56:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21409",
+  "body": "Split from #21000 by the triage seat (objectstack-wide, seat post #6015) · `session_01AavokzJ5DndAwitDXvKy4U`, answering the `pm:retriage` question `5952467081` with **B**. ⛔ Not a claim.\n\nGrade: `bug` · `priority:p2` · `domain:spec` · `area:reports` · `pm:queue`.\n\n## Why a card of its own\n\n#21000 retires three meaningless enum values. It is p3, with the full retirement kit. This is a **measured defect of class (a)**: an authoring shape the contract admits answers a server fault at a public door.\n- A dataset measure that sums `'*'` answered **500 `DATABASE_ERROR`** at `POST /api/v1/analytics/dataset/query`, on both strategies. This is #21220's dev probe, recorded on #21000 in `5940326148`.\n- Folding it into the retirement would make the defect wait on a p3 kit.\n\n## The positions (read at `main`)\n\n1. A cube **measure**'s `sql`, under any aggregate other than `count`.\n2. A cube **dimension**'s `sql`.\n3. A dataset **measure**'s `field` (PR #21240 narrowed it to a column reference, `'*'` included, under any aggregate), under any aggregate other than `count`.\n\nA dataset dimension's `field` already refuses `'*'` (PR #21240), so it is the control.\n\n## Direction\n\n- `'*'` is admitted only where a `count` consumes it. Elsewhere it is refused at the authoring parse, naming the field and prescribing either `count` or a column. That is one cross-field rule per position, sharing **one** predicate. ⛔ No second spelling of the rule per position.\n- The refinement is not expressible in the published JSON Schema, so it is ledgered as a dropped-refinement gap, the way the gate requires.\n- `packages/spec/liveness/analytics_cube.json`'s note, which points the count-only boundary at #21000, is re-pointed here.\n- It is a narrowing of a published accept set: a BREAKING `minor`, `Clause-②: no (narrowing)`. No producer is known to send such a shape. Census the repository's examples and objectui's mirror first.\n\n## Pins\n\n- Each position refuses its non-count `'*'` at parse.\n- `count` over `'*'` is still admitted and still runs, on both strategies.\n- The measured door cell answers 400, not 500.\n\n## Serial\n\n#21000 (the enum retirement) and #21365 (in flight, `AnalyticsQuerySchema`) edit the same `analytics.zod.ts`. Whichever lands later merges `main`."
+}
