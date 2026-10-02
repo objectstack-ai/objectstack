@@ -2041,6 +2041,140 @@ export const RecordHistoryProps = strictObject({
 });
 export type RecordHistoryProps = z.input<typeof RecordHistoryProps>;
 
+/**
+ * [#21142] What the missing row cost: `record:line_items` was the one type on
+ * the string-arm registration ledger (`component-type-vocabulary.ts`), so the
+ * component-props gate skipped its props bag as unregistered. The showcase
+ * project page keyed all five of its grid columns `field` — the spelling the
+ * grid retired — and published green, and the grid drew every cell empty.
+ */
+const RECORD_LINE_ITEMS_HISTORY =
+  'Until this type had a row, the component-props gate skipped it as unregistered: a column keyed '
+  + '`field` (the spelling the grid retired) or any other key the renderer does not read parsed '
+  + 'clean, and the grid drew its cells empty.';
+
+/**
+ * `record:line_items` (#21142) — the inline-editable child grid bound to the
+ * record the page shows (objectui ADR-0001). Measured by the renderer
+ * read-point method at the `.objectui-sha` pin `31971ff1e28f`: objectui
+ * registers it in `plugin-form/src/index.tsx:579` and renders it through
+ * `LineItemsPanel` (`plugin-form/src/LineItemsPanel.tsx`), and `SchemaRenderer`
+ * hoists `properties` onto the schema that component reads. Its fifteen
+ * `schema.<key>` reads are the key set, and a key nobody reads is not declared:
+ *
+ *  - `childObject` `:327`, `:516`, `:673`, `:778`; `relationshipField` `:515`,
+ *    `:674`; `columns` `:702`;
+ *  - `parentObject` `:221`; `parentId` / `recordId` `:228` (`parentId` wins,
+ *    then `recordId`, then the record on the page);
+ *  - `amountField` `:669`, `:703`; `totalField` `:667`, `:669`, `:703`;
+ *  - `title` `:722`; `readonly` `:706`, `:707`, `:723`, `:810`; `minRows`
+ *    `:704`; `maxRows` `:705`;
+ *  - `filter` `:366`; `sort` `:368`, `:377`; `limit` `:341`, `:437`.
+ *
+ * The wrapper adds no key: `ElementDataSourceGate`
+ * (`react/src/element-data-source/ElementDataSourceGate.tsx`) reads the
+ * node-level `dataSource` and the same `filter` / `sort` / `limit` (`:421`,
+ * `:434`, `:445`), and the block's mapping writes the binding's `object` onto
+ * `childObject` (`plugin-form/src/index.tsx:556`). The read set is unchanged on
+ * objectui `main` at `d59f11c0d3dc`.
+ *
+ * `filter` declares the one orthography every `filter` door in this map
+ * shares, the ViewFilterRule array — the `record:related_list.filter`
+ * declaration. The panel's lowering (`toFilterNodeSafely`) also takes the
+ * MongoDB-style record and the AST forms; the contract does not.
+ *
+ * `columns` IS {@link InlineGridColumnSchema} — the same object a relationship
+ * field's `inlineColumns`, a form view's `subforms[].columns` and an
+ * `object-master-detail-form` detail entry's `columns` take, not a copy: the
+ * panel hands its columns to the same objectui grid (`GridField`, whose
+ * `GridColumn` declares exactly that schema's twenty keys at the pin and IS
+ * the spec's type by reference on objectui `main`). One difference is the
+ * carrier's, not the column's, and the `describe()` says it: this panel does
+ * NOT hydrate a column from the child object's field — it passes `columns`
+ * straight through the field-security pass to the grid (`:702`) — so a
+ * column draws exactly what it declares, and an identity-only `{ name }`
+ * column is a text cell headed by its name. For the same reason
+ * `defineStack`'s identity-only check (`collectHydratedInlineColumnErrors` in
+ * `stack.zod.ts`) does not reach this block: there is no hydrated type to
+ * judge.
+ *
+ * The keys this block shares with an `object-master-detail-form` detail entry
+ * take that entry's types and alias table, so one concept is spelled one way
+ * on every child-collection surface. Three of them differ in presence for a
+ * measured reason: `relationshipField` and `columns` are required here because
+ * nothing derives them (the entry auto-detects the FK and derives the
+ * columns; this panel queries `{ [relationshipField]: parentId }` and draws
+ * `columns` as given), and `childObject` is optional because the
+ * component-level `dataSource` binding can supply it instead. `title` is a
+ * plain string because the panel draws it as a React child.
+ */
+export const RecordLineItemsProps = lazySchema(() => strictObject({
+  surface: 'this `record:line_items`',
+  history: RECORD_LINE_ITEMS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: {
+    object: 'childObject', childObjectName: 'childObject', child: 'childObject',
+    foreignKey: 'relationshipField', relationField: 'relationshipField', parentField: 'relationshipField',
+    fields: 'columns', label: 'title', sumField: 'amountField', rollupField: 'totalField',
+    // The plural every `filter` door answers (`FILTERS_TO_FILTER`, declared
+    // further down — spelled here because `OS_EAGER_SCHEMAS=1` evaluates this
+    // body before that const is initialised).
+    filters: 'filter',
+  },
+  guidance: {
+    // The four detail-entry keys this panel does not read — the spellings an
+    // author moving a child collection over from `object-master-detail-form`
+    // carries along. Measured at the pin: the panel hands the grid no
+    // `add_label` / `sort_field` and no `onRowExpand` (`:694-710`, `:806-817`).
+    addLabel: '`record:line_items` does not read `addLabel`: its grid draws the built-in, localized '
+      + 'Add button. `addLabel` belongs to an `object-master-detail-form` detail entry.',
+    sortField: '`record:line_items` does not read `sortField`: its grid stamps no line position, so a '
+      + 'drag-reorder is not saved. `sortField` belongs to an `object-master-detail-form` detail entry.',
+    formFields: '`record:line_items` draws an editable grid only, with no per-row expand form, so it '
+      + 'does not read `formFields`. It belongs to an `object-master-detail-form` detail entry.',
+    inlineMode: '`record:line_items` draws an editable grid only, so it does not read `inlineMode`. It '
+      + 'belongs to an `object-master-detail-form` detail entry.',
+  },
+}, {
+  childObject: z.string().optional()
+    .describe('Child object whose records this grid lists, edits and saves. Optional because the component-level `dataSource` binding can supply the object instead; with neither, the panel shows a configuration hint and fetches nothing'),
+  relationshipField: z.string()
+    .describe("FK on the child object pointing back to the parent record — the rows are queried as `{ [relationshipField]: parentId }`. Required: this panel does not auto-detect it"),
+  columns: z.array(InlineGridColumnSchema).min(1)
+    .describe("Editable grid columns, drawn exactly as declared. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, options?, … } — objectui GridColumn); unknown keys and the retired `field` spelling are refused. Unlike the master-detail carriers, this block does NOT hydrate a column from the child object's field: declare `label`, `type` and `options` yourself — an identity-only `{ name }` column is a text cell headed by its name. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells"),
+  parentObject: z.string().optional()
+    .describe("Parent object the `totalField` rollup is written to (default: the object of the record on the page)"),
+  parentId: z.string().optional()
+    .describe('Parent record id the rows belong to (default: the record on the page). Wins over `recordId`'),
+  recordId: z.string().optional()
+    .describe('Alternate spelling of `parentId` the renderer also reads; `parentId` wins when both are set'),
+  amountField: z.string().optional()
+    .describe("Numeric child column summed for the running total and for the `totalField` rollup (default `amount` when only `totalField` is set)"),
+  totalField: z.string().optional()
+    .describe('Parent field to receive the rolled-up sum on save'),
+  title: z.string().optional()
+    .describe('Panel title. A literal string rendered as-is in every locale (no inline locale map — the panel renders it as a React child); renderer default: the localized "Line Items"'),
+  readonly: z.boolean().optional()
+    .describe('Render the grid read-only: cells locked, no Save button, and no adding or removing lines (renderer default: editable)'),
+  minRows: z.number().optional().describe('Minimum number of rows'),
+  maxRows: z.number().optional().describe('Maximum number of rows'),
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Additional criteria for the child rows — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the parent relationship condition, never substituted for it: it can only narrow this record\'s lines'),
+  sort: z.array(SortItemSchema).optional()
+    .describe('Load order for the child rows — the SortItem array form `[{ field, order }, ...]` (renderer default: storage order)'),
+  limit: z.number().int().positive().optional()
+    .describe('Row cap for the child fetch (renderer default: 500). The grid has no pagination, so this is the window of rows that are editable and saved together'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type RecordLineItemsProps = z.input<typeof RecordLineItemsProps>;
+/**
+ * Post-parse shape of {@link RecordLineItemsProps} (ADR-0122). Differs from the
+ * author state because `columns` carries `InlineGridColumnSchema`, whose
+ * `readonlyWhen` / `requiredWhen` bare-string predicates normalize to
+ * Expression envelopes at parse.
+ */
+export type RecordLineItemsPropsParsed = z.infer<typeof RecordLineItemsProps>;
+
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
   history: PROPS_HISTORY,
@@ -6025,6 +6159,14 @@ export const ComponentPropsMap = {
   'record:alert': RecordAlertProps,
   'record:quick_actions': RecordQuickActionsProps,
   'record:history': RecordHistoryProps,
+  // #21142 — the last registered `record:*` renderer without a row: it sat on
+  // the string-arm registration ledger instead (`component-type-vocabulary.ts`),
+  // so the gate skipped its props and a column keyed `field` published green.
+  // Not a `PageComponentType` member: it reaches the type union through the
+  // open string arm, as `element:metadata_viewer` does, and the row is what
+  // makes it known. Key set measured at the `.objectui-sha` pin; see the
+  // schema's own header.
+  'record:line_items': RecordLineItemsProps,
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),

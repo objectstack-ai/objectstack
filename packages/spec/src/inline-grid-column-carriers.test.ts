@@ -4,7 +4,8 @@
  * #20901 — an inline grid column is judged on BOTH of its carriers, and by the
  * type it renders as. #20928 brought the THIRD carrier, an
  * `object-master-detail-form` page block's `details[].columns`, to the same
- * contract (its own section at the bottom of this file).
+ * contract (its own section near the bottom of this file), and #21142 the
+ * FOURTH, a `record:line_items` page block's `columns` (the last section).
  *
  * The objectui master-detail grid reads one column shape from two carriers: a
  * relationship field's `inlineColumns` and a form view's `subforms[].columns`.
@@ -593,5 +594,160 @@ describe('#20928 — defineStack judges an identity-only detail column by the ty
 
   it('following the remedy builds: the refused column with `scale` deleted and nothing added', () => {
     expect(() => build(stackWithMasterDetailColumns([{ name: 'amount' }]))).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #21142 — the fourth carrier: a `record:line_items` block's `columns`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The page block `record:line_items` draws ONE inline grid of the record's
+ * child rows, through the same objectui grid as the other three carriers. It
+ * had no `ComponentPropsMap` row, so the component-props gate skipped it and
+ * the showcase project page's five `field`-keyed columns published green over
+ * a grid of empty cells.
+ *
+ * One difference from the master-detail block is pinned on purpose: this
+ * panel hands `columns` to the grid as authored, with no hydration from the
+ * child object's field. So an identity-only column has no resolved type for
+ * `defineStack` to judge, and the cross-reference check does not reach this
+ * block — the last test below is that control.
+ */
+const LINE_ITEMS_PROPS = ComponentPropsMap['record:line_items'];
+
+/** Every key objectui's `LineItemsPanel` reads off its schema (the `.objectui-sha` pin `31971ff1e28f`). */
+const FULL_LINE_ITEMS = {
+  childObject: 'crm_invoice_line',
+  relationshipField: 'invoice',
+  columns: [{ name: 'quantity', label: 'Qty', type: 'number' }],
+  parentObject: 'crm_invoice',
+  parentId: 'inv_1',
+  recordId: 'inv_1',
+  amountField: 'amount',
+  totalField: 'total',
+  title: 'Lines',
+  readonly: false,
+  minRows: 1,
+  maxRows: 20,
+  filter: [{ field: 'quantity', operator: 'greater_than', value: 0 }],
+  sort: [{ field: 'quantity', order: 'asc' }],
+  limit: 100,
+} as const;
+
+const parseLineItems = (props: unknown): Result => LINE_ITEMS_PROPS.safeParse(props) as Result;
+
+const parseLineItemColumns = (columns: unknown[]): Result =>
+  parseLineItems({ childObject: 'crm_invoice_line', relationshipField: 'invoice', columns });
+
+describe('#21142 — the line-items block is strict, and its columns are the column contract', () => {
+  it('its column element IS InlineGridColumnSchema — one contract, not a copy', () => {
+    const shape = (LINE_ITEMS_PROPS as unknown as { shape: Record<string, { element: unknown }> }).shape;
+    expect(shape.columns.element).toBe(InlineGridColumnSchema);
+  });
+
+  it('refuses the card\'s `field`-keyed column by name, with the prescription naming `name`', () => {
+    const result = parseLineItemColumns([{ field: 'title', label: 'Title', type: 'text' }]);
+    expect(result.success).toBe(false);
+    const unknown = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.path).toEqual(['columns', 0]);
+    expect(unknown?.message).toContain('`field` → `name`');
+    // The column's identity is missing too — the grid would bind nothing.
+    expect(result.error!.issues.some((i) => i.code === 'invalid_type' && i.path.join('.') === 'columns.0.name')).toBe(true);
+  });
+
+  it('refuses the typed currency column carrying `scale`, at the column\'s `scale`, with the ruled first sentence', () => {
+    const result = parseLineItemColumns([{ name: 'quantity' }, TYPED_CURRENCY_WITH_SCALE]);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    const [issue] = result.error!.issues;
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['columns', 1, 'scale']);
+    expect(issue.message.startsWith(COLUMN_FIRST_SENTENCE)).toBe(true);
+  });
+
+  it('refuses a bogus-key column: the key is named, and the missing `name` is required', () => {
+    const result = parseLineItemColumns([BOGUS_KEY_ONLY]);
+    expect(result.success).toBe(false);
+    const unknown = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.path).toEqual(['columns', 0]);
+    expect(unknown?.message).toContain('`zzz_not_a_key`');
+  });
+
+  it('requires `relationshipField` and at least one column — nothing on this panel derives either', () => {
+    const noFk = parseLineItems({ childObject: 'crm_invoice_line', columns: [{ name: 'quantity' }] });
+    expect(noFk.success).toBe(false);
+    expect(noFk.error!.issues.some((i) => i.code === 'invalid_type' && i.path.join('.') === 'relationshipField')).toBe(true);
+
+    const noColumns = parseLineItems({ childObject: 'crm_invoice_line', relationshipField: 'invoice' });
+    expect(noColumns.success).toBe(false);
+    expect(noColumns.error!.issues.some((i) => i.code === 'invalid_type' && i.path.join('.') === 'columns')).toBe(true);
+
+    const emptyColumns = parseLineItemColumns([]);
+    expect(emptyColumns.success).toBe(false);
+    expect(emptyColumns.error!.issues.some((i) => i.code === 'too_small' && i.path.join('.') === 'columns')).toBe(true);
+  });
+
+  it('refuses a block key the renderer does not read, a near-miss with its rename, and a master-detail entry key with its reason', () => {
+    const bogus = parseLineItems({ ...FULL_LINE_ITEMS, zzz_not_a_key: 1 });
+    expect(bogus.success).toBe(false);
+    const unknown = bogus.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.path).toEqual([]);
+    expect(unknown?.message).toContain('`zzz_not_a_key`');
+
+    const alias = parseLineItems({ childObject: 'crm_invoice_line', foreignKey: 'invoice', columns: [{ name: 'quantity' }] });
+    expect(alias.success).toBe(false);
+    expect(alias.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`foreignKey` → `relationshipField`');
+
+    const entryKey = parseLineItems({ ...FULL_LINE_ITEMS, addLabel: 'Add line' });
+    expect(entryKey.success).toBe(false);
+    const refused = entryKey.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(refused?.message).toContain('`addLabel`');
+    expect(refused?.message).toContain('object-master-detail-form');
+  });
+
+  it('CONTROLS — the showcase\'s five name-keyed columns, and a bag carrying every key the renderer reads, parse and keep their keys', () => {
+    // The showcase project page's block, copied (a spec test does not import an example app).
+    const showcase = {
+      childObject: 'showcase_task',
+      relationshipField: 'project',
+      amountField: 'estimate_hours',
+      title: 'Tasks',
+      columns: [
+        { name: 'title', label: 'Title', type: 'text', required: true },
+        { name: 'status', label: 'Status', type: 'select', options: [{ label: 'Backlog', value: 'backlog' }] },
+        { name: 'priority', label: 'Priority', type: 'select', options: [{ label: 'Low', value: 'low' }] },
+        { name: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
+        { name: 'due_date', label: 'Due Date', type: 'date' },
+      ],
+    };
+    for (const props of [showcase, FULL_LINE_ITEMS]) {
+      const result = parseLineItems(props);
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(result.data).toEqual(props);
+    }
+    expect(Object.keys(FULL_LINE_ITEMS)).toHaveLength(15);
+    // `childObject` may come from the component-level `dataSource` binding instead.
+    const viaBinding = Object.fromEntries(Object.entries(FULL_LINE_ITEMS).filter(([key]) => key !== 'childObject'));
+    expect(parseLineItems(viaBinding).success).toBe(true);
+  });
+
+  it('CONTROL — defineStack does not judge an identity-only line-items column: the panel draws it unhydrated', () => {
+    const page = {
+      name: 'crm_invoice_record',
+      label: 'Invoice',
+      type: 'record' as const,
+      object: 'crm_invoice',
+      regions: [{
+        name: 'main',
+        components: [{
+          type: 'record:line_items',
+          properties: { childObject: 'crm_invoice_line', relationshipField: 'invoice', columns: [IDENTITY_ONLY_WITH_SCALE] },
+        }],
+      }],
+    };
+    expect(() => build({ manifest, objects: [PARENT, childObject()], pages: [page] })).not.toThrow();
+    // The same column under the master-detail block IS judged — the reach is the carrier's.
+    expect(() => build(stackWithMasterDetailColumns([IDENTITY_ONLY_WITH_SCALE]))).toThrow();
   });
 });

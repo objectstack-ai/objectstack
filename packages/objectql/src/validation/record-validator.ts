@@ -95,7 +95,7 @@ import {
   classifyFilterToken,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
-import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand } from '@objectstack/core';
+import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -592,9 +592,14 @@ function valueMayBeAnObject(def: FieldDef): boolean {
  * without this the scalar used to be stored verbatim, silently corrupting
  * the column's shape for every consumer that expects an array.
  *
- * Only unambiguous scalars (string/number/boolean) are wrapped; anything
- * else (plain objects, nested garbage) is left untouched so that
- * `validateRecord` can reject it with `invalid_type`.
+ * [#21238] What a value becomes is `@objectstack/core`'s
+ * `multiValueStorageForm`, the one rule the row-level write `check` also puts
+ * the image it judges through: only unambiguous scalars (string/number/boolean)
+ * are wrapped, a blank is left as missing, and anything else (plain objects,
+ * nested garbage) is left untouched so that `validateRecord` can reject it with
+ * `invalid_type`. WHICH columns it is applied to is this door's: a declared
+ * multi-valued field (`isMultiValueField`), never a lifecycle column or one the
+ * engine owns (`system` / `readonly`).
  */
 export function normalizeMultiValueFields(
   objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
@@ -602,14 +607,11 @@ export function normalizeMultiValueFields(
 ): void {
   if (!objectSchema?.fields || !data) return;
   for (const [name, value] of Object.entries(data)) {
-    if (SKIP_FIELDS.has(name) || isMissing(value)) continue;
+    if (SKIP_FIELDS.has(name)) continue;
     const def = objectSchema.fields[name];
     if (!def || def.system || def.readonly || !isMultiValueField(def)) continue;
-    if (Array.isArray(value)) continue;
-    const t = typeof value;
-    if (t === 'string' || t === 'number' || t === 'boolean') {
-      data[name] = [value];
-    }
+    const stored = multiValueStorageForm(value);
+    if (stored !== value) data[name] = stored;
   }
 }
 
