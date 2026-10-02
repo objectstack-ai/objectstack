@@ -29,8 +29,9 @@
 //      baseline (ADR-0090 D5): an admin resolves it too, so the admin half is
 //      only real if the merge keeps the group for them.
 //
-// The HTTP door (direct read, and the activity metadata through the field
-// redaction) is pinned on a real boot in
+// The HTTP door (direct read, the activity metadata through the field
+// redaction, the member's own row, the field-level write gate and the user
+// picker's candidate query) is pinned on a real boot in
 // `packages/qa/dogfood/test/identity-admin-fields-org-peer.dogfood.test.ts`.
 
 import { describe, it, expect } from 'vitest';
@@ -48,8 +49,14 @@ const DECLARED_ADMIN_GROUP: string[] = Object.entries(SysUser.fields as Record<s
   .map(([name]) => name)
   .sort();
 
-/** Fields a member already reads on a peer's row — the controls that must stay served. */
-const PEER_DIRECTORY_FIELDS = ['name', 'email', 'image'];
+/**
+ * Fields a member already reads on a peer's row — the controls that must stay
+ * served. `banned` is among them by ruling (triage on #21237, Q1 = B): the
+ * deactivation flag is directory status, declared outside the `Admin` group,
+ * because every user picker filters candidates on it and a filter on a withheld
+ * field is refused. Moving it back into the group is red here.
+ */
+const PEER_DIRECTORY_FIELDS = ['name', 'email', 'image', 'banned'];
 
 const ADMIN_SETS = [ADMIN_FULL_ACCESS, ...ORGANIZATION_ADMIN_GRANTS];
 const WITHHOLDING_SETS = ['member_default', 'viewer_readonly'];

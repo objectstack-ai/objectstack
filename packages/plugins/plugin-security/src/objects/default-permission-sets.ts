@@ -248,7 +248,7 @@ const privateCredentialRowScope = () => [
 /** The identity object whose `Admin` field group the sets below withhold or keep. */
 const IDENTITY_OBJECT = 'sys_user';
 /** The field group the identity object's declaration marks as admin-review data. */
-export const IDENTITY_ADMIN_FIELD_GROUP = 'Admin';
+const IDENTITY_ADMIN_FIELD_GROUP = 'Admin';
 
 /**
  * [#21237] The identity object's `Admin`-group field names, READ OFF ITS
@@ -257,7 +257,7 @@ export const IDENTITY_ADMIN_FIELD_GROUP = 'Admin';
  * the moment it is declared; one it moves out of the group stops being
  * withheld the same way. Sorted, so the seeded set rows are stable.
  */
-export function identityAdminGroupFields(): string[] {
+function identityAdminGroupFields(): string[] {
   return Object.entries((SysUser.fields ?? {}) as Record<string, { group?: string }>)
     .filter(([, field]) => field?.group === IDENTITY_ADMIN_FIELD_GROUP)
     .map(([name]) => name)
@@ -290,11 +290,17 @@ export function identityAdminGroupFields(): string[] {
  *   - `keep` → `admin_full_access`, `organization_admin` (and so its derived
  *     no-bypass variant).
  *
- * ⚠️ Field-level security applies to EVERY row, the reader's own included.
- * Every reader of these fields on a member's OWN row reads through system or
- * auth context (the auth manager's gates and stamps, the better-auth adapter,
- * the authorization resolver's `ai_seat` synthesis), which no permission set
- * reaches. A fresh object per set, like `denyWritesOnManagedObjects()`.
+ * ⚠️ Field-level security applies to EVERY row, the reader's own included, and
+ * to filters as well as results: a member's query that filters or sorts on a
+ * withheld field is refused (the predicate guard's filter-oracle rule), and a
+ * member's user-context write naming one is refused by the field-level write
+ * gate. Every reader of these fields on a member's OWN row reads through system
+ * or auth context (the auth manager's gates and stamps, the better-auth
+ * adapter, the authorization resolver's `ai_seat` synthesis), which no
+ * permission set reaches. The deactivation flag is declared OUTSIDE the group
+ * on purpose (#21237): it is directory status that every user picker filters
+ * on, so withholding it would refuse each member's picker query. A fresh
+ * object per set, like `denyWritesOnManagedObjects()`.
  */
 const identityAdminFieldSecurity = (
   posture: 'withhold' | 'keep',
