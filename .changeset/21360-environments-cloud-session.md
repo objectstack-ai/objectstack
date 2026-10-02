@@ -1,10 +1,10 @@
 ---
-'@objectstack/cli': patch
+'@objectstack/cli': minor
 ---
 
 `os environments list | show | create | bind | switch` run on the `os cloud login` session
 
-Clause-②: no
+Clause-②: yes (widening)
 
 The documented hosted flow is `os cloud login`, then `os environments create`. The five
 `os environments` subcommands read only `~/.objectstack/credentials.json` (the `os login`
