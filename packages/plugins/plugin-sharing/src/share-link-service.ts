@@ -64,7 +64,7 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 const SHARE_LINK_SWEEP_SUBJECT = {
   table: 'sys_share_link',
   noun: 'share-link',
-  issue: '#5190',
+  issue: 'a share link is a bearer token, so a reused record id must not inherit it',
 } as const;
 
 /** URL-safe alphabet (RFC 4648 base64url minus padding). 64 symbols. */
