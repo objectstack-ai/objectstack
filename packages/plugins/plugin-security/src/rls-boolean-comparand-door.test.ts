@@ -67,7 +67,8 @@ vi.mock('@objectstack/formula', async (importOriginal) => {
       const result = real.compileCelToFilter(expression, options);
       if (result.ok) {
         deepFreeze(result.filter);
-        compiled.set(expression, [...(compiled.get(expression) ?? []), result.filter]);
+        const key = typeof expression === 'string' ? expression : (expression.source ?? '');
+        compiled.set(key, [...(compiled.get(key) ?? []), result.filter]);
       }
       return result;
     }) as typeof real.compileCelToFilter,
