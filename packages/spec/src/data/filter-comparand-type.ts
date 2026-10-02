@@ -92,7 +92,11 @@
  *   implicit and `$eq` — the layer that answers it is now the comparand-SHAPE
  *   door one file over (ruled 2026-09-23), which runs first inside
  *   `parseFilterAST` and at the engine seam, so no array reaches this walk
- *   there; `$ne` and the other scalar operators stay per driver.
+ *   there. [#19886] `$ne` followed (ruling A). [#21448] And so did every
+ *   other scalar operator: that door refuses a list at any of them, whatever
+ *   the column type, so from a door that runs it first no array reaches this
+ *   walk at a scalar position. This walk still steps around one, for a caller
+ *   that asks it alone.
  * - **An operator outside the declared vocabulary** (`$wat`, retired `$regex`):
  *   the unknown-/retired-operator refusals downstream carry the specific
  *   prescriptions (`RETIRED_FILTER_OPERATORS`), which a generic type refusal
@@ -115,6 +119,8 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/7872 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/7956 (the matrix)
  */
+
+import { LIST_COMPARAND_OPERATORS, SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 
 /**
  * The accepted comparand-type set, as type names. The order is the SQL
@@ -174,22 +180,12 @@ export function isAcceptedFilterComparand(value: unknown): boolean {
   }
 }
 
-/**
- * The declared field-operator vocabulary, split by what the comparand IS.
- * `filter-comparand-type.test.ts` reconciles the union of these two sets
- * against `FieldOperatorsSchema`'s own keys, so an operator added to the
- * schema cannot silently skip the door.
- */
-const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
-  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
-  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
-  '$like', '$ilike',
-  '$null', '$exists', '$empty',
-]);
-
-const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
-  '$in', '$nin', '$between',
-]);
+// The declared field-operator vocabulary, split by what the comparand IS, is
+// `SCALAR_COMPARAND_OPERATORS` / `LIST_COMPARAND_OPERATORS`, imported above.
+// [#21448] It lives in `./filter-comparand-operators.ts` since the
+// comparand-SHAPE face began reading it too. `filter-comparand-type.test.ts`
+// still reconciles the union of the two sets against `FieldOperatorsSchema`'s
+// own keys, so an operator added to the schema cannot silently skip the door.
 
 /**
  * Filter STRUCTURE rather than a comparand: a PLAIN object — prototype
