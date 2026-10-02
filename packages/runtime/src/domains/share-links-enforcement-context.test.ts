@@ -951,11 +951,12 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
  * not a hand-assembled copy of it. DOUBLES: storage (`makeEngine` above) and
  * the enterprise hierarchy resolver, which this open edition does not ship.
  *
- * ## Why the route door is not pinned here
+ * ## The other door
  *
- * The plugin's own route door reads `err.status` alone, and the CRUD gate's
- * refusal carries `statusCode`, so on that door the refusals below answer 500
- * until #21405 lands. Its 201s are the same service call.
+ * The plugin's own route door calls the same service, so every admission and
+ * refusal below is the same verdict there. How that door maps the CRUD gate's
+ * refusal to a status is a property of that door, pinned with it; this block
+ * reads the status this door answers.
  */
 describe('[#21329] mint authority on an owner-private object (dispatcher door, ruling A′)', () => {
     const CONV = 'ai_conversations';
