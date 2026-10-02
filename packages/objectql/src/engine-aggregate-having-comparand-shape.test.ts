@@ -872,13 +872,14 @@ describe('[#20127] having — a { $field, addDays } pair is judged by each aggre
 
   describe('[#21255] a plain { $field } across two comparison classes is refused, as where refuses it', () => {
     // The card's measured shape: `max(closed_at)` (a datetime) against a `day`
-    // bucket (a date). Before, measured at 2791138cbf through `engine.aggregate`
-    // on `SqlDriver` over better-sqlite3, it was answered by
+    // bucket (a date). Before (2791138cbf) it was answered by
     // `@objectstack/formula`'s whole-day reading of the bucket's day — here 3
-    // of the 6 groups (due 2026-01-05, 2026-01-20 and 2026-03-01) — while its
-    // `where` twin, `closed_at` against `due_on`, was refused 400 by
-    // `driver-sql`'s cross-field compiler. The twin itself runs in
-    // `packages/rest` (`aggregation-filter-where-doors.test.ts`).
+    // of the 6 groups (due 2026-01-05, 2026-01-20 and 2026-03-01), measured
+    // with the rule reverted, and the same shape kept groups on `SqlDriver`
+    // over better-sqlite3 through `engine.aggregate` — while its `where` twin,
+    // `closed_at` against `due_on`, was refused 400 by `driver-sql`'s
+    // cross-field compiler. The twin itself runs in `packages/rest`
+    // (`aggregation-filter-where-doors.test.ts`).
     const BUCKETED: EngineAggregateOptions = {
       groupBy: [{ field: 'due_on', dateGranularity: 'day', alias: 'due_day' }],
       aggregations: [{ function: 'max', field: 'closed_at', alias: 'last_closed' }],

@@ -200,11 +200,12 @@ describe('[#20148] POST /data/:object/query — a per-aggregation filter meets w
 });
 
 describe('[#21255] POST /data/:object/query — a plain { $field } across two comparison classes is refused at every position, as its where twin is', () => {
-  // `closed_at` is a datetime, `due_on` a date. Before, measured at 2791138cbf
-  // through this door: the per-aggregation filter counted 3 rows (c1 2, c2 1)
-  // and `having` kept 3 of the 6 day buckets — `@objectstack/formula`'s
-  // whole-day reading of the bare day (o2 closes on its due day at 12:00) —
-  // while the `where` twin below was refused 400 by `driver-sql`'s compiler.
+  // `closed_at` is a datetime, `due_on` a date. Before (2791138cbf), measured
+  // on these rows with the rule reverted, through `engine.aggregate` on this
+  // `SqlDriver`: the per-aggregation filter counted 3 rows (c1 2, c2 1) and
+  // `having` kept 3 of the 6 day buckets — `@objectstack/formula`'s whole-day
+  // reading of the bare day (o2 closes on its due day at 12:00) — while the
+  // `where` twin below was refused 400 by `driver-sql`'s compiler.
   const CROSS_CLASS = { closed_at: { $lte: { $field: 'due_on' } } };
   const HAVING_CROSS_CLASS = {
     groupBy: [{ field: 'due_on', dateGranularity: 'day', alias: 'due_day' }],

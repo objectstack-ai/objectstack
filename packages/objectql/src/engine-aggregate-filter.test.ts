@@ -807,15 +807,16 @@ describe('[#20148] per-aggregation filter — a { $field } names a declared fiel
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('[#21255] per-aggregation filter — a plain { $field } across two comparison classes is refused, as where refuses it', () => {
-  // Before, measured at 2791138cbf through `engine.aggregate` on `SqlDriver`
-  // over better-sqlite3: the class rule judged only an `addDays` pair, so the
+  // Before (2791138cbf), the class rule judged only an `addDays` pair, so the
   // card's query — `closed_at` (datetime) `$lte` `{ $field: 'due_on' }` (date)
   // — was answered by `@objectstack/formula`'s whole-day reading of the bare
-  // day (3 of these 6 rows: o1, o2 and o5), while its `where` twin was refused
-  // 400 by `driver-sql`'s cross-field compiler. The twin itself runs in
-  // `packages/rest` (`aggregation-filter-where-doors.test.ts`), where a real
-  // `SqlDriver` refuses it; the engine judges no `where` reference
-  // (the #20148 control above).
+  // day: 3 of these 6 rows (o1, o2, o5), measured here with the rule reverted,
+  // and the same shape counted on `SqlDriver` over better-sqlite3 through
+  // `engine.aggregate`, while its `where` twin was refused 400 by `driver-sql`'s
+  // cross-field compiler. The twin itself runs in `packages/rest`
+  // (`aggregation-filter-where-doors.test.ts`), where a real `SqlDriver`
+  // refuses it; the engine judges no `where` reference (the #20148 control
+  // above).
   const CROSS_CLASS: ReadonlyArray<readonly [string, () => Record<string, unknown>, string]> = [
     ['a datetime against a date (the card\'s measured query)', () => ({ closed_at: { $lte: { $field: 'due_on' } } }), '"closed_at" is datetime but "due_on" is date'],
     ['a date against a datetime', () => ({ due_on: { $gte: { $field: 'closed_at' } } }), '"due_on" is date but "closed_at" is datetime'],
