@@ -144,18 +144,23 @@ describe('every door that carries a stored or authored cube refuses it — never
   });
 
   it.each(RETIRED)('the rehydration seam replays nothing over a stored row carrying `%s` — it reaches the parse as stored', (member) => {
-    // CONTROL: the seam is live for this type — a retired KEY a D2 conversion
-    // strips (`refreshKey`, lossless: it never had an effect) is stripped here.
-    const withRetiredKey = applyConversionsToStoredItem('analytics_cube', {
+    // CONTROL: the seam is live for this type — a retired VALUE a D2 conversion
+    // does rewrite (`cube-sub-day-granularities-removed` drops a sub-day
+    // interval from a dimension's `granularities`) is rewritten here, on the
+    // same stored row, while the retired measure type beside it is not touched.
+    const withRetiredInterval = applyConversionsToStoredItem('analytics_cube', {
       ...cubeWith(member),
-      refreshKey: { every: '1 hour' },
-    }) as Record<string, unknown>;
-    expect(withRetiredKey).not.toHaveProperty('refreshKey');
+      dimensions: {
+        ...CUBE.dimensions,
+        placed_at: { label: 'Placed', type: 'time', sql: 'placed_at', granularities: ['hour', 'day'] },
+      },
+    }) as { dimensions: Record<string, { granularities?: string[] }>; measures: Record<string, unknown> };
+    expect(withRetiredInterval.dimensions.placed_at!.granularities).toEqual(['day']);
+    expect(withRetiredInterval.measures.m).toEqual(measureOf(member));
     const stored = cubeWith(member);
     const rehydrated = applyConversionsToStoredItem('analytics_cube', stored) as typeof stored;
     // Nothing rewrote or dropped the retired measure on the way…
     expect(rehydrated.measures.m).toEqual(measureOf(member));
-    expect((withRetiredKey.measures as Record<string, unknown>).m).toEqual(measureOf(member));
     // …so the parse that follows refuses it, with the prescription.
     const issues = issuesOf(CubeSchema, rehydrated);
     expect(issues[0]!.message.startsWith(firstSentence(member))).toBe(true);
