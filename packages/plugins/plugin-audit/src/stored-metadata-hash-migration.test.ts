@@ -175,3 +175,15 @@ describe('migrateStoredMetadataBodyCopies — the content-hash copies (driven)',
     expect(second.rewritten).toBe(0);
   });
 });
+
+describe('the history change note that quotes a stored hash (#21207)', () => {
+  it('a copied history snapshot keeps its note and withholds the quote, idempotently', () => {
+    const snapshot = { ...historySnapshot(), change_note: `publish draft (hash ${HASH})` };
+    const row = { id: 'a7', object_name: 'sys_metadata_history', record_id: 'h1', new_value: JSON.stringify(snapshot), old_value: null };
+    const patch = planAuditRowPatch(row)!;
+    const rewritten = JSON.parse(String(patch.new_value));
+    expect(rewritten.change_note).toBe('publish draft (hash (withheld))');
+    expect(String(patch.new_value)).not.toMatch(SHA256);
+    expect(planAuditRowPatch({ ...row, new_value: patch.new_value })).toBeNull();
+  });
+});

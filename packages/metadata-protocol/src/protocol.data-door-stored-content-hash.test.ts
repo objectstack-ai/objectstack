@@ -256,3 +256,48 @@ describe('[#21207] data door — a search never scans the hash or body columns o
         expect(find.mock.calls[0]![1].searchFields).toBeUndefined();
     });
 });
+
+describe('[#21207] data door — the history change note that quotes a stored hash', () => {
+    const QUOTED = hashSpec({ quoted: true });
+    const NOTE_ROWS = [{ id: 'h_note', type: 'view', name: 'all_tasks', version: 3, operation_type: 'publish', metadata: '{}', checksum: QUOTED, previous_checksum: null, change_note: `publish draft (hash ${QUOTED})` }];
+
+    it('is served with the quote keyed, and withheld with no provider', async () => {
+        const saved = [...HISTORY_ROWS];
+        HISTORY_ROWS.push(...(NOTE_ROWS as any));
+        try {
+            const { p } = makeProtocol();
+            const got: any = await p.getData({ object: 'sys_metadata_history', id: 'h_note' });
+            expect(got.record.change_note).toBe(`publish draft (hash ${await keyedDigest(QUOTED)})`);
+            const bare = makeProtocol({ provider: false });
+            const withheld: any = await bare.p.findData({ object: 'sys_metadata_history', query: {} });
+            expect(byId(withheld.records, 'h_note').change_note).toBe('publish draft (hash (withheld))');
+            expect(JSON.stringify(withheld.records)).not.toContain(QUOTED);
+        } finally {
+            HISTORY_ROWS.length = 0;
+            HISTORY_ROWS.push(...saved);
+        }
+    });
+
+    for (const [label, query] of [
+        ['filter', { filter: JSON.stringify({ change_note: 'x' }) }],
+        ['sort', { sort: 'change_note' }],
+        ['group', { groupBy: ['change_note'], aggregations: [{ function: 'count', alias: 'n' }] }],
+        ['explicit search fields', { search: 'abc', searchFields: 'change_note' }],
+    ] as const) {
+        it(`${label} on the change note is refused (INVALID_FIELD / 400)`, async () => {
+            const { p, find, aggregate } = makeProtocol();
+            const err = await refusal(() => p.findData({ object: 'sys_metadata_history', query: query as any }));
+            expect(err.code).toBe('INVALID_FIELD');
+            expect(err.status).toBe(400);
+            expect(err.field).toBe('change_note');
+            expect(find).not.toHaveBeenCalled();
+            expect(aggregate).not.toHaveBeenCalled();
+        });
+    }
+
+    it('an implicit search does not scan the change note', async () => {
+        const { p, find } = makeProtocol();
+        await p.findData({ object: 'sys_metadata_history', query: { search: 'abc' } });
+        expect(find.mock.calls[0]![1].searchFields).not.toContain('change_note');
+    });
+});

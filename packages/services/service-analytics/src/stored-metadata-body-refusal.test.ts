@@ -111,3 +111,14 @@ describe('storedMetadataBodyAnalyticsRefusal — the content-hash columns (#2120
     expect(storedMetadataBodyAnalyticsRefusal([field('file_blob', 'previous_checksum', 'predicate')])).toBeUndefined();
   });
 });
+
+describe('storedMetadataBodyAnalyticsRefusal — the history change note (#21207)', () => {
+  it('refuses the change note, which can quote a stored hash, in either role', () => {
+    for (const role of ['aggregate', 'predicate'] as const) {
+      const err = storedMetadataBodyAnalyticsRefusal([field('sys_metadata_history', 'change_note', role)]) as any;
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      expect(err?.field).toBe('change_note');
+    }
+  });
+});

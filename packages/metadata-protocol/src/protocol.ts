@@ -196,6 +196,7 @@ import {
     // evaluated — see `STORED_METADATA_HASH_COLUMNS`.
     isStoredMetadataBodyObject,
     servedContentHash,
+    serveStoredHashTokens,
     serveStoredMetadataHashColumnRows,
     serveStoredMetadataHashColumns,
     STORED_METADATA_UNSEARCHABLE_COLUMNS,
@@ -18799,12 +18800,16 @@ export class ObjectStackProtocolImplementation implements
         // the same value the write receipts hand out, so an event still names
         // the token a caller holds — and `null` with no crypto provider (a
         // delete event's own `null` is kept either way).
+        // The event's message is the row's change note, which can QUOTE a stored
+        // hash (`publish draft (hash …)` on rows written before the publish door
+        // stated its own message) — each quote is served the same way.
         const digest = this.storedHashDigest();
         for await (const ev of repo.history(ref, opts)) {
             events.push({
                 ...ev,
                 hash: (await servedContentHash(ev.hash, digest)) ?? null,
                 parentHash: (await servedContentHash(ev.parentHash, digest)) ?? null,
+                ...(typeof ev.message === 'string' ? { message: await serveStoredHashTokens(ev.message, digest) } : {}),
             });
         }
         return { events };
@@ -19340,7 +19345,12 @@ export class ObjectStackProtocolImplementation implements
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
                 source: 'protocol.publishMetaItem',
-                ...(request.message ? { message: request.message } : {}),
+                // [#21207] Always a message of the caller's or this door's own:
+                // left unstated, the repository records `publish draft (hash …)`,
+                // quoting the draft's stored content hash into the history row's
+                // change note — served to every history reader and copied by the
+                // audit writer. This door's default says what happened without it.
+                message: request.message || 'publish draft',
                 intent,
                 // [#8907] Spread, not `packageId: request.packageId`: `null` is
                 // a meaningful scope (the unbound row) and `undefined` means

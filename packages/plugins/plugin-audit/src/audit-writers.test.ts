@@ -2351,6 +2351,20 @@ describe('[#21207] stored metadata copies carry no content hash', () => {
     for (const c of created) hashFree(JSON.stringify(c.row));
   });
 
+  it('a history append whose change note quotes a hash: the copy keeps the note and withholds the quote', async () => {
+    const { engine, fire, created } = makeEngine({ ...SCHEMAS, sys_metadata_history: [...SCHEMAS.sys_metadata_history, 'change_note'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata_history',
+      input: { id: 'h-2' },
+      result: { id: 'h-2', name: 'v', type: 'view', metadata: view('one'), checksum: NEXT, change_note: `publish draft (hash ${NEXT})` },
+      session: { userId: 'admin-1' },
+    });
+    for (const c of created) hashFree(JSON.stringify(c.row));
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).change_note).toBe('publish draft (hash (withheld))');
+  });
+
   it('control: another object keeps its own checksum column in the copy', async () => {
     const { engine, fire, created } = makeEngine(SCHEMAS);
     installAuditWriters(engine as any, 'test.audit');

@@ -81,6 +81,21 @@ export const STORED_METADATA_BODY_AUDIT_OBJECTS = ['sys_audit_log', 'sys_activit
  */
 export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
 
+/**
+ * [#21207] The history table's change note, which can QUOTE a stored content
+ * hash (`publish draft (hash …)` on rows written before the publish door stated
+ * its own message). A copy keeps the note and withholds each quote.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
+
+/** An unkeyed content hash quoted in free text (the keyed form's `hmac-sha256:` prefix is not one). */
+const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
+
+/** Free text with each quoted stored content hash `(withheld)`. */
+export function withheldStoredHashTokens(text: string): string {
+  return text.replace(QUOTED_STORED_HASH, '(withheld)');
+}
+
 /** [#21207] The decision-audit table whose conflict notes named both stored hashes. */
 export const METADATA_DECISION_AUDIT_OBJECT = 'sys_metadata_audit';
 
@@ -92,16 +107,21 @@ const CONFLICT_NOTE = /^expected parent (.+) but current is (.+)$/;
 
 /**
  * Drop the stored content-hash columns from one parsed ledger snapshot (or one
- * half of an activity pair). Unchanged when it carries neither.
+ * half of an activity pair), and withhold each hash its change note quotes.
+ * Unchanged when it carries neither.
  */
 export function withoutStoredHashColumns(snapshot: unknown): { changed: boolean; value: unknown } {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
     return { changed: false, value: snapshot };
   }
   const record = snapshot as Record<string, unknown>;
-  if (!STORED_METADATA_HASH_COLUMNS.some((column) => column in record)) return { changed: false, value: snapshot };
+  const note = record[STORED_METADATA_HASH_NOTE_COLUMN];
+  const withheldNote = typeof note === 'string' ? withheldStoredHashTokens(note) : note;
+  const hasHash = STORED_METADATA_HASH_COLUMNS.some((column) => column in record);
+  if (!hasHash && withheldNote === note) return { changed: false, value: snapshot };
   const out: Record<string, unknown> = { ...record };
   for (const column of STORED_METADATA_HASH_COLUMNS) delete out[column];
+  if (withheldNote !== note) out[STORED_METADATA_HASH_NOTE_COLUMN] = withheldNote;
   return { changed: true, value: out };
 }
 

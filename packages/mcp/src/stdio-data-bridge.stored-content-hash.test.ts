@@ -299,3 +299,31 @@ describe('[#21207] stdio record resource: the keyed hash, over the transport', (
     expect(h.name).toBe('v');
   });
 });
+
+describe('[#21207] stdio reader: the history change note that quotes a stored hash', () => {
+  const QUOTED = `sha256:${'4'.repeat(64)}`;
+  const NOTE_ROW = { id: 'h_note', type: 'view', name: 'v', metadata: '{"name":"v"}', checksum: QUOTED, previous_checksum: null, change_note: `publish draft (hash ${QUOTED})` };
+
+  it('is served with the quote keyed, and withheld with no provider', async () => {
+    TABLES.sys_metadata_history!.push(NOTE_ROW);
+    try {
+      const keyed = (await bridgeAs(ADMIN).bridge.get('sys_metadata_history', 'h_note')) as Record<string, unknown>;
+      expect(keyed.change_note).toBe(`publish draft (hash ${await keyedDigest(QUOTED)})`);
+      const bare = (await bridgeAs(ADMIN, { provider: false }).bridge.get('sys_metadata_history', 'h_note')) as Record<string, unknown>;
+      expect(bare.change_note).toBe('publish draft (hash (withheld))');
+    } finally {
+      TABLES.sys_metadata_history!.pop();
+    }
+  });
+
+  it('a filter or sort on the change note is refused (INVALID_FIELD / 400)', async () => {
+    const { bridge, engine } = bridgeAs(ADMIN);
+    for (const run of [
+      () => bridge.query('sys_metadata_history', { where: { change_note: 'x' } }),
+      () => bridge.query('sys_metadata_history', { orderBy: [{ field: 'change_note', order: 'asc' }] }),
+    ]) {
+      await expect(run()).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'change_note' });
+    }
+    expect(engine.find).not.toHaveBeenCalled();
+  });
+});

@@ -451,11 +451,33 @@ export function storedMetadataBodyRefusal(
  */
 export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
 
-/** The content-hash column a field reference reaches — the column, or a dotted path headed by it. */
+/**
+ * [#21207] The history table's change note, which can QUOTE a stored content
+ * hash (`publish draft (hash …)` on rows written before the publish door stated
+ * its own message): served with each quote in its served form, never evaluated.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
+
+/** Every column that holds or can quote a stored content hash. */
+const HASH_BEARING_COLUMNS: readonly string[] = [...STORED_METADATA_HASH_COLUMNS, STORED_METADATA_HASH_NOTE_COLUMN];
+
+/** An unkeyed content hash quoted in free text (the keyed form's `hmac-sha256:` prefix is not one). */
+const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
+
+/** Free text with each quoted stored hash keyed, or `(withheld)` with no provider. */
+async function serveStoredHashTokens(text: string, digest: StoredHashDigest | undefined): Promise<string> {
+  const quoted = text.match(QUOTED_STORED_HASH);
+  if (!quoted) return text;
+  const served = new Map<string, string>();
+  for (const stored of new Set(quoted)) served.set(stored, digest ? await digest(stored) : '(withheld)');
+  return text.replace(QUOTED_STORED_HASH, (stored) => served.get(stored) as string);
+}
+
+/** The hash-bearing column a field reference reaches — the column, or a dotted path headed by it. */
 function hashColumnOf(field: unknown): string | undefined {
   if (typeof field !== 'string') return undefined;
   const head = field.split('.')[0] as string;
-  return STORED_METADATA_HASH_COLUMNS.includes(head) ? head : undefined;
+  return HASH_BEARING_COLUMNS.includes(head) ? head : undefined;
 }
 
 /**
@@ -480,7 +502,8 @@ export function storedMetadataHashRefusal(
   const make = (param: 'groupBy' | 'filter' | 'sort', column: string): McpStoredMetadataBodyRefusal => {
     const doing = param === 'groupBy' ? 'group' : param;
     const err = new Error(
-      `Cannot ${doing} '${object}' by '${column}' (${param}): the query was not run. The '${column}' column holds `
+      `Cannot ${doing} '${object}' by '${column}' (${param}): the query was not run. The '${column}' column `
+        + `${column === STORED_METADATA_HASH_NOTE_COLUMN ? 'can quote' : 'holds'} `
         + `the stored content hash of a metadata body, computed over withheld credential material too, so this door `
         + `serves it only in keyed form; ${param === 'filter'
           ? 'a filter on it compares a guess against the stored hash row by row, which confirms the guess'
@@ -531,7 +554,7 @@ export async function serveStoredMetadataHashes<T>(
 ): Promise<T> {
   if (!isStoredMetadataBodyObject(object) || !row || typeof row !== 'object' || Array.isArray(row)) return row;
   const record = row as Record<string, unknown>;
-  if (!STORED_METADATA_HASH_COLUMNS.some((column) => column in record)) return row;
+  if (!HASH_BEARING_COLUMNS.some((column) => column in record)) return row;
   const out: Record<string, unknown> = { ...record };
   for (const column of STORED_METADATA_HASH_COLUMNS) {
     if (!(column in out)) continue;
@@ -539,6 +562,8 @@ export async function serveStoredMetadataHashes<T>(
     if (!digest || (stored !== null && typeof stored !== 'string')) delete out[column];
     else out[column] = stored === null ? null : await digest(stored);
   }
+  const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+  if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = await serveStoredHashTokens(note, digest);
   return out as T;
 }
 

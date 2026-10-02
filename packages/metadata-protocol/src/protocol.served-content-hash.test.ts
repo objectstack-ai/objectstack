@@ -359,3 +359,33 @@ describe('[#21207] no crypto provider: nothing served, every inbound token refus
         expect(activeHash(h)).toBe(raw);
     });
 });
+
+describe('[#21207] a change note that quotes a stored hash', () => {
+    it('the publish door writes a note that quotes no hash', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await p.saveMetaItem({ ...ref, item: viewBody('staged'), mode: 'draft' } as any);
+        await p.publishMetaItem({ ...ref } as any);
+        const notes = h.historyRows.map((r) => r.change_note).filter((n) => typeof n === 'string') as string[];
+        expect(notes.length).toBeGreaterThan(0);
+        for (const note of notes) expect(note).not.toMatch(SHA256);
+    });
+
+    it('the history read serves a stored note\'s quoted hash keyed, and withheld with no provider', async () => {
+        for (const provider of [true, false]) {
+            const h = makeEngine({ provider });
+            const p = new ObjectStackProtocolImplementation(h.engine);
+            await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+            const stored = activeHash(h);
+            // A row written before the publish door stated its own message.
+            for (const row of h.historyRows) row.change_note = `publish draft (hash ${stored})`;
+
+            const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+            expect(events.length).toBeGreaterThan(0);
+            for (const ev of events) {
+                expect(ev.message).toBe(provider ? `publish draft (hash ${await keyedDigest(stored)})` : 'publish draft (hash (withheld))');
+            }
+            expectNoStoredHash(JSON.stringify(events), storedHashes(h));
+        }
+    });
+});

@@ -111,6 +111,18 @@ const FAMILY_SURFACES = [
     disposition: 'withheld',
     pin: '@objectstack/plugin-audit',
   },
+  // A stored row's change note can QUOTE a stored hash (a draft promotion with
+  // no message of its own recorded one); found by this card's measurement.
+  {
+    surface: 'history change note quoting a stored hash: /meta history message, data door, MCP stdio reader',
+    disposition: 'keyed',
+    pin: 'this package (protocol.served-content-hash.test.ts, protocol.data-door-stored-content-hash.test.ts) + @objectstack/mcp',
+  },
+  {
+    surface: 'history change note: group / filter / sort / search, and as an analytics member',
+    disposition: 'refuses',
+    pin: 'this package (protocol.data-door-stored-content-hash.test.ts) + @objectstack/mcp + @objectstack/service-analytics',
+  },
 ] as const;
 
 /** A stored datasource body as it sits in the `metadata` column: serialized JSON with credential material. */
@@ -180,8 +192,9 @@ describe('[#21120] stored-metadata-body family — the data door exposes only co
     }
     // One row per the three local data-door surfaces + five cross-package ones
     // (audit, analytics, realtime, and the MCP stdio reader's seam and refusal),
-    // + [#21207] the thirteen surfaces of the stored content hash.
-    expect(FAMILY_SURFACES).toHaveLength(21);
+    // + [#21207] the thirteen surfaces of the stored content hash, and the two
+    // of the history change note that can quote one.
+    expect(FAMILY_SURFACES).toHaveLength(23);
   });
 });
 

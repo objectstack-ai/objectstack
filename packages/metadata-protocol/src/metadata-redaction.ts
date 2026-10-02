@@ -807,6 +807,39 @@ export function storedMetadataBodyPredicateRefusal(
  */
 export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
 
+/**
+ * [#21207] The history table's free-text change note — which can QUOTE a stored
+ * content hash: with no message of its own, a draft's promotion recorded
+ * `publish draft (hash <the draft's stored hash>)`. The protocol now always
+ * states a hash-free message, so no new row carries one; rows already written
+ * do, so the column is served with each quoted hash in its served form
+ * ({@link serveStoredHashTokens}) and is never evaluated, exactly as the hash
+ * columns are.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
+
+/** Every column of a stored-metadata table that holds or can quote a stored content hash. */
+export const STORED_METADATA_HASH_BEARING_COLUMNS: readonly string[] = Object.freeze([
+    ...STORED_METADATA_HASH_COLUMNS,
+    STORED_METADATA_HASH_NOTE_COLUMN,
+]);
+
+/** An unkeyed content hash quoted in free text (the keyed form's `hmac-sha256:` prefix is not one). */
+const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
+
+/**
+ * Free text with every quoted stored content hash replaced by its served form:
+ * the keyed digest, or `(withheld)` with no crypto provider. Text that quotes
+ * none is returned as is.
+ */
+export async function serveStoredHashTokens(text: string, digest: StoredHashDigest | undefined): Promise<string> {
+    const quoted = text.match(QUOTED_STORED_HASH);
+    if (!quoted) return text;
+    const served = new Map<string, string>();
+    for (const stored of new Set(quoted)) served.set(stored, digest ? await digest(stored) : '(withheld)');
+    return text.replace(QUOTED_STORED_HASH, (stored) => served.get(stored) as string);
+}
+
 /** The keyed-digest primitive of the registered crypto provider (`ICryptoProvider.keyedDigest`). */
 export type StoredHashDigest = (plain: string) => Promise<string>;
 
@@ -842,7 +875,7 @@ export async function serveStoredMetadataHashColumns<T>(
     digest: StoredHashDigest | undefined,
 ): Promise<T> {
     if (!isStoredMetadataBodyObject(object) || !isPlainRecord(row)) return row;
-    if (!STORED_METADATA_HASH_COLUMNS.some((column) => column in row)) return row;
+    if (!STORED_METADATA_HASH_BEARING_COLUMNS.some((column) => column in row)) return row;
     const out: Record<string, unknown> = { ...row };
     for (const column of STORED_METADATA_HASH_COLUMNS) {
         if (!(column in out)) continue;
@@ -852,6 +885,8 @@ export async function serveStoredMetadataHashColumns<T>(
         if (served === undefined) delete out[column];
         else out[column] = served;
     }
+    const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+    if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = await serveStoredHashTokens(note, digest);
     return out as T;
 }
 
@@ -869,7 +904,7 @@ export async function serveStoredMetadataHashColumnRows<T>(
 function hashColumnOf(field: unknown): string | undefined {
     if (typeof field !== 'string') return undefined;
     const head = field.split('.')[0] as string;
-    return STORED_METADATA_HASH_COLUMNS.includes(head) ? head : undefined;
+    return STORED_METADATA_HASH_BEARING_COLUMNS.includes(head) ? head : undefined;
 }
 
 /** The columns a refusal on these tables points the caller at instead. */
@@ -877,7 +912,8 @@ const USABLE_COLUMNS = `'${STORED_TYPE_COLUMN}', 'name', 'state' or another scal
 
 /**
  * [#21207] The data door's refusal to EVALUATE a content-hash column of a
- * stored-metadata table — a grouping (whose keys would serve the stored
+ * stored-metadata table — or the history table's change note, which can quote
+ * one ({@link STORED_METADATA_HASH_BEARING_COLUMNS}) — a grouping (whose keys would serve the stored
  * values), a filter (an online verifier: a guessed hash matches exactly one
  * row) or a sort (an order over the same values) — or `undefined` when none is
  * named. Maintainer ruling A on #21207's second execution fork.
@@ -902,7 +938,9 @@ export function storedMetadataHashEvaluateRefusal(
                 : 'a sort on it orders by the stored values';
         const err: any = new Error(
             `Cannot ${doing} '${object}' by '${column}' (${position ?? param}): the query was not run. The `
-            + `'${column}' column holds the stored content hash of a metadata body, computed over withheld `
+            + `'${column}' column ${column === STORED_METADATA_HASH_NOTE_COLUMN
+                ? 'can quote the stored content hash of a metadata body'
+                : 'holds the stored content hash of a metadata body'}, computed over withheld `
             + `credential material too, so this door serves it only in keyed form; ${why}. `
             + `${doing === 'group' ? 'Group' : doing === 'filter' ? 'Filter' : 'Sort'} by ${USABLE_COLUMNS} instead.`,
         );
@@ -935,7 +973,7 @@ export function storedMetadataHashEvaluateRefusal(
 
 /**
  * [#21207] The columns of a stored-metadata table a `search` never scans: the
- * body column and the content-hash columns. A search is a substring filter
+ * body column, the content-hash columns and the change note that can quote one. A search is a substring filter
  * evaluated server-side over every scanned column, so over these columns it is
  * the same verifier a filter is — over the stored hash, and over the stored
  * body (a withheld credential rebuilt by prefix probing) — and the engine's
@@ -944,7 +982,7 @@ export function storedMetadataHashEvaluateRefusal(
  */
 export const STORED_METADATA_UNSEARCHABLE_COLUMNS: readonly string[] = Object.freeze([
     STORED_BODY_COLUMN,
-    ...STORED_METADATA_HASH_COLUMNS,
+    ...STORED_METADATA_HASH_BEARING_COLUMNS,
 ]);
 
 /**
@@ -965,7 +1003,9 @@ export function storedMetadataSearchRefusal(
         `Cannot search '${object}' in '${column}' (${param}): the query was not run. A search evaluates `
         + `every column it scans row by row, and the '${column}' column holds ${column === STORED_BODY_COLUMN
             ? 'a stored metadata body with credential material this door withholds'
-            : 'the stored content hash of a metadata body, which this door serves only in keyed form'}, so a `
+            : column === STORED_METADATA_HASH_NOTE_COLUMN
+                ? 'a change note that can quote a stored content hash, which this door serves only in keyed form'
+                : 'the stored content hash of a metadata body, which this door serves only in keyed form'}, so a `
         + `search over it would answer guesses about withheld values. Search ${USABLE_COLUMNS} instead.`,
     );
     err.code = 'INVALID_FIELD';

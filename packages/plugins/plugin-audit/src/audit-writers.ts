@@ -45,7 +45,11 @@ import {
 } from '@objectstack/spec/kernel';
 // [#21207] The same rows' stored content-hash columns — defined beside the
 // at-rest rewrite that withholds the copies already written.
-import { STORED_METADATA_HASH_COLUMNS } from './stored-metadata-body-migration.js';
+import {
+  STORED_METADATA_HASH_COLUMNS,
+  STORED_METADATA_HASH_NOTE_COLUMN,
+  withheldStoredHashTokens,
+} from './stored-metadata-body-migration.js';
 // [commit 1408fe385 / #10101] The platform-row organization resolver, imported rather
 // than owned. It started life in THIS file (commit 1408fe385, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
@@ -1432,6 +1436,9 @@ export function installAuditWriters(
     // has no use for a version token, and the history table stays the lineage.
     if (isStoredMetadataBodyObject(objectName)) {
       for (const column of STORED_METADATA_HASH_COLUMNS) delete out[column];
+      // …and a change note that quotes one keeps its words, not the hash.
+      const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+      if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = withheldStoredHashTokens(note);
     }
     if (dropComputed) {
       const defs = getFieldDefs(objectName);

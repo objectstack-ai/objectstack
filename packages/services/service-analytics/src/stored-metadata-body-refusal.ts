@@ -55,6 +55,13 @@ import { isStoredMetadataBodyObject, STORED_METADATA_BODY_COLUMN } from '@object
  * the object definitions.
  */
 export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
+
+/**
+ * [#21207] The history table's change note, which can QUOTE a stored content
+ * hash (`publish draft (hash …)` on rows written before the publish door stated
+ * its own message) — refused as a member for the same reason.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { NamedField, NamedRead } from './field-read-admission.js';
 
@@ -76,7 +83,7 @@ export function storedMetadataBodyAnalyticsRefusal(
     if ('expression' in f) continue;
     if (!isStoredMetadataBodyObject(f.object)) continue;
     const isBody = f.field === STORED_METADATA_BODY_COLUMN;
-    if (!isBody && !STORED_METADATA_HASH_COLUMNS.includes(f.field)) continue;
+    if (!isBody && !STORED_METADATA_HASH_COLUMNS.includes(f.field) && f.field !== STORED_METADATA_HASH_NOTE_COLUMN) continue;
     const param = f.role === 'aggregate' ? 'dimensions' : 'where';
     const err = new Error(
       isBody
@@ -86,7 +93,8 @@ export function storedMetadataBodyAnalyticsRefusal(
           + `stored body (a group key that cannot be projected, or a filter oracle that rebuilds a withheld value `
           + `by probing). Group, filter or sort by 'type', 'name' or another scalar column instead.`
         // [#21207] A stored content-hash column, in the same envelope.
-        : `Cannot query '${f.object}' by '${f.field}': the query was not run. The ${f.field} column holds the `
+        : `Cannot query '${f.object}' by '${f.field}': the query was not run. The ${f.field} column `
+          + `${f.field === STORED_METADATA_HASH_NOTE_COLUMN ? 'can quote' : 'holds'} the `
           + `stored content hash of a metadata body, computed over withheld credential material too, so every read `
           + `exit serves it only in keyed form; grouping, aggregating, filtering or sorting by it would evaluate the `
           + `stored hash (a group key that serves it, or a filter that confirms a guessed hash). Group, filter or `
