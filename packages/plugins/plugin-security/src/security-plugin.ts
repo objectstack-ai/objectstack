@@ -139,7 +139,7 @@ import {
   PermissionSetReadUnansweredError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
-import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
+import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import { createPlatformAdminService } from './platform-admin-service.js';
 import {
@@ -935,6 +935,27 @@ function writeCheckPolicies(
   );
 }
 
+/**
+ * "Has this boot's own seed data finished landing?", asked through the
+ * published `seed-settlement` contract rather than by sniffing the runtime's
+ * internal `seed-datasets` service — that array's presence says a seed source
+ * EXISTS, never whether it has SETTLED, and the gap between those two facts is
+ * the whole defect. `undefined` means no seed pipeline registered on this
+ * kernel, which by `kernel:ready` is a fact and not a not-yet (every source is
+ * declared in Phase 2 `start()`). Read per use, never cached.
+ */
+function readSeedSettlementSnapshot(ctx: PluginContext): SeedSettlementSnapshot | undefined {
+  try {
+    const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
+      | ISeedSettlementService
+      | undefined;
+    if (!svc || typeof svc.snapshot !== 'function') return undefined;
+    return svc.snapshot();
+  } catch {
+    return undefined;
+  }
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1068,6 +1089,20 @@ export class SecurityPlugin implements Plugin {
    */
   private metadata: any = null;
   private ql: any = null;
+  /**
+   * Who the seed-ownership claim hands rows to, as THIS boot's bootstrap
+   * answered it — the admin the last pass promoted, or the one it found
+   * already holding the unscoped grant. `undefined` until a bootstrap pass
+   * names one, and only ever overwritten with a real answer.
+   *
+   * Kept because the claim is not a single pass (see
+   * {@link claimSeedOwnershipOnSettle}). When a seed settles before any pass
+   * has named a target — an in-budget seed settles before `kernel:ready` —
+   * the claim asks `findExistingPlatformAdmin`, the same rule the bootstrap's
+   * `already_have_admin` guard runs, rather than growing a second copy of that
+   * scan here.
+   */
+  private claimTargetAdminUserId: string | undefined = undefined;
   /** [ADR-0090 D12] Delegated-admin write gate — wired in start() once `ql` exists. */
   private delegatedAdminGate: DelegatedAdminGate | null = null;
   /**
@@ -1309,9 +1344,102 @@ export class SecurityPlugin implements Plugin {
       });
     }
 
+    // The seed-ownership claim runs whenever a seed settles, on every boot —
+    // see {@link claimSeedOwnershipOnSettle}. Subscribed in `init()`, before ANY
+    // plugin's `start()`: an in-budget seed fires `app:seeded` from inside
+    // `AppPlugin.start()`, and the kernel orders starts by registration among
+    // plugins with no edge between them (ADR-0116), so a subscription made in
+    // this plugin's own `start()` misses that signal on every composition that
+    // registers the app first. Nothing here resolves a service: the handler
+    // reads the engine when it runs.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('app:seeded', (payload?: { appId?: string; overBudget?: boolean }) =>
+        this.claimSeedOwnershipOnSettle(ctx, payload),
+      );
+    }
+
     ctx.logger.info('Security Plugin initialized', {
       defaultPermissionSets: this.bootstrapPermissionSets.map((p) => p.name),
     });
+  }
+
+  /**
+   * The seed-ownership CLAIM, run on `app:seeded` — whenever a seed settles, on
+   * every boot, the first one and every later one.
+   *
+   * ## Why a settle signal, and not the promotion alone
+   *
+   * The claim used to run exactly once per database lifetime, inside the one
+   * pass that promotes the first admin — and that instant is not the moment the
+   * seed is done. `AppPlugin` races its inline seed against
+   * `OS_INLINE_SEED_BUDGET_MS` (default 8 s) and continues an over-budget bundle
+   * in the BACKGROUND rather than block kernel start, so for any non-trivial app
+   * the seeder is still writing while the claim walks the registry. Registry
+   * order and seed order are unrelated: every object whose rows land after its
+   * walk stayed `owner_id IS NULL` forever. Measured on a CRM bundle: 73 rows
+   * across six objects, the same loser set on two independent boots.
+   *
+   * ⛔ The fix is NOT to widen `shouldReplayBootstrapFor`. A replayed bootstrap
+   * short-circuits on `already_have_admin` and RETURNS before it ever reaches
+   * the claim, so a wider trigger re-runs a pass that cannot do the thing that
+   * was missed. What runs here is the claim itself.
+   *
+   * ## Why the target is resolved HERE when the bootstrap has not named it
+   *
+   * A later boot replays its seed into a database whose admin already exists,
+   * and an in-budget replay settles inside `AppPlugin.start()` — BEFORE
+   * `kernel:ready` runs the bootstrap that would name the target. Reading only
+   * {@link claimTargetAdminUserId} there returned with nobody to claim to, and
+   * the bootstrap that followed found the admin, promoted nobody and never
+   * reached the claim: every row that replay inserted stayed ownerless for good.
+   * So when no pass of this boot has named a target, this asks
+   * `findExistingPlatformAdmin` — the bootstrap's own `already_have_admin`
+   * rule, the same function, ⛔ never a second selection rule and never a
+   * second claim path. On a first boot nobody holds the grant yet, the answer is
+   * `undefined`, and the promotion that follows does its own claim.
+   *
+   * `app:seeded` fires once per app bundle, so the first fire is not
+   * necessarily the last; the runtime settles the source BEFORE it triggers, so
+   * this handler sees its own signal already reflected in the tally. The claim
+   * is idempotent (only NULL / `usr_system`-owned rows match) and every pass
+   * reports whether its own reading was final, so running on each fire costs a
+   * no-op walk and buys the guarantee.
+   *
+   * ⚠️ Scope: the predicates and the object filter are the promotion-time
+   * pass's own, unchanged. A row a human already owns is not matched by either
+   * predicate and cannot be touched here.
+   */
+  private async claimSeedOwnershipOnSettle(
+    ctx: PluginContext,
+    payload?: { appId?: string; overBudget?: boolean },
+  ): Promise<void> {
+    let ql: any;
+    try {
+      ql = ctx.getService<IObjectQLEngine>('objectql');
+    } catch {
+      return;
+    }
+    if (!ql) return;
+    try {
+      const adminUserId =
+        this.claimTargetAdminUserId ??
+        (await findExistingPlatformAdmin(ql, this.bootstrapPermissionSets));
+      if (!adminUserId) return;
+      await claimSeedOwnership(ql, adminUserId, {
+        logger: ctx.logger,
+        seedSettlement: readSeedSettlementSnapshot(ctx),
+      });
+    } catch (e) {
+      // Best-effort, exactly like the promotion-time call: a failed claim
+      // leaves the rows unowned and the next run claims them, because the
+      // predicate is still true of them. It must not break the boot — `trigger`
+      // dispatch PROPAGATES, and a seed that landed must not fail on this.
+      ctx.logger.warn('[security] seed-settle ownership claim failed', {
+        appId: payload?.appId,
+        overBudget: payload?.overBudget,
+        error: (e as Error).message,
+      });
+    }
   }
 
   async start(ctx: PluginContext): Promise<void> {
@@ -3993,37 +4121,7 @@ export class SecurityPlugin implements Plugin {
     // insert seed rows. Falls back to immediate execution when the
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
-    /**
-     * Who the seed-ownership claim hands rows to — the admin the last bootstrap
-     * pass promoted, or the one it found already holding the unscoped grant.
-     *
-     * Kept because the claim is not a single pass (see the `app:seeded` hook
-     * below). `bootstrapPlatformAdmin` is the ONE place that answers "who is the
-     * platform admin" from the grant rows — through a two-leg, ordered, bounded
-     * scan that took its own card to get right — so the re-run reads its answer
-     * rather than growing a second copy of that scan here.
-     */
-    let claimTargetAdminUserId: string | undefined;
-    /**
-     * "Has this boot's own seed data finished landing?", asked through the
-     * published `seed-settlement` contract rather than by sniffing the runtime's
-     * internal `seed-datasets` service — that array's presence says a seed
-     * source EXISTS, never whether it has SETTLED, and the gap between those two
-     * facts is the whole defect. `undefined` means no seed pipeline registered
-     * on this kernel, which by `kernel:ready` is a fact and not a not-yet (every
-     * source is declared in Phase 2 `start()`).
-     */
-    const readSeedSettlement = (): SeedSettlementSnapshot | undefined => {
-      try {
-        const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
-          | ISeedSettlementService
-          | undefined;
-        if (!svc || typeof svc.snapshot !== 'function') return undefined;
-        return svc.snapshot();
-      } catch {
-        return undefined;
-      }
-    };
+    const readSeedSettlement = (): SeedSettlementSnapshot | undefined => readSeedSettlementSnapshot(ctx);
     // [ADR-0094] Guard so the env-projection wiring runs exactly once even
     // though runBootstrap re-runs (e.g. after the first user insert) —
     // registerMutationProjector replaces idempotently, but the legacy
@@ -4193,11 +4291,11 @@ export class SecurityPlugin implements Plugin {
           // difference that decides whether that pass's claim is the last word.
           seedSettlement: readSeedSettlement(),
         });
-        // Remember the claim's target for the `app:seeded` re-run below. Only
-        // ever overwritten with a real answer: a later pass that returns none
-        // (walled posture, an unreadable engine) must not erase the admin an
-        // earlier pass resolved and leave the re-run with nobody to claim to.
-        if (report?.adminUserId) claimTargetAdminUserId = report.adminUserId;
+        // Remember the claim's target for the `app:seeded` re-run
+        // ({@link claimSeedOwnershipOnSettle}). Only ever overwritten with a
+        // real answer: a later pass that returns none (walled posture, an
+        // unreadable engine) must not erase the admin an earlier pass resolved.
+        if (report?.adminUserId) this.claimTargetAdminUserId = report.adminUserId;
         // Which organizations this boot seeds. Resolved ONCE per bootstrap run
         // and reused by all four catalog steps, so a sweep costs one
         // organization enumeration rather than four.
@@ -4484,59 +4582,10 @@ export class SecurityPlugin implements Plugin {
 
     // ── Re-run the seed-ownership CLAIM when the seed actually settles ────────
     //
-    // The claim used to run exactly once per database lifetime, inside the one
-    // pass that promotes the first admin — and that instant is not the moment
-    // the seed is done. `AppPlugin` races its inline seed against
-    // `OS_INLINE_SEED_BUDGET_MS` (default 8 s) and continues an over-budget
-    // bundle in the BACKGROUND rather than block kernel start, so for any
-    // non-trivial app the seeder is still writing while the claim walks the
-    // registry. Registry order and seed order are unrelated: every object whose
-    // rows land after its walk stayed `owner_id IS NULL` forever, because
-    // nothing re-ran the claim. Measured on a CRM bundle: 73 rows across six
-    // objects, the same loser set on two independent boots.
-    //
-    // ⛔ The fix is NOT to widen `shouldReplayBootstrapFor`. A replayed
-    // bootstrap short-circuits on `already_have_admin` and RETURNS before it
-    // ever reaches the claim, so a wider trigger re-runs a pass that cannot do
-    // the thing that was missed. What re-runs here is the claim itself.
-    //
-    // `app:seeded` is the published settle signal for exactly that background
-    // continuation — the runtime settles the source BEFORE it triggers, so a
-    // consumer inside this hook sees its own signal already reflected in the
-    // tally. It fires once per app bundle, so the first fire is not necessarily
-    // the last; the claim is idempotent (only NULL / `usr_system`-owned rows
-    // match) and every pass reports whether its own reading was final, so
-    // running on each fire costs a no-op walk and buys the guarantee.
-    //
-    // ⚠️ Scope: this moves ownership for exactly the rows the promotion-time
-    // pass missed — the predicates, the target admin and the object filter are
-    // the one-shot pass's own, unchanged. A row a human already owns is not
-    // matched by either predicate and cannot be touched here.
-    //
-    // No admin yet ⇒ nothing to do: an in-budget seed settles before any user
-    // exists, and the promotion that follows does its own claim against a seed
-    // that has already settled.
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('app:seeded', async (payload?: { appId?: string; overBudget?: boolean }) => {
-        const adminUserId = claimTargetAdminUserId;
-        if (!adminUserId) return;
-        try {
-          await claimSeedOwnership(ql, adminUserId, {
-            logger: ctx.logger,
-            seedSettlement: readSeedSettlement(),
-          });
-        } catch (e) {
-          // Best-effort, exactly like the promotion-time call: a failed claim
-          // leaves the rows unowned and the next run claims them, because the
-          // predicate is still true of them. It must not break the boot.
-          ctx.logger.warn('[security] seed-settle ownership claim failed', {
-            appId: payload?.appId,
-            overBudget: payload?.overBudget,
-            error: (e as Error).message,
-          });
-        }
-      });
-    }
+    // Subscribed in `init()`, not here — see {@link claimSeedOwnershipOnSettle}.
+    // `runBootstrap` above only NAMES the claim's target for it
+    // (`this.claimTargetAdminUserId`); a seed that settles before this boot's
+    // bootstrap has run resolves the target itself, by the same rule.
 
     // Re-run bootstrap after a sys_user write that can change the promotion
     // answer, so the platform admin is promoted without a server restart:
