@@ -83,8 +83,9 @@ describe('the declaration surface and the enforcement surface', () => {
         + 'so declaring ahead of the arms is the correct staging. To stage one: declare it in '
         + 'FieldOperatorsSchema, add it to the array THIS assertion compares against, and note on '
         + 'FILTER_OPERATORS which issue implements it. To clear one: implement it on EVERY face '
-        + 'in ONE PR — spec word list, driver-memory (query path, reference matcher, analytics '
-        + 'face), driver-mongodb, service-analytics (3 compilers), objectql `having`, formula — '
+        + 'in ONE PR — spec word list, driver-memory (query path, analytics face), driver-sql, '
+        + 'driver-turso (remote transport), driver-mongodb, service-analytics (3 compilers), '
+        + 'objectql `having`, formula — '
         + 'then empty this list. #6520 is the worked example of the clearing direction.',
     ).toEqual(STAGED_AHEAD_OF_BACKENDS);
   });
