@@ -23,7 +23,8 @@
  *     report still names the work `--apply` would do — so the identity is not
  *     the vacuous one of a walk that never read anything;
  *  2. the control: `--apply` still applies that work;
- *  3. (SQLite) a preview pointed at a file that does not exist creates no file.
+ *  3. (SQLite) a preview pointed at a file that does not exist creates no file,
+ *     and exits 1 with the refusal its changeset declared (#21391).
  *
  * ## The driver axis
  *
@@ -54,9 +55,13 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import MigrateMeta from './meta.js';
 import MigrateAuditMetadataBodies from './audit-metadata-bodies.js';
-import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { isExitSignal } from '../../utils/format.js';
+
+// [#10126] Pay the first transform of this dist-resolved workspace dep at
+// MODULE LOAD: the fixture's served boot reaches it through a dynamic
+// `import()` inside a clocked hook (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/runtime';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -236,16 +241,20 @@ async function createFixture(cell: DialectCell): Promise<Fixture> {
   // The deployment as a served boot left it: every table either command reads,
   // the artifact's seed written, then an operator's edit to the seeded row, a
   // legacy flow row, and an audit copy of a datasource body in cleartext.
-  const stack = await bootSchemaStack({
-    jsonOutput: false,
-    databaseUrl,
-    projectRoot: dir,
-    extraPlugins: await buildDataMigrationPlugins({ automation: true, audit: true }),
-  });
+  //
+  // [#21391] A SERVED boot, not `bootSchemaStack`: no one-shot boot runs the
+  // seed loader any more, so the funnel cannot stand in for `os dev` here.
+  const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
+  const served = await createStandaloneStack({ projectRoot: dir, databaseUrl });
+  const runtime = new Runtime({ cluster: false });
+  const kernel = runtime.getKernel();
+  for (const plugin of served.plugins) await kernel.use(plugin as any);
+  for (const plugin of await buildDataMigrationPlugins({ automation: true, audit: true })) await kernel.use(plugin as any);
+  await runtime.start();
   try {
-    const ql = stack.kernel.getService('objectql') as IObjectQLEngine;
+    const ql = kernel.getService('objectql') as IObjectQLEngine;
     const [acme] = await ql.find('rp_lead', { where: { name: 'Acme' } }, SYSTEM);
-    expect(acme?.status, 'the plain boot did not write the artifact seed — nothing to protect').toBe('open');
+    expect(acme?.status, 'the served boot did not write the artifact seed — nothing to protect').toBe('open');
     await ql.update('rp_lead', { id: acme.id, status: 'won' }, SYSTEM);
     await ql.insert('sys_metadata', {
       type: 'flow',
@@ -254,7 +263,7 @@ async function createFixture(cell: DialectCell): Promise<Fixture> {
       metadata: JSON.stringify(LEGACY_FLOW),
     }, SYSTEM);
   } finally {
-    await stack.shutdown();
+    await kernel.shutdown();
   }
   const raw = probe();
   try {
@@ -468,6 +477,32 @@ for (const cell of DIALECT_CELLS) {
         for (const path of [absent, `${absent}-wal`, `${absent}-shm`, `${absent}-journal`]) {
           expect(existsSync(path), `${path} was created by a preview`).toBe(false);
         }
+      }, cell.timeout);
+
+      // [#21391] The edge #21349's changeset declared BREAKING: a preview whose
+      // database lacks the table it reads used to create the table and answer
+      // "nothing to examine" with exit 0. It now refuses with exit 1 and names
+      // what it could not read. Both halves are asserted: the exit code a
+      // script reads, and the refusal the payload carries.
+      it('meta --stored without --apply on a database that does not exist exits 1 with the driver\'s refusal for sys_metadata', async () => {
+        const absent = join(fixture!.dir, 'data', 'never-started.db');
+        const { payload, exitCode } = await runJson(meta, ['--stored', '--database-url', `file:${absent}`]);
+
+        expect(exitCode).toBe(1);
+        expect(payload.code).toBe('DATABASE_ERROR');
+        expect(payload.error).toContain("'sys_metadata'");
+      }, cell.timeout);
+
+      it('audit-metadata-bodies without --apply on a database that does not exist exits 1 with both tables counted unread', async () => {
+        const absent = join(fixture!.dir, 'data', 'never-started.db');
+        const { payload, exitCode } = await runJson(auditBodies, ['--database-url', `file:${absent}`]);
+
+        expect(exitCode).toBe(1);
+        expect(payload.apply).toBe(false);
+        // `failures` counts the tables whose rows were NOT examined.
+        expect(payload.report.failures).toBe(2);
+        expect(payload.report.scanned).toBe(0);
+        expect(Object.keys(payload.report.byObject).sort()).toEqual(['sys_activity', 'sys_audit_log']);
       }, cell.timeout);
     }
   });

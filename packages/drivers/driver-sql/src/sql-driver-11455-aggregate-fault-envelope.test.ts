@@ -241,12 +241,19 @@ describe(`[#11455] driver-sql — aggregate() takes the backend-fault envelope (
   // THE LOG — a withholding, not a deletion
   // ───────────────────────────────────────────────────────────────
 
-  it('writes the full dialect text to the SERVER LOG, statement included', async () => {
+  it('writes the dialect diagnostic to the SERVER LOG, the statement cut', async () => {
     const { err, logged } = await withLog(driver, () => driver.aggregate(MISSING_TABLE, COUNT_ALL));
     expect(err.code).toBe('DATABASE_ERROR');
     const line = logged.find((l) => l.includes(MISSING_TABLE));
     expect(line, 'an operator must still be able to read what the backend said').toBeDefined();
-    expect(String(line)).toMatch(/\bselect\b/i);
+    // [#21385, maintainer ruling 2026-10-02] A redaction, not a deletion, and
+    // since this ruling a cut one: the dialect's diagnostic still reaches the
+    // log for an operator, the statement and its bound values do not (a server
+    // log leaves the data's trust boundary). The cut's marker says one stood
+    // there. The sentinel pins for this line live in
+    // `sql-driver-21385-refusal-log-line-redaction.test.ts`.
+    expect(String(line)).not.toMatch(/\bselect\b/i);
+    expect(String(line)).toContain('[statement and bound values redacted]');
     expect(String(line)).toContain('DATABASE_ERROR');
   });
 

@@ -83,7 +83,6 @@ const FULL_LIST_VIEW: AnyRec = {
     fields: [{ field: 'status' }],
     tabs: [{ name: 'open', filter: [{ field: 'status', operator: 'equals', value: 'open' }] }],
   },
-  tabs: [{ name: 'mine', filter: [{ field: 'business_unit', operator: 'equals', value: 'x' }] }],
   kanban: { groupByField: 'status', summarizeField: 'estimate', columns: ['title'], titleField: 'title' },
   calendar: {
     startDateField: 'due_at',
@@ -241,23 +240,22 @@ function positionAsserted(path: string, walked: ReadonlySet<string>): string | u
 }
 
 /**
- * [#18836] The rule's three hard-coded filter walks, spelled as
+ * [#18836] The rule's two hard-coded filter walks, spelled as
  * {@link casePath} normalises the paths they report at.
  *
  * They are open code, not table rows — `checkListView` calls `checkFilter` on
- * `listView.filter`, on `tabs[]` and on `userFilters.tabs[]` — so the position
+ * `listView.filter` and on `userFilters.tabs[]` — so the position
  * set derived from the rule cannot reach them, and the completeness assertion
  * below would let their rows be deleted in silence. That is precisely the hole
  * the floor this card replaced DID cover, by counting rows.
  *
  * So they are declared here and asserted EXACTLY: delete one of their rows and
- * the list comes up short; give a fourth hard-coded walk a row without adding
+ * the list comes up short; give a third hard-coded walk a row without adding
  * it here and the list comes up long. Together with the derived assertion, every
  * row in both tables is then accounted for by one criterion or the other.
  */
 const HARD_CODED_FILTER_WALKS = [
   'filter.field',
-  'tabs.filter.field',
   'userFilters.tabs.filter.field',
 ];
 
@@ -290,11 +288,6 @@ describe('#14107 — every other walked position', () => {
     [
       { userFilters: { tabs: [{ name: 'a', filter: [{ field: BAD, operator: 'equals', value: 1 }] }] } },
       'views[0].list.userFilters.tabs[0].filter[0].field',
-      'error',
-    ],
-    [
-      { tabs: [{ name: 'a', filter: [{ field: BAD, operator: 'equals', value: 1 }] }] },
-      'views[0].list.tabs[0].filter[0].field',
       'error',
     ],
     [{ kanban: { summarizeField: BAD } }, 'views[0].list.kanban.summarizeField', 'warning'],
@@ -426,15 +419,15 @@ describe('#14107 — every other walked position', () => {
   // filter walks — nothing else. A set, compared in both directions, which
   // holds three things the completeness assertion does not:
   //
-  //  - SHORT ⇒ RED. Delete a filter-walk row and the set loses a member. All
-  //    three rows measured, one by one. That is exactly the coverage the
+  //  - SHORT ⇒ RED. Delete a filter-walk row and the set loses a member. Every
+  //    row measured, one by one. That is exactly the coverage the
   //    row-counting floor had and the derived assertion cannot reach.
-  //  - LONG ⇒ RED, measured two ways. Remove one of the three declarations
+  //  - LONG ⇒ RED, measured two ways. Remove one of the declarations
   //    below and the rows outnumber them. Leave a row behind for a position the
   //    rule has DROPPED and it matches neither side, so it arrives here as an
   //    extra — red here as well as in that row's own per-case assertion, which
   //    is how this assertion ends up carrying the direction its sibling above
-  //    cannot. A fourth hard-coded walk given a row without being declared
+  //    cannot. A third hard-coded walk given a row without being declared
   //    below lands in the same place by the same comparison.
   it('accounts for every asserted path, as a walked position or a declared filter walk', () => {
     const walkedSet = new Set(listViewWalkedPositions());
@@ -707,11 +700,10 @@ describe('#14282 — a dotted key the FILTER door refuses, and the ones it serve
     expect(validateListViewFieldRefs(stackWith(mutate(filterOn('id.x'))))).toEqual([]);
   });
 
-  it('the tab and user-filter tab presets are judged on the same axis', () => {
+  it('the user-filter tab presets are judged on the same axis', () => {
     const findings = validateListViewFieldRefs(
       stackWith(
         mutate({
-          tabs: [{ name: 'mine', filter: [{ field: 'owner.name', operator: 'equals', value: 'x' }] }],
           userFilters: {
             fields: [{ field: 'status' }],
             tabs: [{ name: 'open', filter: [{ field: 'parent.title', operator: 'equals', value: 'x' }] }],
@@ -720,7 +712,6 @@ describe('#14282 — a dotted key the FILTER door refuses, and the ones it serve
       ),
     );
     expect(idsOf(findings).sort()).toEqual([
-      'views[0].list.tabs[0].filter[0].field',
       'views[0].list.userFilters.tabs[0].filter[0].field',
     ]);
     expect(findings.every((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toBe(true);

@@ -5075,6 +5075,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'nothing refuses at publish: the upgrade signal is behavioural and belongs here.',
   },
   {
+    id: 'agent-memory-store-retired-and-limits-required',
+    order: 61,
+    text:
+      'It also makes an agent\'s memory contract state exactly what the runtime honours (ADR-0049 '
+      + 'enforce-or-remove). The cloud AI runtime, which executes agents, recalls the newest '
+      + '`maxEntries` long-term notes before the first round, writes one every `reflectionInterval` '
+      + 'delivered interactions, and keeps them in its own database store; before an agent\'s first '
+      + 'turn it refused the `vector` store (the old default) and `redis`, an enabled `longTerm` '
+      + 'missing either number, and a `reflectionInterval` without one. So `longTerm.store` is '
+      + 'retired as a whole key — the memory store is platform infrastructure, not agent metadata — '
+      + 'and the D2 conversion `agent-memory-long-term-store-removed` deletes it, losslessly, retired '
+      + 'from the load path; and with long-term memory enabled both numbers are required at '
+      + 'authoring, with no default declared, so an upgrading author chooses them.',
+  },
+  {
     id: 'agent-structured-output-refused-members-retired',
     order: 60,
     text:
@@ -6570,6 +6585,50 @@ const step18: MigrationStep = {
         + 'tests green. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing '
         + 'ever read the container, so removing it removes no behaviour.',
     },
+    // #20274 — ADR-0049 enforce-or-remove (ruling record 5950198150, letter A′) —
+    // the D3 entry of the `agent.memory` contract: one entry for the one decision,
+    // because its two halves leave an upgrading author ONE job between them. The
+    // `store` half is mechanical (the D2 conversion
+    // `agent-memory-long-term-store-removed` deletes it, losslessly); the two
+    // required numbers are not — no default is declared, so only the author can
+    // choose them, which is the judgement this entry exists to carry.
+    {
+      id: 'agent-memory-store-retired-and-limits-required',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
+      surface:
+        'agent.memory — longTerm.store left the shape (the memory store is the platform\'s); '
+        + 'longTerm.maxEntries and reflectionInterval are required when longTerm.enabled is true, and '
+        + 'reflectionInterval is refused without an enabled longTerm; longTerm.enabled is unchanged',
+      replacement:
+        'no storage key: delete `longTerm.store`, whatever it held — where long-term memory notes are '
+        + 'kept is the platform\'s choice. An agent whose `longTerm.enabled` is true declares '
+        + '`longTerm.maxEntries` (how many distilled notes are kept for each user; the newest are recalled '
+        + 'before the first round and older ones evicted) and `memory.reflectionInterval` (how many '
+        + 'delivered interactions pass between the reflections that write a note). An agent without '
+        + 'enabled long-term memory declares no `reflectionInterval`',
+      reason:
+        'ADR-0049 enforce-or-remove: the `agent.memory` contract states exactly what the runtime honours. '
+        + 'The cloud AI runtime, the one runtime that executes agents, enforces long-term memory from '
+        + '`enabled`, `maxEntries` and `reflectionInterval`: it recalls the newest `maxEntries` notes '
+        + 'before the first round, writes one note every `reflectionInterval` delivered interactions, and '
+        + 'evicts notes beyond `maxEntries`. It keeps the notes in its own database store, and before an '
+        + 'agent\'s first turn it refused the `vector` store (the old default, so what an omitted `store` '
+        + 'parsed to), `redis`, an enabled `longTerm` missing either number, and a `reflectionInterval` '
+        + 'without an enabled `longTerm`. Authoring now refuses the same declarations, each with a '
+        + 'prescription. The D2 conversion `agent-memory-long-term-store-removed` deletes `store` from '
+        + 'existing sources and stored rows, losslessly: no value of it ever chose a backend. No default '
+        + 'is declared for either number, because none has a measured basis — so an agent with long-term '
+        + 'memory enabled and either number missing no longer parses, and only its author can choose the '
+        + 'numbers it needs',
+      acceptanceCriteria:
+        'No agent declares `memory.longTerm.store`, or a `backend`, `storage` or `provider` key under '
+        + '`longTerm`; each is refused at parse with its prescription, and TypeScript rejects `store`. '
+        + 'Every agent whose `longTerm.enabled` is true declares both `longTerm.maxEntries` and '
+        + '`memory.reflectionInterval`, each an integer of at least 1 chosen for that agent, and no agent '
+        + 'declares `reflectionInterval` without an enabled `longTerm`. Every agent parses under the new '
+        + 'schema.',
+      conversionIds: ['agent-memory-long-term-store-removed'],
+    },
     // #21277 — ADR-0049 enforce-or-remove (ruling record 5945617233, letter A) —
     // the D3 entry of the `agent-structured-output-refused-members-removed`
     // family: one entry for the four members, because they leave for one reason
@@ -6963,6 +7022,66 @@ const step18: MigrationStep = {
         + 'in-process, so a host that builds one parses it with `AnalyticsQuerySchema` first. A '
         + 'query that carried a refused value was never returning one window, so re-check what the '
         + 'widget was meant to show rather than trusting the old result set.',
+    },
+    // #21409 (ADR-0049 enforce-or-remove) — the row wildcard `'*'` is admitted only
+    // where a `count` consumes it: a cube measure under `type: 'count'` and a dataset
+    // measure under `aggregate: 'count'`. A cube dimension's `sql` takes the column
+    // path without the wildcard arm (the dataset dimension's pattern since
+    // `dataset-member-field-expression-refused`), and both measure slots ask one
+    // shared predicate. Semantic only, with no D2 conversion: such a member never
+    // produced an answer, and there is no lossless rewrite — `count` changes the
+    // figure the author asked for, and a column is the author's to name.
+    {
+      id: 'analytics-row-wildcard-outside-count-refused',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'analyticsCubes[].measures.<metric>.sql, analyticsCubes[].dimensions.<dimension>.sql and '
+        + 'datasets[].measures[].field (data.MetricSchema.sql / data.DimensionSchema.sql / '
+        + 'ui.DatasetMeasureSchema.field) authored as the row wildcard * where no count consumes it — a cube '
+        + 'measure whose type is anything but count, any cube dimension, and a dataset measure whose '
+        + 'aggregate is anything but count or that declares none (a derived measure)',
+      replacement:
+        'what the member meant. A row count: `type: \'count\'` on a cube measure or `aggregate: \'count\'` '
+        + 'on a dataset measure, keeping `\'*\'` (a dataset count may also omit `field`). An aggregate of '
+        + 'values: the column it aggregates — a field of the object (`amount`) or a relationship path '
+        + 'ending in one (`account.amount`). A cube dimension: the column it groups by; to count rows, '
+        + 'declare a `count` measure instead. A `derived` measure: delete the `field` key, which nothing '
+        + 'read — a derived measure combines other measures by name',
+      reason:
+        '`\'*\'` is the row wildcard a `count` aggregates (`COUNT(*)`): it reads no field value, so no '
+        + 'other aggregate has a column to read over it, and a dimension has no aggregate at all. The '
+        + 'contract nevertheless admitted it in a cube member\'s `sql` on any measure and on a dimension, '
+        + 'and in a dataset measure\'s `field` under any aggregate, and the analytics strategies passed it '
+        + 'to the database as written. Measured at POST /api/v1/analytics/dataset/query over a real '
+        + 'SQLite driver, on the native-SQL and the ObjectQL strategy alike: a dataset measure aggregating '
+        + '`\'*\'` under `sum`, `avg`, `min`, `max` or `count_distinct` answered 500 DATABASE_ERROR — a '
+        + 'server fault for an authoring mistake the contract had admitted. A dataset measure compiles to '
+        + 'the cube measure it names verbatim, so the same reading covers an authored cube measure; a '
+        + 'dimension over `\'*\'` (GROUP BY *) was measured the same way when the dataset dimension was '
+        + 'narrowed. Such a member never produced an answer, so no working document changes meaning: the '
+        + 'failure moves from the query to the authoring parse, which names the slot and the aggregate and '
+        + 'prescribes a `count` or a column. There is no D2 conversion: rewriting to `count` would change '
+        + 'the figure the author asked for, and only the author knows which column a sum over `\'*\'` was '
+        + 'meant to read. A STORED document is not rewritten: a metadata read still serves it as stored, '
+        + 'with the refusal on its read diagnostics, and a re-save through the metadata write door is '
+        + 'refused at the slot. The dataset query door parses every dataset it is handed, inline or saved, '
+        + 'so a stored dataset carrying such a measure is refused 400 VALIDATION_FAILED on EVERY query — '
+        + 'including a query that selects only its other measures, which used to answer: it fails closed '
+        + 'until the member is fixed. An authored cube reaches the analytics runtime through the stack '
+        + 'definition, whose parse refuses it when the stack is built. In-repo census before the change: no '
+        + 'example, platform object, doc, skill or fixture authored one, and neither did objectui at the '
+        + 'pinned commit; deployed metadata was NOT measured. ADR-0021 / ADR-0049 / ADR-0087',
+      acceptanceCriteria:
+        'Every analytics cube and dataset parses: `CubeSchema`, `DatasetSchema`, the analytics_cube and '
+        + 'dataset write doors, defineCube and defineStack refuse `\'*\'` on a cube measure whose `type` is '
+        + 'not `count` and on a dataset measure whose `aggregate` is not `count` (at its `sql` / `field`, '
+        + 'code custom), and on a cube dimension (at its `sql`, code invalid_format), each naming the slot '
+        + 'and prescribing a `count` or a column, so the sweep is mechanical — parse each document, and each '
+        + 'refusal is one member to change. For each changed member, a query that selects it returns a '
+        + 'figure instead of a 500, and a dashboard bound to a stored dataset that carried one answers '
+        + 'again on every widget. A `count` over `\'*\'`, a dataset count with no `field`, and every member '
+        + 'that names a column parse byte-identically to before and run on both strategies.',
     },
     {
       id: 'analytics-time-dimension-date-range-vocabulary-closed',
@@ -8937,12 +9056,16 @@ const step18: MigrationStep = {
         + '`id`, the number of measures and the authored `type`, when `dimensions` is absent or an empty '
         + 'array, `values` carries two or more measures, and `type` is `pie`, `donut`, `funnel`, '
         + '`scatter`, `radar`, `treemap` or `sankey`. The check is the exported '
-        + '`checkDashboardWidgetDimensionlessMeasureArity`, and the set it reads is the exported '
+        + '`checkDashboardWidgetChartMeasureArity` (exported as '
+        + '`checkDashboardWidgetDimensionlessMeasureArity` until '
+        + '`dashboard-widget-single-series-multi-measure-refused` gave it a second arm and renamed it), and '
+        + 'the set it reads is the exported '
         + '`DASHBOARD_WIDGET_MULTI_MEASURE_TYPES` — one list, which the check, the refusal text and the '
         + '`values` doc string all read. '
-        + 'WHAT IS NOT, so this is not read as complete: the same seven types WITH a dimension keep '
-        + 'accepting several measures exactly as before (whether that shape renders them all is a '
-        + 'separate question this entry does not answer); one measure parses on every type; every type in '
+        + 'WHAT IS NOT, so this is not read as complete: the same seven types WITH a dimension are '
+        + 'outside THIS entry — `scatter` and `radar` keep accepting several measures with a dimension, and '
+        + '`pie` / `donut` / `funnel` / `treemap` / `sankey` are refused with a dimension too, by '
+        + '`dashboard-widget-single-series-multi-measure-refused`; one measure parses on every type; every type in '
         + '`DASHBOARD_WIDGET_MULTI_MEASURE_TYPES` keeps accepting any number of measures with no '
         + 'dimension; the metric family (`metric` / `kpi` / `gauge` / `solid-gauge` / `bullet`, and a '
         + 'widget that declares no `type`, which resolves to `metric`) keeps its OWN refusal, unchanged '
@@ -9047,6 +9170,82 @@ const step18: MigrationStep = {
         + 'single-measure tiles and the same three numbers on screen — check the rendered grid '
         + 'afterwards, because the two new tiles are numbers the dashboard was ALREADY paying '
         + 'to compute and had never shown.',
+    },
+    {
+      id: 'dashboard-widget-single-series-multi-measure-refused',
+      surface: 'dashboard widget measure arity WITH a dimension on a single-series chart type — '
+        + '`dashboard.widgets[].values` (`DashboardWidgetSchema.values`) on a widget whose `dimensions` '
+        + 'declares one or more dimensions and whose `type` is `pie`, `donut`, `funnel`, `treemap` or '
+        + '`sankey`; and the check export `checkDashboardWidgetDimensionlessMeasureArity` (from '
+        + '`@objectstack/spec/ui`), renamed `checkDashboardWidgetChartMeasureArity`',
+      replacement: 'Keep ONE measure on the widget, or pick a visual that renders several. With a '
+        + 'dimension, `type: \'table\'` renders a column per measure and a bar-family type (`bar` / '
+        + '`column` / `horizontal-bar`) renders one bar per measure in each category; both keep the '
+        + 'unbounded `values` they have always had. Or keep the type and give each measure its OWN '
+        + 'widget: a new `id`, the same `dataset` and `dimensions`, that one measure in `values`, and its '
+        + 'own `layout` if the dashboard pins grid positions. ⛔ The migration does not do this for you '
+        + 'and no conversion could: whether a two-measure pie by stage meant a table, a grouped bar chart '
+        + 'or two pies is an authoring choice, and N widgets need N ids and N boxes on a 12-column grid, '
+        + 'which is a LAYOUT decision about a dashboard the registry has never seen. A mirror that '
+        + 'chained the old check export by name imports `checkDashboardWidgetChartMeasureArity` instead: '
+        + 'same signature, same attachment point, and it refuses everything the old name refused.',
+      reason:
+        'Triage\'s ruling on objectui\'s finding that a dimensioned pie draws only its first measure: '
+        + 'the spec refuses, the renderer does not invent. It extends '
+        + '`dashboard-widget-dimensionless-multi-measure-refused`, which applied maintainer ruling D '
+        + '(「协议不正确的应该先修改协议」) to a widget with NO dimension, to the dimensioned arm for '
+        + 'the five types that draw one series whatever the dimension. Measured in objectui\'s shared '
+        + 'chart renderer: the `pie` / `donut`, `funnel`, `treemap` and `sankey` arms each bind the '
+        + 'first series and read no other, so `{ type: \'pie\', dimensions: [\'stage\'], values: '
+        + '[\'revenue\', \'cost\'] }` drew one slice per stage for `revenue` and no trace of `cost` — the '
+        + 'dataset query selects and computes every measure, and all but the first are thrown away. '
+        + 'Every door accepted the document, because the dimensionless rule stepped aside for any '
+        + 'widget that declared a dimension. That is the declared≠delivered shape ADR-0049 exists to '
+        + 'end. A pie of several measures has zero measured pull, so no rendering is invented for it. '
+        + 'The census before the change found zero authored dimensioned multi-measure widgets of the five '
+        + 'types in the platform\'s examples, its first-party dashboards or objectui\'s example apps, so '
+        + 'this ships at once with no deprecation window. Relaxing later is free and needs no second '
+        + 'migration — a type whose renderer gains a declared rendering for several measures with a '
+        + 'dimension leaves the single-series set — while leaving the shape accepted costs an author a '
+        + 'widget that silently drops what they declared. The check export is renamed in the same change '
+        + 'because its old name said a widget with a dimension was outside it, which stopped being true; '
+        + 'no first-party consumer chained it under that name.',
+      acceptanceCriteria:
+        '⚠️ WHICH DOOR: the refusal is the spec\'s, attached at the same point as the dimensionless rule, '
+        + 'so it reaches every door that parses the spec schema — measured on `defineStack`, which throws '
+        + 'naming the widget, and on the stack schema, the dashboard schema and the `dashboard` '
+        + 'metadata-type schema, each refusing at `widgets[N].values`. It is NOT refused by objectui\'s '
+        + 'client-side authoring door until that door chains the export: `@object-ui/types` builds its '
+        + '`DashboardWidgetSchema` from a `.shape` spread of the spec\'s, which carries the FIELDS and '
+        + 'drops every object-level check, so its editor keeps accepting a dimensioned two-measure `pie` '
+        + 'and the author meets the refusal at publish. ⇒ Do not read a green editor as a clean '
+        + 'dashboard; re-parse through the spec. '
+        + '⚠️ AND THE TODO CANNOT NAME YOUR MEASURES: a `SemanticMigration` is static prose emitted once '
+        + 'per hop, with no per-document interpolation and no filtering by whether the stack carries the '
+        + 'shape, so `os migrate meta` prints THIS paragraph, not a list of your widgets. The refusal is '
+        + 'what names them, per widget, on the re-parse — drive the fix off `os validate`, not off the '
+        + 'migrate output. '
+        + 'WHAT IS REFUSED, exactly: ONE `custom` issue at `widgets[N].values`, naming the widget\'s '
+        + '`id`, the number of measures and the authored `type`, and saying the type draws one series '
+        + 'whatever its `dimensions`, when `dimensions` declares at least one dimension, `values` carries '
+        + 'two or more measures, and `type` is `pie`, `donut`, `funnel`, `treemap` or `sankey`. The check '
+        + 'is the exported `checkDashboardWidgetChartMeasureArity` — the dimensionless rule\'s own check, '
+        + 'with a second arm; the single-series set it reads is not exported, and the refusal prints it. '
+        + 'WHAT IS NOT, so this is not read as complete: `scatter` and `radar` WITH a dimension keep '
+        + 'accepting several measures exactly as before (the ruling named the five: `radar` draws every '
+        + 'series, and `scatter` says on the chart that it draws one); every type in '
+        + '`DASHBOARD_WIDGET_MULTI_MEASURE_TYPES` keeps accepting any number of measures with a dimension; '
+        + 'one measure parses on every type; a DIMENSIONLESS widget of the five keeps the dimensionless '
+        + 'refusal, word for word and still ONE issue; the metric family (`metric` / `kpi` / `gauge` / '
+        + '`solid-gauge` / `bullet`, and a widget that declares no `type`, which resolves to `metric`) '
+        + 'keeps its OWN refusal, unchanged; an EMPTY `values` keeps the field\'s own `too_small`; a '
+        + '`type` outside `ChartTypeSchema` reports the TYPE refusal alone, and called directly on a '
+        + 'wider type enum the export judges only the types the spec declares; and whether each measure '
+        + 'EXISTS in the bound dataset is still unreachable from this schema. '
+        + 'VERIFY by re-parsing each dashboard: a dashboard that had one two-measure `pie` by stage should '
+        + 'end with a `table` or bar-family widget carrying both measures, or with two widgets of one '
+        + 'measure each — check the rendered grid afterwards, because the second measure is a number the '
+        + 'dashboard was ALREADY paying to compute and had never shown.',
     },
     {
       id: 'dashboard-widget-stage-order-non-funnel-refused',
@@ -20262,6 +20461,31 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #20274 — ADR-0049 enforce-or-remove, ruling record 5950198150 (letter A′,
+    // maintainer 「同意」): the `agent.memory` contract states exactly what the
+    // runtime honours, and the memory store is platform infrastructure, not agent
+    // metadata. Retired as a WHOLE key, ⛔ not narrowed to a one-value enum: the
+    // cloud AI runtime keeps the notes in its own database store and refused the
+    // `vector` default and `redis` before an agent's first turn. Tombstoned with
+    // `retiredKey()` inside the live `longTerm` block; its old aliases (`backend` /
+    // `storage` / `provider`) became `guidance` entries carrying the same answer.
+    // D2 conversion `agent-memory-long-term-store-removed` (lossless delete,
+    // retired from the load path); D3 semantic entry
+    // `agent-memory-store-retired-and-limits-required`. Registered under 18 for the
+    // launch-window reason its neighbours state.
+    //
+    // ⚠️ The key was DEFAULTED (`'vector'`), so a released toolchain materialized
+    // it into every parsed agent that declared `longTerm`. The
+    // `acceptRetiredDefaultResidue` stage is deliberately NOT adopted: the producer
+    // census is zero (no agent outside `packages/spec` declares `longTerm`, measured
+    // in this repository; none of cloud's built-in agents does, per the cloud
+    // seat's reading), and the ruling names the tombstone's prescription as the
+    // backstop for the unmeasured tenant population. Stored rows and built
+    // artifacts are healed by the replayed D2 conversion; a pre-retirement compiled
+    // definition fed back through the authoring funnel meets the prescription.
+    //
+    // Nested key of an inline block — no `authorable-surface/` line of its own.
+    'ai/Agent:memory.longTerm.store',
     // #15680 (stack card 5/6 of #14478) — maintainer ruling 2026-09-02 ("ruled B"):
     // a duration-shaped `z.number()` key carries its unit in its NAME, and no
     // existing offender is grandfathered. `ConversationAnalytics.duration` said

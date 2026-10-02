@@ -400,7 +400,7 @@ for (const cell of DIALECT_CELLS) {
           expect(
             diagnostic,
             `${probe.family} changed its phrasing. Whatever entry in VALUE_BEARING_TEMPLATES `
-              + '(objectql/src/driver-fault-redaction.ts) was written against it no longer matches. '
+              + '(types/src/driver-fault-redaction.ts) was written against it no longer matches. '
               + `Server said: ${JSON.stringify(diagnostic)}`,
           ).toContain(probe.phrasing);
 
@@ -419,7 +419,7 @@ for (const cell of DIALECT_CELLS) {
               + (actual === 'message'
                 ? 'It now inlines a caller value into the diagnostic `ObjectLogger.write` SERIALIZES — '
                   + 'this is a new leak. Add the template to VALUE_BEARING_TEMPLATES in '
-                  + 'objectql/src/driver-fault-redaction.ts and cite this output as the warrant. '
+                  + 'types/src/driver-fault-redaction.ts and cite this output as the warrant. '
                 : 'The exposure changed shape; re-read the redactor before relaxing this. ')
               + `Server said: ${JSON.stringify(diagnostic)}`,
           ).toBe(probe.placement);
@@ -462,7 +462,7 @@ for (const cell of DIALECT_CELLS) {
             naive,
             `${probe.family}: the naive cut is expected to leave a SUFFIX of the caller's value standing — `
               + 'that residue is the exposure the redactor\'s head-anchored cut closes '
-              + '(objectql/src/driver-fault-redaction.ts, and its suite drives this exact string).',
+              + '(types/src/driver-fault-redaction.ts; objectql/src/driver-fault-redaction.test.ts drives this exact string).',
           ).toContain(SEPARATOR_CANARY_SUFFIX);
         });
       }

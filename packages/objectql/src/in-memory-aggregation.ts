@@ -88,6 +88,7 @@ import { bucketDateKey, compensatedSum } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
 import {
   aggregationFilterClause,
+  assertAggregationFilterReferencesAreDeclared,
   assertAggregationFilterSparesJsonStoredFields,
   declaredFieldClasses,
   declaredJsonStoredFields,
@@ -126,6 +127,18 @@ import {
  * and the caller still gets the refusal's code, status and prescription.
  * `engine.aggregate` has judged the filter already (and logged it) before it
  * calls this, so it passes none.
+ *
+ * [#21299] …and, before that, every `{ $field }` reference in each filter takes
+ * the reference rules `engine.aggregate` applies to the same position, through
+ * the same function (having-filter.ts `assertAggregationFilterReferencesAreDeclared`):
+ * the referent (and an `addDays` offset column) names a declared field, the
+ * spec's comparison-class verdict refuses a `cross-class` or a `no-class` pair,
+ * and an `addDays` pair follows its class rule — the cross-field rules `where`
+ * gets from `driver-sql`'s compiler. Before, a host calling this with a field
+ * map met none of them: a datetime against a date, a text against an image or
+ * a reference to a field the map does not declare was counted. Absent `fields`
+ * (every in-repo caller but the engine) ⇒ nothing is judged, as before. The
+ * withheld diagnostic names no object (this entry point is not told one).
  */
 export function applyInMemoryAggregation(
   rows: any[],
@@ -139,13 +152,16 @@ export function applyInMemoryAggregation(
   if (groupBy.length === 0 && aggregations.length === 0) return rows;
   // [#20176] Read once per call, and only when some aggregation carries a filter.
   const anyFilter = aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0);
-  // [#21007] The JSON-column rule, judged on each FILTER before any row is —
-  // the complete door, not the per-row backstop. See the docblock above.
+  // [#21299] The reference rules, then [#21007] the JSON-column rule — the
+  // order `engine.aggregate` takes them in — judged on each FILTER before any
+  // row is: the complete doors, not the per-row backstop. See the docblock above.
   if (fields && anyFilter) {
     const declared = { fields, reportWithheld: reportWithheld ?? (() => undefined) };
     for (const [index, agg] of aggregations.entries()) {
       if (!agg?.filter || Object.keys(agg.filter).length === 0) continue;
-      assertAggregationFilterSparesJsonStoredFields(agg.filter, aggregationFilterClause(index).root, declared);
+      const root = aggregationFilterClause(index).root;
+      assertAggregationFilterReferencesAreDeclared(agg.filter, root, declared);
+      assertAggregationFilterSparesJsonStoredFields(agg.filter, root, declared);
     }
   }
   const filterClasses = fields && anyFilter ? declaredFieldClasses(fields) : undefined;
