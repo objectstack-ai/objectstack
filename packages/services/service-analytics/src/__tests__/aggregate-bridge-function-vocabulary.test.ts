@@ -19,15 +19,25 @@
  *
  * ## Why this refusal is deliberately NOT in the ADR-0112 envelope
  *
- * The reachable producer of a non-aggregate method — a custom-SQL measure
- * (`AggregationMetricType` `number`/`string`/`boolean`) — is refused earlier
- * and caller-facing by `ObjectQLStrategy.resolveMeasureAggregation` (commit 017130a09,
- * `INVALID_FIELD` / 400). Anything still arriving at the bridge is host drift
- * (an unparsed cube object, our own drift), which `dataset-refusal.ts`'s module
- * header assigns to the bare-`Error`, undeclared-500 tier — the same tier it
- * assigns to `native-sql-strategy.ts`'s "measure … has unrecognised type". The
- * absence of a `code` is therefore asserted, not overlooked: enveloping this as
- * a 400 would tell the author to fix something they did not write.
+ * A non-aggregate method is host drift (an unparsed cube object, our own
+ * drift), which `dataset-refusal.ts`'s module header assigns to the
+ * bare-`Error`, undeclared-500 tier. The absence of a `code` is therefore
+ * asserted, not overlooked: enveloping this as a 400 would tell the author to
+ * fix something they did not write.
+ *
+ * ## [#21000] Two seams, one tier
+ *
+ * The custom-SQL metric types (`AggregationMetricType` `number` / `string` /
+ * `boolean`) used to be refused `INVALID_FIELD` / 400 by
+ * `ObjectQLStrategy.resolveMeasureAggregation` (commit 017130a09), and every
+ * OTHER non-aggregate type — `median`, a cube that never met the parse — was
+ * forwarded on to this bridge. The three were retired from the spec, and the
+ * resolver now answers every type no aggregate lowers itself
+ * (`aggregateOfMeasure`), in the same undeclared-500 tier, in the spec's words.
+ * So the cube path no longer reaches the bridge with one, and this file pins
+ * both seams: the cube path refused at the resolver, nothing reaching the
+ * engine; and the bridge itself, driven directly, still parsing whatever
+ * method arrives before the engine sees it.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -114,14 +124,40 @@ describe('[#11833] the aggregate auto-bridge speaks the engine contract vocabula
     expect(AggregationFunction.options).toContain(calls[0].aggregations?.[0].function);
   });
 
-  it('refuses a method outside the engine vocabulary instead of forwarding it', async () => {
+  it('a cube measure whose type names no aggregate is refused at the resolver, before the bridge', async () => {
     // Host drift: a cube object registered without meeting `CubeSchema`, so its
-    // `type` never faced the enum's parse. This is the arrival path the tiering
-    // note above describes.
+    // `type` never faced the enum's parse. Since #21000 the strategy's resolver
+    // refuses it — the same tier the bridge answers in, in the spec's words.
     const calls: EngineAggregateCall[] = [];
     const service = await analyticsVia(fakeEngine(calls, schema), cubeWithMeasureType('median'));
 
     const err = await service.query(selection as never).then(() => null, (e: Error) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.message).toContain('measure "revenue" on cube "sales" cannot be served: its type "median"');
+    for (const fn of AggregationFunction.options) expect(err?.message).toContain(fn);
+    // Undeclared-500 tier, deliberately: no ADR-0112 envelope on this family.
+    expect((err as Error & { code?: string }).code).toBeUndefined();
+    // The load-bearing half — the bad type never reached the engine.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('the bridge itself still refuses a method outside the engine vocabulary instead of forwarding it', async () => {
+    // Driven DIRECTLY: no cube path reaches the bridge with a non-aggregate
+    // method any more (the case above), so the seam is exercised as the
+    // strategy calls it — the service's strategy context's `executeAggregate`,
+    // which is the plugin's auto-bridge — with a method the engine does not
+    // declare.
+    const calls: EngineAggregateCall[] = [];
+    const service = await analyticsVia(fakeEngine(calls, schema), cubeWithMeasureType('sum'));
+    const bridge = (service as unknown as {
+      baseCtx: { executeAggregate: (object: string, options: unknown) => Promise<unknown> };
+    }).baseCtx.executeAggregate;
+
+    const err = await bridge('opportunity', {
+      groupBy: ['region'],
+      aggregations: [{ field: 'amount', method: 'median', alias: 'revenue' }],
+    }).then(() => null, (e: Error) => e);
 
     expect(err).toBeInstanceOf(Error);
     // The wording IS the contract here: it must name the offending method, the
