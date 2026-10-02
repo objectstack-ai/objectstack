@@ -3800,7 +3800,7 @@ const GridAggregationSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid` aggregation',
   history:
     'Until this shape was declared, `aggregations` was `z.unknown()`: an unknown function, a '
-    + 'missing `field` or a mis-spelled key passed, and the group header drew no number.',
+    + 'missing `field` or a mis-spelled key passed, and the group header drew a `0` nothing computed, or no number at all.',
 }, {
   field: z.string().describe('Field whose values the function aggregates within each group (ignored by `count`)'),
   type: AggregationFunction.describe('Aggregation function — `count` (the group\'s row count), `sum`, `avg`, `min`, `max` or `count_distinct`'),
@@ -4144,7 +4144,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `count_distinct`, the query AST's own {@link AggregationFunction}
    * vocabulary, by reference. `count` is the group's row count whatever
    * `field` names. An object, an unknown function or a missing `field` used to
-   * pass here and draw no number.
+   * pass here and draw a `0` nothing computed (client-side grouping) or no
+   * number at all (server-side grouping).
    */
   aggregations: z.array(GridAggregationSchema).optional()
     .describe('Per-group aggregations drawn in a grouped grid\'s group headers — `[{ field, type }]`, `type` one of `count`, `sum`, `avg`, `min`, `max`, `count_distinct` (`count` is the group\'s row count, whatever `field` names)'),

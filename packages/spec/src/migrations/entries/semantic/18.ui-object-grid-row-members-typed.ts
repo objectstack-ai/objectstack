@@ -30,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'answered an off-shape one with a silent default: an off-preset `rowHeight` such as `42` '
     + 'rendered as `compact`, a `rowColor` of the wrong shape coloured no row, a `navigation` written '
     + 'as a bare mode string opened the record page whatever it named, an aggregation with an '
-    + 'unknown function drew no number, and an `operations` '
+    + 'unknown function drew a zero nothing computed or no number at all, and an `operations` '
     + 'toggle nothing reads toggled nothing. The row now takes the list view\'s own schemas for the '
     + 'five members a list view declares, and the measured shape for `aggregations` and '
     + '`operations`, so one value is judged the same way on both doors. It is read where every page '

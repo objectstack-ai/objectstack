@@ -12,7 +12,7 @@ Clause-②: yes (narrowing)
 
 **`@objectstack/spec`**
 
-- **Seven members of `ComponentPropsMap['object-grid']` are typed.** Each was `z.unknown()` (`bulkActionDefs` an array of it), although the console's `ObjectGrid` reads each with one shape. Any value passed, and the grid answered an off-shape one with a silent default: `rowHeight: 42` rendered as a compact grid, and an aggregation with an unknown function drew no number. Each member now takes the shape the grid reads:
+- **Seven members of `ComponentPropsMap['object-grid']` are typed.** Each was `z.unknown()` (`bulkActionDefs` an array of it), although the console's `ObjectGrid` reads each with one shape. Any value passed, and the grid answered an off-shape one with a silent default: `rowHeight: 42` rendered as a compact grid, and an aggregation with an unknown function drew a zero nothing computed, or no number at all. Each member now takes the shape the grid reads:
   - `rowHeight` is the list view's `RowHeightSchema`: `compact`, `short`, `medium`, `tall` or `extra_tall`. These are exactly the five values the grid admits.
   - `rowColor` is the list view's `RowColorConfigSchema`, `{ field, colors }`.
   - `navigation` is the list view's `NavigationConfigSchema`, the same carrier `object-kanban`, `object-calendar` and `object-timeline` take.
