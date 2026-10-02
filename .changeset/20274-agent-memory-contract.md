@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/platform-objects': patch
 ---
 
 feat(spec)!: an agent's `memory` contract states exactly what the runtime honours — `maxEntries` and `reflectionInterval` are required once long-term memory is enabled, `longTerm.store` is retired, and the block is `live`, enforced by the cloud AI runtime (#20274)
@@ -78,6 +79,16 @@ Each refusal is a parse error at the key's own path, naming the key and the fix,
 - ⚠️ **The window, stated.** At `ef5a4344` the cloud reader still reads `store`: it
   honours `database` only and refuses `vector` and `redis`. Cloud drops `store` in
   that one reader once this release reaches its pin, and no earlier.
+
+### The agent form's help texts
+
+- The `memory` row's help text on the agent metadata form named short-term memory,
+  a key the schema refuses. It now states what memory does and that `maxEntries`
+  and `reflectionInterval` are required once long-term memory is enabled.
+- The neighbouring `planning` row named a strategy and a replan switch the schema
+  does not declare; it now states the one key it has, the iteration cap.
+- The `platform-objects` metadata-form catalogs follow: the English leaves are
+  regenerated, and the `zh-CN`, `ja-JP` and `es-ES` leaves are authored, not copied.
 
 ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is
 published, and tenant-authored agents were not measured. This repo authors no
