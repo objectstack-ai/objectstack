@@ -274,7 +274,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 778 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 773 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1665,7 +1665,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 778 isomorphic pins', () => {
+  it('still declares all 773 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2405,7 +2405,13 @@ describe('ADR-0122 type-alias convention', () => {
     // whose own input ≠ infer, so `ObjectMasterDetailFormPropsSchema` left the
     // isomorphic family for an `ObjectMasterDetailFormPropsParsed` alias, the
     // route the object-* family note above prescribes. -1 removed.
-    expect(pins).toHaveLength(778);
+    //
+    // 778 -> 773 is #21320: `automation/state-machine.zod.ts` was deleted whole
+    // when its last authorable door, `agent.lifecycle`, was tombstoned
+    // (ADR-0049). Its five pins (`ActionRefSchema`, `GuardRefSchema`,
+    // `StateMachineSchema`, `StateNodeSchema`, `TransitionSchema`) went with the
+    // module, and so did its `M42` import. -5 removed.
+    expect(pins).toHaveLength(773);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
