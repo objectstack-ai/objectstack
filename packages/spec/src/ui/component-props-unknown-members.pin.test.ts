@@ -116,10 +116,10 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  * would refuse a measured writer is reported, not shipped.
  */
 const STAGES = {
-  'object-metric': 'the metric tile\'s four config blocks; the dashboard widget schemas are the by-reference candidates',
+  'object-metric': 'the metric tile\'s four config blocks; the dashboard widget\'s `compareTo` and the chart\'s `aggregate` / `drillDown` are the by-reference candidates, and `trend` has no spec declaration, so it is typed to the renderer\'s read',
   'object-form': 'the form and master-detail form rows; `FormViewSchema` (`sections`, `submitBehavior`) is the by-reference candidate',
   'list-family': 'the grid, kanban and calendar list members; `ListViewSchema` (`columns`, `selection`, `rowActions`, `bulkActions`, `calendar`) is the by-reference candidate',
-  'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, `UIActionSchema`)',
+  'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, and `UIActionSchema`, an objectui interface that borrows some members from the spec `Action`); the spec declares each first, contract-first, then the row takes it',
   'held-for-decision': 'a by-reference shape exists, but measured writers author values it refuses — the narrowing waits for a ruling',
 } as const;
 type Stage = keyof typeof STAGES;
