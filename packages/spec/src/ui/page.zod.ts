@@ -899,9 +899,18 @@ export const PageSchema = lazySchema(() => strictObject({
    */
   source: z.string().optional()
     .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080 amendment 2026-06-30). Authoritative over `regions` in both."),
-  /** Plugin namespaces the JSX source references — inferred at compile, checked at save AND load (ADR-0048 provenance). */
+  /**
+   * Plugin namespaces an html page's source uses (ADR-0080 §5; ADR-0048
+   * provenance). Derived from the source at save, so authors omit it. On a
+   * server that has the deployment's SDUI component manifest, the save door
+   * compiles a `kind: 'html'` page's source, refuses a written list that
+   * disagrees with it (a draft at its publish), and stores the derived one;
+   * at load, a stored page whose list names a plugin no manifest component
+   * carries is reported and still served. A server with no manifest judges
+   * neither, and says so at boot.
+   */
   requires: z.array(z.string()).optional()
-    .describe('Plugin namespaces the JSX source references (validated at save and load)'),
+    .describe("Plugin namespaces the page's source uses, derived from the source at save — omit it. On a server that has the deployment's SDUI component manifest, saving a kind==='html' page (alias 'jsx') compiles its source and stores the namespaces it uses here; a written list that disagrees with the source is refused (422 INVALID_METADATA, page-requires-disagrees-with-source) — on a draft save it is kept until the draft's publish, which refuses it. At load, a stored page whose list names a plugin no component in that manifest carries is reported, page and plugin named, and is still served. A server with no manifest checks neither and says so once at boot."),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `page` is a registered metadata type, so `MetadataPlugin`'s loader stamps

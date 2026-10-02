@@ -7,8 +7,12 @@
       "note": "JSX-source page authoring (ADR-0080). Consumer: objectui PageRenderer compiles `source` via @object-ui/sdui-parser into the SchemaNode tree (parse, never execute) and renders it — components/src/renderers/layout/page.tsx (kind:'jsx' branch). Browser-verified in the Command Center showcase."
     },
     "requires": {
-      "status": "planned",
-      "note": "Plugin namespaces the JSX `source` references (ADR-0080). Inferred at compile time; save/load enforcement of plugin presence is deferred (M3b) — declared, not enforced yet."
+      "status": "live",
+      "verifiedAt": "2026-10-02",
+      "evidenceScope": "in-repo",
+      "evidence": "SAVE: packages/metadata-protocol/src/runtime-authoring-gate.ts#findHtmlPageSourceGaps reads the authored list of a kind 'html' page and refuses one that disagrees with the namespaces its compiled source uses — 422 INVALID_METADATA under page-requires-disagrees-with-source, on an active save and on a draft's publish; packages/metadata-protocol/src/runtime-authoring-gate.ts#stampHtmlPageRequires stores the compiled list on save, and packages/metadata-protocol/src/protocol.ts#promoteDraftForPublish applies it again to the body a draft promotion writes. LOAD: packages/metadata-protocol/src/protocol.ts#reportPageRequiresAbsentAtLoad, called from boot hydration (loadMetaFromDb), reports a stored page whose list names a namespace no component in the manifest carries (packages/metadata-protocol/src/runtime-authoring-gate.ts#findPageRequiresAbsentFromManifest), page and plugin named; the page still loads and is served",
+      "producer": "packages/cli/src/utils/sdui-manifest.ts#registerDeploymentSduiManifest — both moments compare the list against the deployment's SDUI component manifest, a second input: os serve (packages/cli/src/commands/serve.ts, which dev and start spawn) resolves it at boot and registers it under SDUI_MANIFEST_SERVICE, and packages/metadata-protocol/src/protocol.ts#resolveSduiManifest reads that key per publish and at load. A host that registers no manifest judges neither moment and prints one boot line saying so",
+      "note": "Plugin namespaces an html page's `source` uses (ADR-0080 §5), derived from the source at save. planned → live 2026-10-02 (#20871): refused at save since the save door landed (PR #20852, #20312 stages ① and ②), reported at load and re-stamped on draft promotion since #20870 (PR #21121). An authored list survives only when it agrees with the source; omitting it is the intended authoring. Boundaries: kind 'react' pages are not compiled at save (ADR-0081), so an authored list on one is judged only by the load report; a draft is stored as written and judged at its publish; rows already stored are reported, never rewritten."
     },
     "name": {
       "status": "live",
