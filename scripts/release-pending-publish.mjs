@@ -9,6 +9,8 @@
  *   node scripts/release-pending-publish.mjs select --event push --head SHA --before SHA
  *   node scripts/release-pending-publish.mjs select --event workflow_dispatch --head SHA
  *   node scripts/release-pending-publish.mjs npm-state VERSION
+ *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --version VERSION
+ *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --json
  *   node scripts/release-pending-publish.mjs sweep --workflow release.yml [--dry-run]
  *   node scripts/release-pending-publish.mjs --self-test
  *
@@ -60,6 +62,47 @@
  * commit has no parent, reads as "the version changed here", and would be
  * returned as the version commit -- a confident wrong answer.
  *
+ * `unconsumed` -- what the version commit ships WITHOUT a CHANGELOG entry
+ * (#21361). The Version Packages PR cannot be refreshed while it is queued,
+ * and the merge queue lands it on top of the current main. So the version
+ * commit's tree carries every landing since the PR's last refresh, and the PR
+ * deleted, and turned into CHANGELOG entries, only the changesets that existed
+ * at that refresh. The later ones stay in `.changeset/`: their code ships under
+ * the new version, and its CHANGELOG does not name them. Measured on every
+ * release since 17.3.0, with the version commit and what it left behind:
+ *
+ *   17.3.0  8a1bad8b8   4 changesets from  3 commits
+ *   17.4.0  7e6337007  13 changesets from 13 commits
+ *   17.5.0  8c87d26a5   8 changesets from  7 commits (two breaking)
+ *   17.6.0  617f25f8a   1 changeset  from  1 commit  (748b24072, #21270)
+ *   17.2.0  e7d2cc67f   none -- and 17.1.0 and 17.0.0 none either
+ *
+ * The answer: every pending changeset in the version commit's tree, each named
+ * with the commit that added it. "Pending" is what `changeset version` itself
+ * would read there: a top-level `.changeset/*.md` that `@changesets/read`
+ * (1.0.1, the version pnpm-lock resolves) does not skip, so not a dotfile and
+ * not README.md (any case), AGENTS.md, CLAUDE.md or GEMINI.md. Pre mode is
+ * read both ways it has been stored: today's `@changesets/cli` MOVES a
+ * consumed changeset into `.changeset/pre/`, which is not top-level; the 2.x
+ * shape the 17.0.0 release candidates carry KEPT it in place and listed its id
+ * in `.changeset/pre.json`'s `changesets`, and a listed id counts as consumed.
+ * A changeset `changeset version` skips on purpose -- every package it names
+ * in `ignore`, or private with `privatePackages.version: false` -- would be
+ * reported too; `.changeset/config.json` configures neither today.
+ *
+ * The commit that added it is `@changesets/git`'s own lookup, the newest
+ * `--diff-filter=A` commit for that path, with renames off so a rename counts
+ * as the add of the new path. The walk starts AT the version commit, so the
+ * commit it names is always the version commit or an ancestor of it: a
+ * changeset that landed after the version commit is in another tree and is
+ * never this release's. A SHALLOW clone is refused, as `select` refuses one:
+ * at the graft boundary every older changeset would read as added by the
+ * boundary commit -- a confident wrong commit, never an empty answer.
+ *
+ * The report never refuses a release: it is a `::warning::` and a job-summary
+ * section, and `release.yml` runs it in the push (or dispatch) that queues the
+ * publish, where the approver reads it. `--json` prints the measurement alone.
+ *
  * `npm-state` -- present / absent / unknown for one version, from `npm view`'s
  * exit status and its `E404`. The caller decides what `unknown` means: the
  * audit keeps its old reading (not on npm), the publish guard proceeds with a
@@ -103,7 +146,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
 export const CLI_MANIFEST = 'packages/cli/package.json';
@@ -227,6 +270,135 @@ export function select({ cwd, event, head, before, npmStateOf }) {
       ? rangeState({ cwd, versionCommit: found.versionCommit, before, head: found.head })
       : { state: 'not-a-push', detail: `event ${event} has no push range` };
   return { ...found, event, before: before || null, npm, range, ...decidePending({ event, range, npm }) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The changesets a version commit did not consume
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const CHANGESET_DIR = '.changeset';
+/** Where the 2.x pre mode listed the ids it had consumed but kept in place. */
+export const PRE_STATE = '.changeset/pre.json';
+
+/** The basenames `@changesets/read` 1.0.1 skips inside `.changeset/` (its `ignoredMdFiles`). */
+const CHANGESET_SKIPPED = Object.freeze([/^README\.md$/i, /^AGENTS\.md$/, /^CLAUDE\.md$/, /^GEMINI\.md$/]);
+
+/** Is this top-level `.changeset/` basename one `changeset version` reads as a changeset? */
+export function isChangesetFile(basename) {
+  return !basename.startsWith('.') && basename.endsWith('.md') && !CHANGESET_SKIPPED.some((p) => p.test(basename));
+}
+
+/**
+ * Every pending changeset in the version commit's tree, each with the commit
+ * that added it. Pending means `changeset version` would still read it, so the
+ * version commit did not consume it. Throws on a shallow clone, on a rev that
+ * is not a commit, and on a `pre.json` whose `changesets` is not a list of ids.
+ */
+export function unconsumedChangesets({ cwd, versionCommit }) {
+  if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
+    throw new Error(
+      'refusing to name the commits that added changesets in a shallow clone: at the graft boundary every older ' +
+        'changeset reads as added by the boundary commit. Check out with fetch-depth: 0.',
+    );
+  }
+  const sha = gitOk(cwd, ['rev-parse', '--verify', `${versionCommit}^{commit}`]).trim();
+  // `--full-tree`: paths from the repository root whatever the cwd. A tree
+  // with no `.changeset/` lists nothing, which is the answer "none pending".
+  const blobs = gitOk(cwd, ['ls-tree', '-z', '--full-tree', sha, '--', `${CHANGESET_DIR}/`])
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => {
+      const tab = entry.indexOf('\t');
+      return { type: entry.slice(0, tab).split(' ')[1], path: entry.slice(tab + 1) };
+    })
+    .filter((e) => e.type === 'blob');
+
+  let recorded = new Set();
+  if (blobs.some((e) => e.path === PRE_STATE)) {
+    const text = gitOk(cwd, ['show', `${sha}:${PRE_STATE}`]);
+    let state;
+    try {
+      state = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`${PRE_STATE} at ${sha} is not JSON (${err instanceof Error ? err.message : err})`);
+    }
+    if (state && state.changesets !== undefined) {
+      if (!Array.isArray(state.changesets) || !state.changesets.every((id) => typeof id === 'string')) {
+        throw new Error(`${PRE_STATE} at ${sha} carries a "changesets" that is not a list of changeset ids`);
+      }
+      recorded = new Set(state.changesets);
+    }
+  }
+
+  const pending = blobs.filter((e) => isChangesetFile(e.path.slice(CHANGESET_DIR.length + 1)));
+  const unconsumed = [];
+  let recordedInPreState = 0;
+  for (const { path } of pending) {
+    if (recorded.has(path.slice(CHANGESET_DIR.length + 1, -'.md'.length))) {
+      recordedInPreState += 1;
+      continue;
+    }
+    const added = gitOk(cwd, ['log', '--no-renames', '--diff-filter=A', '--max-count=1', '--format=%H %s', sha, '--', path]).trim();
+    const space = added.indexOf(' ');
+    unconsumed.push(
+      added === ''
+        ? { path, commit: null, subject: null }
+        : { path, commit: space === -1 ? added : added.slice(0, space), subject: space === -1 ? '' : added.slice(space + 1) },
+    );
+  }
+  return {
+    versionCommit: sha,
+    pending: pending.length,
+    recordedInPreState,
+    unconsumed,
+    commits: new Set(unconsumed.map((c) => c.commit ?? `unknown:${c.path}`)).size,
+  };
+}
+
+/** A workflow command's message: `%`, CR and LF are the three characters the runner unescapes. */
+function commandData(text) {
+  return String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+/**
+ * The report over a measurement -- pure, so its every line is pinned. `log` is
+ * printed to the step's log (the first line the `::warning::` when there is a
+ * finding), `summary` is appended to the job summary.
+ */
+export function describeUnconsumed({ version, report }) {
+  const short = report.versionCommit.slice(0, 10);
+  if (report.unconsumed.length === 0) {
+    const kept =
+      report.recordedInPreState > 0 ? ` (${report.recordedInPreState} kept in place and recorded as consumed in ${PRE_STATE})` : '';
+    const line = (sha) =>
+      `Changesets: the version commit ${sha} consumed every changeset in its tree${kept}, so ${version}'s CHANGELOG leaves out no landed change.`;
+    return { log: [line(short)], summary: ['', line(`\`${short}\``)] };
+  }
+  const n = report.unconsumed.length;
+  const by = (c) => (c.commit ? c.commit.slice(0, 10) : 'commit not found');
+  const warning =
+    `::warning::${n} changeset(s) from ${report.commits} commit(s) are still in the tree of the version commit ${short}, ` +
+    `which did not consume them: their code ships in ${version}, and the CHANGELOG.md files ${version} publishes do not ` +
+    `name them. The next Version Packages PR lists them under the next version. Name them in the ${version} release ` +
+    `notes. ${report.unconsumed.map((c) => `${c.path} (${by(c)})`).join(', ')}`;
+  return {
+    log: [
+      commandData(warning),
+      ...report.unconsumed.map((c) => `  ${c.path}  added by ${c.commit ? `${c.commit.slice(0, 10)} ${c.subject}` : 'a commit this history does not show'}`),
+    ],
+    summary: [
+      '',
+      `### ${n} changeset(s) ship in ${version} without a CHANGELOG entry`,
+      '',
+      `The version commit \`${short}\` still carries these in its tree: it did not consume them, so the`,
+      `\`CHANGELOG.md\` files ${version} publishes do not name them, while their code is in this release.`,
+      `The next Version Packages PR lists them under the next version. Name them in the ${version} release notes.`,
+      '',
+      ...report.unconsumed.map((c) =>
+        c.commit ? `- \`${c.path}\`, added by \`${c.commit.slice(0, 10)}\`: ${c.subject}` : `- \`${c.path}\`, added by a commit this history does not show`,
+      ),
+    ],
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -578,8 +750,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the version-commit list -> newest first, each with the commits its push can end on': 4,
   'the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged': 13,
   'an event with no release predicate -> refused': 1,
+  'a Version Packages PR landing behind main -> each changeset it did not consume, with the commit that added it': 4,
+  'a version commit that consumed every changeset -> none (the control)': 2,
+  'only what changeset version reads is a changeset -> README, AGENTS, dotfiles, pre/ and non-.md files are not': 2,
+  'a 2.x pre.json -> the ids it lists are consumed, the rest are not, and a malformed list is refused': 2,
+  'the commit that added it -> the newest add, a rename included, never a landing after the version commit': 3,
+  'a shallow clone or an unresolvable version commit -> refused, never a boundary commit or an empty answer': 2,
+  'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 async function selfTest() {
   let failed = 0;
@@ -739,6 +918,118 @@ async function selfTest() {
       'the commits after it stop at the walk cap',
     );
     check(throws(() => versionCommitsOf({ cwd: shallowDir }).next(), /shallow clone/), 'a shallow clone is refused here too');
+
+    // ── the changesets a version commit did not consume ──────────────────
+    // The 17.6.0 sequence, reduced: the Version Packages PR is refreshed on a
+    // base carrying two changesets, main takes two more landings while it is
+    // queued, and the queue lands it as a squash on top of them.
+    const c = fixture();
+    const put = (path, text = `---\n'${CLI_PACKAGE}': patch\n---\n\n${path}\n`) => {
+      mkdirSync(dirname(join(c.dir, path)), { recursive: true });
+      writeFileSync(join(c.dir, path), text);
+    };
+    const unconsumedAt = (rev) => unconsumedChangesets({ cwd: c.dir, versionCommit: rev });
+    const paths = (report) => report.unconsumed.map((u) => u.path).join();
+    c.writeCli('1.0.0');
+    put('.changeset/README.md', 'what a changeset is\n');
+    put('.changeset/config.json', '{}\n');
+    put('.changeset/one.md');
+    put('.changeset/two.md');
+    c.commit('base: two changesets pending');
+    c.g('checkout', '-q', '-b', 'version-pr');
+    c.g('rm', '-q', '.changeset/one.md', '.changeset/two.md');
+    c.writeCli('1.1.0');
+    const refreshed = c.commit('chore: version packages (as last refreshed)');
+    c.g('checkout', '-q', 'main');
+    put('.changeset/three.md');
+    const late1 = c.commit('a landing after the refresh');
+    put('.changeset/four.md');
+    put('.changeset/five.md');
+    const late2 = c.commit('a landing carrying two changesets');
+    c.g('merge', '-q', '--squash', 'version-pr');
+    const landed = c.commit('chore: version packages (landed by the queue)');
+
+    battery('a Version Packages PR landing behind main -> each changeset it did not consume, with the commit that added it');
+    const behind = unconsumedAt('main');
+    check(
+      findVersionCommit({ cwd: c.dir, head: 'main' }).versionCommit === landed && behind.versionCommit === landed,
+      'the queue-landed squash is the version commit select names, and the report reads that commit',
+    );
+    check(
+      paths(behind) === '.changeset/five.md,.changeset/four.md,.changeset/three.md',
+      'it names exactly the three changesets that landed after the refresh, and neither one it consumed',
+    );
+    check(
+      behind.unconsumed.map((u) => u.commit).join() === [late2, late2, late1].join() &&
+        behind.unconsumed[2].subject === 'a landing after the refresh',
+      'each with the commit that added it, and that commit\'s subject -- two of them from one commit',
+    );
+    check(behind.pending === 3 && behind.commits === 2, 'counted as 3 changesets from 2 commits');
+
+    battery('a version commit that consumed every changeset -> none (the control)');
+    const control = unconsumedAt(refreshed);
+    check(control.unconsumed.length === 0, 'the Version Packages PR landed with nothing behind it names no changeset');
+    check(control.pending === 0 && control.recordedInPreState === 0, 'and its README.md and config.json are not counted as pending');
+
+    battery('only what changeset version reads is a changeset -> README, AGENTS, dotfiles, pre/ and non-.md files are not');
+    c.g('checkout', '-q', '-b', 'odd-names', refreshed);
+    for (const p of ['readme.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.draft.md', 'pre/moved.md', 'nested/deep.md', 'notes.txt', 'real.md']) {
+      put(`.changeset/${p}`);
+    }
+    const odd = unconsumedAt(c.commit('odd names under .changeset/'));
+    check(odd.pending === 1 && paths(odd) === '.changeset/real.md', 'of nine files under .changeset/, only real.md is pending');
+    check(
+      ['README.md', 'Readme.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.x.md', 'x.mdx', 'x.json'].every((b) => !isChangesetFile(b)) &&
+        isChangesetFile('x.md') && isChangesetFile('agents.md'),
+      "the filter is @changesets/read's: README any case, the three agent files exactly, dotfiles and non-.md out",
+    );
+
+    battery('a 2.x pre.json -> the ids it lists are consumed, the rest are not, and a malformed list is refused');
+    c.g('checkout', '-q', '-b', 'pre-mode', refreshed);
+    put(PRE_STATE, `${JSON.stringify({ mode: 'pre', tag: 'rc', initialVersions: {}, changesets: ['kept'] })}\n`);
+    put('.changeset/kept.md');
+    put('.changeset/fresh.md');
+    const pre = unconsumedAt(c.commit('rc: one changeset consumed in place, one not'));
+    check(
+      pre.pending === 2 && pre.recordedInPreState === 1 && paths(pre) === '.changeset/fresh.md',
+      'kept.md, listed in pre.json, is consumed; fresh.md is not',
+    );
+    put(PRE_STATE, `${JSON.stringify({ mode: 'pre', tag: 'rc', changesets: 'kept' })}\n`);
+    const malformed = c.commit('rc: a pre.json whose changesets is not a list');
+    check(throws(() => unconsumedAt(malformed), /not a list of changeset ids/), 'a "changesets" that is not a list of ids is refused, not read as empty');
+
+    battery('the commit that added it -> the newest add, a rename included, never a landing after the version commit');
+    c.g('checkout', '-q', '-b', 'history', refreshed);
+    put('.changeset/again.md');
+    c.commit('again.md, first add');
+    c.g('rm', '-q', '.changeset/again.md');
+    c.commit('again.md, removed');
+    put('.changeset/again.md');
+    const readded = c.commit('again.md, added again');
+    put('.changeset/old-name.md');
+    c.commit('old-name.md added');
+    c.g('mv', '.changeset/old-name.md', '.changeset/new-name.md');
+    const renamed = c.commit('old-name.md renamed to new-name.md');
+    const history = unconsumedAt(renamed);
+    check(history.unconsumed.find((u) => u.path === '.changeset/again.md')?.commit === readded, 'a changeset removed and added again -> the commit that added it last');
+    check(history.unconsumed.find((u) => u.path === '.changeset/new-name.md')?.commit === renamed, 'a renamed changeset -> the commit that put it at its current path');
+    c.g('checkout', '-q', 'main');
+    put('.changeset/six.md');
+    const after = c.commit('a landing after the version commit');
+    check(
+      paths(unconsumedAt(landed)) === paths(behind) && unconsumedAt(after).unconsumed.some((u) => u.path === '.changeset/six.md' && u.commit === after),
+      "a changeset that lands after the version commit is not that release's -- the next tree's",
+    );
+
+    battery('a shallow clone or an unresolvable version commit -> refused, never a boundary commit or an empty answer');
+    const shallowChangesets = mkdtempSync(join(tmpdir(), 'release-pending-publish-shallow-'));
+    dirs.push(shallowChangesets);
+    gitOk(tmpdir(), ['clone', '-q', '--depth', '1', `file://${c.dir}`, shallowChangesets]);
+    check(
+      throws(() => unconsumedChangesets({ cwd: shallowChangesets, versionCommit: 'HEAD' }), /shallow clone/),
+      'a depth-1 clone -- where every changeset would read as added by its one commit -- is refused',
+    );
+    check(throws(() => unconsumedAt('f'.repeat(40)), /exited/), 'a version commit the clone does not have is refused');
   } finally {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
@@ -946,6 +1237,51 @@ async function selfTest() {
     'schedule is the bookkeeping lane and has no publish predicate at all',
   );
 
+  battery('the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none');
+  // The 17.6.0 instance, as the measurement answered it on the real history.
+  const v176 = {
+    versionCommit: '617f25f8a4c4d7e23ceb63f2bbb8c1e5cd22ad2e',
+    pending: 1,
+    recordedInPreState: 0,
+    unconsumed: [
+      {
+        path: '.changeset/21110-scheduled-work-host-reason.md',
+        commit: '748b2407235a6a32d2cd7f61f36e1f69f95d775e',
+        subject: "feat(types,automation): a host's per-kernel scheduled-work OFF reports its own reason (#21270)",
+      },
+    ],
+    commits: 1,
+  };
+  const told = describeUnconsumed({ version: '17.6.0', report: v176 });
+  check(
+    told.log[0].startsWith('::warning::1 changeset(s) from 1 commit(s) are still in the tree of the version commit 617f25f8a4,') &&
+      told.log[0].endsWith('.changeset/21110-scheduled-work-host-reason.md (748b240723)') &&
+      /their code ships in 17\.6\.0/.test(told.log[0]),
+    'one warning line names the version commit, the release, and each changeset with the commit that added it',
+  );
+  check(
+    told.summary.includes('### 1 changeset(s) ship in 17.6.0 without a CHANGELOG entry') &&
+      told.summary.includes(
+        "- `.changeset/21110-scheduled-work-host-reason.md`, added by `748b240723`: feat(types,automation): a host's per-kernel scheduled-work OFF reports its own reason (#21270)",
+      ),
+    'the job summary gets a section headed by the count, one line per changeset with its commit and subject',
+  );
+  const escaped = describeUnconsumed({
+    version: '1.1.0',
+    report: { ...v176, unconsumed: [{ path: '.changeset/100%-done.md', commit: null, subject: null }] },
+  });
+  check(
+    !escaped.log[0].includes('\n') && escaped.log[0].includes('.changeset/100%25-done.md (commit not found)') &&
+      escaped.summary.includes('- `.changeset/100%-done.md`, added by a commit this history does not show'),
+    "the warning escapes what the runner unescapes (a '%'), and a changeset with no add commit is still named",
+  );
+  const none = describeUnconsumed({ version: '17.2.0', report: { ...v176, unconsumed: [], commits: 0, recordedInPreState: 3, pending: 3 } });
+  check(
+    none.log.length === 1 && !none.log[0].includes('::') && none.log[0].includes('617f25f8a4') &&
+      /consumed every changeset/.test(none.log[0]) && /3 kept in place and recorded as consumed in \.changeset\/pre\.json/.test(none.log[0]),
+    'nothing unconsumed -> one plain line, no annotation, still naming the version commit it read',
+  );
+
   // ── the floor: every declared battery ran, at or above its pin ─────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = (message) => {
@@ -1018,11 +1354,27 @@ async function main(argv) {
     process.stdout.write(`${npmState(rest[0])}\n`);
     return;
   }
+  if (mode === 'unconsumed') {
+    const versionCommit = flag(rest, '--version-commit');
+    if (!versionCommit) throw new Error('unconsumed needs --version-commit');
+    const json = rest.includes('--json');
+    const version = flag(rest, '--version');
+    if (!json && !version) throw new Error('unconsumed needs --version for its report (or --json for the measurement alone)');
+    const report = unconsumedChangesets({ cwd: process.cwd(), versionCommit });
+    if (json) {
+      process.stdout.write(`${JSON.stringify(report)}\n`);
+      return;
+    }
+    const { log, summary } = describeUnconsumed({ version, report });
+    console.log(log.join('\n'));
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+    return;
+  }
   if (mode === 'sweep') {
     await sweep({ workflow: flag(rest, '--workflow') || 'release.yml', dryRun: rest.includes('--dry-run') });
     return;
   }
-  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, sweep or --self-test`);
+  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, sweep or --self-test`);
 }
 
 if (isEntrypoint(import.meta.url)) {

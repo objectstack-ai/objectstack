@@ -19,13 +19,18 @@
  * - `passes` / `deferred`: the driver read ran and received the filter as
  *   written.
  *
- * ## One partition, measured rather than dropped
+ * ## Two partitions, measured rather than dropped
  *
  * - **`formula`** — refused one door EARLIER, by the #8296 materializable door,
  *   with `INVALID_FIELD`, whatever its return type: no driver materialises a
  *   formula column. Pinned in the direction it answers (the contract's module
  *   header says the suite partitions these rows out), and the door's own walk
  *   is pinned to judge the class correctly for the day that neighbour opens.
+ * - **[#21333] a declared `boolean` / `toggle` field** — the census's `$gt "abc"`
+ *   there passes the NUMBER verdict (not this door's subject) and is refused by
+ *   the same walk's BOOLEAN arm, in that arm's words. Pinned in the direction
+ *   it answers; the arm's own suite is
+ *   `engine-boolean-comparand-declared-type-door.test.ts`.
  *
  * [#20446] The `$empty` row used to be a second partition, pinned at the door
  * alone while `$empty` was staged out of `FILTER_OPERATORS`. It is in that
@@ -44,6 +49,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
+  booleanComparandDoorVerdict,
   NON_NUMERIC_STRING_FORMS,
   NON_NUMERIC_VALUE_FORMS,
   NUMBER_COMPARAND_DOOR_CASES,
@@ -125,7 +131,18 @@ const refusalOf = async (p: Promise<unknown>): Promise<Thrown> =>
 const isFormulaCase = (c: NumberComparandDoorCase): boolean => c.declaredType === 'formula';
 /** The `$empty` row — driven end to end since #20446, see the header. */
 const isEmptyFlagCase = (c: NumberComparandDoorCase): boolean => c.position.endsWith('.$empty');
-const engineDriven = (c: NumberComparandDoorCase): boolean => !isFormulaCase(c);
+/**
+ * [#21333] A row the NUMBER verdict passes on a declared BOOLEAN field (the
+ * census's `$gt "abc"` on `f_boolean` / `f_toggle`) that the walk's boolean arm
+ * refuses: the same walk judges both arms, so at the engine it is the boolean
+ * arm's refusal — pinned below, and driven in full by
+ * `engine-boolean-comparand-declared-type-door.test.ts`.
+ */
+const isBooleanArmCase = (c: NumberComparandDoorCase): boolean =>
+  !isFormulaCase(c)
+  && !/\.\$(null|exists|empty)$/.test(c.position)
+  && booleanComparandDoorVerdict({ type: c.declaredType }, c.comparand).verdict === 'door-refusal';
+const engineDriven = (c: NumberComparandDoorCase): boolean => !isFormulaCase(c) && !isBooleanArmCase(c);
 
 const SEEDED = [
   { id: 'r1', f_number: 5 },
@@ -160,10 +177,11 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
   const PASSES = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.verdict === 'passes' && engineDriven(c));
   const DEFERRED = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.verdict === 'deferred' && engineDriven(c));
   const FORMULA = NUMBER_COMPARAND_DOOR_CASES.filter(isFormulaCase);
+  const BOOLEAN_ARM = NUMBER_COMPARAND_DOOR_CASES.filter(isBooleanArmCase);
 
   it('GUARD the case table is partitioned exactly, and every partition that carries a verdict is non-empty', () => {
     expect(NUMBER_COMPARAND_DOOR_CASES.length).toBe(
-      REFUSALS.length + NARROWS.length + PASSES.length + DEFERRED.length + FORMULA.length,
+      REFUSALS.length + NARROWS.length + PASSES.length + DEFERRED.length + FORMULA.length + BOOLEAN_ARM.length,
     );
     expect(REFUSALS.length).toBeGreaterThan(0);
     expect(NARROWS.length).toBeGreaterThan(0);
@@ -222,6 +240,23 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
       await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
       expect(reads, `${c.name}: the driver must have been read`).toHaveLength(1);
       expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(lowered(filter));
+    }
+  });
+
+  it('NAMED DIVERGENCE [#21333] — the census rows on a declared BOOLEAN field pass the number verdict and are refused by the walk\'s boolean arm', async () => {
+    expect(BOOLEAN_ARM.map((c) => c.name).sort()).toEqual(
+      NUMBER_COMPARAND_DOOR_CASES
+        .filter((c) => c.name.startsWith('[census]') && (c.key === 'f_boolean' || c.key === 'f_toggle'))
+        .map((c) => c.name).sort(),
+    );
+    for (const c of BOOLEAN_ARM) {
+      expect(c.verdict, c.name).toBe('passes');
+      reads.length = 0;
+      const err = await refusalOf(engine.find(OBJECT, { where: c.filter() }));
+      expect({ code: err?.code, status: err?.status }, c.name).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, c.name).toContain(`filter on '${c.key}' compares a declared ${c.declaredType} field`);
+      expect(err!.message, c.name).toContain('which is not a boolean');
+      expect(reads, c.name).toHaveLength(0);
     }
   });
 

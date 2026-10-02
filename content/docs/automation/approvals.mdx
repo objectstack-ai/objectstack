@@ -386,7 +386,8 @@ and nothing can move it, so the run parks forever.
 
 The approver's surface is the **Approvals Inbox** — in the stock console, the
 **Approvals** entry in the account menu. It lists what is waiting on the current
-user (`status = pending`, `pending_approvers` containing them) and it is the only
+user (`status = pending`, `pending_approvers` containing them — their user id,
+or the `position:<name>` literal of a position they hold) and it is the only
 surface that carries the **decision actions**: approve, reject, return, reassign,
 request info, delegate, remind, override.
 
@@ -415,15 +416,19 @@ curl -b cookies.txt \
 `approverId` accepts a user id, an email, or a `<type>:<value>` approver literal
 (`position:finance_manager` — the form an entry falls back to when it resolves
 to no users) — and takes several values (comma-separated or repeated) to cover
-a person's identities in one call.
+a person's identities in one call. A position literal matches under both
+spellings the service admits a holder of that position under as their own
+identity: `position:<name>`, and the deprecated pre-rename prefix the stock
+console still sends — so either one finds the same requests.
 Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
 `offset`.
 
 <Callout type="warn">
 **`approverId` is a filter, not authorization.** What you may see is decided
 separately: a request is visible to its **participants** — the submitter, a
-current approver, and anyone who has already acted on it (a past approver whose
-slot has moved on, a commenter). So omitting `approverId` returns *your*
+current approver (counting anyone who holds the position a `position:<name>`
+slot names, since the decision routes admit them under it), and anyone who has
+already acted on it (a past approver whose slot has moved on, a commenter). So omitting `approverId` returns *your*
 requests, not every request in the tenant. Admins with override authority
 (`admin_full_access`, or `organization_admin` within their org) see all of them
 — that is what the "all requests" view is for.

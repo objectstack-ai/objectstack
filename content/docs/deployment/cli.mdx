@@ -1723,9 +1723,11 @@ os verify --rls --multi-tenant --json          # Org-scoped boot, structured rep
    same ones `os validate` reports — and the app is never booted. Advisories
    (`warning` and `info` findings) never fail `os verify`; the text face counts
    them, and `os validate` prints them. This stage is the rule registry, not all
-   of `os validate`: the package-docs lint, the capability-provider check, the
-   picklist-reference and view-container-name checks and `--strict` stay
-   `os validate`'s, so run it too.
+   of `os validate`: the `defineStack` provenance refusal (a config whose
+   default export `defineStack` did not build, `STACK_PROVENANCE_MISSING`), the
+   package-docs lint, the capability-provider check, the picklist-reference and
+   view-container-name checks and `--strict` stay `os validate`'s, so run it
+   too.
 2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
    stack: for each object, a record derived from its fields is created, read
    back and compared (CRUD round-trip fidelity), and a create, read or
@@ -1746,7 +1748,12 @@ The config is the one `--app` names, or the auto-detected one — see
 | `0` | Both stages passed: no gating author-time finding, and no runtime failure |
 | `1` | The author-time stage refused the stack (the runtime stage did not run), the runtime stage found failures, or the command could not run at all (no config found, a config that does not load, a boot failure) |
 
-**`--json`.** What the document carries depends on where the run ended:
+**`--json`.** stdout carries exactly one JSON document and nothing else, so
+`os verify --json > report.json` leaves a file `JSON.parse` reads whole. Every
+other line the run produces — the booted stack's log records, warnings
+included, and its boot and shutdown lines — goes to stderr; none is dropped.
+Without `--json`, those lines stay on stdout beside the text report. What the
+document carries depends on where the run ended:
 
 - **Refused by the author-time stage:** `{ "error": "<sentence>", "errors": [...] }`,
   where `errors` carries the findings in the shape `os validate --json` carries

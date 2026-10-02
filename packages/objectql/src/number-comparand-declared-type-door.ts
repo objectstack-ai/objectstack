@@ -153,6 +153,18 @@
  * door and the lowering find a condition at the same boundaries by
  * construction. The per-aggregation `filter` and `having` keep the refusal.
  *
+ * ## [#21333] …and the boolean arm, at all three positions
+ *
+ * The same walk judges a comparand against a declared BOOLEAN field
+ * (`boolean-comparand-declared-type-door.ts`, by `@objectstack/spec/data`'s
+ * `filter-boolean-comparand-declared-type.ts`): `1` / `0`, `"1"` / `"0"` and
+ * `"true"` / `"false"` narrow to their boolean, copy-on-write, and any other
+ * string is refused `INVALID_FILTER` / 400. It is asked at every field key the
+ * number arm does not judge (the classes are disjoint), at the same positions
+ * ({@link judgeFieldSpec}) — so the functions below, and the engine sites that
+ * call them, run both arms. At `having` it reads each column's TYPE (a groupBy
+ * of a boolean field), as the no-operator-object arm does.
+ *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
@@ -165,9 +177,16 @@ import {
   numberComparandDoorVerdict,
   numberComparandFieldVerdict,
   numberComparandRefusalMessage,
+  type BooleanComparandDoorFieldMeta,
   type NumberComparandDoorFieldMeta,
   type NumberComparandRefusalSite,
 } from '@objectstack/spec/data';
+import {
+  booleanArmFieldMeta,
+  judgeBooleanComparand,
+  nonBooleanComparandRefusalMessage,
+  type NonBooleanComparand,
+} from './boolean-comparand-declared-type-door.js';
 import { invalidFilterError } from './filter-comparand-shape.js';
 import type { AggregatedColumnClass } from './having-filter.js';
 import {
@@ -203,6 +222,12 @@ export type NonNumericComparand = NumberComparandRefusalSite;
 interface KeyFacts {
   /** The number arm's field meta — `null` when that arm has nothing to judge here. */
   readonly number: NumberComparandDoorFieldMeta | null;
+  /**
+   * [#21333] The boolean arm's field meta — `null` when that arm has nothing to
+   * judge here. The two classes are disjoint; the walk asks this arm only
+   * where the number arm does not judge.
+   */
+  readonly boolean: BooleanComparandDoorFieldMeta | null;
   /**
    * [#20546] The column the no-operator-object arm judges — else `null`.
    * [#20745] Any of its three kinds (a scalar-valued, a relation or a
@@ -277,6 +302,7 @@ interface WalkContext extends RefusalSiteContext {
 /** The first refusal the walk met, and which arm raised it. */
 type Refusal =
   | { readonly arm: 'number'; readonly site: NonNumericComparand }
+  | { readonly arm: 'boolean'; readonly site: NonBooleanComparand }
   | { readonly arm: 'no-operator-object'; readonly site: NoOperatorObjectRefusal }
   | { readonly arm: 'relation'; readonly site: RelationConditionRefusal };
 
@@ -316,6 +342,26 @@ function fieldMetaOf(def: unknown): NumberComparandDoorFieldMeta | null {
 }
 
 /**
+ * [#21333] One comparand arm's judgment of ONE comparand at a judged position:
+ * the number arm ({@link judgeComparand}) or the boolean arm
+ * (`boolean-comparand-declared-type-door.ts`). {@link judgeFieldSpec} hands it
+ * every judged position — the implicit comparand, each scalar operator, each
+ * list member — so both arms judge at the same boundaries by construction.
+ */
+type JudgeOne = (field: string, comparand: unknown, path: string) => Outcome;
+
+/** [#21333] The number arm, bound to a field's meta and the position's site. */
+const numberArm = (meta: NumberComparandDoorFieldMeta, ctx: RefusalSiteContext): JudgeOne =>
+  (field, comparand, path) => judgeComparand(meta, field, comparand, path, ctx);
+
+/** [#21333] The boolean arm, bound to a field's meta and the position's site. */
+const booleanArm = (meta: BooleanComparandDoorFieldMeta, ctx: RefusalSiteContext): JudgeOne =>
+  (field, comparand, path) => {
+    const answer = judgeBooleanComparand(meta, field, comparand, path, ctx.aggregated);
+    return answer.refused ? { ok: false, refusal: { arm: 'boolean', site: answer.site } } : kept(answer.value);
+  };
+
+/**
  * One comparand at a judged position: the spec's verdict, routed. Whatever
  * the comparand is — a string, a boolean, a `Date`, an array (#20502) — the
  * verdict alone decides; this function only turns its answer into an outcome.
@@ -348,16 +394,19 @@ function judgeComparand(
   };
 }
 
-/** One judged field's constraint: `{ amount: <spec> }`. */
+/**
+ * One judged field's constraint: `{ amount: <spec> }`. [#21333] `judge` is the
+ * arm that judges the field — the number arm or the boolean arm; the positions
+ * walked here are the same for both.
+ */
 function judgeFieldSpec(
-  meta: NumberComparandDoorFieldMeta,
+  judge: JudgeOne,
   field: string,
   spec: unknown,
   path: string,
-  ctx: RefusalSiteContext,
 ): Outcome {
   // Not filter structure → an implicit-equality comparand, judged at this path.
-  if (!isFilterNode(spec)) return judgeComparand(meta, field, spec, path, ctx);
+  if (!isFilterNode(spec)) return judge(field, spec, path);
   // A field spec with no `$` key is a deep-equality / nested-relation
   // condition; the #5869 gate records why descending into one would invent a
   // contract no backend agrees with. [#20546] Under a column that holds
@@ -372,7 +421,7 @@ function judgeFieldSpec(
   for (const op of ops) {
     const comparand = spec[op];
     if (SCALAR_OPERATORS.has(op)) {
-      const judged = judgeComparand(meta, field, comparand, `${path}.${op}`, ctx);
+      const judged = judge(field, comparand, `${path}.${op}`);
       if (!judged.ok) return judged;
       if (judged.value !== comparand) (out ??= { ...spec })[op] = judged.value;
       continue;
@@ -382,7 +431,7 @@ function judgeFieldSpec(
     if (!LIST_OPERATORS.has(op) || !Array.isArray(comparand)) continue;
     let members: unknown[] | undefined;
     for (const [index, member] of comparand.entries()) {
-      const judged = judgeComparand(meta, field, member, `${path}.${op}[${index}]`, ctx);
+      const judged = judge(field, member, `${path}.${op}[${index}]`);
       if (!judged.ok) return judged;
       if (judged.value !== member) (members ??= [...comparand])[index] = judged.value;
     }
@@ -475,8 +524,15 @@ function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: num
         // Only a judged field can refuse or narrow a comparand; a `formula`
         // whose return type is unreadable is `deferred`, and everything else is
         // `not-judged` — the spec's verdict, never a list here.
-        if (!meta || numberComparandFieldVerdict(meta) !== 'judged') continue;
-        judged = judgeFieldSpec(meta, key, value, here, ctx);
+        if (meta && numberComparandFieldVerdict(meta) === 'judged') {
+          judged = judgeFieldSpec(numberArm(meta, ctx), key, value, here);
+        } else {
+          // [#21333] …and where the number arm does not judge, the boolean arm
+          // may: the two classes are disjoint, so at most one arm judges a key.
+          const booleanMeta = booleanArmFieldMeta(facts.boolean);
+          if (!booleanMeta) continue;
+          judged = judgeFieldSpec(booleanArm(booleanMeta, ctx), key, value, here);
+        }
       }
     }
     if (!judged.ok) return judged;
@@ -514,11 +570,13 @@ function declaredFactsOf(schema: unknown): FactsOf | null {
       // column all the same, and the arm judges it by the type it stores;
       // every other undeclared key keeps the registry-less tolerance.
       const provisioned = provisionedNoOperatorObjectColumn(key);
-      return provisioned === null ? null : { number: null, column: provisioned };
+      return provisioned === null ? null : { number: null, boolean: null, column: provisioned };
     }
     const meta = fieldMetaOf(fields[key]);
     if (!meta) return null;
-    return { number: meta, column: declaredNoOperatorObjectColumn(fields[key]) };
+    // [#21333] The same declaration slice serves both comparand arms; each
+    // arm's field verdict decides whether it judges the key.
+    return { number: meta, boolean: meta, column: declaredNoOperatorObjectColumn(fields[key]) };
   };
 }
 
@@ -549,9 +607,11 @@ function refuse(context: string, refusal: Refusal): never {
   throw invalidFilterError(
     refusal.arm === 'number'
       ? numberComparandRefusalMessage(refusal.site, context)
-      : refusal.arm === 'relation'
-        ? relationConditionRefusalMessage(refusal.site, context)
-        : noOperatorObjectRefusalMessage(refusal.site, context),
+      : refusal.arm === 'boolean'
+        ? nonBooleanComparandRefusalMessage(refusal.site, context)
+        : refusal.arm === 'relation'
+          ? relationConditionRefusalMessage(refusal.site, context)
+          : noOperatorObjectRefusalMessage(refusal.site, context),
   );
 }
 
@@ -571,6 +631,10 @@ function refuse(context: string, refusal: Refusal): never {
  * (`WHERE_SITE`); only `where` itself ever reaches a live driver bind, so the
  * not-a-number / boolean / date clauses name PostgreSQL's server error there
  * alone (#20510).
+ *
+ * [#21333] The same walk runs the boolean arm: a comparand against a declared
+ * boolean field is narrowed to its boolean (`"true"`, `1`, `"0"`, …) or, for
+ * any other string, refused — `INVALID_FILTER` / 400, the contract's words.
  */
 export function narrowNumberComparands<W>(
   object: string,
@@ -666,6 +730,9 @@ export function narrowHavingNumberComparands<H>(
       const kind = type === undefined ? null : noOperatorObjectColumnKind(type);
       return {
         number: classes.get(key) === 'numeric' ? { type: 'number' } : null,
+        // [#21333] A groupBy projection (or a `min` / `max`) of a boolean
+        // field carries that field's type; the boolean arm judges it by that.
+        boolean: type === undefined ? null : { type },
         column: kind === null ? null : { kind, type: type as string },
       };
     },

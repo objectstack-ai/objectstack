@@ -213,7 +213,7 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    *
    *   `$exists`      REFERENCE is correct. `$exists` means "has a value"
    *                  (#5298 ③ / #5369, PR #5962), so mingo's key-presence
-   *                  reading was the divergent one. CLOSED by #13195: the live
+   *                  reading was the divergent one. CLOSED by commit 9dac1ae01: the live
    *                  path stopped handing `$exists` to mingo under its own name
    *                  and lowers it to `{$ne: null}` / `{$eq: null}` — the
    *                  spelling `$null` in the same method already used — so the
@@ -238,13 +238,13 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    * built for exactly that edit. It used to say "⛔ Nothing is flipped in either
    * direction. The #5499 investment freeze was the reason while it stood; it
    * dissolved 2026-08-11 …, so that excuse has lapsed and the direction is now
-   * #13166's and #13195's to settle." #13166 settled its two: the `$nin` and
+   * #13166's and [commit 9dac1ae01]'s to settle." #13166 settled its two: the `$nin` and
    * `$notContains` rows below now assert live and reference AGREEING, on the
    * affirmed include answer. They were not re-baselined onto whatever the
    * matcher began printing — the target was the live path's pre-existing
    * answer, named as correct in this very note before the fix existed.
    *
-   * ⚠️ [#13195, ruled 2026-08-30] The third cell has now converged too, and by
+   * ⚠️ [commit 9dac1ae01, ruled 2026-08-30] The third cell has now converged too, and by
    * the same discipline: the target was the REFERENCE column, which this note
    * named correct before the fix existed, not whatever the live path began
    * printing. `driver-mongodb` — which read key-presence for its own,
@@ -255,7 +255,7 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    * ⛔ What the row still showed, and why the pin stays: this package answered
    * with two faces. "driver-memory reads has-value" was true of the reference
    * matcher and FALSE of the live query path users actually reach, for the
-   * three months between #5962 and #13195.
+   * three months between #5962 and commit 9dac1ae01.
    *
    * [#5930 step 4, ruling D6] The reference matcher is retired, so the
    * live-vs-reference columns below are asserted as the literal answer both

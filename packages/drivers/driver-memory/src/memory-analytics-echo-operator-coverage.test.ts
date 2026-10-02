@@ -364,7 +364,7 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
     });
 
     /**
-     * [#13195] The one cell where SQL could not say what mingo said — CLOSED,
+     * [commit 9dac1ae01] The one cell where SQL could not say what mingo said — CLOSED,
      * and closed from the mingo side.
      *
      * This assertion used to be an INEQUALITY, kept so the split could not be
@@ -468,7 +468,7 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
       it(`${op}: running the echo returns exactly the rows the query returns`, async () => {
         const executed = await executedIds(where);
         const echoed = await echoIds(where);
-        // [#13195] `$exists` used to return early here — the documented residue
+        // [commit 9dac1ae01] `$exists` used to return early here — the documented residue
         // above was asserted there and skipped in this loop, so the loop was a
         // statement about every OTHER operator. The residue is gone, the skip
         // with it, and this loop is now total over the face's vocabulary.
