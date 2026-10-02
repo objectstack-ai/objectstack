@@ -27,6 +27,11 @@ import {
   // component `ListView` does, so one declaration judges both doors.
   EmptyStateSchema,
 } from './view.zod';
+// [#21229] `object-grid.exportOptions` is the list view's export options OBJECT,
+// by identity — not the list view's union, whose legacy bare-array arm lifts to
+// `{ formats }` while the grid reads `.formats` and lifts nothing. Declared
+// outside the `ui` barrel so the two carriers share it without publishing it.
+import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -4020,8 +4025,27 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
   frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
   showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
-  exportOptions: z.unknown().optional()
-    .describe('Export config ({ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract'),
+  /**
+   * [#21229] The list view's export options object, BY IDENTITY —
+   * `ListViewExportOptionsSchema`, the strict five-member block
+   * (`./list-view-export-options.ts`) — and ⛔ not `ListViewSchema.exportOptions`
+   * itself: that is a union whose legacy bare-array arm LIFTS to `{ formats }`,
+   * and `ObjectGrid` reads `exportOptions.formats` and lifts nothing, so the
+   * legacy spelling does not spread to this surface (triage ruling on #21229).
+   *
+   * Until #21229 this was `z.unknown()`: a bare `['csv']` passed every door and
+   * the grid exported its csv/json default instead, with the author's list
+   * dropped and nothing reported. A bare array is now refused here with the
+   * object form named, and so is a format outside the enum (`'pdf'` with its
+   * own retirement text) and a key the block does not declare.
+   *
+   * No conversion lifts the array: it never worked on this surface. Read by the
+   * component-props gate (advisory); a stored page still saves and loads,
+   * because page-component `properties` is not parsed on the metadata save or
+   * load path (the `ui-object-grid-export-options-closed` semantic entry).
+   */
+  exportOptions: ListViewExportOptionsSchema.optional()
+    .describe("Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }`"),
   operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
   /**
    * Data source binding — `ViewDataSchema`, the #5090-pinned authority the

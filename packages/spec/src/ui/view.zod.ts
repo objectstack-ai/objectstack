@@ -84,19 +84,17 @@ import { BulkActionDefSchema } from './bulk-action.zod';
  */
 import { HttpMethodSubsetSchema, HttpRequestSchema } from '../shared/http.zod';
 import { lazySchema } from '../shared/lazy-schema';
-
-/**
- * Shared history for this file (#4001).
- *
- * Views are the surface an author iterates on visually, which is exactly why a
- * dropped key hides here: the view still renders, just not the way it was
- * described. `FormFieldBaseSchema` / `FormSectionSchema` / `FormButtonConfig`
- * were closed years ago (ADR-0089 D3a); the other forty-odd shapes in this file
- * kept the posture those three were rescued from.
- */
-const VIEW_HISTORY =
-  'Until these shapes were closed an unknown key was dropped silently — the view still '
-  + 'rendered, without whatever the key was meant to configure.';
+// This file's shared refusal history (#4001), declared outside it since #21229
+// so the export options block it shares with the `object-grid` row keeps it.
+import { VIEW_HISTORY } from './view-history';
+// [#21229] The export options block — its format enum, the retired-`'pdf'`
+// prescription and the five-member object — declared once, outside the `ui`
+// barrel: the `object-grid` page-component row takes the object by identity.
+import {
+  LIST_VIEW_EXPORT_PDF_RETIRED,
+  ListViewExportFormatSchema,
+  ListViewExportOptionsSchema,
+} from './list-view-export-options';
 
 export { HttpMethodSubsetSchema, HttpRequestSchema };
 
@@ -2240,7 +2238,7 @@ export const NavigationModeSchema = lazySchema(() => z.enum([
 // #126 item 4 (maintainer ruling 2026-09-13, option B: retire). Declared with
 // `//` on purpose: build-docs takes a file's first JSDoc per exported symbol,
 // and this constant needs no doc page (the `LIST_VIEW_EXPORT_PDF_RETIRED`
-// placement note in this same file).
+// placement note, in `./list-view-export-options.ts` since #21229).
 //
 // The key promised "the form view to use for details" and nothing from spec to
 // console ever resolved a view BY NAME. Its one read in the shipped console put
@@ -2305,59 +2303,6 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
    */
   width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
-
-// `'pdf'` retirement prescription (#8010). Declared with `//` on purpose — the
-// hook-body precedent's placement note applies here too: build-docs takes a
-// file's first JSDoc per exported symbol, and this constant needs no doc page.
-const LIST_VIEW_EXPORT_PDF_RETIRED =
-  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 "
-  + '(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF '
-  + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
-  + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
-  + "formats are 'csv', 'xlsx' and 'json'. "
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
-
-/**
- * Export formats the platform actually delivers (#8010): `csv`/`json` on both
- * export paths, `xlsx` on the server stream only.
- *
- * `'pdf'` was REMOVED in 17 (#8010): PDF export was declined platform-side
- * (#1301 NOT_PLANNED), so the enum member was a declared-but-unrenderable
- * format whose only failure signal was a browser console line. This is an
- * enum-VALUE narrowing, so there is no `retiredKey()` tombstone to hang the
- * prescription on — the enum's own error map carries it
- * ({@link LIST_VIEW_EXPORT_PDF_RETIRED}), keyed on `issue.input` so that only
- * the value which used to be legal gets the "was removed" message (the
- * `HookBodyCapability` / `object.managedBy: 'system'` precedent).
- */
-const ListViewExportFormatSchema = z.enum(['csv', 'xlsx', 'json'], {
-  error: (issue) => (issue.input === 'pdf' ? LIST_VIEW_EXPORT_PDF_RETIRED : undefined),
-});
-
-/**
- * Object form of `view.exportOptions` (#8010, maintainer ruling 2026-08-12 —
- * option A). The declared key set is exactly what the only renderer reads,
- * measured on objectui `origin/main@878140b` (`ObjectGrid.tsx:1596–1642`):
- * `formats`, `maxRecords`, `includeHeaders`, `fileNamePrefix`, and the
- * previously UNDECLARED `streaming` opt-out — declared here so no
- * undeclared-but-read key survives the fix. Declaring anything more would be
- * capability surface with no reader; declaring less recreates the defect.
- */
-const ListViewExportOptionsSchema = strictObject({
-  surface: 'this export options block',
-  history: VIEW_HISTORY,
-}, {
-  formats: z.array(ListViewExportFormatSchema).optional()
-    .describe("Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only."),
-  maxRecords: z.number().int().nonnegative().optional()
-    .describe('Maximum number of records to export; 0 or absent = unlimited'),
-  includeHeaders: z.boolean().optional()
-    .describe('Include column headers in the exported file (default true)'),
-  fileNamePrefix: z.string().optional()
-    .describe('Download file name prefix — replaces the object label and suppresses the view label in the generated file name'),
-  streaming: z.boolean().optional()
-    .describe('Set false to force the client-side export path (csv/json only) instead of the server stream'),
-});
 
 /**
  * Loud top-level refusal for a retired `'pdf'` anywhere in `exportOptions`
@@ -4147,7 +4092,7 @@ function refineFormFieldFeaturesRoot(
 
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049
 // enforce-or-remove). Declared with `//` on purpose — the
-// `LIST_VIEW_EXPORT_PDF_RETIRED` placement note above applies here too. An
+// `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too. An
 // enum-VALUE narrowing: the enum's own error map carries the prescription,
 // keyed on `issue.input`, so only a value which used to be legal gets the "was
 // removed" message. The twin of `OBJECT_FORM_LAYOUT_RETIRED`
