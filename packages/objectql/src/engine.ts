@@ -17616,10 +17616,16 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21274] A boundary outside the middleware seam: the raw command's
       // bound `params` are the caller's values, and the driver's refusal
       // carries the dialect error on its `cause`.
+      //
+      // [#21345] And the one door whose statement the engine did not compose:
+      // it may open with a word the shared leak predicate does not list (a
+      // common-table-expression form, a dialect's upsert or merge verb), so
+      // the cut must not wait for the predicate to recognise it. The door
+      // knows it sent a statement, and says so.
       try {
           return await driver.execute(rawCommand, params, options);
       } catch (e) {
-          throw redactPropagatedDriverFault(e);
+          throw redactPropagatedDriverFault(e, { statementSent: true });
       }
   }
 
