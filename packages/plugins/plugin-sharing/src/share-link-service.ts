@@ -15,7 +15,9 @@ import type {
  * is the HTTP layer's 401 vocabulary and is deliberately not named in this
  * file: the contexts this file receives are forwarded into `engine.find`, where
  * `accessible_org_ids` (ADR-0105 D2), `posture` (ADR-0095 D2), `org_user_ids`,
- * `systemPermissions` and `tabPermissions` are all read.
+ * `systemPermissions` and `tabPermissions` are all read. One read is exempt by
+ * ruling: the caller's OWN share-link list, which ADR-0111 rules self-scoped
+ * and `listLinks` reads under the system context (see `isLinkCreator`).
  */
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Expression } from '@objectstack/spec';
