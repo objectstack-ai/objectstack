@@ -1810,9 +1810,12 @@ export class TursoDriver extends SqlDriver {
       // membership read, keyed by object name, so a filter on a multi-value or
       // structured-JSON field is refused, or answered by membership, alike on
       // both transports (`turso-local-remote-json-column-parity` holds them to
-      // one answer).
+      // one answer). [#21236] It hands down the column's CLASS, from the same
+      // registry plus `mediaFields`, so a single-value file-class field (a JSON
+      // column on this face always: remote mode never moves its media columns)
+      // reads the local face's media-column-move refusal, not `$contains`.
       this.remoteTransport.setJsonColumnResolver((object, field) =>
-        this.isJsonColumn(object, field),
+        this.jsonColumnFieldClass(object, field),
       );
 
       // [#7929] The server-side half of a REDACTED filter refusal. The remote

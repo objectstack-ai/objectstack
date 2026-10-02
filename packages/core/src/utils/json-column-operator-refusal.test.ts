@@ -28,12 +28,22 @@
  *
  * A deliberate change of wording updates the hashes in the PR that makes it —
  * and then reaches every face alike, which is the point of the move.
+ *
+ * [#21236] The second class of JSON column, a single-value file-class field
+ * inside the ADR-0104 window, has its own reason and repair (the media-column
+ * move), pinned the same three ways at the foot of this file. The first
+ * class's words are the control: its hashes above did not move, and the
+ * default class is the first class, byte for byte.
  */
 
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { truncateClientMessage } from '@objectstack/types';
-import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from './json-column-operator-refusal.js';
+import {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS,
+  jsonColumnOperatorRefusalText,
+  type JsonColumnFieldClass,
+} from './json-column-operator-refusal.js';
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -149,5 +159,77 @@ describe('[#21067] jsonColumnOperatorRefusalText — whole on the wire, and true
     // An author-marked refusal puts this text on the wire (driver-sql's #8220
     // arm): for a field name of an ordinary length it is whole there too.
     expect(truncateClientMessage(diagnostic)).toBe(diagnostic);
+  });
+});
+
+describe('[#21236] jsonColumnOperatorRefusalText — a single-value file-class field inside the ADR-0104 window', () => {
+  const MEDIA: JsonColumnFieldClass = 'single-value-media';
+  /** Every spelling that gets this refusal: each member of the set, and the bare one. */
+  const SPELLINGS: ReadonlyArray<readonly [op: string, bare: boolean]> = [
+    ...[...JSON_COLUMN_INCOMPATIBLE_OPERATORS].map((op) => [op, false] as const),
+    ['=', true],
+  ];
+  /** The move, as the migration entry `filter-text-operator-declared-type-refused` words it. */
+  const MOVE =
+    'Such a field is not a membership question: it answers these operators again once this deployment ' +
+    'finishes the media-column move (the column step of `objectstack migrate files-to-references --apply`).';
+
+  it('the words, by hash: one message for every operator, and a diagnostic per spelling', () => {
+    const MESSAGE = { sha: 'd76a61be45a1f2200179f7282e4cbe50685ad32f65124f55fc79eb7a2876fd22', length: 485 };
+    for (const [op, bare, diagnostic] of [
+      ['$startsWith', false, { sha: '9ee94859d50fc05f124ee2c1620c20d140c9572d2eb680bab3a45205a0b66de6', length: 418 }],
+      ['$eq', false, { sha: '8e976c33c09a3c91ba135179caf47497ad1fbe7d1b8bc8c29ae5363512af83d8', length: 402 }],
+      ['=', true, { sha: '40f4606c544acab304594079b6a8c9ded6fabfb7b2a9e037932e96aa0ca5e988', length: 414 }],
+    ] as const) {
+      const text = jsonColumnOperatorRefusalText('attachment', op, bare, MEDIA);
+      expect({ sha: sha256(text.message), length: text.message.length }, op).toEqual(MESSAGE);
+      expect({ sha: sha256(text.diagnostic), length: text.diagnostic.length }, op).toEqual(diagnostic);
+    }
+  });
+
+  it('prescribes the media-column move and the presence spellings, and never $contains', () => {
+    for (const [op, bare] of SPELLINGS) {
+      const { message, diagnostic } = jsonColumnOperatorRefusalText('attachment', op, bare, MEDIA);
+      for (const text of [message, diagnostic]) {
+        expect(text, op).toContain('at a single-value file-class field still stored as JSON.');
+        expect(text, op).toContain(MOVE);
+        expect(text, op).toContain('For no value, use "$null" or "$empty".');
+        expect(text, op).not.toContain('$contains');
+        expect(text, op).not.toContain('which it cannot test for one member');
+      }
+      expect(message.startsWith('A constraint in this filter WAS NOT APPLIED: ')).toBe(true);
+      expect(message.endsWith(
+        'The field and the operator are withheld from the message; the full diagnostic is in the server log.',
+      )).toBe(true);
+      expect(message, op).not.toContain('attachment');
+      expect(diagnostic, op).toContain(`it aims "${op}", a scalar comparison or text operator, at`);
+    }
+  });
+
+  it('the message passes the REST envelope\'s bound unchanged, for every refused spelling', () => {
+    for (const [op, bare] of SPELLINGS) {
+      const { message } = jsonColumnOperatorRefusalText('attachment', op, bare, MEDIA);
+      expect(truncateClientMessage(message), op).toBe(message);
+    }
+  });
+
+  it('the diagnostic is whole on the wire for a 91-character field name, the bound the module docblock states', () => {
+    const name = 'f'.repeat(91);
+    for (const [op, bare] of SPELLINGS) {
+      const { diagnostic } = jsonColumnOperatorRefusalText(name, op, bare, MEDIA);
+      expect(truncateClientMessage(diagnostic), op).toBe(diagnostic);
+    }
+    const past = jsonColumnOperatorRefusalText(`${name}f`, '$startsWith', false, MEDIA).diagnostic;
+    expect(truncateClientMessage(past)).not.toBe(past);
+  });
+
+  it('the control: the default class IS the multi-value class, and its words are not the media class\'s', () => {
+    for (const [op, bare] of SPELLINGS) {
+      const byDefault = jsonColumnOperatorRefusalText('members', op, bare);
+      const named = jsonColumnOperatorRefusalText('members', op, bare, 'multi-value-or-json');
+      expect(named, op).toEqual(byDefault);
+      expect(byDefault.message, op).toContain('{ "FIELD": { "$contains": "a" } }');
+      expect(jsonColumnOperatorRefusalText('members', op, bare, MEDIA).message, op).not.toBe(byDefault.message);
+    }
   });
 });
