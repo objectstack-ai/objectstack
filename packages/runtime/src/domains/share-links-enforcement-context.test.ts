@@ -1070,6 +1070,13 @@ describe('[#21405] the plugin route door answers the same refusal with the same 
  * for. Each refusal is read as the pair (`status`, `code`) and against the
  * STORE: a refused mint writes no row.
  *
+ * ## The capability hard stop
+ *
+ * A second object is gated on a capability too (`requiredPermissions`,
+ * ADR-0066 D3). An owner who lacks it is refused there: neither alternative
+ * applies past that gate. The control is an owner who holds the capability and
+ * is refused only by the CRUD grant, and mints.
+ *
  * ## What is real here
  *
  * Both doors' production entries — the dispatcher domain body and the plugin's
@@ -1090,6 +1097,10 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
     const STRANGER = 'u_stranger';
     const ADMIN = 'u_admin';
     const MANAGER = 'u_manager';
+    /** Owns a record on the capability-gated object AND holds its capability. */
+    const CAPABLE_OWNER = 'u_capable_owner';
+    /** Owner-private AND capability-gated (ADR-0066 D3): a read needs `view_vault`. */
+    const VAULT = 'vault_notes';
 
     const CONVERSATION_SCHEMA = {
         name: CONV,
@@ -1136,7 +1147,28 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
         objects: { [CONV]: { allowEdit: true, writeScope: 'unit' } },
     });
 
-    const SETS = [MEMBER_BASELINE, MODIFY_ALL, UNIT_WRITER];
+    /** The object a capability gates, on top of being owner-private. */
+    const VAULT_SCHEMA = {
+        name: VAULT,
+        access: { default: 'private' },
+        requiredPermissions: ['view_vault'],
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+    };
+
+    /** The capability, and nothing else: no object grant rides with it. */
+    const VAULT_CAPABLE: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_vault_capable',
+        label: 'Holds view_vault',
+        objects: {},
+        systemPermissions: ['view_vault'],
+    });
+
+    const SETS = [MEMBER_BASELINE, MODIFY_ALL, UNIT_WRITER, VAULT_CAPABLE];
 
     /** The envelope `resolveExecutionContext` assembles for a human member of org A. */
     const principal = (userId: string, permissions: string[]): ExecutionContext =>
@@ -1158,6 +1190,7 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
     const stranger = () => principal(STRANGER, ['conv_member_baseline']);
     const admin = () => principal(ADMIN, ['conv_member_baseline', 'conv_modify_all']);
     const manager = () => principal(MANAGER, ['conv_member_baseline', 'conv_unit_writer']);
+    const capableOwner = () => principal(CAPABLE_OWNER, ['conv_member_baseline', 'conv_vault_capable']);
 
     interface World {
         tables: Record<string, any[]>;
@@ -1165,6 +1198,11 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
         mint(as: ExecutionContext): Promise<{ status: number; body: any }>;
         /** The same mint through the plugin's route door. */
         mintOnPlugin(as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** The same mint on the capability-gated object, at each door. */
+        mintVault(recordId: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        mintVaultOnPlugin(recordId: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** A data-door read of a vault record under `as`. */
+        readVault(recordId: string, as: ExecutionContext): Promise<unknown>;
         resolve(token: string): Promise<{ status: number; body: any }>;
         revoke(idOrToken: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
         /** A data-door read of the record under `as` — the visibility leg itself. */
@@ -1175,10 +1213,14 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
     async function bootWorld(): Promise<World> {
         const tables: Record<string, any[]> = {
             [CONV]: [{ id: CONV_ID, title: 'My chat', owner_id: OWNER, organization_id: ORG_A }],
+            [VAULT]: [
+                { id: 'vault_owner', title: 'Owner\'s note', owner_id: OWNER, organization_id: ORG_A },
+                { id: 'vault_capable', title: 'Capable owner\'s note', owner_id: CAPABLE_OWNER, organization_id: ORG_A },
+            ],
             sys_share_link: [],
             sys_permission_set: [],
         };
-        const engine = makeEngine(tables, { [CONV]: CONVERSATION_SCHEMA });
+        const engine = makeEngine(tables, { [CONV]: CONVERSATION_SCHEMA, [VAULT]: VAULT_SCHEMA });
         const services: Record<string, any> = {
             manifest: { register: vi.fn() },
             objectql: engine,
@@ -1245,6 +1287,9 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
             sharing: services.sharing,
             mint: (as) => drive('', 'POST', { object: CONV, recordId: CONV_ID }, as),
             mintOnPlugin: (as) => mintOnPluginDoor(engine, svc, as, { object: CONV, recordId: CONV_ID }),
+            mintVault: (recordId, as) => drive('', 'POST', { object: VAULT, recordId }, as),
+            mintVaultOnPlugin: (recordId, as) => mintOnPluginDoor(engine, svc, as, { object: VAULT, recordId }),
+            readVault: async (recordId, as) => engine.find(VAULT, { where: { id: recordId }, limit: 1, context: as }),
             resolve: (token) => drive(`/${token}/resolve`, 'GET', undefined, undefined),
             revoke: (idOrToken, as) => drive(`/${idOrToken}`, 'DELETE', undefined, as),
             read: async (as) => engine.find(CONV, { where: { id: CONV_ID }, limit: 1, context: as }),
@@ -1327,5 +1372,42 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
         const revoked = await w.revoke(String(minted.body.data.id), manager());
         expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
         expect(w.tables.sys_share_link[0]?.revoked_at).toBeTruthy();
+    }, 30_000);
+    it('[capability persona] the vault refuses the owner at the CAPABILITY gate, and the capable owner only at the CRUD grant', async () => {
+        const w = await bootWorld();
+        const ownerRead = await w.readVault('vault_owner', owner()).then(() => null, (e) => e);
+        expect(ownerRead).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        expect(ownerRead?.details?.missingPermissions, 'the owner lacks view_vault').toEqual(['view_vault']);
+        const capableRead = await w.readVault('vault_capable', capableOwner()).then(() => null, (e) => e);
+        expect(capableRead).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        expect(capableRead?.details?.missingPermissions, 'the capable owner is refused by the CRUD grant, not the capability').toBeUndefined();
+    }, 30_000);
+
+    it('[capability] an owner lacking the object\'s required capability is refused with that refusal at both doors, and nothing lands', async () => {
+        const w = await bootWorld();
+        const res = await w.mintVault('vault_owner', owner());
+        const plugin = await w.mintVaultOnPlugin('vault_owner', owner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        // The wire carries the refusal's user-facing sentence only — which gate
+        // refused (the capability's `missingPermissions`) stays off the wire, so
+        // that half is pinned beside the service, on the rejection itself.
+        expect(res.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+        // The owner alternative itself holds; the hard stop is what refused.
+        expect(await w.sharing.canManageShares(VAULT, 'vault_owner', owner())).toBe(true);
+    }, 30_000);
+
+    it('[capability control] the owner who HOLDS the capability mints on the same object at both doors', async () => {
+        const w = await bootWorld();
+        const res = await w.mintVault('vault_capable', capableOwner());
+        const plugin = await w.mintVaultOnPlugin('vault_capable', capableOwner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([CAPABLE_OWNER, CAPABLE_OWNER]);
     }, 30_000);
 });
