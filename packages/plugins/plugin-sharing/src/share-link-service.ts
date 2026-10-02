@@ -709,7 +709,8 @@ export class ShareLinkService implements IShareLinkService {
     // holder PRESENTED it and the lookup matched on it, so it is echoed back
     // rather than re-read: the redemption route answers it to the holder, and
     // the console's shared page addresses the link's companion routes by it.
-    if (!('token' in row)) row.token = token;
+    const asStored = row as unknown as Record<string, unknown>;
+    if (!('token' in asStored)) asStored.token = token;
 
     if (row.revoked_at) return null;
     if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
