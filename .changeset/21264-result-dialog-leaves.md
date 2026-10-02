@@ -6,6 +6,8 @@
 
 Clause-②: no (narrowing)
 
+<!-- adr-0087: not-required (no-migration-prescription) No spec key, export or stored value moves: TranslationDataSchema parses these three keys exactly as before, so objectstack migrate meta has nothing to convert, and the runtime publish door never runs this rule on a translation write (the member's runtime types default to flow). The refusal is a lint finding at the authoring doors that names the key; its remedy is the author's choice between moving the copy, declaring the dialog or deleting the copy, not a mechanical rewrite of one shape into another. -->
+
 **What is refused.** `resultDialog.title`, `resultDialog.description` and `resultDialog.acknowledge` under an action that declares no `resultDialog` are now `translation-target-unknown` errors, one per key: the code and level an undeclared `params`, `outcomeMessages` or `resultDialog.fields` key already gets. `translateAction` returns no dialog for such an action, so the copy is never read. Before this, only `resultDialog.fields.PATH` was checked under the dialog, and these three keys passed.
 
 **What still passes.** The same three keys under an action that declares a `resultDialog` are read and pass, whether or not the dialog sets that text itself.
