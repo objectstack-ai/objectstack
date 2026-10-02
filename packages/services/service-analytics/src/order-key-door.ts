@@ -44,12 +44,18 @@
  *
  * ## Where it runs
  *
- * `AnalyticsService.queryIn` — `query()` (`/analytics/query`) and every query a
- * dataset selection runs through `DatasetExecutor` — and `generateSql()`
- * (`/analytics/sql`), after `ensureCube` and the caller-member gate, so an
- * unknown cube still answers 404 first, and before strategy selection, so the
- * native-SQL and the ObjectQL face give one answer on every driver. The dataset
- * door already refuses an unselected `selection.order` key itself
+ * `AnalyticsService.callCtx`, the one seam `query()` (`/analytics/query`, and
+ * every query a dataset selection runs through `DatasetExecutor`) and
+ * `generateSql()` (`/analytics/sql`) share — so both doors and the native-SQL
+ * and the ObjectQL face give one answer on every driver:
+ *
+ * - after `ensureCube`, so an unknown cube still answers 404 first;
+ * - after the admission verdicts (object, stored metadata body, field read
+ *   and field query), so a key naming a field the caller may not read keeps
+ *   the 403 that field gets in every other position;
+ * - before the read scopes are resolved and before any strategy is selected.
+ *
+ * The dataset door already refuses an unselected `selection.order` key itself
  * (`resolveOrdering`, `DATASET_INVALID`) and pushes an `order` down into its
  * query only when every key is a dimension or measure that query selects, so
  * this door never refuses a dataset selection it accepted.
