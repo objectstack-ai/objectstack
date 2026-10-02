@@ -54,6 +54,7 @@ function fakeCrypto(): ICryptoProvider {
             return { ...handle, version: handle.version + 1 };
         },
         digest: (plain: string) => `d:${plain.length}`,
+        keyedDigest: async (plain: string) => `k:${plain.length}`,
     };
 }
 

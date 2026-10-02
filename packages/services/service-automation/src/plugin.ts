@@ -620,8 +620,6 @@ export class AutomationServicePlugin implements Plugin {
      * source, and the `flow` credential channel of the metadata save door.
      */
     private credentialChannel?: FlowCredentialChannel;
-    /** [#20790] Whether `sys_flow_credential` reached the `manifest` service. */
-    private credentialObjectRegistered = false;
     /** [#20790] Serializes the one-time credential move — see {@link scheduleCredentialMigration}. */
     private credentialMigration: Promise<void> = Promise.resolve();
     /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
@@ -662,7 +660,10 @@ export class AutomationServicePlugin implements Plugin {
     /**
      * Register {@link SysAutomationRun} and {@link SysFlowDispatch} with the
      * `manifest` service so the suspended-run and dispatch-ledger tables
-     * migrate like every other `sys_*` object (ADR-0019, #10220).
+     * migrate like every other `sys_*` object (ADR-0019, #10220) — and
+     * [#20790] {@link SysFlowCredential}, the write-only flow credential
+     * channel, in the same registration, so one manifest answer (and at most
+     * one warning) covers all three.
      *
      * Returns whether it landed. Callers must honour a `false` — a durable
      * store attached over an unregistered object writes to a table that does
@@ -678,7 +679,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun, SysFlowDispatch],
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential],
             });
             return true;
         } catch (err) {
@@ -715,9 +716,11 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * [#20790] Register {@link SysFlowCredential} with the `manifest` service —
-     * on EVERY composition, unlike the run objects: a flow credential has
-     * nowhere else to go, so the save door refuses one without this table.
+     * [#20790] Register {@link SysFlowCredential} ALONE with the `manifest`
+     * service — the `suspendedRunStore: 'memory'` composition, which registers
+     * no run object: a flow credential has nowhere else to go, so the channel
+     * needs its table on every composition. Every other composition registers
+     * it with the run objects ({@link registerRunObject}).
      */
     private registerCredentialObject(ctx: PluginContext): boolean {
         try {
@@ -852,7 +855,6 @@ export class AutomationServicePlugin implements Plugin {
         // metadata save door stores them in it (registered at `start()`).
         this.credentialChannel = new FlowCredentialChannel(() => this.resolveDataEngine(ctx));
         this.engine.setFlowCredentialSource(this.credentialChannel);
-        this.credentialObjectRegistered = this.registerCredentialObject(ctx);
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
@@ -874,7 +876,10 @@ export class AutomationServicePlugin implements Plugin {
         // like other sys_* tables (ADR-0019). Best-effort: a host without the
         // manifest service still runs in-memory. Skipped when persistence is off.
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
+            // [#20790] The channel's table rides the same registration.
             this.runObjectRegistered = this.registerRunObject(ctx);
+        } else {
+            this.registerCredentialObject(ctx);
         }
 
         // Seed the platform's built-in node executors. A bare
@@ -909,7 +914,6 @@ export class AutomationServicePlugin implements Plugin {
         // BEFORE the inert-mode return below: a one-shot tool that rewrites
         // stored rows (`os migrate meta --stored`) must not store a flow
         // credential back into a definition either. Registering it arms nothing.
-        if (!this.credentialObjectRegistered) this.credentialObjectRegistered = this.registerCredentialObject(ctx);
         this.registerCredentialChannelOnProtocol(ctx);
 
         // ── Inert mode (#4454) — an engine, and nothing armed ─────────────────
