@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17590, director ruling 2026-09-12] `$contains` on a multi-valued / JSON
+ * [commit e04a0aff2, director ruling 2026-09-12] `$contains` on a multi-valued / JSON
  * column is a MEMBERSHIP test, and `driver-sql` compiles it PER DIALECT so
  * SQLite, MySQL and PostgreSQL answer the SAME ROWS.
  *
@@ -52,7 +52,7 @@
  * - **live postgres** — the cell that carried the defect. Runs when
  *   provisioned; measured here on PostgreSQL 16.13.
  * - **live mysql** — measured DIRECTLY, which is what the ruling asked for:
- *   the card's MySQL row was a second-hand reading off #17343's CI job.
+ *   the card's MySQL row was a second-hand reading off commit 82cb69fed's CI job.
  *   Measured here on MySQL 8.0.46.
  *
  * The three cells assert the SAME literal row sets, which is what "answer the
@@ -61,9 +61,9 @@
  * @see SqlDriver.applyJsonMembership — the emitter and its two fall-through cases.
  * @see jsonMembershipPredicate — the per-dialect construct and its measured table.
  * @see jsonMembershipCandidates — why one string comparand denotes two JSON scalars.
- * @see https://github.com/objectstack-ai/objectstack/issues/17590
+ * @see commit e04a0aff2
  * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the membership spelling)
- * @see https://github.com/objectstack-ai/objectstack/issues/17343 (the boolean cell this covers)
+ * @see commit 82cb69fed (the boolean cell this covers)
  * @see https://github.com/objectstack-ai/objectstack/issues/17469 (the population predicate, unwidened)
  */
 

@@ -170,7 +170,7 @@ const REFUSED: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
  * predicates, which ask about the column's presence — a well-formed question
  * whatever the column holds.
  *
- * ⚠️ [#17590] The sentence that stood here said the `LIKE` family "matches the
+ * ⚠️ [commit e04a0aff2] The sentence that stood here said the `LIKE` family "matches the
  * serialization as text (which is how `$contains` works at all)". That was an
  * accurate description of a mechanism that has since been replaced: it made
  * `$contains` a SUBSTRING test over the serialization — right across element

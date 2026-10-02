@@ -8,6 +8,7 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
 import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, type FieldMaskingRule } from '@objectstack/spec/data';
+import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
@@ -1041,6 +1042,15 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly datetimeFieldNamesCache = new Map<string, ReadonlySet<string>>();
   /**
+   * [#21242] Each object's declared columns as the spec's number-comparand
+   * verdict reads them (`type`, and a `formula`'s `returnType`), read in the
+   * SAME pass as {@link fieldNamesCache} and invalidated with it. Handed to the
+   * RLS compile seam as `RlsFieldGuard.number`, so a policy comparand a
+   * numeric column cannot be compared with is refused there, as the engine's
+   * `where` door refuses it.
+   */
+  private readonly numberComparandFieldsCache = new Map<string, ReadonlyMap<string, NumberComparandDoorFieldMeta>>();
+  /**
    * Per-object cache of tenancy opt-out. `true` means the schema
    * explicitly disabled multi-tenancy (`tenancy.enabled === false` or
    * `systemFields.tenant === false`). Wildcard policies that target
@@ -1420,6 +1430,7 @@ export class SecurityPlugin implements Plugin {
       this.metadataWatch = md.watch('*', () => {
         this.fieldNamesCache.clear();
         this.datetimeFieldNamesCache.clear();
+        this.numberComparandFieldsCache.clear();
         this.tenancyDisabledCache.clear();
         this.cbpRelCache.clear();
         this.objectSecurityMetaCache.clear();
@@ -7472,7 +7483,13 @@ export class SecurityPlugin implements Plugin {
           compilable,
           context,
           'using',
-          objectFields ? { declared: objectFields, datetime: this.datetimeFieldNamesCache.get(object) } : undefined,
+          objectFields
+            ? {
+                declared: objectFields,
+                datetime: this.datetimeFieldNamesCache.get(object),
+                number: this.numberComparandFieldsCache.get(object),
+              }
+            : undefined,
         );
         // Every applicable policy dropped for a missing field → deny sentinel.
         if (layer1 == null && dropped > 0) {
@@ -7738,7 +7755,13 @@ export class SecurityPlugin implements Plugin {
       withCheck,
       context,
       'check',
-      objectFields ? { declared: objectFields, datetime: this.datetimeFieldNamesCache.get(object) } : undefined,
+      objectFields
+        ? {
+            declared: objectFields,
+            datetime: this.datetimeFieldNamesCache.get(object),
+            number: this.numberComparandFieldsCache.get(object),
+          }
+        : undefined,
     );
   }
 
@@ -9284,10 +9307,19 @@ export class SecurityPlugin implements Plugin {
       // [ADR-0053 D-D1 item 7 — #5930] The `datetime` columns, from the same
       // declaration (see `datetimeFieldNamesCache`).
       const datetime = new Set<string>();
+      // [#21242] …and every column's type as the number-comparand verdict
+      // reads it (see `numberComparandFieldsCache`). The verdict decides which
+      // are numeric; this pass only records what each column declares.
+      const number = new Map<string, NumberComparandDoorFieldMeta>();
+      const noteNumberMeta = (name: string, def: any): void => {
+        if (!def || typeof def !== 'object' || typeof def.type !== 'string') return;
+        number.set(name, typeof def.returnType === 'string' ? { type: def.type, returnType: def.returnType } : { type: def.type });
+      };
       if (Array.isArray(obj.fields)) {
         for (const f of obj.fields) {
           if (f?.name) set.add(String(f.name));
           if (f?.name && f.type === 'datetime') datetime.add(String(f.name));
+          if (f?.name) noteNumberMeta(String(f.name), f);
         }
       } else if (typeof obj.fields === 'object') {
         for (const key of Object.keys(obj.fields)) {
@@ -9295,11 +9327,13 @@ export class SecurityPlugin implements Plugin {
           const v = (obj.fields as Record<string, any>)[key];
           if (v && typeof v === 'object' && v.name) set.add(String(v.name));
           if (v && typeof v === 'object' && v.type === 'datetime') datetime.add(key);
+          noteNumberMeta(key, v);
         }
       } else {
         return null;
       }
       this.datetimeFieldNamesCache.set(objectName, datetime);
+      this.numberComparandFieldsCache.set(objectName, number);
       return set;
     } catch {
       return null;

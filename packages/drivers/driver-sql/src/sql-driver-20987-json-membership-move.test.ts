@@ -5,7 +5,7 @@
  * MEMBERSHIP emitter: the statement and its bindings, per dialect and per
  * comparand shape, are the ones this driver emitted before the predicate moved.
  *
- * `jsonMembershipCandidates` and the per-dialect construct (#17590) were
+ * `jsonMembershipCandidates` and the per-dialect construct (commit e04a0aff2) were
  * module-private here. They moved to `@objectstack/core`
  * (`utils/json-membership-sql.ts`) so the analytics read scope and the
  * analytics `where` ask the same question this driver asks, from one
@@ -23,7 +23,7 @@
  * string `Number()` would accept but the JSON grammar refuses (`'0x10'`).
  *
  * `'unknown'` is a knex client this driver does not model (here `mssql`): it
- * keeps the pre-#17590 `LIKE`, unchanged by the move. The scalar column beside
+ * keeps the `LIKE` from before commit e04a0aff2, unchanged by the move. The scalar column beside
  * the JSON one is the control: `$contains` stays the substring test there.
  */
 

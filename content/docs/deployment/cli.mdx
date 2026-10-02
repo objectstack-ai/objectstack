@@ -1614,6 +1614,7 @@ emits a scoped, publishable `@objectstack/plugin-<name>`, and it lands under
 | Command | Description |
 |---------|-------------|
 | `os lint [config]` | Every author-time gate `validate`/`build` run, plus style and convention checks |
+| `os verify` | The author-time rules `validate` runs, then boot the app in-process and verify it through the real HTTP stack |
 | `os test [files]` | Run Quality Protocol test scenarios against a running server |
 | `os doctor` | Check development environment health |
 
@@ -1678,6 +1679,62 @@ verdict is readable without re-deriving it from the counts: `strict` (whether
 the flag was in effect), `failing` (the count the exit code was read from —
 `errors`, or `errors + warnings` under `--strict`) and `passed` (`failing` is
 `0` — the same statement the exit code makes).
+
+#### `os verify`
+
+The done-bar: `os verify` green means the author-time rules pass **and** the
+app behaves at runtime. It runs two stages, in order, and the second starts
+only when the first passes.
+
+```bash
+os verify                                      # Author-time rules, then CRUD round-trip fidelity
+os verify --app ./objectstack.config.ts --rls  # Also prove the cross-owner RLS invariant
+os verify --rls --multi-tenant --json          # Org-scoped boot, structured report
+```
+
+1. **Author-time rules.** The rule registry `os validate` runs, over the stack
+   prepared the way `os validate` prepares it: normalized, inline handlers
+   lowered, parsed against the protocol schema, and judged whole and then once
+   per package of a multi-package artifact. A stack that does not parse, or
+   that any gating rule refuses, fails the run here with those findings — the
+   same ones `os validate` reports — and the app is never booted. Advisories
+   (`warning` and `info` findings) never fail `os verify`; the text face counts
+   them, and `os validate` prints them. This stage is the rule registry, not all
+   of `os validate`: the package-docs lint, the capability-provider check, the
+   picklist-reference and view-container-name checks and `--strict` stay
+   `os validate`'s, so run it too.
+2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
+   stack: for each object, a record derived from its fields is created, read
+   back and compared (CRUD round-trip fidelity), and a create, read or
+   fidelity failure fails the run. With `--rls`, a second fresh boot proves the
+   cross-owner invariant — a member must not write what it cannot read — for a
+   probe persona and for one persona per declared position, and a hole fails
+   the run. `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
+   apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
+   `group`) asks for the same boot.
+
+The config is the one `--app` names, or the auto-detected one — see
+[Config File Auto-Detection](#config-file-auto-detection).
+
+**Exit status.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | Both stages passed: no gating author-time finding, and no runtime failure |
+| `1` | The author-time stage refused the stack (the runtime stage did not run), the runtime stage found failures, or the command could not run at all (no config found, a config that does not load, a boot failure) |
+
+**`--json`.** What the document carries depends on where the run ended:
+
+- **Refused by the author-time stage:** `{ "error": "<sentence>", "errors": [...] }`,
+  where `errors` carries the findings in the shape `os validate --json` carries
+  them under `errors` — the gating findings (`severity`, `rule`, `where`,
+  `path`, `message`, `hint`, plus `package` for a finding raised inside one
+  package of the artifact), or the schema issues when the stack does not parse.
+- **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
+  `crud`, `rls` (with `--rls`) and `hardFailures`, the count the exit status is
+  read from.
+- **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
+  when the failure carries them.
 
 #### `os test`
 

@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#9160] The instrument #8823 did not have: raise each candidate diagnostic
+ * [#9160] The instrument commit 4dfa369a9 did not have: raise each candidate diagnostic
  * family against a LIVE server and record what the server actually printed.
  *
  * ## Why this file exists
  *
  * `redactStatementFromMessage` (`@objectstack/objectql`) keeps the database's
  * diagnostic after the statement cut, on the premise that a diagnostic names
- * IDENTIFIERS. #8823 found one family where that is false — MySQL's
+ * IDENTIFIERS. Commit 4dfa369a9 found one family where that is false — MySQL's
  * `ER_DUP_ENTRY` inlines the conflicting VALUE — and redacted that one slot.
  *
  * The list it introduced had exactly one entry and **no way to notice a second
@@ -236,7 +236,7 @@ const PG_CASES: readonly ProbeCase[] = [
     raise: (db) => db(PG_TABLE).insert({ age: 99999999999 }),
   },
   {
-    // #8823's coincidence, re-measured. The value is on `detail`, which
+    // Commit 4dfa369a9's coincidence, re-measured. The value is on `detail`, which
     // `ObjectLogger.write` does not serialize — so Postgres is saved here by a
     // fact about our Logger, not by the cut.
     family: 'unique_violation (23505)',

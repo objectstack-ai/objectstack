@@ -448,7 +448,7 @@ export function declareUnprovisionedCell(cell: DialectCell, matrix: string): voi
  * Nothing in the corridor (15_000, 600_000) is distinguishable by measurement,
  * so the value is fixed by this package's OWN existing answer for live-touching
  * sites: 60 explicit `60_000` budgets across 22 files — #13688 and its sweep
- * #13902 put them on live test BODIES, #14213 and #14628 on the hooks that pay
+ * #13902 put them on live test BODIES, #14213 and commit 6392b9c2b on the hooks that pay
  * a live connect. Adopting it leaves the live matrix with ONE live budget
  * instead of two, so a red at 60_000 ms is unambiguous about which bound it hit.
  *

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #13015 — a healthy #11627 hash-shadow UNIQUE is not drift, and the remedy the
+ * Commit cd1348802 — a healthy #11627 hash-shadow UNIQUE is not drift, and the remedy the
  * differ used to propose would have DROPPED the constraint it was reconciling.
  *
  * ## The defect
@@ -44,8 +44,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { SqlDriver, diffManagedIndexes } from '../src/index.js';
 // The shadow vocabulary stays INTERNAL to this package — nothing outside it
-// consumes a hash shadow, so #13015 deliberately did not widen the published
-// surface. Imported from the module, exactly as the #11627/#12998 suites do.
+// consumes a hash shadow, so commit cd1348802 deliberately did not widen the published
+// surface. Imported from the module, exactly as the #11627 and commit df1c75c4b suites do.
 import {
   enforcedIndexKey,
   hashShadowColumnFor,
@@ -86,13 +86,13 @@ const carrier = (shadowKey?: PhysicalIndex['shadowKey']): PhysicalIndex => ({
   ...(shadowKey ? { shadowKey } : {}),
 });
 
-/** What a HEALTHY (post-#12998) shadow hashes: the declared NULL-safe key. */
+/** What a HEALTHY (since commit df1c75c4b) shadow hashes: the declared NULL-safe key. */
 const healthyKey = [
   { column: 'organization_id', nullSafe: true },
   { column: 'v', nullSafe: false },
 ];
 
-/** What a PRE-#12998 shadow hashes: the same columns, RAW. */
+/** What a shadow from BEFORE commit df1c75c4b hashes: the same columns, RAW. */
 const staleKey = [
   { column: 'organization_id', nullSafe: false },
   { column: 'v', nullSafe: false },
@@ -188,7 +188,7 @@ describe('shadow-carried UNIQUE is not index drift (#13015)', () => {
 
   it('resolves the enforced key from the stored generation expression', () => {
     // The spellings MySQL 8 stores, verbatim: single column, plain composite,
-    // and the NULL-safe composite #12998 introduced.
+    // and the NULL-safe composite commit df1c75c4b introduced.
     expect(parseHashShadowKeyParts('unhex(sha2(`v`,256))')).toEqual([
       { column: 'v', nullSafe: false },
     ]);
@@ -350,7 +350,7 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
 
     /**
      * The direction a blind skip would have lost: a shadow hashing the RAW
-     * columns (what shipped before #12998) must still be reported AND must be
+     * columns (what shipped before commit df1c75c4b) must still be reported AND must be
      * repairable — the stale column is re-generated, not reused.
      */
     it('reports and repairs a shadow that hashes the raw columns', async () => {
@@ -361,7 +361,7 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
       const indexName = 'uniq_os13015_stale_org_v';
       const shadow = hashShadowColumnFor(indexName);
 
-      // Reproduce the pre-#12998 physical state: raw CONCAT, no COALESCE.
+      // Reproduce the physical state from before commit df1c75c4b: raw CONCAT, no COALESCE.
       await knex.raw(`ALTER TABLE \`os13015_stale\` DROP INDEX \`${indexName}\``);
       await knex.raw(`ALTER TABLE \`os13015_stale\` DROP COLUMN \`${shadow}\``);
       await knex.raw(

@@ -39,7 +39,7 @@
  * their declared bound and the invariant above licenses their TEXT column.
  * The former "STILL-OPEN half" cases below are the same measurements in their
  * CLOSED shape: the data-URI that was refused `22001` / `ER_DATA_TOO_LONG` at
- * varchar(255) is accepted and round-trips byte-identically, and the #11374
+ * varchar(255) is accepted and round-trips byte-identically, and commit d0e3a885b's
  * keyed-and-bounded rule applies to them the way it applies to every other
  * text-family member (keyed + bounded ⇒ varchar(maxLength), physically
  * enforced at exactly the declared bound; otherwise TEXT, bound enforced at
@@ -205,7 +205,7 @@ describe('richtext joins the TEXT family (#11794) — physical shape on SQLite',
     // from a width.
     expect(mirror({ type: 'richtext' })).toBeNull();
     expect(mirror({ type: 'code', maxLength: 64 })).toBeNull();
-    // Keyed and bounded: varchar(maxLength) — the #11374 rule, so a declared
+    // Keyed and bounded: varchar(maxLength) — commit d0e3a885b's rule, so a declared
     // index on a bounded code field still keys on MySQL.
     expect(mirror({ type: 'code', maxLength: 64 }, { unique: true })).toBe(64);
     // Keyed and unbounded: still TEXT — MySQL then refuses the key BY NAME
@@ -321,17 +321,17 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         // seam (record-validator, pinned in objectql), keyed columns enforce
         // it physically too. Both directions measured, boundary included.
         const KT = `${T}_keyed`;
-        // Hoisted (not an inline literal) the way #11374's `boundedObject()`
+        // Hoisted (not an inline literal) the way commit d0e3a885b's `boundedObject()`
         // is, exactly as the platform objects declare it.
         //
         // ⚠️ The second half of what this comment used to say has EXPIRED and
         // is kept here as a dated record rather than deleted: it read
         // "`indexes` rides through `initObjects` beyond its narrow parameter
         // type", and that was true — the signature declared no `indexes` and
-        // the driver read the key through an `as any` anyway. #16570 declared
-        // it and #16711 closed the class, so the hoist is no longer LOAD-BEARING
+        // the driver read the key through an `as any` anyway. Commit b72226f48 declared
+        // it and commit 7862fb711 closed the class, so the hoist is no longer LOAD-BEARING
         // here; an inline literal would compile today. It stays because
-        // mirroring #11374's authoring shape is why it was written that way in
+        // mirroring commit d0e3a885b's authoring shape is why it was written that way in
         // the first place, and because this suite is about column widths, not
         // about parameter types. The pin that must stay inline is
         // `sql-driver-16711-object-def-param-keys.test.ts`.

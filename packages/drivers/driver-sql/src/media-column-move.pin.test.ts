@@ -11,7 +11,7 @@
  * refusing.
  *
  * ⛔ The single most load-bearing assertion here is that the PostgreSQL retype
- * arm's pre-check exists at all. The #15041 addendum prescribed the retype with
+ * arm's pre-check exists at all. The ADR-0104 2026-09-05 addendum prescribed the retype with
  * NO pre-check, and that form was measured on live PostgreSQL 16.13 to accept a
  * row holding an inline metadata blob and flatten it to its own literal text.
  * The director ruling (decision batch #120 item 1) replaced the clause; a pin
