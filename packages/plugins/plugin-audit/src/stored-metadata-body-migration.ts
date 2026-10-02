@@ -107,14 +107,14 @@ export function withoutStoredHashColumns(snapshot: unknown): { changed: boolean;
 
 /**
  * The conflict note with each side's value withheld — `null` kept, anything
- * else `[withheld]` — exactly the sentence the protocol writes now; `undefined`
+ * else `(withheld)` — exactly the sentence the protocol writes now; `undefined`
  * for a note that is not that sentence or already withholds both sides.
  */
 function withheldConflictNote(note: unknown): string | undefined {
   if (typeof note !== 'string') return undefined;
   const match = CONFLICT_NOTE.exec(note);
   if (!match) return undefined;
-  const side = (value: string) => (value === 'null' ? 'null' : '[withheld]');
+  const side = (value: string) => (value === 'null' ? 'null' : '(withheld)');
   const rewritten = `expected parent ${side(match[1] as string)} but current is ${side(match[2] as string)}`;
   return rewritten === note ? undefined : rewritten;
 }
@@ -158,7 +158,7 @@ function rewriteSerialized(
  *  - `sys_audit_log` / `sys_activity` — the ledger snapshot / activity pair the
  *    writer copied a `sys_metadata_audit` row into.
  *
- * Each value becomes `[withheld]` and a `null` side stays `null` — the sentence
+ * Each value becomes `(withheld)` and a `null` side stays `null` — the sentence
  * the protocol writes since this card, so a rewritten note and a new one read
  * the same. Idempotent.
  */

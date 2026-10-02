@@ -15767,7 +15767,7 @@ export class ObjectStackProtocolImplementation implements
      *  - a caller's token naming no current head: the keyed current head;
      *  - no crypto provider: no value, and the remedy.
      *
-     * A side with no served form is `[withheld]`; an absent side is `null`.
+     * A side with no served form is `(withheld)`; an absent side is `null`.
      */
     private async metadataConflictRefusal(err: ConflictError, subject: string, prefix: string): Promise<Error> {
         const conflict: any = new Error(subject);
@@ -15781,7 +15781,7 @@ export class ObjectStackProtocolImplementation implements
             return conflict;
         }
         const digest = this.storedHashDigest();
-        const show = (served: string | null | undefined) => (served === undefined ? '[withheld]' : served ?? 'null');
+        const show = (served: string | null | undefined) => (served === undefined ? '(withheld)' : served ?? 'null');
         const current = await servedContentHash(err.actualHead, digest);
         if (current !== undefined) conflict.actualHead = current;
         if (err instanceof InboundVersionConflictError) {
@@ -15828,10 +15828,10 @@ export class ObjectStackProtocolImplementation implements
             // every audit reader), and not keyed either (a copy has no use for a
             // version token, and a keyed value would die with the key). The
             // note keeps its sentence and says which side was absent; a value
-            // is `[withheld]`. `os migrate audit-metadata-bodies` rewrites the
+            // is `(withheld)`. `os migrate audit-metadata-bodies` rewrites the
             // notes written before this to exactly this text.
-            note: `expected parent ${args.expectedParent == null ? 'null' : '[withheld]'} `
-                + `but current is ${args.actualHead == null ? 'null' : '[withheld]'}`,
+            note: `expected parent ${args.expectedParent == null ? 'null' : '(withheld)'} `
+                + `but current is ${args.actualHead == null ? 'null' : '(withheld)'}`,
         };
     }
 

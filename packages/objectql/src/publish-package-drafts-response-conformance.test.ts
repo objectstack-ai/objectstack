@@ -28,6 +28,7 @@
  * upgrade only when a consumer needs a field) — so the cases here assert it is
  * carried through unstripped, never its inner shape.
  */
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -138,6 +139,12 @@ async function makeProtocol() {
     // only into a package the registry holds (#20863). Its manifest declares
     // no namespace, so the ADR-0028 prefix pre-flight is unchanged.
     engine.registry.installPackage({ id: PKG, name: 'Edu', version: '1.0.0' } as never);
+    // [#21207] The host's composition-root step (`os serve`, the verify harness):
+    // a crypto provider. A version token is the provider's keyed digest of the
+    // stored content hash, so without one the receipts issue none.
+    engine.setCryptoProvider({
+        keyedDigest: async (plain: string) => `hmac-sha256:${createHash('sha256').update(`conformance|${plain}`).digest('hex')}`,
+    } as never);
     return new ObjectStackProtocolImplementation(engine);
 }
 
@@ -216,10 +223,11 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(parsed.publishedCount).toBe(2);
         expect(parsed.failedCount).toBe(0);
         expect(parsed.failed).toEqual([]);
-        // Every element carries the ADR-0008 OCC token, unstripped.
+        // Every element carries the ADR-0008 OCC token, unstripped — [#21207]
+        // in keyed form, never the stored content hash.
         for (const el of parsed.published) {
             expect(typeof el.version).toBe('string');
-            expect(el.version.length).toBeGreaterThan(0);
+            expect(el.version).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
         }
         expect(parsed.published.map((e) => e.name).sort()).toEqual(['cases', 'leads']);
     });

@@ -34,7 +34,7 @@ const view = (label: string) => JSON.stringify({ name: 'v', type: 'grid', label 
 const metaSnapshot = () => ({ id: 'm1', name: 'v', type: 'view', scope: 'platform', metadata: view('one'), checksum: HASH });
 const historySnapshot = () => ({ id: 'h1', name: 'v', type: 'view', metadata: view('one'), checksum: HASH, previous_checksum: PARENT });
 const conflictNote = `expected parent ${PARENT} but current is ${HASH}`;
-const WITHHELD_NOTE = 'expected parent [withheld] but current is [withheld]';
+const WITHHELD_NOTE = 'expected parent (withheld) but current is (withheld)';
 
 describe('planAuditRowPatch / planActivityRowPatch — the hash columns leave the copy', () => {
   it('a sys_metadata create snapshot loses its checksum, and nothing else', () => {
@@ -89,7 +89,7 @@ describe('planDecisionNotePatch — the decision-audit note and its copies', () 
 
   it('keeps a null side as null', () => {
     const patch = planDecisionNotePatch('sys_metadata_audit', { id: 'd2', code: 'metadata_conflict', note: `expected parent null but current is ${HASH}` });
-    expect(patch).toEqual({ note: 'expected parent null but current is [withheld]' });
+    expect(patch).toEqual({ note: 'expected parent null but current is (withheld)' });
   });
 
   it('leaves every other note alone, and is idempotent', () => {

@@ -6981,10 +6981,13 @@ export class RestServer {
                             : body;
 
                     // Opt-in OCC under ADR-0008 PR-10d.3: callers (Studio,
-                    // CLI) may set `If-Match: <sha256:...>` to enforce that
-                    // the overlay row has not advanced since they last read
-                    // it. A `null`/empty body or no header preserves the
-                    // legacy last-write-wins behaviour.
+                    // CLI) may set `If-Match` to the version token a receipt
+                    // served, to enforce that the overlay row has not advanced
+                    // since they last read it. A `null`/empty body or no header
+                    // preserves the legacy last-write-wins behaviour. [#21207]
+                    // The token is the crypto provider's keyed digest of the
+                    // stored content hash, never the hash itself; the protocol
+                    // compares it in that form, so it passes through here as sent.
                     const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '') // strip ETag-style quotes
