@@ -43,6 +43,9 @@ import {
   STORED_METADATA_BODY_COLUMN,
   STORED_METADATA_TYPE_COLUMN,
 } from '@objectstack/spec/kernel';
+// [#21207] The same rows' stored content-hash columns — defined beside the
+// at-rest rewrite that withholds the copies already written.
+import { STORED_METADATA_HASH_COLUMNS } from './stored-metadata-body-migration.js';
 // [commit 1408fe385 / #10101] The platform-row organization resolver, imported rather
 // than owned. It started life in THIS file (commit 1408fe385, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
@@ -1421,6 +1424,14 @@ export function installAuditWriters(
       const outcome = redactStoredMetadataBody(type, out[STORED_METADATA_BODY_COLUMN]);
       if (outcome.ok) out[STORED_METADATA_BODY_COLUMN] = outcome.body;
       else delete out[STORED_METADATA_BODY_COLUMN];
+    }
+    // [#21207] …and the same row's stored CONTENT HASH is not copied at all
+    // (fork three, ruling A). It is a hash over the whole stored body, withheld
+    // credential material included, so a copy of it beside the projected body
+    // is an offline verifier, at rest and served to every ledger reader. A copy
+    // has no use for a version token, and the history table stays the lineage.
+    if (isStoredMetadataBodyObject(objectName)) {
+      for (const column of STORED_METADATA_HASH_COLUMNS) delete out[column];
     }
     if (dropComputed) {
       const defs = getFieldDefs(objectName);
