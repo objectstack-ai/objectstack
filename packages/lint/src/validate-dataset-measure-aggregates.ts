@@ -135,18 +135,54 @@
  * paths included, on the object the LEAF lives on) and stays silent under the
  * same skips 1, 3 and 4 above, plus a dimension that writes no `field`.
  *
- * **Cube dimensions are NOT judged here, because lint reads no cube.** No
- * authoring rule in this package walks `analyticsCubes`: its one mention is
- * `validate-field-consumers.ts`'s list of roots a field-REMOVAL census reads,
- * which judges nothing about a cube member. A cube dimension is a different
- * position (a record keyed by member name, its column in `sql`) on a different
- * metadata type, and the registry entry that carries this rule to the runtime
- * door declares `runtimeTypes: ['dataset']` only — so a cube leg would be a new
- * walk and a new door, not this rule extended.
+ * ## [#21082] The cube leg — `analyticsCubes` members, under the same two ids
+ *
+ * An authored cube (`defineStack({ analyticsCubes })`) reaches the SAME door
+ * the dataset compiles to: `structured-json-dimension-door.ts` judges every
+ * cube's grouped members and `count_distinct` measures, whether the cube was
+ * authored or compiled from a dataset. Until this leg no rule in this package
+ * walked `analyticsCubes`, so a cube dimension over a `json` field passed
+ * `os validate` and met its first refusal at query time. The leg refuses the
+ * three shapes that door refuses, with the verdicts this file already holds —
+ * ⛔ no second account of either:
+ *
+ *   - a dimension whose column is structured-JSON or multi-value —
+ *     {@link groupKeyClassOf}, under `dimension-json-stored-field-refused`;
+ *   - a `count_distinct` measure whose column is JSON-stored —
+ *     {@link acceptsDeclaration}, under `measure-aggregate-field-type-refused`.
+ *
+ * The door's other cube judgment (#21044, `cube-measure-field-type-door.ts`:
+ * `sum` / `avg` / `min` / `max` against the table) is not this leg's; a cube
+ * measure of any other `type` is left unjudged here.
+ *
+ * How a cube names its column is read the way the door reads it
+ * (`analytics-service.ts`, `hop-object.ts`):
+ *
+ *   - the cube's object is its `sql`, trimmed, when that names an object this
+ *     stack defines with a field map (skip 1, as for a dataset — a `sql` that
+ *     is not a bare object name names none, and the door stands down on it
+ *     too);
+ *   - a member's column is its `sql`, a column reference since #20943: a bare
+ *     column of the cube's object, or a relationship path whose leaf is read
+ *     on the object the last hop reaches. A hop the cube declares a join for
+ *     (`joins`, keyed by the path with its dots as `__`) reaches that join's
+ *     `name` — the door's first tier, and the one place it can disagree with
+ *     the field's declared `reference`; every other hop is walked on the
+ *     object graph by {@link resolveFieldPath}, the door's second tier. A hop
+ *     the graph cannot follow is the door's alias tier, and a skip here;
+ *   - the row wildcard `'*'` names no column, so it resolves to nothing and is
+ *     skipped, on a dimension and a measure alike (whether `'*'` belongs on
+ *     either is a question of its own, not this leg's).
+ *
+ * The same skips 1, 3 and 4 hold, plus a member that writes no `sql`.
+ *
+ * Both legs ride the one registry entry: gating, on all three commands. At the
+ * runtime write door that entry is dispatched for a `dataset` write, whose
+ * per-write snapshot carries no `analyticsCubes`, so the cube leg reads nothing
+ * there; an `analytics_cube` write is dispatched to no rule today.
  *
  * The function keeps its name: it is the registry's key (`authoring-rules.ts`),
- * and the dimension leg rides on that one entry — gating, on all three
- * commands, and at the runtime `dataset` write door.
+ * and the dimension and cube legs ride on that one entry.
  */
 
 import {
@@ -157,6 +193,7 @@ import {
   type ValueShapeFieldDef,
 } from '@objectstack/spec/data';
 
+import { collectionEntries } from './collection-entries.js';
 import {
   indexObjectGraph,
   isUnjudgeable,
@@ -180,7 +217,8 @@ export const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED = 'measure-aggregate-field-typ
  * JSON-STORED — the spec's own name for the union the analytics door refuses
  * to group by (`aggregate-field-type-compatibility.ts`: the structured-JSON
  * class, the multi-option types, and a multi-capable type flagged
- * `multiple: true`).
+ * `multiple: true`). [#21082] A cube dimension whose `sql` names such a
+ * column carries the same id: one verdict, one door, two places to write it.
  */
 export const DIMENSION_JSON_STORED_FIELD_REFUSED = 'dimension-json-stored-field-refused';
 
@@ -196,9 +234,12 @@ export interface DatasetMeasureAggregateFinding {
    */
   severity: 'error';
   rule: typeof MEASURE_AGGREGATE_FIELD_TYPE_REFUSED | typeof DIMENSION_JSON_STORED_FIELD_REFUSED;
-  /** Human-readable location, e.g. `dataset "sales" › measure "avg_closed"`. */
+  /** Human-readable location, e.g. `dataset "sales" › measure "avg_closed"` or `cube "sales" › dimension "meta"`. */
   where: string;
-  /** Config path, e.g. `datasets[0].measures[2].aggregate` or `datasets[0].dimensions[1].field`. */
+  /**
+   * Config path, e.g. `datasets[0].measures[2].aggregate`, `datasets[0].dimensions[1].field`,
+   * `analyticsCubes[0].dimensions.meta.sql` or `analyticsCubes[0].measures.distinct_meta.type`.
+   */
   path: string;
   message: string;
   hint: string;
@@ -261,11 +302,15 @@ function shapeOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, fieldType: 
   return { type: fieldType, multiple: verdict.meta?.multiple === true };
 }
 
-/** Which object the words say declares the leaf: the dataset's own, or the joined one. */
-function declarerOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, baseObject: string): string {
+/** Which object the words say declares the leaf: the dataset's (or cube's) own, or the joined one. */
+function declarerOf(
+  verdict: Extract<FieldPathVerdict, { kind: 'ok' }>,
+  baseObject: string,
+  owner: 'dataset' | 'cube',
+): string {
   return verdict.object === baseObject
     ? `object "${baseObject}"`
-    : `object "${verdict.object}" (reached through this dataset's join chain)`;
+    : `object "${verdict.object}" (reached through this ${owner}'s join chain)`;
 }
 
 /**
@@ -281,19 +326,263 @@ function groupKeyClassOf(shape: ValueShapeFieldDef): 'structured-json' | 'multi-
   return isMultiValueField(shape) ? 'multi-value' : null;
 }
 
+/** One member a finding is about: where it stands, what it names, and who declares its column. */
+interface MemberSite {
+  /** The finding's `where`. */
+  where: string;
+  /** The finding's `path`. */
+  path: string;
+  /** The member's name, as the words say it. */
+  name: string;
+  /** The column reference the author wrote: a dataset member's `field`, a cube member's `sql`. */
+  column: string;
+  /** Who declares the resolved column, as the words say it ({@link declarerOf}). */
+  declarer: string;
+}
+
+/**
+ * The last sentence of a measure finding's hint: the door that refuses the
+ * same pair later, and with what. A dataset's pair is refused when the
+ * dataset compiles; an authored cube has no compile step, and its pair is
+ * refused by the analytics door when a query names the measure.
+ */
+const DATASET_COMPILE_DOOR =
+  'The compile leg refuses this same pair with `400 DATASET_INVALID` before any SQL is emitted, ' +
+  'so this is the same fix made earlier.';
+const CUBE_QUERY_DOOR =
+  'The analytics door refuses this same pair on the cube with `400 INVALID_FIELD` before any SQL is ' +
+  'built, so this is the same fix made earlier.';
+
+/**
+ * [#20890] The finding for a dimension that groups by a JSON-stored column,
+ * in one set of words for a dataset dimension and a cube dimension alike.
+ * `selector` names who selects the dimension: a dataset's reports and
+ * dashboards, a cube's queries.
+ */
+function jsonStoredDimensionFinding(
+  site: MemberSite,
+  leaf: Extract<FieldPathVerdict, { kind: 'ok' }>,
+  shape: ValueShapeFieldDef,
+  cls: 'structured-json' | 'multi-value',
+  selector: string,
+): DatasetMeasureAggregateFinding {
+  const head =
+    `dimension "${site.name}" groups by field "${site.column}", which ` +
+    `${site.declarer} declares as ${declaredAs(shape)} — `;
+  const door =
+    'The analytics door refuses every query that groups by this dimension with ' +
+    `\`400 INVALID_FIELD\` before any SQL is built, so ${selector} that selects it gets ` +
+    'that refusal instead of an answer.';
+  return {
+    severity: 'error',
+    rule: DIMENSION_JSON_STORED_FIELD_REFUSED,
+    where: site.where,
+    path: site.path,
+    message:
+      cls === 'structured-json'
+        ? head +
+          'a structured-JSON value, which analytics does not group by. A JSON document is no ' +
+          'group key the SQL dialects share: one groups each serialized document apart, ' +
+          `another refuses the statement. ${door}`
+        : head +
+          'a multi-value field, which analytics does not group by. A list of values is no ' +
+          'group key the SQL dialects share: one groups each serialized list apart, another ' +
+          `refuses the statement. ${door}`,
+    hint:
+      cls === 'structured-json'
+        ? 'Group by a field that stores one scalar value: store the part of the document you ' +
+          'group on in a field of its own and point this dimension at that field, or remove ' +
+          'the dimension.'
+        : `Filter by one member instead of grouping: a record query on "${leaf.object}" ` +
+          `with where { "${leaf.field}": { "$contains": VALUE } } counts or lists the records ` +
+          'that hold VALUE, one query per member. Point this dimension at a field that stores ' +
+          'one value, or remove it.',
+  };
+}
+
+/**
+ * The finding for a measure whose aggregate the column's declaration cannot
+ * carry ({@link acceptsDeclaration} said no), in one set of words for a
+ * dataset measure and a cube measure alike. `door` is the hint's last
+ * sentence ({@link DATASET_COMPILE_DOOR} or {@link CUBE_QUERY_DOOR}).
+ */
+function refusedMeasureFinding(
+  site: MemberSite,
+  aggregate: string,
+  accepted: readonly string[],
+  fieldType: string,
+  shape: ValueShapeFieldDef,
+  door: string,
+): DatasetMeasureAggregateFinding {
+  // [#20890] The row accepts the TYPE and the declaration is what refuses:
+  // a multi-capable field flagged `multiple: true` under `count_distinct`.
+  const flaggedList = isAggregateCompatibleWithFieldType(aggregate, fieldType);
+  return {
+    severity: 'error',
+    rule: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
+    where: site.where,
+    path: site.path,
+    message: flaggedList
+      ? `measure "${site.name}" applies aggregate "${aggregate}" to field "${site.column}", which ` +
+        `${site.declarer} declares as ${declaredAs(shape)} — a list of values ` +
+        `stored as JSON. "${aggregate}" COMPARES the stored values for equality, and no two ` +
+        `backends compare a JSON-stored value alike: one counts every row apart, one compares ` +
+        `the serialized text, another has no equality for the type and fails at query time. ` +
+        `"${aggregate}" accepts: ${accepted.join(', ')}, none of them with \`multiple: true\`.`
+      : `measure "${site.name}" applies aggregate "${aggregate}" to field "${site.column}", which ` +
+        `${site.declarer} declares as \`${fieldType}\`. That pair is refused by the aggregate × ` +
+        `field-type compatibility table in @objectstack/spec, so the number a backend returns ` +
+        `for it is a property of the SQL dialect rather than of the data — one coerces the ` +
+        `stored form and answers something plausible, another has no such function and fails ` +
+        `at query time. "${aggregate}" accepts: ${accepted.join(', ')}.`,
+    hint:
+      `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
+      `"${site.column}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
+      `${aggregatesAccepting(shape).join(', ')}. ` +
+      `\`count\` accepts every type because it reads no value, and \`count_distinct\` every ` +
+      `type but the JSON-stored ones — a field declared \`multiple: true\` among them — whose ` +
+      `values no two backends compare alike; a ` +
+      `quantity that must be added up or averaged has to be STORED as a ` +
+      `numeric field (a computed column) and aggregated as one. ${door}`,
+  };
+}
+
+/**
+ * [#21082] The column a cube member's `sql` reads, resolved the way the
+ * analytics door resolves it (`hop-object.ts`): a hop the cube declares a
+ * join for reaches that join's `name` (keyed by the path up to the hop, its
+ * dots as `__`), so the walk restarts on the LAST such join's object; every
+ * other hop, and the leaf, are {@link resolveFieldPath}'s on the object graph.
+ * ⛔ No hop is walked here: this only picks the object the shared walk starts
+ * on. A bare column and the row wildcard `'*'` have no hop, and `'*'` resolves
+ * to nothing.
+ */
+function resolveCubeColumn(
+  graph: ObjectGraph,
+  cube: AnyRec,
+  baseObject: string,
+  sql: string,
+): FieldPathVerdict | undefined {
+  const segments = sql.split('.');
+  const joins = isRec(cube.joins) ? cube.joins : undefined;
+  let root = baseObject;
+  let from = 0;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const alias = segments.slice(0, i + 1).join('__');
+    const join = joins && Object.prototype.hasOwnProperty.call(joins, alias) ? joins[alias] : undefined;
+    const target = isRec(join) ? strName(join.name) : undefined;
+    if (target) {
+      root = target;
+      from = i + 1;
+    }
+  }
+  return resolveFieldPath(graph, root, segments.slice(from).join('.'));
+}
+
+/**
+ * [#21082] The cube leg for one `analyticsCubes` entry — see "The cube leg" in
+ * the module note. Its dimensions before its measures, each located at the
+ * member's key (`analyticsCubes[0].dimensions.meta.sql`).
+ */
+function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph): DatasetMeasureAggregateFinding[] {
+  const findings: DatasetMeasureAggregateFinding[] = [];
+
+  // ── Skip 1: the cube's `sql` names no object this stack defines with a field map ──
+  const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+  if (!object || !graph.has(object) || !graph.get(object)) return findings;
+
+  const cubeName = strName(cube.name) ?? cubePath;
+
+  /** The resolved, typed column a member's `sql` reads, or `undefined` for every skip. */
+  const columnOf = (sql: string) => {
+    // ── Skip 3: the reference does not resolve (the row wildcard among them) ──
+    const verdict = resolveCubeColumn(graph, cube, object, sql);
+    if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return undefined;
+    // ── Skip 4: the column declares no type, so nothing can be asked about it ──
+    const fieldType = verdict.meta?.type;
+    if (!fieldType) return undefined;
+    return { verdict, fieldType, shape: shapeOf(verdict, fieldType) };
+  };
+
+  for (const { rec: dimension, path } of collectionEntries(cube.dimensions, `${cubePath}.dimensions`)) {
+    // A dimension that writes no `sql` has nothing to judge.
+    const sql = strName(dimension.sql);
+    if (!sql) continue;
+    const column = columnOf(sql);
+    if (!column) continue;
+    const cls = groupKeyClassOf(column.shape);
+    if (cls === null) continue;
+
+    const name = strName(dimension.name) ?? path;
+    findings.push(
+      jsonStoredDimensionFinding(
+        {
+          where: `cube "${cubeName}" › dimension "${name}"`,
+          path: `${path}.sql`,
+          name,
+          column: sql,
+          declarer: declarerOf(column.verdict, object, 'cube'),
+        },
+        column.verdict,
+        column.shape,
+        cls,
+        'a query',
+      ),
+    );
+  }
+
+  for (const { rec: measure, path } of collectionEntries(cube.measures, `${cubePath}.measures`)) {
+    // Only `count_distinct` is this leg's: it is the cube measure the door's
+    // JSON-stored judgment covers. Every other `type` is skipped, judged or not
+    // elsewhere — see the module note.
+    const aggregate = strName(measure.type);
+    if (aggregate !== 'count_distinct') continue;
+    const accepted = ACCEPTED_TYPES_BY_AGGREGATE.get(aggregate);
+    if (!accepted) continue;
+    const sql = strName(measure.sql);
+    if (!sql) continue;
+    const column = columnOf(sql);
+    if (!column) continue;
+    if (acceptsDeclaration(aggregate, column.shape)) continue;
+
+    const name = strName(measure.name) ?? path;
+    findings.push(
+      refusedMeasureFinding(
+        {
+          where: `cube "${cubeName}" › measure "${name}"`,
+          path: `${path}.type`,
+          name,
+          column: sql,
+          declarer: declarerOf(column.verdict, object, 'cube'),
+        },
+        aggregate,
+        accepted,
+        column.fieldType,
+        column.shape,
+        CUBE_QUERY_DOOR,
+      ),
+    );
+  }
+
+  return findings;
+}
+
 /**
  * Refuse every dataset measure whose `aggregate` the field's declaration
- * cannot carry, and every dataset dimension whose field is JSON-stored.
- * Returns findings (empty = clean), each dataset's dimensions before its
- * measures. Pure `(stack) => Finding[]` (ADR-0019): no I/O, and safe on both
- * the schema-parsed stack and the raw config the `os lint` path carries.
+ * cannot carry, and every dataset dimension whose field is JSON-stored; then
+ * [#21082] every cube dimension whose `sql` column is JSON-stored, and every
+ * cube `count_distinct` measure whose column is. Returns findings (empty =
+ * clean): each dataset's dimensions before its measures, then each cube's.
+ * Pure `(stack) => Finding[]` (ADR-0019): no I/O, and safe on both the
+ * schema-parsed stack and the raw config the `os lint` path carries.
  */
 export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasureAggregateFinding[] {
   const findings: DatasetMeasureAggregateFinding[] = [];
   if (!isRec(stack)) return findings;
 
   const datasets = recordsOf(stack.datasets);
-  if (datasets.length === 0) return findings;
+  const cubes = collectionEntries(stack.analyticsCubes, 'analyticsCubes');
+  if (datasets.length === 0 && cubes.length === 0) return findings;
 
   const graph: ObjectGraph = indexObjectGraph(stack);
 
@@ -325,38 +614,21 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
       if (cls === null) return;
 
       const dimensionName = strName(dimension.name) ?? `#${k}`;
-      const head =
-        `dimension "${dimensionName}" groups by field "${field}", which ` +
-        `${declarerOf(verdict, object)} declares as ${declaredAs(shape)} — `;
-      const door =
-        'The analytics door refuses every query that groups by this dimension with ' +
-        '`400 INVALID_FIELD` before any SQL is built, so a report or dashboard that selects it gets ' +
-        'that refusal instead of an answer.';
-      findings.push({
-        severity: 'error',
-        rule: DIMENSION_JSON_STORED_FIELD_REFUSED,
-        where: `dataset "${dsName}" › dimension "${dimensionName}"`,
-        path: `datasets[${di}].dimensions[${k}].field`,
-        message:
-          cls === 'structured-json'
-            ? head +
-              'a structured-JSON value, which analytics does not group by. A JSON document is no ' +
-              'group key the SQL dialects share: one groups each serialized document apart, ' +
-              `another refuses the statement. ${door}`
-            : head +
-              'a multi-value field, which analytics does not group by. A list of values is no ' +
-              'group key the SQL dialects share: one groups each serialized list apart, another ' +
-              `refuses the statement. ${door}`,
-        hint:
-          cls === 'structured-json'
-            ? 'Group by a field that stores one scalar value: store the part of the document you ' +
-              'group on in a field of its own and point this dimension at that field, or remove ' +
-              'the dimension.'
-            : `Filter by one member instead of grouping: a record query on "${verdict.object}" ` +
-              `with where { "${verdict.field}": { "$contains": VALUE } } counts or lists the records ` +
-              'that hold VALUE, one query per member. Point this dimension at a field that stores ' +
-              'one value, or remove it.',
-      });
+      findings.push(
+        jsonStoredDimensionFinding(
+          {
+            where: `dataset "${dsName}" › dimension "${dimensionName}"`,
+            path: `datasets[${di}].dimensions[${k}].field`,
+            name: dimensionName,
+            column: field,
+            declarer: declarerOf(verdict, object, 'dataset'),
+          },
+          verdict,
+          shape,
+          cls,
+          'a report or dashboard',
+        ),
+      );
     });
 
     recordsOf(ds.measures).forEach((measure, k) => {
@@ -379,43 +651,31 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
 
       const shape = shapeOf(verdict, fieldType);
       if (acceptsDeclaration(aggregate, shape)) return;
-      // [#20890] The row accepts the TYPE and the declaration is what refuses:
-      // a multi-capable field flagged `multiple: true` under `count_distinct`.
-      const flaggedList = isAggregateCompatibleWithFieldType(aggregate, fieldType);
 
       const measureName = strName(measure.name) ?? `#${k}`;
-      findings.push({
-        severity: 'error',
-        rule: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
-        where: `dataset "${dsName}" › measure "${measureName}"`,
-        path: `datasets[${di}].measures[${k}].aggregate`,
-        message: flaggedList
-          ? `measure "${measureName}" applies aggregate "${aggregate}" to field "${field}", which ` +
-            `${declarerOf(verdict, object)} declares as ${declaredAs(shape)} — a list of values ` +
-            `stored as JSON. "${aggregate}" COMPARES the stored values for equality, and no two ` +
-            `backends compare a JSON-stored value alike: one counts every row apart, one compares ` +
-            `the serialized text, another has no equality for the type and fails at query time. ` +
-            `"${aggregate}" accepts: ${accepted.join(', ')}, none of them with \`multiple: true\`.`
-          : `measure "${measureName}" applies aggregate "${aggregate}" to field "${field}", which ` +
-            `${declarerOf(verdict, object)} declares as \`${fieldType}\`. That pair is refused by the aggregate × ` +
-            `field-type compatibility table in @objectstack/spec, so the number a backend returns ` +
-            `for it is a property of the SQL dialect rather than of the data — one coerces the ` +
-            `stored form and answers something plausible, another has no such function and fails ` +
-            `at query time. "${aggregate}" accepts: ${accepted.join(', ')}.`,
-        hint:
-          `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
-          `"${field}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
-          `${aggregatesAccepting(shape).join(', ')}. ` +
-          `\`count\` accepts every type because it reads no value, and \`count_distinct\` every ` +
-          `type but the JSON-stored ones — a field declared \`multiple: true\` among them — whose ` +
-          `values no two backends compare alike; a ` +
-          `quantity that must be added up or averaged has to be STORED as a ` +
-          `numeric field (a computed column) and aggregated as one. The compile leg refuses ` +
-          `this same pair with \`400 DATASET_INVALID\` before any SQL is emitted, so this is ` +
-          `the same fix made earlier.`,
-      });
+      findings.push(
+        refusedMeasureFinding(
+          {
+            where: `dataset "${dsName}" › measure "${measureName}"`,
+            path: `datasets[${di}].measures[${k}].aggregate`,
+            name: measureName,
+            column: field,
+            declarer: declarerOf(verdict, object, 'dataset'),
+          },
+          aggregate,
+          accepted,
+          fieldType,
+          shape,
+          DATASET_COMPILE_DOOR,
+        ),
+      );
     });
   });
+
+  // ── [#21082] The cube leg — see "The cube leg" in the module note ──
+  for (const { rec: cube, path } of cubes) {
+    findings.push(...cubeMemberFindings(cube, path, graph));
+  }
 
   return findings;
 }

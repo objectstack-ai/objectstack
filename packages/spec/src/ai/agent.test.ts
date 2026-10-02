@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+
+import { defineStack } from '../stack.zod';
 import {
   AgentSchema,
   AIModelConfigSchema,
@@ -465,7 +467,10 @@ Be precise, data-driven, and clear in your explanations.`,
   });
 
   describe('Memory Management', () => {
-    it('should accept agent with memory configuration', () => {
+    // Flipped from the old acceptance: `store` is retired and the two numbers
+    // are required once long-term memory is enabled (ADR-0049, #20274). The
+    // refusals themselves are pinned in "agent memory contract" below.
+    it('should accept agent with memory configuration, and materialize no store', () => {
       const agent = AgentSchema.parse({
         name: 'memory_agent',
         label: 'Memory Agent',
@@ -474,7 +479,6 @@ Be precise, data-driven, and clear in your explanations.`,
         memory: {
           longTerm: {
             enabled: true,
-            store: 'vector',
             maxEntries: 10000,
           },
           reflectionInterval: 5,
@@ -482,23 +486,23 @@ Be precise, data-driven, and clear in your explanations.`,
       });
 
       expect(agent.memory?.longTerm?.enabled).toBe(true);
-      expect(agent.memory?.longTerm?.store).toBe('vector');
+      expect(agent.memory?.longTerm?.maxEntries).toBe(10000);
       expect(agent.memory?.reflectionInterval).toBe(5);
+      // The retired key's old default no longer appears: absence stays absence.
+      expect(agent.memory?.longTerm).not.toHaveProperty('store');
     });
 
-    it('should accept all memory store backends', () => {
-      const stores = ['vector', 'database', 'redis'] as const;
-
-      stores.forEach(store => {
+    it('should accept memory without enabled long-term memory', () => {
+      for (const memory of [{}, { longTerm: {} }, { longTerm: { enabled: false } }, { longTerm: { enabled: false, maxEntries: 5 } }]) {
         const agent = AgentSchema.parse({
           name: 'test_agent',
           label: 'Test',
           role: 'Test',
           instructions: 'Test',
-          memory: { longTerm: { enabled: true, store } },
+          memory,
         });
-        expect(agent.memory?.longTerm?.store).toBe(store);
-      });
+        expect(agent.memory?.reflectionInterval).toBeUndefined();
+      }
     });
   });
 
@@ -768,5 +772,131 @@ describe('defineAgent', () => {
       role: 'Tester',
       instructions: 'Test.',
     })).toThrow();
+  });
+});
+
+// ─── The agent memory contract (ADR-0049, ruling record 5950198150, letter A′) ──
+//
+// The cloud AI runtime, the one runtime that executes agents, enforces
+// long-term memory from `enabled`, `maxEntries` and `reflectionInterval`, and
+// refused before an agent's first turn exactly the declarations the spec still
+// accepted. Authoring now refuses them, by name, with a prescription; and the
+// storage backend left the spec as a whole key — that retirement's pins, its D2
+// conversion and its tree-scoped absence walk live in
+// `agent-memory-store-retirement.test.ts`. On the assertion set: a schema
+// refusal is a ZodError whose issues carry `code` and `path` but no ADR-0112
+// `status` — so the schema pins assert refusal, the issue `code`, the `path`
+// naming the key and the prescription text, and the authoring door
+// (`defineStack`) is pinned with its envelope's `code` and `status`.
+
+const MEMORY_AGENT = {
+  name: 'memory_agent',
+  label: 'Memory Agent',
+  role: 'Assistant',
+  instructions: 'Remember what the user told you.',
+} as const;
+
+/** A stack an authoring door accepts, carrying one agent. */
+const stackWith = (agent: Record<string, unknown>) => ({
+  manifest: { id: 'com.example.agent-memory', name: 'agent_memory', version: '1.0.0', type: 'app' },
+  agents: [agent],
+});
+
+/** The one refusal `defineStack` raised, as its ADR-0112 envelope. */
+const stackRefusal = (agent: Record<string, unknown>) => {
+  let thrown: unknown;
+  try {
+    defineStack(stackWith(agent) as never);
+  } catch (e) {
+    thrown = e;
+  }
+  return thrown as { code?: string; status?: number; issues?: Array<{ path: PropertyKey[]; message: string }> };
+};
+
+describe('agent memory contract — what the runtime honours is what authoring accepts', () => {
+  it('accepts an enabled long-term memory carrying both numbers', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 20 }, reflectionInterval: 5 } });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+
+  it('refuses an enabled longTerm without `maxEntries`, at its path, naming the key and the fix', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true }, reflectionInterval: 5 } });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['memory', 'longTerm', 'maxEntries']);
+    expect(issues[0].message.split(' — ')[0]).toBe(
+      '`agent.memory.longTerm.maxEntries` is required when `agent.memory.longTerm.enabled` is true',
+    );
+    expect(issues[0].message).toContain('the spec declares no default for it');
+    expect(issues[0].message).toContain('Declare it as an integer of at least 1');
+  });
+
+  it('refuses an enabled longTerm without `reflectionInterval` — the declaration cloud refused at turn time', () => {
+    // `{ enabled: true, maxEntries: 5 }` is the most natural declaration, and the
+    // one the runtime refused before the first round: no reflection, no note.
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 5 } } });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['memory', 'reflectionInterval']);
+    expect(issues[0].message.split(' — ')[0]).toBe(
+      '`agent.memory.reflectionInterval` is required when `agent.memory.longTerm.enabled` is true',
+    );
+    expect(issues[0].message).toContain('the spec declares no default for it');
+  });
+
+  it('names BOTH missing numbers in one pass, each at its own path', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true } } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['memory', 'longTerm', 'maxEntries']],
+      ['custom', ['memory', 'reflectionInterval']],
+    ]);
+  });
+
+  it('refuses `reflectionInterval` without an enabled longTerm — absent, empty or disabled', () => {
+    for (const longTerm of [undefined, {}, { enabled: false }, { enabled: false, maxEntries: 5 }]) {
+      const memory = longTerm === undefined ? { reflectionInterval: 5 } : { longTerm, reflectionInterval: 5 };
+      const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory });
+      expect(r.success, `longTerm: ${JSON.stringify(longTerm)}`).toBe(false);
+      const issues = r.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      expect(issues[0].path).toEqual(['memory', 'reflectionInterval']);
+      expect(issues[0].message.split(' — ')[0]).toBe(
+        '`agent.memory.reflectionInterval` requires `agent.memory.longTerm.enabled: true`',
+      );
+      expect(issues[0].message).toContain('or delete `reflectionInterval`');
+    }
+  });
+
+  it('declares no default for either number: an omitted one is never filled in', () => {
+    const parsed = AgentSchema.parse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: false } } });
+    expect(parsed.memory?.longTerm).toEqual({ enabled: false });
+    expect(parsed.memory).not.toHaveProperty('reflectionInterval');
+  });
+
+  it('a malformed number keeps its own type complaint — the contract check adds none on top', () => {
+    const r = AgentSchema.safeParse({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 0 }, reflectionInterval: 5 } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues).toHaveLength(1);
+    expect(r.error!.issues[0].code).toBe('too_small');
+    expect(r.error!.issues[0].path).toEqual(['memory', 'longTerm', 'maxEntries']);
+  });
+
+  it('the authoring door, defineStack, refuses a missing number with the STACK_SCHEMA_INVALID envelope', () => {
+    const refusal = stackRefusal({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 5 } } });
+    expect(refusal?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refusal?.status).toBe(422);
+    expect(refusal.issues).toHaveLength(1);
+    expect(refusal.issues?.[0]?.path).toEqual(['agents', 0, 'memory', 'reflectionInterval']);
+    expect(refusal.issues?.[0]?.message).toContain('`agent.memory.reflectionInterval` is required');
+    // CONTROL: the same agent with both numbers is accepted by the same door.
+    expect(() =>
+      defineStack(stackWith({ ...MEMORY_AGENT, memory: { longTerm: { enabled: true, maxEntries: 5 }, reflectionInterval: 3 } }) as never),
+    ).not.toThrow();
   });
 });

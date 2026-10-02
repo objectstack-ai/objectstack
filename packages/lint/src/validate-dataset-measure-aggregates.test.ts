@@ -619,3 +619,243 @@ describe('dimension-json-stored-field-refused — a dimension over a JSON-stored
     ).toEqual([]);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#21082] The cube leg — `analyticsCubes` members, under the same two ids.
+// The analytics door (`structured-json-dimension-door.ts`) refuses a grouped
+// cube member whose column is JSON-stored, and a cube `count_distinct` measure
+// over one, with `400 INVALID_FIELD`; until this leg `os validate` read no cube
+// at all, so all three passed authoring (measured: `cube-json-dim`, exit 0).
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The measured instance's shape (`cube-json-dim`, os-dev-report on #20890): a
+ * cube over `fx_ledger` whose members name the column in `sql`. `members`
+ * replaces the cube's `dimensions` / `measures`; `extra` adds cube keys.
+ */
+const cubeStack = (
+  members: { dimensions?: Record<string, unknown>; measures?: Record<string, unknown> },
+  extra: Record<string, unknown> = {},
+  ledgerFields: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  name: 'analytics_probe',
+  objects: [
+    {
+      name: 'fx_ledger',
+      sharingModel: 'private',
+      fields: {
+        name: { type: 'text' },
+        meta: { type: 'json' },
+        labels: { type: 'tags' },
+        stages: { type: 'select', multiple: true },
+        stage: { type: 'select' },
+        account: { type: 'lookup', reference: 'fx_account' },
+        ...ledgerFields,
+      },
+    },
+    {
+      name: 'fx_account',
+      sharingModel: 'private',
+      fields: { name: { type: 'text' }, hq: { type: 'json' }, region: { type: 'text' } },
+    },
+    {
+      name: 'fx_branch',
+      sharingModel: 'private',
+      fields: { name: { type: 'text' }, hq: { type: 'text' }, region: { type: 'json' } },
+    },
+  ],
+  analyticsCubes: [
+    {
+      name: 'fx_cube',
+      sql: 'fx_ledger',
+      measures: { count: { label: 'Count', type: 'count', sql: '*' }, ...(members.measures ?? {}) },
+      dimensions: members.dimensions ?? {},
+      ...extra,
+    },
+  ],
+});
+
+const dim = (sql: string) => ({ label: 'Dimension', type: 'string', sql });
+const measure = (type: string, sql: string) => ({ label: 'Measure', type, sql });
+
+const cubeDimensionFindings = (stack: unknown) =>
+  validateDatasetMeasureAggregates(stack).filter((f) => f.rule === DIMENSION_RULE);
+
+describe('the cube leg — an analyticsCubes member the analytics door refuses is refused at authoring', () => {
+  // ⭐ The card's measured instance and its scalar control, one pair.
+  it('refuses cube-json-dim — a cube dimension over a json field — and accepts one over a text field', () => {
+    const found = validateDatasetMeasureAggregates(cubeStack({ dimensions: { meta: dim('meta') } }));
+    expect(found).toHaveLength(1);
+    const issue = found[0];
+    expect(issue.severity).toBe('error');
+    expect(issue.rule).toBe(DIMENSION_RULE);
+    expect(issue.path).toBe('analyticsCubes[0].dimensions.meta.sql');
+    expect(issue.where).toBe('cube "fx_cube" › dimension "meta"');
+    expect(issue.message).toContain('object "fx_ledger" declares as `json`');
+    expect(issue.message).toContain('structured-JSON');
+    expect(issue.message).toContain('400 INVALID_FIELD');
+    expect(issue.message).toContain('so a query that selects it gets that refusal');
+    expect(issue.hint).toContain('scalar value');
+
+    expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { name: dim('name') } }))).toEqual([]);
+  });
+
+  it('refuses a cube dimension over a multi-value field — tags, or a select flagged multiple: true — and serves a single select', () => {
+    const [tags] = cubeDimensionFindings(cubeStack({ dimensions: { labels: dim('labels') } }));
+    expect(tags?.path).toBe('analyticsCubes[0].dimensions.labels.sql');
+    expect(tags?.message).toContain('multi-value');
+    const [flagged] = cubeDimensionFindings(cubeStack({ dimensions: { stages: dim('stages') } }));
+    expect(flagged?.message).toContain('`select` with `multiple: true`');
+    // The route the door names: filter by one member on the declaring object.
+    expect(flagged?.hint).toContain('a record query on "fx_ledger"');
+    expect(flagged?.hint).toContain('$contains');
+    expect(cubeDimensionFindings(cubeStack({ dimensions: { stage: dim('stage') } }))).toEqual([]);
+  });
+
+  it('refuses a cube count_distinct over a JSON-stored column, under the measure id, located at the aggregate', () => {
+    const [json] = findings(cubeStack({ measures: { distinct_meta: measure('count_distinct', 'meta') } }));
+    expect(json?.severity).toBe('error');
+    expect(json?.path).toBe('analyticsCubes[0].measures.distinct_meta.type');
+    expect(json?.where).toBe('cube "fx_cube" › measure "distinct_meta"');
+    expect(json?.message).toContain('aggregate "count_distinct" to field "meta"');
+    expect(json?.message).toContain('`json`');
+    // The door that refuses it later is the cube's, never the dataset compile leg.
+    expect(json?.hint).toContain('on the cube with `400 INVALID_FIELD`');
+    expect(json?.hint).not.toContain('DATASET_INVALID');
+
+    const [flagged] = findings(cubeStack({ measures: { distinct_stages: measure('count_distinct', 'stages') } }));
+    expect(flagged?.message).toContain('`select` with `multiple: true`');
+    expect(flagged?.hint).toContain('accepts: count.');
+    const [tags] = findings(cubeStack({ measures: { distinct_labels: measure('count_distinct', 'labels') } }));
+    expect(tags?.path).toBe('analyticsCubes[0].measures.distinct_labels.type');
+  });
+
+  it('accepts a scalar cube — the control: scalar dimensions and count_distinct over scalar columns', () => {
+    const stack = cubeStack({
+      dimensions: { name: dim('name'), stage: dim('stage'), acct: dim('account.name') },
+      measures: {
+        distinct_name: measure('count_distinct', 'name'),
+        distinct_stage: measure('count_distinct', 'stage'),
+      },
+    });
+    expect(validateDatasetMeasureAggregates(stack)).toEqual([]);
+  });
+
+  it('judges only count_distinct among the cube measures: count reads no value, and the other rows are not this leg\'s', () => {
+    for (const type of ['count', 'sum', 'avg', 'min', 'max']) {
+      expect(findings(cubeStack({ measures: { m: measure(type, 'meta') } })), type).toEqual([]);
+    }
+  });
+
+  // The whole surface against the door's predicates, read from the spec.
+  it('agrees with the door\'s predicates on every declared FieldType, flagged and not, for a dimension and a count_distinct', () => {
+    let refused = 0;
+    let accepted = 0;
+    for (const fieldType of FieldType.options) {
+      for (const multiple of [false, true]) {
+        const def = multiple ? { type: fieldType, multiple: true } : { type: fieldType };
+        const stack = cubeStack(
+          { dimensions: { probe: dim('probe') }, measures: { probe_distinct: measure('count_distinct', 'probe') } },
+          {},
+          { probe: def },
+        );
+        const found = validateDatasetMeasureAggregates(stack);
+        const dimFires = found.some((f) => f.rule === DIMENSION_RULE);
+        const cdFires = found.some((f) => f.rule === RULE);
+        const shape = { type: fieldType, multiple };
+        expect(dimFires, `dimension over ${fieldType}${multiple ? ', multiple' : ''}`).toBe(
+          STRUCTURED_JSON_TYPES.has(fieldType) || isMultiValueField(shape),
+        );
+        expect(cdFires, `count_distinct over ${fieldType}${multiple ? ', multiple' : ''}`).toBe(
+          !isAggregateCompatibleWithFieldType('count_distinct', fieldType) || isMultiValueField(shape),
+        );
+        for (const fires of [dimFires, cdFires]) {
+          if (fires) refused++;
+          else accepted++;
+        }
+      }
+    }
+    expect(refused).toBeGreaterThan(30);
+    expect(accepted).toBeGreaterThan(100);
+  });
+
+  it('reads a relationship path on the object the last hop reaches — the lookup\'s reference, or the join the cube declares for it', () => {
+    // No declared join: the lookup's `reference` (`fx_account.hq` is json).
+    const [byReference] = cubeDimensionFindings(cubeStack({ dimensions: { acct_hq: dim('account.hq') } }));
+    expect(byReference?.message).toContain('object "fx_account" (reached through this cube\'s join chain)');
+    expect(cubeDimensionFindings(cubeStack({ dimensions: { acct_region: dim('account.region') } }))).toEqual([]);
+
+    // A declared join wins over the reference, as at the door: keyed `account`,
+    // reaching `fx_branch`, where `hq` is text and `region` is json.
+    const joined = { joins: { account: { name: 'fx_branch' } } };
+    expect(cubeDimensionFindings(cubeStack({ dimensions: { acct_hq: dim('account.hq') } }, joined))).toEqual([]);
+    const [byJoin] = cubeDimensionFindings(cubeStack({ dimensions: { acct_region: dim('account.region') } }, joined));
+    expect(byJoin?.message).toContain('object "fx_branch"');
+    const [distinctByJoin] = findings(
+      cubeStack({ measures: { d: measure('count_distinct', 'account.region') } }, joined),
+    );
+    expect(distinctByJoin?.path).toBe('analyticsCubes[0].measures.d.type');
+  });
+
+  it('never hands the predicates a guess — the same skips as the dataset leg', () => {
+    const refusedShape = { dimensions: { meta: dim('meta') }, measures: { d: measure('count_distinct', 'meta') } };
+    expect(validateDatasetMeasureAggregates(cubeStack(refusedShape))).toHaveLength(2);
+    // A cube whose `sql` names no object this stack defines, or is not an object name.
+    expect(validateDatasetMeasureAggregates(cubeStack(refusedShape, { sql: 'not_here' }))).toEqual([]);
+    expect(validateDatasetMeasureAggregates(cubeStack(refusedShape, { sql: 'SELECT * FROM fx_ledger' }))).toEqual([]);
+    // A column that does not resolve, and a hop the graph cannot follow.
+    expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { x: dim('nope') } }))).toEqual([]);
+    expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { x: dim('ghost.hq') } }))).toEqual([]);
+    // An untyped column, and a member that writes no `sql` / a non-string one.
+    expect(
+      validateDatasetMeasureAggregates(cubeStack({ dimensions: { u: dim('untyped') } }, {}, { untyped: { label: 'U' } })),
+    ).toEqual([]);
+    expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { x: { label: 'X', type: 'string' } } }))).toEqual([]);
+    expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { x: { ...dim('meta'), sql: ['meta'] } } }))).toEqual([]);
+  });
+
+  // `'*'` on a dimension or a non-count measure is a question of its own; the
+  // row wildcard names no column, so this leg reads nothing from it.
+  it('reads nothing from the row wildcard, on a dimension or a count_distinct', () => {
+    expect(
+      validateDatasetMeasureAggregates(
+        cubeStack({ dimensions: { all: dim('*') }, measures: { d: measure('count_distinct', '*') } }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('reports each dataset before each cube, and a cube stack with no datasets is walked', () => {
+    const stack = {
+      ...dimensionStack({ type: 'json' }),
+      analyticsCubes: (cubeStack({ dimensions: { meta: dim('meta') } }).analyticsCubes as unknown[]),
+      objects: [
+        ...((dimensionStack({ type: 'json' }).objects as unknown[])),
+        ...((cubeStack({}).objects as unknown[])),
+      ],
+    };
+    expect(validateDatasetMeasureAggregates(stack).map((f) => f.path)).toEqual([
+      'datasets[0].dimensions[0].field',
+      'analyticsCubes[0].dimensions.meta.sql',
+    ]);
+  });
+
+  it('fires through runAuthoringRules on all three commands, and only on the refused members', () => {
+    const stack = cubeStack({ dimensions: { meta: dim('meta') }, measures: { d: measure('count_distinct', 'meta') } });
+    for (const command of ['validate', 'build', 'lint'] as const) {
+      const found = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter(
+        (f) => f.rule === DIMENSION_RULE || f.rule === RULE,
+      );
+      expect(found.map((f) => [f.rule, f.path]), command).toEqual([
+        [DIMENSION_RULE, 'analyticsCubes[0].dimensions.meta.sql'],
+        [RULE, 'analyticsCubes[0].measures.d.type'],
+      ]);
+      expect(found.every((f) => f.severity === 'error'), command).toBe(true);
+    }
+    const control = cubeStack({ dimensions: { name: dim('name') }, measures: { d: measure('count_distinct', 'name') } });
+    expect(
+      runAuthoringRules('lint', { normalized: control, parsed: control }).filter(
+        (f) => f.rule === DIMENSION_RULE || f.rule === RULE,
+      ),
+    ).toEqual([]);
+  });
+});
