@@ -399,13 +399,15 @@ export default class MarketplaceSearch extends Command {
 #### Step 3: Load the Plugin into the CLI
 
 <Callout type="warn">
-**`os plugins install` is not available today.** `@objectstack/cli`'s `package.json`
-lists `@oclif/plugin-plugins` under `oclif.plugins`, but the package sits in
-`devDependencies` — and oclif's core-plugin loader only matches names that appear in
-`dependencies`. The result is that neither `os plugins …` nor `os help` is a
-registered command; `os --help` shows no `plugins` topic. Until that is fixed, load a
-CLI extension by building an `os` distribution that lists the package in **both**
-`oclif.plugins` and `dependencies`.
+**`@objectstack/cli` ships no plugin manager.** Its `package.json` declares no
+`oclif.plugins`, and it does not depend on `@oclif/plugin-plugins` or
+`@oclif/plugin-help`. So `os plugins …` (`install`, `link`, `update`, …) and `os help`
+are not commands: each exits 2 with `command … not found`. `os --help` is the help
+entry, and it shows no `plugins` topic. To load a CLI extension, build an `os`
+distribution: a package whose own `package.json` lists the extension in **both**
+`oclif.plugins` and `dependencies`. oclif's core-plugin loader matches `oclif.plugins`
+names only against `dependencies`, so a name listed under `devDependencies` alone never
+loads.
 </Callout>
 
 #### Using the Extended CLI

@@ -203,9 +203,9 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 - `-d, --dir <directory>` — Override target directory
 
-### `os plugins` (oclif)
+### `os plugins` and `os help` (not commands)
 
-`os plugins install`, `os plugins uninstall`, `os plugins update`, and friends come from `@oclif/plugin-plugins`. They install third-party CLI extensions (oclif plugins), not runtime plugins for an ObjectStack project. See [oclif's plugin docs](https://oclif.io/docs/plugins) for the full surface.
+This package ships no oclif plugin manager: its `package.json` declares no `oclif.plugins` and does not depend on `@oclif/plugin-plugins` or `@oclif/plugin-help`. So `os plugins` (`install`, `uninstall`, `update`, `link`, and the rest) and `os help` are not registered commands; each exits 2 with `command … not found`. Use `os --help` or `os <command> --help` for help. To add third-party CLI commands, see [oclif Plugin System](#oclif-plugin-system).
 
 ### `os info`
 
@@ -218,13 +218,13 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 ## oclif Plugin System
 
-The CLI uses oclif's built-in plugin system for extensibility. Third-party plugins (e.g., cloud commands, marketplace tools) can extend the CLI without modifying the main package.
+The CLI is built on oclif, and oclif's plugin system is its only command-extension mechanism: a third-party package (e.g., cloud commands, marketplace tools) ships oclif Command classes and is loaded as an oclif plugin, without modifying this package. The `os` binary this package publishes declares no plugins and ships no plugin manager, so there is no `os plugins install`.
 
 ### How Plugin Extension Works
 
 1. **Create an oclif plugin package** with its own `oclif` config in `package.json`
 2. **Export oclif Command classes** from the plugin's `src/commands/` directory
-3. **Install the plugin** via `os plugins install <package>` or declare it in the main CLI's `oclif.plugins`
+3. **Load the plugin through an `os` distribution you build**: a package whose own `package.json` lists the plugin in **both** `oclif.plugins` and `dependencies`. oclif's core-plugin loader matches `oclif.plugins` names only against `dependencies`; a name listed under `devDependencies` alone never loads.
 
 ### Creating a CLI Plugin
 
@@ -263,10 +263,11 @@ export default class MarketplaceSearch extends Command {
 }
 ```
 
-**3. Install and use:**
+**3. Load it through your `os` distribution, then use it:**
+
+List `@acme/plugin-marketplace` in both `oclif.plugins` and `dependencies` of the distribution's `package.json` (see [How Plugin Extension Works](#how-plugin-extension-works)). Its commands then appear in that distribution's `os --help`:
 
 ```bash
-os plugins install @acme/plugin-marketplace
 os marketplace search "crm"
 ```
 
@@ -274,7 +275,7 @@ os marketplace search "crm"
 
 | Before (Commander.js) | After (oclif) |
 |---|---|
-| Plugins declared in `objectstack.config.ts` | Plugins installed via `os plugins install` or `oclif.plugins` |
+| Plugins declared in `objectstack.config.ts` | Plugins listed in an `os` distribution's `oclif.plugins` and `dependencies` |
 | Custom `loadPluginCommands` mechanism | oclif's built-in plugin discovery |
 | `contributes.commands` in manifest | `oclif.commands` in `package.json` |
 | Commander.js `new Command(...)` exports | oclif `class extends Command` exports |
