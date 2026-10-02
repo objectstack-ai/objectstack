@@ -71,6 +71,8 @@ function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>
             if (!(v as Array<Record<string, unknown>>).some((c) => matchesWhere(r, c))) return false;
             continue;
         }
+        // Any other combinator is REFUSED, never read as a field name.
+        if (k.startsWith('$')) throw new Error(`stub engine: combinator '${k}' is not implemented`);
         if (v === undefined) continue;
         if (r[k] !== v) return false;
     }
