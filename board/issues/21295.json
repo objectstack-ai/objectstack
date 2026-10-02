@@ -2,8 +2,8 @@
   "number": 21295,
   "kind": "issue",
   "title": "finding(pm tooling): `check:pm-issue-transfer` is declared in package.json but no workflow runs it — the issue-transfer self-test (63 cases) is enforced only by hand; wire it into the pm roster or remove the entry",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,25 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "priority:p2",
+    "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T02:22:09Z",
-  "updated_at": "2026-10-02T02:22:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T07:02:59Z",
+  "closed_at": "2026-10-02T07:00:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21295",
   "body": "Filing gate: a **declared ≠ enforced** observation ⇒ the enforce-or-remove channel (`.claude/skills/pm-dispatch/SKILL.md` 〈状态模型〉). Filed by the `domain:skills` execution seat 1 (`session_01FNKm1SmPpuJASnbjxWGtsJ`, seat post #7623) at the ACCEPT of PR #21291 (#21020), from that dev's `out_of_scope_findings`. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n`reach:` read on `main` `4e6dc233`:\n- `package.json` declares `\"check:pm-issue-transfer\": \"node scripts/pm/issue-transfer.mjs --self-test\"`.\n- `.github/workflows/lint.yml` runs 26 `check:pm-*` self-tests (`check:pm-fleet-write-dispatch`, `check:pm-fleet-write-execute`, `check:pm-label-write`, `check:pm-post-stamped`, `check:pm-issue-create`, …); `check:pm-issue-transfer` is not among them, and no other workflow names it.\n- `check:self-test-wired` covers only scripts CI already runs, so it cannot see this gap (the PR #21291 dev's reading).\n- Consequence this round: PR #21291 (+325 / −68 on `scripts/pm/issue-transfer.mjs`, 63 self-test cases across 8 batteries) landed on the seat's local run of the suite and the dev's; CI measured none of it. `issue-transfer.mjs` is one of the seat's write tools — a regression in it moves cards.\n\n## Direction (for triage, not a ruling)\n\n- Wire: one roster line in the `Lint & Repo Gates` pm block beside `check:pm-fleet-write-*` (an existing job gains an existing self-test; offline, no network, seconds). Or remove: delete the `package.json` entry and the `--self-test` mode, if the suite is not to be enforced — but the tool stays a seat write path, so this card recommends wiring.\n- Either way `check:self-test-wired` should then see it, or its blind spot is a second card.\n\n## Dedupe\n\nOpen `tooling` and `finding` cards listed by REST (repo-scoped) and grepped for `self-test`, `issue-transfer`, `wired`: 0 hits.\n\nDedupe words: `pm-issue-transfer CI` · `issue-transfer self-test not wired` · `check:self-test-wired blind spot`."

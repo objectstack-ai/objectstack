@@ -1,0 +1,35 @@
+{
+  "number": 21345,
+  "kind": "issue",
+  "title": "[security] Driver-fault redaction residue after #21274: a raw statement whose leading verb the leak predicate does not list, and the lifecycle archiver's direct cold-store writes, can still carry a statement to a logger",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T05:46:23Z",
+  "updated_at": "2026-10-02T07:22:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21345",
+  "body": "Filing gate: **① a defect with named positions**, filed under the reach exception for **possible data disclosure**: a statement with bound values could be written to a log. ⚠️ Classes and positions only, with no statement, value or reproduction here. This is the **family close-out** for #21274 (the engine-boundary redaction, PR #21335). It names the two positions that the boundary does not reach.\n\n`reach:` **not measured** at a public door, and a **read-only inference** from the head of PR #21335 (`fd19d3661b`) and `origin/main` `222ecc27f`. The position-by-line readings come from PR #21335's contract review, record 5946293208, items ③ and its two escalations, and the dev's os-dev-report 5946109461 (`out_of_scope_findings[0]`). The seat re-read both positions at `222ecc27f`.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`). **Reader who acts:** triage grades and routes. Both positions are in `domain:engine` packages or in `@objectstack/types`. ⛔ Not a claim.\n\n## Positions\n\n1. **The shared leak predicate's statement verbs.** `packages/types/src/error-leak.ts`, `looksLikeInternalErrorLeak` (near `:226` to `:238`), recognises a driver dump by four leading statement verbs (`insert into`, `update`, `select`, `delete from`) or by a dialect phrasing.\n   - PR #21335's boundary helper cuts a propagated driver error's statement-bearing PROPERTIES unconditionally. It cuts `message` and `stack` only when the predicate recognises the dump.\n   - So a raw statement that opens with another verb (a common-table-expression form, or an upsert form some dialects spell with its own verb) and whose diagnostic matches no dialect phrasing keeps its statement in `message` and `stack`, on the log face and on the propagated face alike.\n   - The raw-statement door is `engine.execute`. `SqlDriver.execute` already raises a declared server fault with the dialect error under a non-enumerable `cause`, which the HTTP boundary withholds by declaration. The residue is the `cause`'s own `message` and `stack` wherever a logger serialises the cause chain.\n2. **The lifecycle archiver's direct driver writes.** `packages/objectql/src/lifecycle/lifecycle-service.ts`, `archiveObject` (near `:1236`), takes the hot and cold drivers straight from `engine.getDriverForObject` and writes each row through `cold.upsert` (near `:1405`). That bypasses every engine door, and with it the #21274 boundary. The sweep's catch (near `:683` to `:686`) logs the error's `message` as WARN. A driver fault on a cold write would therefore print the driver's raw message, including whatever statement and values it inlines. No auth object declares an archive policy at this head, so this is not the credential tables' path today.\n\n## Governing text\n\n`packages/types/src/error-leak.ts`, the header note for #16019, maintainer ruling 2026-09-06 (decision batch #57, option 3): the predicate's list **is frozen**, and \"a driver phrasing this list does not recognise is closed by the DRIVER declaring its own fault … never by a row added here.\" ⛔ So this card's fix is not a new verb in that list.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- **Position 1:** close it at the producer, as the ruling directs. For example, the engine's raw-statement door cuts the statement it itself sent, by construction, rather than by recognising it in the text. Or the driver's declared fault carries no statement in any field. Pins:\n  - a synthetic sentinel bound into a raw statement that opens with an unlisted verb is absent from every carrier of the propagated error and of the engine's log line;\n  - the class and code survive (the #21274 control).\n- **Position 2:** route the archiver's cold and hot driver faults through the same boundary helper before they are logged or rethrown, or log only the class and code. Pin: a forced cold-write fault leaves no sentinel in the sweep's log line or its `report.errors` entry.\n- `Clause-②: no`: no accept set moves.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「looksLikeInternalErrorLeak statement verb list WITH REPLACE raw execute leak not recognised」: 2 hits, both closed. #8132 (a pg phrasing; the list was frozen afterwards by #16019) and #3566 (identity import row errors).\n- 「lifecycle archiver cold store driver error logged raw statement bound values bypasses engine」: 4 hits. #21274 is open, this card's parent class. #20805, #8441 and #5755 are closed, on other subjects.\n- 「driver fault redaction residue direct driver call outside engine boundary」: 9 hits. #21274 is open; the rest are closed and none covers these positions.\n\nNone covers either position. This is the family's close-out card.\n\nDedupe words: `leak predicate unlisted verb` · `raw execute statement in cause log` · `lifecycle archiver driver fault log` · `cold store upsert error message` · `driver fault redaction residue`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

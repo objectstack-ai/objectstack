@@ -1,0 +1,35 @@
+{
+  "number": 21341,
+  "kind": "issue",
+  "title": "ci: a diff confined to one of Build Core's own guard scripts (check-dts-closure, check-dual-build-cjs-loads, check-sourcemap-no-sources-content, check-lean-entry-closure) skips Build Core, so the changed guard runs nowhere at PR time",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T05:30:15Z",
+  "updated_at": "2026-10-02T08:05:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21341",
+  "body": "Filing gate: **① a defect, class (a)**. `reach:` a named producer, measured. PR #17100 (`91f65c4ea4`, merged 2026-09-09) changed only `scripts/check-lean-entry-closure.mjs`, and the `Build Core` check-run on its head `9998c82a5e` concluded `skipped`. So the changed guard's real leg and its `--self-test` ran nowhere before the merge queue. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21202 dev report (`out_of_scope_findings[0]`, PR #21338). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The gap\n\n- Build Core runs four dist-reading guards in its own steps: `scripts/check-dts-closure.mjs`, `check-dual-build-cjs-loads.mjs`, `check-sourcemap-no-sources-content.mjs` and `check-lean-entry-closure.mjs`, each through its `pnpm check:*` script.\n- Build Core starts only when ci.yml's `core:` filter matches. `core:` matches none of these four paths, before and after PR #21338 (picomatch 2.3.1 and 4.0.5, measured by the #21202 dev).\n- PR #21338 (#21202) makes `core:` cover the build inputs `turbo.json` declares, and derives that set from `turbo.json`. These four are guards, not declared build inputs, so that derivation does not reach them.\n- The repository's rule \"a change to the guard runs the guard\" is how ci.yml's own `console:` filter treats its guards (`CONSOLE_GUARDS`; see the comment above `console:`). `core:` has no such list for Build Core's guards.\n\n## Direction (for triage, not a ruling)\n\n- A declared guard list for `core:`, held by `scripts/check-ci-filter-parity.mjs` the way it holds `console:`'s guards. Or a derivation from Build Core's `run:` steps, so the list cannot drift.\n- ⛔ Not a new gate: the existing parity gate gains a subject, as #21202's did.\n- Serial: `ci.yml` and `scripts/check-ci-filter-parity.mjs` are PR #21338's surface until it lands.\n\n## Dedupe\n\nThe 100 most recently updated open issues and PRs were listed over REST and grepped for `Build Core skipped`, `guard script` and \"change to the guard runs the guard\". The only hit is PR #21338, which names this as out of scope.\n\nDedupe words: core filter guard scripts Build Core skipped · check-lean-entry-closure check-dts-closure core paths-filter · change to the guard runs the guard core"
+}

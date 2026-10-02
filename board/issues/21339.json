@@ -1,0 +1,33 @@
+{
+  "number": 21339,
+  "kind": "pull_request",
+  "title": "docs(qa): re-point eight checklist items the 17.6.0 release-verification run proved stale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T05:24:55Z",
+  "updated_at": "2026-10-02T07:47:39Z",
+  "closed_at": "2026-10-02T07:47:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-10-02T07:47:37Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21339",
+  "body": "Docs-only checklist revision from the 17.6.0 release-verification run #21330 (subject `617f25f8`, Console pin `31971ff1e28f`). Every change follows the checklist README's lifecycle rule: the item's `revision` bumps and one `history` entry says what changed, why, and cites the run. No product code, no `content/docs/**`, no generated file.\n\n## Stale clauses the run proved (each a FAIL in #21330 with disposition stale-clause / assertion-defect)\n\n| item | rev | evidence | changed by |\n|---|---|---|---|\n| `access-security.audit-log-browser` | 2 → 3 | admin `GET /data/sys_audit_log?filter={\"action\":\"delete\"}` → 0 rows; the row is stored with correct attribution | `30c530e5` (#21194): the ledger serves a non-system reader, admins included, only rows about records it can read |\n| `api-backend.filter-comparand-conformance` | 2 → 3 | POST `/query` → 400 `VALIDATION_FAILED` at `query.where.f_number.$eq`; GET `$filter` and engine → 400 `INVALID_FILTER`; no door returns rows | #20116 (`cfc3bcf1` #20247, `dd1b8031` #20325) — the split query-contract-matrix rev 3 already records |\n| `api-backend.date-range-preset-matrix` | 1 → 2 | equality `{\"signed_on\":\"today\"}` → 400 `INVALID_FILTER` (temporal door); `$gte:\"this_week\"` → 400 with `bareDateRangePresetComparandMessage` | by design: `18.filter-preset-ordering-comparand-refused.ts` judges ordering positions only |\n| `records-forms.import-transform-matrix` | 1 → 2 | 400 `UNSUPPORTED_TRANSFORM` names the missing sandbox, 0 rows — but no `framework#2611` | `f115b1f` (#21188): refusals state decisions in words, not tracker numbers |\n| `studio-authoring.view-authoring-live` | 1 → 2 | `GET /meta/view?object=repair_asset` serves `repair_asset.default` / `repair_asset.form` with the authored config; container name 0 hits | by design: `expandViewContainer` (#7163, #7736, #13407) |\n\n## Expected-fail notes 17.6.0 has made pass (clauses held in #21330; only their framing was stale)\n\n| item | rev | measured | fixed by |\n|---|---|---|---|\n| `automation.packaged-flow-subflow-disable-refusal` | 1 → 2 | caller off → child's disable retry 200, ledger `active=false`; caller-first enable 409 `RESOURCE_CONFLICT` | `36d043b` #20724, `0d9349f` #20759; the enable guard is `679f95e` #20711 (step 6 now enables the child first) |\n| `automation.packaged-flow-clone-contract` | 1 → 2 | clone survives a cold restart and fires; still unreachable from Studio | durability `cb4c31d` #20907; reachability now filed as #21332 (clause unchanged, still expected to fail) |\n| `access-security.packaged-flow-write-door-parity` | 1 → 2 | `PUT` / `DELETE /automation/showcase_urgent_task_alert` → 403 `NOT_OVERRIDABLE`, flow unchanged | `4b45afae` (#20817); knownGap names the existing pin `packaged-flow-write-door-parity.dogfood.test.ts` |\n\nNo clause was weakened: each still refuses the original failure mode (rows returned, a served delete row, a 200-with-zero-rows), and the clone clause keeps its expected fail.\n\n## Validation\n\n- `node scripts/check-platform-checklist.mjs` → `OK — 15 areas, 269 items (265 active, 2 planned)`; symbol anchors and line-citation sweep green.\n- `api-backend.json` is re-serialized in its existing canonical 2-space form; the other four files are edited in place in their existing mixed formatting.\n\nNot in this PR (listed on #21330's close-out instead): the other checklist-accuracy findings the run collected, and the two `planned` picklist items, which can only be promoted by a run in which they pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018zT8d8NpiQ1ExhuNd5TxY6\n"
+}

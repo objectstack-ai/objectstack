@@ -1,0 +1,35 @@
+{
+  "number": 21315,
+  "kind": "issue",
+  "title": "spec(ui): an object-master-detail-form detail entry's sortField describe says it is derived when omitted; on the renderer's fast path nothing derives it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T04:12:40Z",
+  "updated_at": "2026-10-02T07:31:02Z",
+  "closed_at": "2026-10-02T07:29:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21315",
+  "body": "Filing gate: **① a defect, class (c)**: published text teaches a behaviour the runtime does not have. `reach:` the sentence ships in `@objectstack/spec@17.6.0` (`latest`), in `src/ui/component.zod.ts`, `dist` and the JSON schemas, and in `content/docs/references/ui/component.mdx`. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017). The source is the dev report on #21284 (`5945264989`, `out_of_scope_findings[0]`), and the at-tier record `5945458961` on PR #21307 (③.2–③.3) ruled that a card is owed. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The text\n\n`packages/spec/src/ui/component.zod.ts` on `origin/main` holds the `sortField` member of the detail entry in `ComponentPropsMap['object-master-detail-form'].details[]` (the `masterDetailDetailEntry()` member list):\n\n> `sortField` … \"Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted)\"\n\n## Why it is false on one path (objectui at the `.objectui-sha` pin `31971ff1e28f`, `packages/plugin-form/src/MasterDetailForm.tsx`)\n\n- **Fast path (967):** an entry that names `relationshipField` and types every column is returned unchanged, so an omitted `sortField` stays undefined, and 862 passes `sort_field: undefined`. Nothing derives it.\n- **Hydrate path (1038, 1051) and derived path (1066):** these DO derive it. On these paths the sentence holds.\n- `amountField` has the same fast-path gap, but its describe claims no derivation, so it owes nothing.\n- PR #21307 (#21284) corrected the same one-path reading for the sibling `inlineMode` and `formFields` describes. This member was outside that card's ruling and surface.\n\n## The retirement this meets\n\nRecord `5937457620` (on #20928, closed) notes that objectui `main` retired the authored `sortField` at `0a3e5409f` (objectui#11376), after the pin; its subject reads \"a detail's sort field is derived only\". So the `.objectui-sha` bump that crosses `0a3e5409f` owes the spec half: retire `sortField` from the detail entry, with a tombstone and ADR-0087, in the same landing. objectui#11396 and seat post #6017 name it. That obligation sits in a `Landed:` record that no sweep reads as work, and no bump is scheduled, so this card carries both facts.\n\n## Direction (for triage, not a ruling)\n\n- **Option 1:** a point fix now. Narrow the describe to the two paths that derive, as PR #21307 did for its siblings (`patch`, `Clause-②: no`).\n- **Option 2:** fold it into the retirement landing at the pin bump. The describe then goes with the key, at the cost of the released sentence staying wrong until that bump.\n- \"Derive on the fast path\" is not a live renderer option: objectui `main` has already retired the authored key.\n\n## Dedupe\n\nThe 100 most recently updated objectstack issues and PRs, open and closed, were listed over REST and grepped locally for `sortField`. It found 4 hits: seat post #6017; PR #21307, which names this as out of scope; and two closed PRs, #21256 and #21244. None of them is a card that fixes this describe. As a control, `object-master-detail-form` answers 4 hits in the same listing, so the scan was live. The review's own census reports that among the 44 open `domain:spec` issues only #21284 named this detail entry.\n\nDedupe words: detail entry sortField derived when omitted fast path · master-detail columnsTyped relationshipField sort_field undefined · object-master-detail-form sortField retirement pin bump 0a3e5409f"
+}

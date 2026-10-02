@@ -2,8 +2,8 @@
   "number": 21284,
   "kind": "issue",
   "title": "spec(ui): an object-master-detail-form detail entry's inlineMode describe says the mode is resolved from the relationship's inlineEdit when omitted; on an entry kept as authored the renderer resolves nothing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:records",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T01:34:22Z",
-  "updated_at": "2026-10-02T01:55:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T04:47:42Z",
+  "closed_at": "2026-10-02T04:46:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21284",
   "body": "Filing gate: **① a defect, class (c)**: published text teaches a behaviour the runtime does not have. `reach:` read at the pinned renderer. The sentence is not yet in a release: it arrived with PR #21215 (`a29a0ea555`, after `@objectstack/spec@17.5.0`). So it ships in the next tarball unless corrected first. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the second at-tier review of PR #21256 (`5943918881`, ③, a note outside that diff). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The text\n\n`packages/spec/src/ui/component.zod.ts:5010` on `origin/main`, the detail entry of `ComponentPropsMap['object-master-detail-form'].details[]`:\n\n> `inlineMode` … \"Resolved from the relationship field's `inlineEdit` when omitted\"\n\nIt is lifted verbatim into `content/docs/references/ui/component.mdx:970`.\n\n## Why it is false on one path (objectui at the `.objectui-sha` pin `31971ff1e28f`)\n\n- **Derived path:** an entry that does not name both `relationshipField` and `columns` is hydrated at `MasterDetailForm.tsx` 1055–1066, with `inlineMode: d.inlineMode ?? derived.mode`. There the sentence holds.\n- **Kept-as-authored path:** an entry that names BOTH `relationshipField` and `columns` takes the fast path (967) or the hydrate path that spreads the entry as authored (1048–1052). `inlineMode` stays undefined, and line 847 then offers the per-row form by the field-versus-column count. Nothing is resolved from `inlineEdit`.\n- PR #21256 (#21091) corrected the same reading inside `field-no-consumers` (its review's F1) and states both paths in the lint docblock. The spec's own describe still says the loose thing.\n\n## Sibling describe to measure in the same edit\n\n`formFields` on the same entry (`:5009`): \"derived from the child object's editable fields when omitted\". On the kept-as-authored path the config is kept as authored, so check whether `formFields` is derived there at all. Fix it in the same edit if it is not. ⛔ No point card for it.\n\n## Direction (for triage, not a ruling)\n\n- Reword the `inlineMode` describe, and the `formFields` one if measured false, so each states both paths: what is resolved when the entry is derived, and what the renderer does when it is kept as authored.\n- Regenerate the reference page.\n- `@objectstack/spec` `patch` changeset, `Clause-②: no`.\n- Serial: PR work on #21229 currently holds `component.zod.ts` (the `object-grid` row), so this lands after it.\n\n## Dedupe\n\n454 objectstack issues and PRs (the open set plus the 300 most recently updated closed) were grepped locally for `Resolved from the relationship`, `inlineMode … describe` and `detail entry … inlineMode`. The one hit is PR #21256 (the source, which does not touch `component.zod.ts`). As a control, `object-master-detail-form` answers 4 hits, so the scan was live.\n\nDedupe words: detail entry inlineMode describe resolved inlineEdit · kept as authored fast path inlineMode · object-master-detail-form details formFields derived when omitted"

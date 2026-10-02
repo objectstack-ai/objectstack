@@ -2,8 +2,8 @@
   "number": 21236,
   "kind": "issue",
   "title": "core/driver-sql: the JSON-column refusal tells a single-value file field (media columns not yet moved) to use $contains, which answers no rows there; its repair is the media-column move",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "huangyiirene"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T20:25:37Z",
-  "updated_at": "2026-10-02T01:33:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T03:33:35Z",
+  "closed_at": "2026-10-02T03:27:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21236",
   "body": "Filing gate: **① a defect, class (c)** (a refusal whose prescription steers the author to an operator that cannot answer), with a named landing site and a repro. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21189 dev report (`5939634586`, `out_of_scope_findings` 1), which the at-tier contract review of PR #21234 (`5939868227`, ③) escalated for a card in the engine lane. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n**Landing site:** `packages/core/src/utils/json-column-operator-refusal.ts` (`jsonColumnOperatorRefusalText` and its `$contains` remedy), as driver-sql reaches it for a single-value file-class field (`SqlDriver.isJsonField` → `mediaColumnIsJson()`).\n\n## The defect\n\nOn a SQL deployment still inside the ADR-0104 dual-encoding window (its media columns not yet moved), driver-sql stores a **single-value** `file` / `image` field as a JSON column. A text operator on it (`$startsWith`, `$endsWith`, `$icontains`, `$like`, `$ilike`) is refused by the JSON-column door with `INVALID_FILTER` / 400. That refusal prescribes `$contains`, the membership repair that is right for a multi-valued field. On this field there is no member to find: the column holds one JSON scalar string.\n\n## Repro (the #21189 dev, throwaway SQLite through `SqlDriver`, never committed)\n\n- With the media columns not moved, `$startsWith` over a single `file` field → `INVALID_FILTER` 400 (the door fires), and `$contains` with the field's exact id (`'fil_one'`) → **0 rows**. The prescribed repair answers nothing.\n- With the media columns moved, the same `$startsWith` → rows (the door does not fire).\n- Control: a `select` with `multiple: true` → 400 for `$startsWith` on both arms, and `$contains` answers membership.\n\n**Public door:** the at-tier review traced it to the same public chain #21189's premise rests on. The engine's declared-type door passes `FILE_REFERENCE_TYPES`, so the filter reaches driver-sql's `assertOperatorAppliesToColumn` through `engine.find` on any such deployment. It was not re-run over HTTP.\n\n## Direction (for triage, not a ruling)\n\nFor a single-value file-class field inside the window, the refusal names the repair that works: finish the media-column move (the column step of `objectstack migrate files-to-references --apply`). It does not prescribe `$contains`. The migration entry `filter-text-operator-declared-type-refused` now says exactly that (PR #21234), so the runtime text and the entry agree. Pin it with a refusal-text assertion on a single-value file field, and keep the multi-valued field as the `$contains` control.\n\n## Dedupe\n\nOpen issues (142, REST, all pages; `open_issues_count` 155 = 142 + 13 open PRs) and the 96 most recently updated closed issues, grepped locally: `jsonColumnOperatorRefusalText`, `mediaColumnIsJson`, `dual-encoding`, `files-to-references`, `containsRemedy`, `single-value file`: 0 hits each. Control: `INVALID_FILTER` 10 issues and `JSON column` 6 in the same corpus.\n\nDedupe words: JSON-column refusal single-value file prescription · mediaColumnIsJson $contains zero rows · dual-encoding window media filter refusal"

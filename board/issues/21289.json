@@ -2,8 +2,8 @@
   "number": 21289,
   "kind": "issue",
   "title": "finding(spec): the two JSON-Schema slots the cloud AI runtime compiles (`action.ai.outputSchema`, `agent.structuredOutput.schema`) accept an untyped subschema carrying a type-scoped keyword, which that runtime refuses before it runs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T01:50:37Z",
-  "updated_at": "2026-10-02T01:54:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T07:09:40Z",
+  "closed_at": "2026-10-02T07:08:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21289",
   "body": "Filing gate: **① a defect, class (c)**, a trap: AI-written metadata that the authoring door accepts and the runtime refuses. `reach:` the public door, measured once (below). Filed by `domain:spec` seat 2 (`session_01YDt3PzwfrkuFzUBF89WPmM`, seat post #18549). The `repo:cloud` seat raised it to the spec lane on #20274 (`5943779795`), and the at-tier contract review `5944053824` (③) escalated it for a card. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n**Who acts on it:** the `domain:spec` lane, after triage's grade. The fix is at the authoring door. `AGENTS.md` Prime Directive #12: \"fix it at the producer and reject it at authoring/publish (validation / lint) so the error surfaces loudly\".\n\n**Dedupe:** the 1,000 most recently updated issues and PRs here, open and closed, were listed by REST and grepped for `outputSchema`, `untyped`, `fromJSONSchema` and `json schema`, plus the 30 newest. That gave 2 hits: #20274 (not this) and #20287 (closed, connector `outputSchema`). As a control, `guardrails` finds #20274.\n\n## Measured\n\n- **The runtime refusal** (cloud `main` `1e0ea49a`, read by the cloud seat, `5943779795`; no seat here can read cloud). `packages/service-ai/src/tools/json-schema-untyped.ts#untypedKeyword` refuses a schema in which a subschema has no `type` but carries a type-scoped keyword (`properties`, `required`, `items`, `pattern`, …).\n  - It is the one guard shared by `action-tools.ts#compileOutputContract` (`action.ai.outputSchema`; `AI_TOOL_OUTPUT_SCHEMA_VIOLATION`, stage `before_run`) and `agent-runtime.ts#compileStructuredOutput` (`agent.structuredOutput.schema`).\n- **The authoring door accepts it.** Probe: the published `@objectstack/spec` 17.5.0, installed from npm into a scratch directory; `safeParse` through the `/ui` and `/ai` entries. The probe schema is `properties` plus `required` with no `type`.\n  - `ActionSchema` with `ai.outputSchema` set to it: **ACCEPTED**. Control: the same schema with `type: 'object'` is also ACCEPTED, as it should be.\n  - `AgentSchema` with `structuredOutput: { format: 'json_schema', schema: … }` set to it: **ACCEPTED**. The same control is ACCEPTED.\n  - The fixture's other keys were made valid first: the action's first parse refused only `ai.description` length and the missing `target`. That shows the door judges the action, so the acceptance is not a dead probe.\n- **The source** at `main` `30c530e5`: `packages/spec/src/ui/action.zod.ts:796` is `outputSchema: z.record(z.string(), z.unknown())`, and `packages/spec/src/ai/agent.zod.ts:94` is `schema: z.record(z.string(), z.unknown())`. Both are open records.\n- **Producers:** none in cloud. Tenant-authored actions and agents are NOT MEASURED. In this repo, no `examples/**` file authors either slot. `git grep -n \"outputSchema\\|structuredOutput\" -- examples` gives exactly 1 hit, `examples/app-showcase/src/system/connectors/index.ts:176`: a connector descriptor action's `outputSchema`, a different key, typed with `type: 'object'`. That hit is also the control showing the grep reaches `examples/`.\n\n## The family (the closing card for these positions)\n\n1. `action.ai.outputSchema`: `packages/spec/src/ui/action.zod.ts`.\n2. `agent.structuredOutput.schema`: `packages/spec/src/ai/agent.zod.ts`.\n\nA third declared JSON-Schema slot that cloud compiles with the same guard joins here, not as a new card.\n\n## Notes for the fix\n\n- **The refusal belongs at authoring:** a Zod refinement on the slot, or a lint rule the `os validate` door runs. It names the subschema path and prescribes adding `type`. Choosing between the two is the implementing lane's call within Prime Directive #2 (no business logic in `packages/spec`).\n- **This is a narrowing,** so `Clause-②: no (narrowing)`. It is breaking for a stored schema of that shape, so the playbook's ADR-0087 disposition applies.\n- **`agent.structuredOutput` is on #21277** (retire versus build its `regex` / `grammar` / `xml` / `coerce_types` members). Position 2 can ride that card's PR if the ruling lands first.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

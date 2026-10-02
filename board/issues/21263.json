@@ -2,8 +2,8 @@
   "number": 21263,
   "kind": "issue",
   "title": "spec(contracts): `ICryptoProvider` gains a required keyed digest — the server-held-key HMAC that #21207's served content hash is ruled onto (option B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,22 +14,23 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "needs-user-decision",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T23:29:36Z",
-  "updated_at": "2026-10-02T02:11:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T05:09:27Z",
+  "closed_at": "2026-10-02T05:07:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21263",
-  "body": "**Ruling:** the maintainer chose **option B** of the decision analysis `5938508053` on #21207 on 2026-10-01, verbatim 「同意」, answering the seat's batch #1 item 1. Exit two of #21207 serves the stored-metadata content hash keyed at the serve boundary, under a server-held key, and that key is reached through the crypto-provider contract. This card is that contract's half. #21207 is blocked on it.\n\n⚠️ A `security` family: name classes, doors and positions only. ⛔ No request, header, field path, value or seeding recipe in public text.\n\n## Why the contract has to widen\n\n- `packages/spec/src/contracts/crypto-provider.ts` declares `encrypt`, `decrypt`, `rotateKey` and `digest`, and nothing keyed.\n  - The docblock of `digest` (`:155-161`) allows plain SHA-256 (\"use HMAC or SHA-256 of canonical JSON\").\n  - The one in-repo implementation, `LocalCryptoProvider.digest` (`packages/services/service-settings/src/local-crypto-provider.ts:500-501`), is unkeyed SHA-256.\n  - Relying on `digest` for a keyed property would therefore be declared-but-not-enforced, and the ruling rejects that.\n- The served hash needs a primitive that is keyed **by contract**: same key, same input, same output across restarts and nodes; and without the key, the output cannot be recomputed from the input.\n\n## Scope\n\n1. **The contract (`Clause-②: yes`, a new required member on a published contract).**\n   - Add one method to `ICryptoProvider`: a keyed digest of a string under the provider's server-held key.\n   - Its docblock states:\n     - the output is keyed and MUST NOT be computable without the key;\n     - it is stable for a given key across processes and nodes;\n     - it is not a substitute for `digest`, whose audit-log stability is unchanged.\n   - The method name and output shape (prefix, encoding) are this card's call, kept within what a served version token can carry.\n2. **Every in-repo implementation:** `LocalCryptoProvider` implements it from the key material it already resolves (the configured secret, the dev key, the persisted file, the ephemeral test key). No new operator secret.\n3. **Pins:**\n   - the output differs from the unkeyed SHA-256 of the same input;\n   - it is equal for equal input under one key, and differs under a different key;\n   - a provider instance without key material refuses rather than falling back to unkeyed.\n4. **Not in this card:** routing the provider to the hash-serving exits and keying them. That is #21207's exit two, dispatched once this lands. Its exit family is: the data door (both stored tables), the MCP door, the save receipt, the `/meta` version and history reads, and the HTTP cache validator.\n\n## Open for the implementing lane\n\n- **Out-of-repo providers:** implementations outside this repo (the cloud repository's providers, if any) are not visible from here. A required member breaks them at type level until they implement it. Name them, or record why none exist, before landing.\n- **The semver level:** the level the widening takes under the repo's changeset rules.\n\n## Routing\n\n- The surface is `packages/spec/src/contracts/**` plus `packages/services/service-settings`.\n- The PR owes the contract-review-tier review (Clause-② yes).\n- Filed by the `domain:cli` seat (the lane holding #21207). Triage sets `domain:*`."
+  "body": "Ruled: 5945612493 · letter A · 2026-10-02T04:30Z\n\n**Ruling:** the maintainer chose **option B** of the decision analysis `5938508053` on #21207 on 2026-10-01, verbatim 「同意」, answering the seat's batch #1 item 1. Exit two of #21207 serves the stored-metadata content hash keyed at the serve boundary, under a server-held key, and that key is reached through the crypto-provider contract. This card is that contract's half. #21207 is blocked on it.\n\n⚠️ A `security` family: name classes, doors and positions only. ⛔ No request, header, field path, value or seeding recipe in public text.\n\n## Why the contract has to widen\n\n- `packages/spec/src/contracts/crypto-provider.ts` declares `encrypt`, `decrypt`, `rotateKey` and `digest`, and nothing keyed.\n  - The docblock of `digest` (`:155-161`) allows plain SHA-256 (\"use HMAC or SHA-256 of canonical JSON\").\n  - The one in-repo implementation, `LocalCryptoProvider.digest` (`packages/services/service-settings/src/local-crypto-provider.ts:500-501`), is unkeyed SHA-256.\n  - Relying on `digest` for a keyed property would therefore be declared-but-not-enforced, and the ruling rejects that.\n- The served hash needs a primitive that is keyed **by contract**: same key, same input, same output across restarts and nodes; and without the key, the output cannot be recomputed from the input.\n\n## Scope\n\n1. **The contract (`Clause-②: yes`, a new required member on a published contract).**\n   - Add one method to `ICryptoProvider`: a keyed digest of a string under the provider's server-held key.\n   - Its docblock states:\n     - the output is keyed and MUST NOT be computable without the key;\n     - it is stable for a given key across processes and nodes;\n     - it is not a substitute for `digest`, whose audit-log stability is unchanged.\n   - The method name and output shape (prefix, encoding) are this card's call, kept within what a served version token can carry.\n2. **Every in-repo implementation:** `LocalCryptoProvider` implements it from the key material it already resolves (the configured secret, the dev key, the persisted file, the ephemeral test key). No new operator secret.\n3. **Pins:**\n   - the output differs from the unkeyed SHA-256 of the same input;\n   - it is equal for equal input under one key, and differs under a different key;\n   - a provider instance without key material refuses rather than falling back to unkeyed.\n4. **Not in this card:** routing the provider to the hash-serving exits and keying them. That is #21207's exit two, dispatched once this lands. Its exit family is: the data door (both stored tables), the MCP door, the save receipt, the `/meta` version and history reads, and the HTTP cache validator.\n\n## Open for the implementing lane\n\n- **Out-of-repo providers:** implementations outside this repo (the cloud repository's providers, if any) are not visible from here. A required member breaks them at type level until they implement it. Name them, or record why none exist, before landing.\n- **The semver level:** the level the widening takes under the repo's changeset rules.\n\n## Routing\n\n- The surface is `packages/spec/src/contracts/**` plus `packages/services/service-settings`.\n- The PR owes the contract-review-tier review (Clause-② yes).\n- Filed by the `domain:cli` seat (the lane holding #21207). Triage sets `domain:*`.\n"
 }

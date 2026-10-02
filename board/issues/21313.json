@@ -1,0 +1,36 @@
+{
+  "number": 21313,
+  "kind": "issue",
+  "title": "release.yml: once a version's fixed group is on npm, the push-lane Releases backfill races the publish job's own Releases step — 17.6.0 got 9 × 422 already_exists, 5 duplicate GitHub Releases and two red runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T04:08:05Z",
+  "updated_at": "2026-10-02T08:11:16Z",
+  "closed_at": "2026-10-02T08:08:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21313",
+  "body": "Filed by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`) on the maintainer's direct instruction in that session on 2026-10-02: 「这次 Release 任务的结论是 failure,失败在 \"Create GitHub Releases\" 这一步。 报 issue」. ⛔ Not a claim, not a dispatch. Triage sets `domain:*` and the grade.\n\n## What happened (measured from the run logs and the Releases API)\n\nThe 17.6.0 release, cut from the version commit `617f25f8a4` (#20639), went to npm and pushed its tags cleanly. Two red runs followed, and they wrote to the same GitHub Releases at the same time:\n\n| Writer | Run / job | Script window | Result |\n|:--|:--|:--|:--|\n| Publish job, step \"Create GitHub Releases\" | run `36955885276`, job `110678824190` | 03:03:47Z → 03:05:42Z | 65 created, 1 updated, **3 failed** (422) |\n| Push-lane `release-integrity`, step \"Backfill GitHub Releases\" (the landing push `4e530568a2`) | run `36958423332`, job `110686494582` | 03:04:37Z → 03:05:42Z | 9 created, 54 updated, **6 failed** (422) |\n\n- **Both run `scripts/release-github-releases.mjs` for `RELEASE_VERSION: 17.6.0`.** They walk the package list in the same order, about 50 s apart, and catch up with each other near the tail of the list.\n- **The 9 failures:** every one is `422 {\"code\":\"already_exists\",\"field\":\"tag_name\"}`.\n  - The publish job failed on `service-messaging`, `trigger-record-change` and `trigger-schedule`.\n  - The backfill failed on `service-job`, `service-package`, `service-queue`, `service-settings`, `service-sms` and `verify`.\n- **Duplicates:** where both writers' check-then-create landed inside the same second, **both POSTs succeeded**. 69 tags now carry 74 Release objects. Five tags have two releases each, published within a second of each other:\n  - `@objectstack/service-knowledge@17.6.0`: `401511494`, `401511496`\n  - `@objectstack/service-realtime@17.6.0`: `401511528`, `401511529`\n  - `@objectstack/service-storage@17.6.0`: `401511561`, `401511562`\n  - `@objectstack/spec@17.6.0`: `401511580`, `401511585`\n  - `@objectstack/types@17.6.0`: `401511638`, `401511640`\n- **The ADR-0087 D4 asset:** the publish job then ran `release-spec-changes.sh --attach` (\"Attached spec-changes.json to release @objectstack/spec@17.6.0\"). It landed on `401511580`, and the other `spec` release, `401511585`, carries no asset.\n\n## Why (read from `release.yml` at `origin/main`)\n\n- The backfill is gated on \"the version's whole fixed group is on npm\". That gate is the fix for #20627, which covered a landing during a publish that started the Docker backfill before the group was on npm.\n- It works for the group. But the publish job's own npm read-back only settled at 03:03:47Z (\"all 69 published package(s) are readable on npm — settled after 795s\"). The publish job then **still had its Releases step to run**.\n- The landing `4e530568a2` arrived at 03:03:12Z. Its `release-integrity` read the group as complete and started its own backfill of the same Releases while the publish job was creating them.\n- **The two jobs do not share a concurrency group:**\n  - `release-integrity` uses `group: release-integrity-${{ github.ref }}` (`:783-784`);\n  - the publish job uses `group: release-publish-${{ github.ref }}` (`:1287-1288`).\n- **`release-github-releases.mjs` is not safe under a concurrent writer.** It decides create-or-update from a read, then POSTs; a 422 `already_exists` fails the release rather than re-reading and updating. And the Releases API accepted two creates for one tag inside the same second.\n- **Class:** #20627's, one step later. #20982, also closed, covered the same backfill's build source and is not this.\n\n## Current state\n\n- **npm:** all 69 packages are published at 17.6.0, and every tag is pushed.\n- **GitHub Releases:** every tag has at least one release.\n  - Five tags have a duplicate.\n  - The `spec` duplicate pair carries the D4 asset on only one of the two.\n  - The `releases/latest` pointer reads `@objectstack/verify@17.6.0`.\n- **Runs:** both are red with no missing artifact.\n- **Out of scope:** the seat did not touch any release object. ⛔ Deleting the duplicate releases and re-running either job are release-surface actions, and they stay with the maintainer or the release lane.\n\n## Direction (for triage; not a ruling)\n\n- **Exclusion:** make the backfill and the publish job's Releases step mutually exclusive for one version. Either they share a concurrency group keyed on the version, or the push lane skips the Releases backfill while a publish run for that version has not concluded.\n- **Idempotent script:** make `release-github-releases.mjs` idempotent under a racing writer. On a 422 `already_exists`, re-read the tag's release and update it instead of failing.\n- **Duplicates:** decide whether the script also has to detect and report duplicate releases for a tag. The five above say the platform will not prevent them.\n- **One-time cleanup:** delete one release from each duplicate pair, keeping `401511580` for `spec` because it carries the D4 asset. This is the maintainer's call."
+}

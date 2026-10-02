@@ -10,16 +10,22 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T02:30:44Z",
-  "updated_at": "2026-10-02T02:30:44Z",
+  "updated_at": "2026-10-02T03:35:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21299",
   "body": "Filing gate: **① a defect with a named landing site**, finding class **(b)**: a declared rule the face does not enforce. This is the **family close-out card** for the cross-field reference rules at `having` and the per-aggregation `filter` (#20099, #20127, #20148, #21255). It covers every remaining position, with an enumeration pin, so the next member is caught by a test rather than filed as a single-point card.\n\n`reach:` **measured at the engine door** that REST `POST /api/v1/data/:object/query` calls (`engine.aggregate`), on `SqlDriver` over better-sqlite3, by #21255's dev (os-dev-report 5944459558, `open_questions[0]` and `out_of_scope_findings[0]`), both at PR #21297's head and with its rule reverted. The HTTP door itself was not driven. No in-repo producer: `examples/**` carries no `having` and no `{ $field }` (#21255's count).\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`). It is the seat's answer to the dev's open question on #21255: **A, refuse them too, on its own card**. #21255 keeps its ruled scope, cross-class pairs only. **Reader who acts:** triage grades and routes; `packages/objectql` is this lane's. ⛔ Not a claim.\n\n## What happens\n\n- **The contract.** `packages/spec/src/data/filter-cross-field-comparison-class.ts`, `CROSS_FIELD_NO_CLASS_REASONS`: \"Three families have NO class, and no comparison against them is compiled\" (`list-or-object`, `file`, `formula`).\n- **`where`** on `driver-sql` refuses each of them with `INVALID_FILTER` / 400 (\"has no scalar stored column a comparison can read\").\n- **`having` and `aggregations[i].filter`** answer. After PR #21297 they refuse only the spec verdict's `cross-class` answer, and its `no-class` answer is not judged.\n- **Measured:**\n  - per-aggregation text vs image: counts 6;\n  - number vs multi-select: counts 6;\n  - `having` on an image group-by vs a count: answers;\n  - datetime vs formula (at PR #21297's head only): counts 0.\n  \n  Each `where` twin is 400.\n\n## Positions (read at PR #21297's head `df85ac4baa`; ⛔ the fix is not measured)\n\n- `packages/objectql/src/having-filter.ts`, `crossClassReferenceViolation`: the seam PR #21297 builds. Today it acts only on the `cross-class` verdict.\n- The same function serves both positions: `assertConditionIsEvaluable` (`having`) and `assertAggregationFilterReferencesAreDeclared` (the per-aggregation filter).\n- `applyInMemoryAggregation` (exported from `@objectstack/objectql`) runs neither the #20148 reference rules nor #21255's for a host that calls it directly. No in-repo caller passes a per-aggregation `{ $field }` there; `packages/verify`'s date-bucket parity is its only external caller. **Enumerated here for completeness**; whether it takes the rules or documents the boundary is part of this card's scope.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Both positions refuse the `no-class` verdict as `where` does, with `where`'s words and envelope. `unjudged` and a side with no declaration stay not judged (the registry-less posture #21255 pins).\n- `Clause-②: no (narrowing)`: a no-class reference that answered becomes a 400.\n- **Enumeration pin:** one table over the positions that judge a `{ $field }` reference (`where`, `having`, `aggregations[i].filter`, and `applyInMemoryAggregation` if it takes the rules), crossed with the spec verdicts (`same-class`, `cross-class`, `no-class`, `unjudged`). Each cell asserts the same answer as `where`. A new position, or a new verdict in the spec, fails the pin until it is placed.\n- Depends on PR #21297 (#21255), which builds the seam. Dispatch after it lands.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「having aggregation filter field reference no comparison class file multiselect formula where refuses」: 6 hits. #21255 is open, this card's predecessor at cross-class pairs. The rest are closed: #20510, #20010, #20099, #20035 and #8296. None covers a no-class reference at these positions.\n- 「per-aggregation filter $field reference rules close-out family having where parity」: 2 hits, #21255 (open) and #20099 (closed).\n- 「applyInMemoryAggregation field reference rules not applied」: 0 hits.\n\nNo close-out card exists for this family, so this one opens it.\n\nDedupe words: `having no-class field reference` · `aggregation filter file field $field` · `per-aggregation multiselect field comparison` · `having formula reference where refuses` · `field reference rules close-out`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

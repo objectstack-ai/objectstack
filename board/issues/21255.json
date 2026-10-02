@@ -2,8 +2,8 @@
   "number": 21255,
   "kind": "issue",
   "title": "objectql having and the per-aggregation filter judge a cross-field reference's comparison class only on an addDays pair, so a plain datetime-vs-date { $field } answers by formula's whole-day reading where the where twin refuses it 400",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "huangyiirene"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T22:56:24Z",
-  "updated_at": "2026-10-02T02:29:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T03:27:05Z",
+  "closed_at": "2026-10-02T03:25:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21255",
   "body": "Filing gate: **① a defect with a named landing site**, finding class **(b)**: a declared rule the face does not enforce. Landing site: `packages/objectql/src/having-filter.ts`, the class rule in `assertConditionIsEvaluable` (gated on `target.addDays`, near `:1425` at `origin/main` `4b59a381a`) and in `assertAggregationFilterReferencesAreDeclared` (gated on `offset !== undefined`).\n\n`reach:` **measured at the engine door** that REST `POST /api/v1/data/:object/query` calls (`engine.aggregate`, from `protocol.ts` near `:11728`), on `SqlDriver` over better-sqlite3 at `4b59a381a`, as a member. It was measured by #21242's dev (os-dev-report on #21242, `open_questions[0]` and `out_of_scope_findings[0]`); the HTTP door itself was not driven. No in-repo producer: `examples/**` at `4b59a381a` carries 0 `having` and 0 `{ $field }`.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`) as the **precondition of #21242**. **Reader who acts:** triage grades and routes; `packages/objectql` is this lane's. ⛔ Not a claim.\n\n## What happens\n\n- **The contract.** `packages/spec/src/data/filter-cross-field-comparison-class.ts` (`CROSS_FIELD_COMPARISON_CLASSES`) says: \"The six comparison classes. Two columns are comparable only within one of them.\" `date` and `datetime` are separate classes.\n- **`where`** applies the class rule to every `{ $field }` comparison, so a `datetime` column against a `date` column answers `INVALID_FILTER` / 400.\n- **`having` and `aggregations[i].filter`** apply it only when the reference carries `addDays`. A plain `{ $field }` reference across classes is never judged. It reaches `formula`'s `matchesFilterCondition`, which answers by `lteBound`'s whole-day reading of the bare-day referent.\n- **Measured:**\n  - `aggregations: [{ filter: { closed_at: { $lte: { $field: 'due_on' } } } }]`, with `closed_at` a `datetime` and `due_on` a `date`, counts 3. The `where` twin answers 400.\n  - `having` on `max(closed_at)` `$lte` a `{ $field }` day bucket keeps 2 groups.\n- **Why it blocks #21242.** Ruling 5933322270 (#21109, letter A) deletes `lteBound`. With `lteBound` gone, the same two queries answer 1 and 0 groups, silently. That is the midnight-anchored shape #3777 removed. So this face is a production caller that still depends on the copy, and #21242 stops until this face refuses as `where` does.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- `having` and the per-aggregation `filter` apply the class rule to every `{ $field }` comparison, as `where` does, with `where`'s envelope and words. An `addDays` pair keeps its current judgement.\n- `Clause-②: no (narrowing)`: a cross-class plain reference that answered becomes a 400.\n- Pins:\n  - the two measured queries refuse 400, matching their `where` twins;\n  - a same-class plain reference (`date` against `date`, `datetime` against `datetime`) answers as before (the control);\n  - the `addDays` pairs are unchanged.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「having aggregation filter cross-class field reference refused class rule datetime date」: 2 hits, both closed. #20148 (the per-aggregation filter's four missing doors) and #20127 (`having` `addDays` against a non-temporal column).\n- 「having plain $field comparison class not judged only addDays pair」: 2 hits, both closed. #20127 again, and #15104 (driver-memory's reference matcher).\n- 「per-aggregation filter where refuses INVALID_FILTER but aggregation answers count silent field comparison」: 25 hits, the 10 read all closed. The same family is closed in #20148, #20176, #20334, #21007 and #20873.\n\nNone covers a plain cross-class `{ $field }` at these two positions. This is the family's next member, not a duplicate.\n\nDedupe words: `having cross-class field reference` · `aggregation filter plain $field class rule` · `having datetime date field comparison` · `lteBound caller having`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

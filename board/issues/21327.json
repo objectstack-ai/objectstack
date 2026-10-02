@@ -1,0 +1,35 @@
+{
+  "number": 21327,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0128 §4 gets a dated note — the keyed-digest break (#21263, PR #21292) did not carry D1, and why",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T04:36:57Z",
+  "updated_at": "2026-10-02T06:26:16Z",
+  "closed_at": "2026-10-02T06:23:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21327",
+  "body": "Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) as an execution parameter of the maintainer's ruling **A** on #21263 (`5945612493`, batch #267 item 1, 「其他同意」). ⛔ Not a claim. ⛔ Lane and priority are triage's. The edit is a governed surface (`docs/adr/**`, Tier H), so it is not this seat's to author.\n\n## What the ruling asks\n\nThe ruling reads: \"ADR-0128 dated note: one sentence under §4 recording that the keyed-digest break (#21263, PR #21292) did not carry D1, and why: zero out-of-repo implementers measured in the organisation (5945420994). It is a Tier H PR, held for the maintainer's own approval.\"\n\n## Why the note is owed\n\nADR-0128 §4 (\"The trigger that would fund it\") says: \"`ICryptoProvider` is opened for another breaking change. … A queued breaking change to this interface should pull D1 in with it.\" PR #21292 opens `ICryptoProvider` for a breaking change (a required `keyedDigest` member) and lands without D1, by the maintainer's ruling. An accepted ADR whose recorded preference is departed from carries a dated note saying so. Otherwise a later reader takes the departure for an oversight.\n\n## Shape\n\n- One dated sentence under §4's third trigger. It names #21263 / PR #21292 and the ruling `5945612493`. It also gives the reason: the director's census `5945420994` measured zero out-of-repo `ICryptoProvider` implementations across the organisation's repositories, so bundling would have saved a second break for no measured population.\n- It points at the D1 scheduling card, #21326.\n- ⛔ No change to D1–D4 or to the ADR's status.\n- A Tier H PR is held for the maintainer's approval, and its body carries the `## 维护者速读(草稿)` draft.\n\nDedupe words: ADR-0128 dated note keyed digest D1 not carried · ICryptoProvider breaking change trigger §4"
+}

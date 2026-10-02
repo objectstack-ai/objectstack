@@ -1,0 +1,34 @@
+{
+  "number": 21362,
+  "kind": "pull_request",
+  "title": "docs(releases): finalize the 17.6.0 notes after publish",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T07:40:47Z",
+  "updated_at": "2026-10-02T08:09:03Z",
+  "closed_at": "2026-10-02T08:09:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-10-02T08:09:01Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21362",
+  "body": "## What this is\n\nThe release-time half of the 17.6.0 release notes, following #20623 for 17.5.0.\n\nThe page `content/docs/releases/v17/17-6.mdx` landed before publish (#21290) with a RELEASE-TIME TODO. 17.6.0 was published to `latest` on 2026-10-02 from the version commit `617f25f8` (#20639): `@objectstack/cli` at 02:53Z, `@objectstack/spec` at 03:03Z. This PR makes the TODO's edits, deletes both TODO comments, and updates `content/docs/releases/v17/index.mdx`.\n\nDocs-only, two files under the release-owned `content/docs/releases/`. Nothing is published, hence `skip-changeset`.\n\nClause-②: no\n\n## What changed\n\n**`17-6.mdx`**\n\n- **Publish date.** 2026-10-02, 3 days after 17.5.0.\n- **Count.** The version commit consumed **337** changesets (the `.changeset/*.md` files it deletes, README excluded). The draft read 338.\n  - The 69 `CHANGELOG.md` files that carry a 17.6.0 section at `617f25f8` list 496 per-package entries (198 minor, 298 patch) in 48 of those files.\n  - Those entries de-duplicate to the same 337.\n  - Every consumed changeset was already in the draft, so nothing new needed folding in.\n  - New in 17.6.0: 337 − 16 shipped in 17.5.0 = **321**.\n- **New section \"Also shipped in 17.6.0 — not in its CHANGELOG\".**\n  - `748b240` (#21270, `hostDisabledReason`) is an ancestor of the version commit, but the version commit did not consume its changeset.\n  - The npm packages therefore carry it, and no 17.6.0 CHANGELOG names it. HotCRM's upgrade observed the same (objectstack-ai/hotcrm#1982).\n  - This is the same window that produced 17.5.0's seven stragglers. I filed it as #21361.\n- **Console.**\n  - The pin stayed `31971ff1e28f`.\n  - The known-issues list gains the zh-CN defect: console strings render in English (objectui#11326, fixed upstream in `d0fba91aa`). #21330 confirmed it on 17.6.0.\n  - The release verification reproduced the dataset and datasource saves on 17.6.0.\n- **New section \"Known issues found after publish\".** It draws on the three 17.6.0 verification lanes:\n  - the HotCRM upgrade, objectstack-ai/hotcrm#1982;\n  - the North Star path on the published packages, #21318;\n  - the P0 + 17.6-risk checklist run, #21330.\n\n  The issues it lists:\n  - #21349: the `--stored` and `audit-metadata-bodies` previews write to the database;\n  - #21321 / #21322: local package install loses script action bodies, and a hot install leaves flows unbound;\n  - #21323 / #21324: `verify` passes a refused stack, and its `--json` output is not clean;\n  - #21350: \"My Pending\" misses position-routed approvals (pre-existing);\n  - #21332: a cloned flow reaches no Studio surface;\n  - #21158: anonymous endpoints;\n  - the console pin issues.\n\n  The authorization-class finding in #21330 (R2) is deliberately not described here.\n- **Upgrade checklist.** 19 of 30 lines are now marked *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02*, each with what was observed, taken from hotcrm#1982's per-line table.\n  - Lines that do not apply to HotCRM stay *Not exercised*.\n  - Two lines gain a ⚠️ for #21349, telling operators to run the previews on a copy.\n  - One line is new: `os validate --strict` now fails on dead keys. HotCRM got +88 warnings.\n- **Unchanged.** #21158 is still open, so its \"no supported channel\" lines stay.\n\n**`v17/index.mdx`** (following #20623)\n\n- The frontmatter description runs through 17.6.0.\n- The status blockquote says 17.6.0 is released and current, published 2026-10-02, taking over from 17.5.0. A plain install resolves 17.6.0, and the minors warning names 17.6.0.\n- A new \"17.6.0 stays in that register\" paragraph links the breaking changes, the known issues and the checklist.\n- The per-release list marks 17.6.0 as current. The checklist callout records that 17.5.0 → 17.6.0 was exercised in part (19 lines, on HotCRM), and the checklist links lead with 17.6.0.\n- The top-level `content/docs/releases/index.mdx` already reads \"current series: 17.6.0\", stamped at version time.\n\n## Verification\n\nRun locally on the head commit. All of these pass:\n\n- `check-issue-citations --base origin/main`\n- `check-doc-anchors` (406 links)\n- `check-role-word`\n- `check-release-page-status`\n- `check-release-section-coverage`, plain and `--strict`\n- `check:release-index-currency-sync`\n- `check-docs-single-h1`\n- `check-release-notes`\n- `check-doc-frontmatter`\n\nBoth pages compile as MDX with `@mdx-js/mdx` 3 + `remark-gfm`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014VGCS11YUtYAiinRcdqQwL\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014VGCS11YUtYAiinRcdqQwL)_"
+}

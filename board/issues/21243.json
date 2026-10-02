@@ -2,8 +2,8 @@
   "number": 21243,
   "kind": "issue",
   "title": "On MySQL, sys_packages is never created (its raw DDL fails three ways), so package publish answers 500 and an installed or edited package silently disappears on restart while install and PATCH answer success",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T21:07:57Z",
-  "updated_at": "2026-10-02T00:45:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T03:03:49Z",
+  "closed_at": "2026-10-02T03:03:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21243",
   "body": "Filing gate: **① a reproducible defect with named landing sites**. Finding class **(a)**, plus a declared-not-enforced tolerance: an install that reports success for a write that never landed.\n\n`reach:` **measured at public doors** by this seat's read-only probe on `origin/main` `a7d9768ec`. It used `pnpm dev:crm -- --fresh --database mysql://…` against a throwaway MySQL 8.0.46, with a SQLite control on the same build. No commit and no GitHub write by the probe. It was escalated by PR #21239's contract review (5940367924), from #21227's dev report.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`). **Reader who acts:** triage grades and routes. The DDL is `service-package` (`domain:services`); the swallowed failure is `metadata-protocol` (`domain:engine`). ⛔ Not a claim.\n\n## Doors (MySQL against the SQLite control, as the platform admin)\n\n| door | MySQL | SQLite |\n|:--|:--|:--|\n| `POST /api/v1/packages/publish` | **500 `DATABASE_ERROR`** | 200 |\n| `POST /api/v1/packages` (install) | 201, but no `sys_packages` row is written | 201, row stored |\n| `PATCH /api/v1/packages/:id` | 200, but no `sys_packages` row is written | 200, row stored |\n| `GET /api/v1/packages/:id` after a restart | **404 `RESOURCE_NOT_FOUND`** | 200, with the PATCHed description |\n| `GET /api/v1/packages`, and `GET :id` in the same process | 200 (in-memory registry) | 200 |\n\n`DELETE /api/v1/packages/:id`'s `sys_packages` leg and `POST /api/v1/packages/:id/duplicate` were **not measured**. On that MySQL boot DELETE was refused earlier by the tenant gate: no default organization existed, which may be #21227's `create` defect; not measured.\n\n## Mechanism\n\n1. **The table is never created on MySQL.** `ServicePackage.ensureTable` (`packages/services/service-package/src/index.ts`, near `:648`) issues raw DDL through `objectql.execute`. The statement fails in three independent ways, each isolated by the probe against MySQL 8.0.46:\n   - `created_at TEXT DEFAULT CURRENT_TIMESTAMP` (and `updated_at`): `ER_INVALID_DEFAULT`;\n   - with the defaults removed, `PRIMARY KEY (id, version)` over `TEXT`: `ER_BLOB_KEY_WITHOUT_LENGTH`;\n   - `CREATE INDEX IF NOT EXISTS idx_packages_latest`: `ER_PARSE_ERROR` (MySQL has no `IF NOT EXISTS` on `CREATE INDEX`).\n\n   Each error masks the next, so fixing only the default surfaces the next refusal. `ensureTable` catches the failure and logs it at `debug` (\"may already exist\"). Every MySQL boot then logs `Failed to list packages … ER_NO_SUCH_TABLE` from hydration.\n2. **The failed write is reported as success.** `protocol.installPackage` and `protocol.updatePackage` (`packages/metadata-protocol/src/protocol.ts`, near `:24402` and `:24451`) catch the `sys_packages` persist failure as \"Non-fatal: registry write already succeeded\" and answer success with a `console.warn`. The in-memory registry holds the package until the process restarts; then it is gone. `POST /packages/publish` calls the service directly and does surface the 500.\n\n## Population\n\nGrep over `origin/main`:\n- `TEXT [NOT NULL] DEFAULT CURRENT_TIMESTAMP`, non-test code under `packages/`: 4 hits in 2 files. They are `service-package/src/index.ts:659-660` and the same DDL quoted in `service-package/README.md:87-88`.\n- Raw `CREATE TABLE` under `packages/services`: only `sys_packages`.\n- Raw `CREATE INDEX IF NOT EXISTS`: only `idx_packages_latest`.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- `sys_packages` is created portably on every supported dialect, either through the driver's schema path (a declared object) or with dialect-correct DDL. ⛔ Not a MySQL-only patch over the same raw string.\n- A persist failure at install or update is not reported as success. The door answers the failure, or the in-memory registration is undone. ⛔ No silent `console.warn`.\n- Pins: a live MySQL cell (and PostgreSQL) in which a package installed through the door survives a restart; the SQLite cell unchanged (the control).\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「sys_packages mysql table not created package lost after restart」: 0 hits.\n- 「service-package raw DDL CREATE TABLE sys_packages dialect portability ensureTable」: 0 hits.\n- 「package publish 500 mysql DATABASE_ERROR packages endpoint」: 0 hits.\n\nNear the shape, not this gap: #21241 (a MySQL `datetime` default on a declared field, same boot) and #21227 (MySQL `create`).\n\nDedupe words: `sys_packages mysql` · `package lost after restart mysql` · `service-package ensureTable raw DDL` · `installPackage persist skipped`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

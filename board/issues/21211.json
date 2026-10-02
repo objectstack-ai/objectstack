@@ -14,16 +14,13 @@
     "area:reports",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T16:48:50Z",
-  "updated_at": "2026-10-02T02:29:45Z",
+  "updated_at": "2026-10-02T02:55:29Z",
   "closed_at": "2026-10-02T02:29:45Z",
   "closed_by": {
     "login": "os-zhuang",
@@ -31,7 +28,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21211",
   "body": "Filing gate: **① a defect, class (c)** (a metadata-authoring trap in a published skill), `reach:` a named real producer: the published skill text itself, `skills/objectstack-ui/rules/dashboards.md`, which ships to customer projects through `npx skills add objectstack-ai/objectstack/skills` and instructs an AI author to write the key. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21131 dev report (`5935805280`, `out_of_scope_findings` 3), which the at-tier contract review of PR #21205 (`5936107820`, ③ OOS-3) escalated for a `domain:skills` card. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n**Who acts on it:** the `domain:skills` lane (`skills/**` is Tier H; a docs-only PR for the maintainer's click). ⚠️ PR #21205 (`Part of #21131`, Tier H, open) edits two other sites of the same file; whoever takes this works after or beside it.\n\n## The text\n\n`skills/objectstack-ui/rules/dashboards.md`, the `compareTo` \"Cartesian charts\" bullet (about `:257`-`:262` on `origin/main` `2c1cef3345`):\n\n> muted per family (dashed `'4 4'` on line/area only; reduced opacity on all). Override per-series with `series.dashArray` / `series.opacity`.\n\n## Why it is a trap\n\n- On a dataset-bound dashboard widget, `chartConfig.series` is a `retiredKey` tombstone (`packages/spec/src/ui/dashboard.zod.ts`, about `:963`): \"Per-series appearance (label, colour, mark type, stacking) is not authorable on a dataset-bound widget; `colors` on this same chart config is the palette channel that remains.\"\n- The chart config's own describe (about `:968`) states that `type`, `xAxis`, `yAxis` and `series` \"are refused here\".\n- `content/docs/ui/dashboards.mdx` (\"What `chartConfig` does not carry\") says the same.\n- So an AI following the skill writes a key the schema refuses at parse. The refusal is loud and carries a prescription, but the skill is the source of the wrong instruction (NORTH-STAR priority 4: a wrong sentence in a skill is a product defect).\n\n## Not measured\n\n- A served `os validate` run on a stack carrying `chartConfig.series`: the refusal is read from the tombstone and its describe, not from a run.\n- Whether the bullet means the dashboard widget at all, or a renderer-internal series option. The section is the dashboards rule's `compareTo` guidance, which is about dashboard widgets; the taker confirms.\n\n## Direction (for triage, not a ruling)\n\nDelete the override sentence, or replace it with the one channel that remains (`chartConfig.colors`), within the skills token ratchet (net lines ≤ 0).\n\n## Dedupe\n\nOpen issues (152, REST, all pages) and the 183 most recently updated closed issues, grepped locally: `dashArray` 0, `series.opacity` 0; `compareTo` 1 hit, #20760 (a different concern); `dashboards.md` 1 hit, #21131 (the source). Control: `chartConfig` 2 hits in the same corpus.\n\nDedupe words: dashboards skill series dashArray opacity · compareTo override per-series chartConfig.series tombstone · skill teaches refused chartConfig key"

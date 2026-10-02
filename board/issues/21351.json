@@ -1,0 +1,35 @@
+{
+  "number": 21351,
+  "kind": "issue",
+  "title": "finding(pm tooling): check:self-test-wired cannot see a declared `--self-test` alias that no workflow names, so removing the only step that runs one stays green",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T06:12:48Z",
+  "updated_at": "2026-10-02T08:32:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21351",
+  "body": "Filing gate: a **declared ≠ enforced** observation ⇒ the enforce-or-remove channel (`.claude/skills/pm-dispatch/SKILL.md` 〈状态模型〉). This is the \"second card\" #21295's body and its triage grade (`5944815521`) both name: \"If it still cannot see a declared but unwired `check:pm-*` entry, that blind spot goes in this claim's `out_of_scope_findings`, with its reach.\" Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21295 dev report (PR #21348, `out_of_scope_findings[0]`). ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n## The declaration and the gap\n\n- `scripts/check-self-test-wired.mjs`'s header states its purpose: removing a `--self-test` invocation from a workflow \"stops being an invisible act\".\n- Its population is only the scripts that some workflow NAMES. `auditPopulation` skips a script no workflow names.\n- So a root `package.json` alias whose expansion carries `--self-test`, and which no workflow runs, is outside the gate. The same holds when the ONE step that runs such an alias is deleted: the script drops back out of the population, and every gate stays green.\n\n## Reach, measured\n\n- **The named producer:** PR #21291 (+325 / −68 on `scripts/pm/issue-transfer.mjs`, a 75-case self-test) landed with `Lint & Repo Gates` green, and that self-test never ran in CI. #21295 / PR #21348 wires it now.\n- The gate's header and the stale-`finding` sweep step's comment in `lint.yml` record three earlier unrun self-tests (61, 79 and 91 cases).\n- **Probe, on a scratch copy of PR #21348's head `9eed85fb3a`:**\n  - A new alias `check:pm-probe-unwired` = `node scripts/pm/measurement-claim-triage.mjs --self-test`, named by no workflow: the gate exits 0, with the population unchanged at 231.\n  - The positive control on the same copy is a workflow step running that script without the flag: exit 1, `[self-test-not-run] scripts/pm/measurement-claim-triage.mjs`.\n  - Deleting PR #21348's new step returns the tree to its base, where the gate is also exit 0.\n- **Live population after PR #21348:** zero such aliases (the base had 1, `check:pm-issue-transfer`).\n\n## Direction (for triage, not a ruling)\n\n- **Enforce, by extending the existing gate (not a new one):** admit every root `package.json` alias whose expansion carries `--self-test` as a third population source. On PR #21348's head that measures 0 members, so it lands green, and it then holds PR #21348's step and every future declared self-test alias.\n- **Remove:** narrow the header's stated purpose to \"scripts a workflow names\", so the declaration matches what is enforced.\n\n## Dedupe\n\nThe 100 most recently updated open issues and PRs were listed over REST and grepped for `self-test-wired`. The hits are #21295, PR #21348 and PR #21338, and none holds this population gap.\n\nDedupe words: check:self-test-wired unnamed alias · declared self-test alias no workflow · self-test-wired population named-only · unwired --self-test package.json"
+}

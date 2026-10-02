@@ -2,8 +2,8 @@
   "number": 21260,
   "kind": "issue",
   "title": "security(plugin-audit): an audit capability for the compliance ledger, held by platform administrators by default, exempts its holder from the parent-record read gate (ruling 甲 on #21175, part B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T23:15:51Z",
-  "updated_at": "2026-10-02T02:30:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T03:26:35Z",
+  "closed_at": "2026-10-02T03:25:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

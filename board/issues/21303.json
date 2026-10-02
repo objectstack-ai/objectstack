@@ -1,0 +1,36 @@
+{
+  "number": 21303,
+  "kind": "pull_request",
+  "title": "docs(protocol): the actions.mdx outputSchema bullet says the cloud AI runtime validates the action result",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T02:43:44Z",
+  "updated_at": "2026-10-02T03:30:31Z",
+  "closed_at": "2026-10-02T03:30:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-02T03:30:29Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21303",
+  "body": "Refs #21288\n\nClause-②: no\n\n## What this does\n\nOne bullet in `content/docs/protocol/objectui/actions.mdx` (the AI Tool Exposure section, line 494 at `4e6dc233`) said `ai.outputSchema` is \"JSON Schema for the return value, enabling structured tool chaining\". No reading on the parent card names a consumer that chains tools on it, and the 2026-08-29 cloud re-close recorded \"no chaining consumer\"; meanwhile the one thing the runtime does with the key was missing. The bullet now reads: JSON Schema for the return value. The cloud AI runtime validates the action's result against it and withholds a result that does not conform; a schema it cannot enforce is refused before the action runs.\n\n- Reading 5943158888 on #20274, of cloud `main` `cb62c3ea`: `packages/service-ai/src/tools/action-tools.ts#compileOutputContract` reads `action.ai.outputSchema` directly, inside the action tool's handler; a non-conforming result is withheld with a typed error.\n- Reading 5943779795 on #20274, of cloud `main` after the merge `1e0ea49a` (objectstack-ai/cloud#2572 landed): a schema zod cannot parse, or one with a type-scoped keyword in an untyped subschema, is refused before the action runs (`AI_TOOL_OUTPUT_SCHEMA_VIOLATION`, stage `before_run`); every other schema is checked against the return value after the run, and a violation withholds the value.\n- The bullet stays one line, like its three siblings; the file's line count is unchanged (567).\n\n## Why a second PR, and why `Refs`\n\nThis is the cross-lane `domain:devx` surface of #21288, routed by triage 5944149289: the card's two skill positions land in the governed `skills/**` PR on `claude/issue-21288-ai-skill-guardrails-outputschema-enforced` (Tier H, draft until an authorized APPROVED review), and this docs line lands as an ordinary PR under the same claim. The card is closed by that PR. This one deliberately carries no closing keyword, so the duplicate-fix guard sees one claim on the issue, not two.\n\n## Verification (at `7e943517`, worktree `objectstack-issue-21288-docs`)\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derived 40 commands from the merge base `4e6dc233` (1 path, +1/−1). Each ran with its exit code captured before any pipe; `--ran` answered: \"✓ dispatch-gates --ran: 40 derived famil(ies) accounted for — 40 run, 0 NOT-MEASURED\".\n- Exit 0 each: `pnpm check:doc-authoring`, `pnpm check:doc-anchors`, `pnpm check:docs-single-h1`, `pnpm check:docs-redirects`, `pnpm check:docs-spec-enumerations`, `pnpm check:docs-audit-scope`, `pnpm check:docs-transcript-drift`, `pnpm check:corpus-claim-drift`, `pnpm check:role-word`, `pnpm check:nul-bytes`, `pnpm check:published-readme-links`, `pnpm check:skill-identifier-liveness`, `pnpm check:gitlink-declared`, `pnpm check:cross-package-test-inputs`, `pnpm check:driver-memory-census`, `pnpm check:react-page-adapter-contract`, `pnpm check:refd-timer-probe`, `pnpm check:vendor-version-stamps`, `pnpm check:watch-hint-literal`; `pnpm --filter @objectstack/spec run check:docs`, `check:empty-state`, `check:liveness`, `check:strictness-ledger`, `check:variant-docs`, `check:yaml-examples` (after `pnpm --filter @objectstack/spec build` under the shared verify lock); and the direct `node scripts/check-*.mjs` rows (ci-filter-parity, closing-keyword-parity and its self-test, comment-mask-corpus, doc-frontmatter and self-test, doc-route-spelling advisory and self-test, docs-section-name and self-test, section-landing-index and self-test).\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` and `check:doc-security-posture`: first run exit 3, PREREQUISITE NOT MET (`@objectstack/formula` / `@objectstack/lint` not built), nothing measured; after `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the lock, exit 0 each (\"✅ 27 ObjectSchema.create example(s) in 227 marked block(s) across 249 prose file(s) in 2 root(s) carry an os validate-clean security posture\").\n- `pnpm --filter @objectstack/spec run check:skill-examples`: first run exit 3 (`packages/client-react/dist` holds no declarations), nothing measured; after `pnpm exec turbo run build --filter=@objectstack/client --filter=@objectstack/client-react` under the lock, exit 0: \"✅ 259 prose examples type-check across 3 surface(s)\".\n- NOT MEASURED locally, CI's own: the `Build Docs` job, the whole-root `pnpm lint`, the type-check lanes and Test Core; the `--ran` footer names them as outside the derived total.\n\n## Changeset\n\n`skip-changeset`. `content/docs/**` is in no published package's `files[]`: a scan of every `package.json` in the tree for a `files[]` entry naming `skills` or `content/docs` finds zero; the positive control `@objectstack/spec` lists `dist`, `json-schema`, `liveness`, `prompts`, `llms.txt`, `README.md`, `src/**/*.zod.ts`, `CHANGELOG.md`, `api-surface`, `spec-changes.json`. The docs site is built from this tree, not shipped in a tarball.\n\n## Acceptance notes\n\n- `content/docs/ai/tools.mdx:148` on `main` at `4e6dc233` still carries the folded-into-the-description row for a tool's `outputSchema`, as do the spec describe and the generated reference pages. PR #21280 (open, draft) rewrites them. Carrier: that PR; noted, not filed.\n- `packages/spec/src/ui/action.zod.ts` types `action.ai.outputSchema` as an open record, so authoring accepts an untyped-keyword schema the runtime now refuses at call time (reading 5943779795 raises it for the spec lane). The docs line describes the refusal; whether authoring should refuse it is the same shape of question as #21277 and is not decided here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FNKm1SmPpuJASnbjxWGtsJ)_\n"
+}

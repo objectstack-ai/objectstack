@@ -1,0 +1,35 @@
+{
+  "number": 21361,
+  "kind": "issue",
+  "title": "release: a Version Packages PR that merges behind main ships every changeset landed since its last refresh without a CHANGELOG entry (17.5.0: 8 changesets, 17.6.0: 1)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T07:36:33Z",
+  "updated_at": "2026-10-02T08:01:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21361",
+  "body": "## Summary\n\nThe Version Packages PR is regenerated on a schedule and on demand (#11233), and it cannot be refreshed while it sits in the merge queue. When it lands, the merge queue builds it on top of the current `main`. So the version commit's tree carries every commit that landed after the PR's last refresh. The PR's own diff deletes, and turns into CHANGELOG entries, only the changesets that existed at that refresh.\n\nThe code of the later commits is therefore published under the new version, but their changesets stay in `.changeset/`. No CHANGELOG entry for that version names them. They show up one release later, under the wrong version.\n\n#20625 (#20613) made the publish ship the version commit and nothing after it. This is the window before the version commit, which #20625 does not cover.\n\n## Measured twice\n\n| release | version commit | commits in its tree whose changesets it did not consume | where they surfaced |\n|---|---|---|---|\n| 17.5.0 | `8c87d26a` (#17076) | seven commits, eight changesets: `f11b5f2` #20568, `e73ee2d` #20567 (two changesets), `c876a74` #20504, `7a1faf1` #20579, `c9d234c` #20577, `24d521e` #20572, `2123fcc` #20576 | listed again in 17.6.0's CHANGELOG. Two are breaking (`e73ee2d`, `c876a74`). The 17.5.0 notes carry a dated correction for them. |\n| 17.6.0 | `617f25f8` (#20639) | `748b240` #21270 (`ScheduledWorkPolicy.hostDisabledReason`, a `minor` for three packages) | `.changeset/21110-scheduled-work-host-reason.md` is still pending on `main`. No 17.6.0 `CHANGELOG.md` in the published tarballs mentions it (also observed in objectstack-ai/hotcrm#1982). |\n\nHow to check either one:\n\n```\ngit merge-base --is-ancestor <commit> <version commit>   # → true\ngit show --name-status <version commit> | grep '^D.*\\.changeset/<file>'   # → no line\n```\n\n## Why it matters\n\nThe generated CHANGELOG is the record an upgrading agent or operator reads, and the release notes are compiled from it. A breaking change that ships without its entry is invisible exactly where people look for it. For 17.5.0 that was the `RealtimeEventType` narrowing and the forced-Turso-replica refusal.\n\n## Directions (not decided here)\n\n- **A merge-group guard on the Version Packages PR.** Refuse the merge when the merge-group tree still contains a non-README `.changeset/*.md` that the PR does not delete, so the PR must be refreshed first. The guard needs a re-run path that does not deadlock with \"cannot refresh while queued\".\n- **Regenerate inside the merge group.** Run `changeset version` on the merge-group tree, so the version commit consumes everything in it.\n- At minimum, have the release-integrity audit report unconsumed changesets whose commits are ancestors of the published version commit, so the gap is seen at publish time rather than found later."
+}

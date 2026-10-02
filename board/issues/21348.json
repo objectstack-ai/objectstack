@@ -1,0 +1,36 @@
+{
+  "number": 21348,
+  "kind": "pull_request",
+  "title": "ci(lint): run the issue-transfer door self-test in the pm roster",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T06:08:26Z",
+  "updated_at": "2026-10-02T07:00:45Z",
+  "closed_at": "2026-10-02T07:00:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-02T07:00:43Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21348",
+  "body": "Fixes #21295\nClause-②: no\n\n## What changes\n\nOne step in the `Lint & Repo Gates` pm block of `.github/workflows/lint.yml`, placed directly after `Fleet-write dispatcher self-test`:\n\n```yaml\n      - name: Issue-transfer door self-test\n        run: pnpm check:pm-issue-transfer\n```\n\n`check:pm-issue-transfer` (`node scripts/pm/issue-transfer.mjs --self-test`) was declared in `package.json` and named by no workflow, so the door's offline self-test ran only by hand. Per the triage ruling on the card (wire, not remove), an existing self-test now runs in an existing job. This is not a new gate. The step mirrors its neighbours: a name, a comment block at the same density (what the live path is, why CI holds only the offline half, what the self-test instruments), a `run: pnpm` line, and no `if:`.\n\nNothing else changes. `package.json`, `scripts/pm/issue-transfer.mjs`, `scripts/check-self-test-wired.mjs`, `ci.yml` and `scripts/check-ci-filter-parity.mjs` are untouched. No published package moves, so there is no changeset (`skip-changeset`).\n\n## Evidence (head `9eed85fb3a`, base `222ecc27f9`)\n\n**The self-test runs offline, without a token, in about a second.**\n\n- Inside a network namespace with no route out (`unshare -rn`; curl to the egress proxy fails there with exit 7), with `GH_TOKEN`, `GITHUB_TOKEN` and the `OS_FLEET_*` identity variables unset: `pnpm check:pm-issue-transfer` exits 0 in 1.0 s and prints `✓ issue-transfer self-test: 75 cases pass across 9 batteries`.\n- In the normal environment it exits 0 in 1.1 s and prints the same line.\n\n**`check:self-test-wired`, before and after** (`node scripts/check-self-test-wired.mjs`):\n\n| tree | exit | population (scripts CI runs that ship `--self-test`) | run through the flag | issue-transfer |\n|---|---|---|---|---|\n| base `222ecc27f9` | 0 | 230 | 227 | absent: no workflow names it, so it is outside the population |\n| head `9eed85fb3a` | 0 | 231 | 228 | named and self-tested only by `lint.yml (pnpm check:pm-issue-transfer)` |\n\nBoth runs read 316 files under `scripts/`, 248 of which carry `--self-test` in code.\n\n**`check:self-test-workflow-commands`** exits 0 on head. Its population is 231 and now includes the door. The door's self-test output carries no legacy workflow-command token (hash, hash, open bracket) and no double-colon token at line start, so it cannot mint a runner annotation.\n\n**Parse check.** `lint.yml` parses with the `yaml` package. The new step is step 58 of 194 in job `lint` (`Lint & Repo Gates`), between `Fleet-write dispatcher self-test` and `Board-snapshot archiver self-test`, and no step name is duplicated.\n\n`origin/main` has since moved to `97239c3c8a`. None of `lint.yml`, `package.json`, `issue-transfer.mjs` or `check-self-test-wired.mjs` changed in that range.\n\n## Gates (head `9eed85fb3a`)\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`. The change set is 1 path against merge base `222ecc27f` (+27 / -0). That gives 44 commands, identical to the seat's derivation at dispatch. All 44 exit 0. The `--ran` reconciliation reads `44 derived famil(ies) accounted for — 44 run, 0 NOT-MEASURED`.\n\nTwo of the 44 run longer than the container's foreground cap. They were started detached, as their headers ask, and waited on in the foreground:\n\n- `pnpm check:pm-dispatch-gates`: exit 0, `dispatch-gates self-test: 1976 cases pass`, 819 s on a shared box.\n- `pnpm check:type-check-debt` (under the shared verify lock): `VERDICT command-exit 0`, `1 ledger entr(ies) re-measured in 63.8s, ... none above its recorded number`.\n\nSix artifact-roster families keep their roster under `.github/`. Those are `check-platform-checklist-watchdog` (production and `--self-test`) plus the self-tests of `ci/select-shard-timings-run`, `measure-test-shard-timings`, `pr-labels` and `release-verify-npm`. All six exit 0. The 11 declared wide-population families scan TypeScript sources under `packages/`, `apps/` and `examples/`. This diff touches none of them, and CI runs them.\n\n## Acceptance notes\n\n1. **`check:self-test-wired` still cannot see a declared but unwired self-test alias, and it does not hold the new step.** Its population is the set of scripts some workflow names (`auditPopulation` skips any script that is not named). A `package.json` alias that carries `--self-test` but that no workflow runs is therefore outside the population by construction. Measured on head `9eed85fb3a` against a scratch copy of the tree: adding the alias `check:pm-probe-unwired`, which runs `scripts/pm/measurement-claim-triage.mjs --self-test` (a real carrier that no workflow names), leaves the gate at exit 0 with population 231. The positive control on the same copy adds a workflow step that runs that script without the flag, and the gate turns to exit 1: `[self-test-not-run] scripts/pm/measurement-claim-triage.mjs`. The base-tree run above gives the same reading for this step: with the step absent, the gate is green. The comment on the new step says this. It goes to the seat as an out-of-scope finding, and the gate itself does not change here.\n2. **The declared but unwired set is now empty.** On base, 18 of the 248 self-test carriers under `scripts/` were named by no workflow. Issue-transfer was the only one of them with a root `package.json` alias that carries `--self-test`. On head, 17 remain unnamed and none has such an alias.\n3. **The card's case count is out of date.** The card cites 63 cases across 8 batteries. On `222ecc27f9` the tool runs 75 cases across 9 batteries.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UtnxvdiN376GF3sgXwAw4d)_\n"
+}

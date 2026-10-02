@@ -2,8 +2,8 @@
   "number": 21202,
   "kind": "issue",
   "title": "ci: the core path filter skips Build Core for build-input-only PRs (scripts/**, root tsup.config.ts, turbo.json) — a broken build first surfaces in the merge queue",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -15,7 +15,6 @@
     "bug",
     "ci/cd",
     "domain:spec",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T16:16:20Z",
-  "updated_at": "2026-10-01T17:00:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T06:47:35Z",
+  "closed_at": "2026-10-02T06:45:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21202",
   "body": "Class-a finding from #21193's dev report (comment 5935495304). PR #21199 demonstrated it on itself.\n\n## Reading\n\n`ci.yml`'s `core` path filter evaluates **false** for these paths:\n- `scripts/**`\n- the root `tsup.config.ts`\n- `turbo.json`\n\nThe dev checked this with picomatch 4.0.5 against the repo's `core` list. On PR #21199 (`turbo.json` only), Build Core and its build-time gates were **skipped**.\n\nAll three are real build inputs: #21193 declares `scripts/*` files as `build` task inputs, and the root `tsup.config.ts` moves 72/72 build hashes. So a PR that changes only build inputs never runs Build Core at PR time. The merge-queue run is the first place a broken build shows up.\n\n## Why it matters\n\n- The queue still protects `main`, but a red build costs a queue slot, and the author learns about it late.\n- The same blind spot covers any future edit to these files, such as a new `scripts/` import that a tsup config gains.\n\n## Scope\n\n- Add the build-input paths to the `core` filter. At minimum that is the root `tsup.config.ts`, `turbo.json`, and the `scripts/` files that `build` tasks declare as inputs. Ideally the list is derived from `turbo.json`'s declared `$TURBO_ROOT$` build inputs, so the two cannot drift.\n- Acceptance: a PR touching only one of these paths runs Build Core. Show this with the filter evaluated against each path, plus one real PR run.\n"

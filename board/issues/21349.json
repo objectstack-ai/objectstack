@@ -1,0 +1,32 @@
+{
+  "number": 21349,
+  "kind": "issue",
+  "title": "17.6.0: `os migrate meta --stored` (preview) and `os migrate audit-metadata-bodies` (dry run) boot the app's seed loader and write to application tables",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T06:09:38Z",
+  "updated_at": "2026-10-02T06:56:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21349",
+  "body": "## Summary\n\nOn 17.6.0, two commands documented as read-only previews write to the application's tables:\n\n- `os migrate meta --stored` without `--apply`;\n- `os migrate audit-metadata-bodies` without `--apply` (new in 17.6.0).\n\nBoth boot the app's seed loader against the target database. It rewrites seeded rows, and it logs an error when it tries to write to a view. The 17.5.0 CLI, run on the same file, changes nothing. So for `--stored` this is a 17.6.0 regression.\n\nThe 17.6.0 upgrade checklist tells every operator to run both commands first as previews:\n\n- `os migrate meta --stored`, then `--stored --apply`;\n- `os migrate audit-metadata-bodies` (\"a dry run by default\"), then `--apply`.\n\nThe preview should leave the database unchanged.\n\nFound by the HotCRM 17.6.0 upgrade lane of the 17.6.0 release verification (objectstack-ai/hotcrm#1982, \"Platform issues → A\"). That session could not attach this repository, so it is filed from the release session.\n\n## Steps\n\n1. Create a SQLite database with HotCRM on 17.5.0: boot it, let the seed load run, and sign up the first admin. Copy the file.\n2. With `@objectstack/cli@17.6.0`, run `os migrate meta --stored --database-url file:<copy>`. Do not pass `--apply`.\n3. Compare row hashes of the app tables before and after. Do the same for `os migrate audit-metadata-bodies --database-url file:<copy>` without `--apply`.\n\n## Expected\n\nA read-only preview: the file is unchanged.\n\n## Actual\n\nThe command boots the app's seed loader. On `crm_contact`, `crm_lead`, `crm_opportunity` and five more tables it:\n\n- bumps `updated_at`;\n- stamps `organization_id` on seeded rows that had none;\n- rewrites relative-date seed values.\n\nIt also logs `ERROR [SeedLoader] Failed to write sys_activity …: cannot modify sys_activity because it is a view`, because `sys_activity` is a rotation view on that database.\n\n## Comparison\n\n- The 17.5.0 CLI, running `os migrate meta --stored` on the same file, leaves every row hash identical and logs no SeedLoader error.\n- `audit-metadata-bodies` is new in 17.6.0, so it has no 17.5.0 baseline. Its dry run makes the same writes.\n\n## Related\n\n- #21138 / `f20f669` (17.6.0) stopped `os migrate plan` and `os migrate apply` from running `onEnable` and the host's `kernel:bootstrapped` / `kernel:listening` hooks during their boot. The seed load reached through `migrate meta --stored` and `audit-metadata-bodies` may need the same withholding."
+}
