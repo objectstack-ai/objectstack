@@ -587,9 +587,12 @@ export interface FlowRuntimeState {
      * field that tells them apart on the wire.
      *
      * [#17396 ruling G item 6] A flow left unarmed because package-authored
-     * scheduled work is switched OFF on this deployment carries a DISTINCT
-     * sentence — `SCHEDULED_WORK_DISABLED_REASON` (`@objectstack/types`),
-     * which names the switch and its remedy — and ⛔ never reads as "binding
+     * scheduled work is switched OFF carries a DISTINCT sentence — the
+     * policy's reason, `scheduledWorkDisabledReason(policy)`
+     * (`@objectstack/types`). [#21110] That is the host's `hostDisabledReason`
+     * when a host-injected per-kernel `ScheduledWorkPolicy` carries one, else
+     * `SCHEDULED_WORK_DISABLED_REASON`, which names the deployment switch and
+     * its remedy — and ⛔ never reads as "binding
      * failed": a binding failure is a defect with an engineering remedy, while
      * this is a deployment policy with an operator one, and the two send the
      * reader to different places. Before this field existed the two reached
