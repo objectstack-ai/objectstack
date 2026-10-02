@@ -55,9 +55,13 @@ const MEMORY_AGENT = {
   instructions: 'Remember what the user told you.',
 } as const;
 
-/** The store tombstone's prescription: key first, why, the fix, the migrate sentence. */
+/**
+ * The store tombstone's prescription: why, the fix. Unanchored, because a thrown
+ * `ZodError`'s message is the JSON of its issues; the key-first house convention
+ * is asserted on the issue message itself below.
+ */
 const STORE_PRESCRIPTION =
-  /^`agent\.memory\.longTerm\.store` was removed in @objectstack\/spec 17\.7\.0 \(ADR-0049 enforce-or-remove\) — the memory store is platform infrastructure, not agent metadata: .*Delete the key; long-term memory is configured by `enabled`, `maxEntries` and `agent\.memory\.reflectionInterval`/s;
+  /`agent\.memory\.longTerm\.store` was removed in @objectstack\/spec 17\.7\.0 \(ADR-0049 enforce-or-remove\) — the memory store is platform infrastructure, not agent metadata: .*Delete the key; long-term memory is configured by `enabled`, `maxEntries` and `agent\.memory\.reflectionInterval`/s;
 
 /** The one refusal `defineStack` raised, as its ADR-0112 envelope. */
 const stackRefusal = (agent: Record<string, unknown>) => {
@@ -86,6 +90,8 @@ describe('agent memory store retirement — the tombstone, at every door that ca
       expect(issues[0].code).toBe('invalid_type');
       expect(issues[0].path).toEqual(['memory', 'longTerm', 'store']);
       expect(issues[0].message).toMatch(STORE_PRESCRIPTION);
+      // House convention 1: the fully-qualified key, in backticks, opens it.
+      expect(issues[0].message.startsWith('`agent.memory.longTerm.store` was removed')).toBe(true);
       expect(issues[0].message.endsWith(MIGRATE_SENTENCE)).toBe(true);
     }
   });
@@ -168,7 +174,7 @@ describe('agent memory store retirement — the D2 conversion', () => {
       onNotice: (n) => notices.push(n as { conversionId?: string; path?: string; from?: string; to?: string }),
     }) as Record<string, unknown>;
     expect(notices.map((n) => [n.conversionId, n.path, n.from, n.to])).toEqual([
-      [CONVERSION_ID, 'agents[0](memory_agent).memory.longTerm.store', 'store', '(removed)'],
+      [CONVERSION_ID, 'agents[0].memory.longTerm.store', 'store', '(removed)'],
     ]);
     // CONTROL: every live key on the same row survives byte-for-byte.
     expect(rehydrated).toEqual({
