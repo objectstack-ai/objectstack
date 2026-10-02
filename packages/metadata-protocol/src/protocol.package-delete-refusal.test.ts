@@ -107,7 +107,7 @@ const thrownDatabaseError: StoreDelete = async () => {
 };
 
 /** One process over `world`. A second call over the same world is a restart. */
-function boot(world: World, storeDelete: StoreDelete = landed) {
+function boot(world: World, storeDelete: StoreDelete = landed, opts: { uninstallRefusal?: Error } = {}) {
   const rows = new Map<string, { manifest: Record<string, unknown>; status: string; enabled: boolean }>();
   const registry = {
     installPackage(manifest: Record<string, unknown>) {
@@ -117,6 +117,12 @@ function boot(world: World, storeDelete: StoreDelete = landed) {
     },
     getPackage: (id: string) => rows.get(id),
     getAllPackages: () => [...rows.values()],
+    // The real `SchemaRegistry` verb: asks the uninstall's ADR-0029 refusal and
+    // mutates nothing. It refuses only when the case says another package
+    // extends an object this one owns.
+    assertPackageUninstallable(_id: string) {
+      if (opts.uninstallRefusal) throw opts.uninstallRefusal;
+    },
     uninstallPackage(id: string) {
       world.steps.push('registry.uninstallPackage');
       return rows.delete(id);
@@ -233,6 +239,28 @@ describe('#21276 deletePackage — a refused sys_packages delete fails the unins
     expect(world.steps).toEqual(['sys_packages.delete']);
     expect(snapshot(world)).toEqual(before);
     expect(registry.getPackage(PKG)).toBeDefined();
+  });
+});
+
+describe('#21276 deletePackage — the registry\'s uninstall refusal is asked BEFORE the store delete', () => {
+  it('another package extends an object this one owns: the refusal is thrown as is, and the sys_packages row survives', async () => {
+    const extender = new Error(
+      'Cannot uninstall package "com.example.leave": object "leave_request" is extended by com.example.addon. Uninstall extenders first.',
+    );
+    const world = makeWorld();
+    const before = snapshot(world);
+    const { impl, registry } = boot(world, landed, { uninstallRefusal: extender });
+
+    const err = await rejectionOf(impl.deletePackage({ packageId: PKG, allTenants: true }));
+
+    // The registry's own error, unwrapped: the door answers it as it always did.
+    expect(err).toBe(extender);
+    // Asked before the first durable step: not even the store delete ran.
+    expect(world.steps).toEqual([]);
+    expect(snapshot(world)).toEqual(before);
+    expect(registry.getPackage(PKG)).toBeDefined();
+    // …and a restart therefore still has the package, whole.
+    expect(boot(world).registry.getPackage(PKG)).toBeDefined();
   });
 });
 

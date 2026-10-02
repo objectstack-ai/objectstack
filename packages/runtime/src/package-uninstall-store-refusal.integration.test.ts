@@ -21,11 +21,13 @@
  *  2. After a restart, the package is still there and still disabled.
  *  3. CONTROL: an ordinary delete removes it — `404` in the same process, `404`
  *     after a restart (no resurrection) — and clears its disable record.
- *  4. The step that can still refuse after the store delete — the registry
- *     withdrawal, when another package extends an object this one owns
- *     (ADR-0029) — is answered as the stored state stands: `200` with
- *     `registryRemoved: false`, the process serving the package until it
- *     restarts, and gone after the restart.
+ *  4. The registry's own uninstall refusal — another package extends an object
+ *     this one owns (ADR-0029) — is decided BEFORE the store delete
+ *     (`SchemaRegistry.assertPackageUninstallable`, asked by `deletePackage`):
+ *     the door answers `500` and nothing changes — the stored rows, the
+ *     registry entry and the disable record are all intact, in the same
+ *     process and after a restart. That is the envelope the door gave when it
+ *     withdrew the package itself first.
  *
  * ## The composition — the shipped pieces, booted twice over one database file
  *
@@ -247,28 +249,33 @@ describe('#21276 CONTROL — an ordinary delete removes the package, and a resta
   });
 });
 
-describe('#21276 the refusal that can still come after the store delete — an ADR-0029 extender', () => {
-  it('200 with registryRemoved: false; the process serves the package until it restarts, and the restart does not', async () => {
+describe('#21276 the registry\'s uninstall refusal (an ADR-0029 extender) is decided before the store delete', () => {
+  it('500, and nothing changes: stored rows, registry entry and disable record intact, in the same process and after a restart', async () => {
     const dir = newDir();
     const first = await boot(dir);
     await seed(first);
     // Another package extends an object this one owns, so the registry refuses
-    // to withdraw it. Registered in memory only: nothing about it is stored.
+    // the uninstall. Registered in memory only: nothing about it is stored.
     first.engine.registry.registerObject({ name: 'leave_request', fields: { title: { type: 'text' } } } as any, PKG, 'leave', 'own');
     const fqn = first.engine.registry.getAllObjects(PKG).map((o: any) => o.name).find((n: string) => n.endsWith('leave_request'));
     first.engine.registry.registerObject({ name: fqn, fields: { note: { type: 'text' } } } as any, OTHER_PKG, undefined, 'extend');
 
     const answer = await first.call('DELETE', `/${PKG}`);
 
-    expect(answer.status).toBe(200);
-    expect(answer.body?.data).toMatchObject({ packageId: PKG, success: true, registryRemoved: false });
-    expect((await first.call('GET', `/${PKG}`)).status).toBe(200);
-    expect(await first.metadataRows()).toEqual([]);
-    expect(loadDisabledPackageIds(ENV).has(PKG)).toBe(false);
+    expect({ status: answer.status, code: answer.code }).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    const detail = await first.call('GET', `/${PKG}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body?.data).toMatchObject({ enabled: false, status: 'disabled' });
+    expect(first.engine.registry.getObject(fqn)).toBeDefined();
+    expect(await first.metadataRows()).toEqual(['view/leave_list']);
+    expect(loadDisabledPackageIds(ENV).has(PKG)).toBe(true);
     await first.destroy();
 
     const restarted = await boot(dir);
 
-    expect((await restarted.call('GET', `/${PKG}`)).status).toBe(404);
+    const after = await restarted.call('GET', `/${PKG}`);
+    expect(after.status).toBe(200);
+    expect(after.body?.data).toMatchObject({ enabled: false, status: 'disabled' });
+    expect(await restarted.metadataRows()).toEqual(['view/leave_list']);
   });
 });
