@@ -12,6 +12,13 @@
  *     `--yes` write what the command was asked to write, and the artifact's
  *     inline seed loader does not ride along. The operator never saw a seed
  *     write in the preview.
+ *  3. [#21471] **No mode creates key material**: in a development posture
+ *     with an empty key home, every mode of every command leaves the key home
+ *     empty. The settings service's default provider mints a key file there
+ *     (the control below boots exactly that composition and watches it
+ *     appear), so a command that composes the settings service hands it the
+ *     one-shot provider from `./one-shot-settings.ts` instead. A minted key
+ *     opens nothing stored, and the next process on that host adopts it.
  *
  * ## Why one table, derived from source
  *
@@ -69,8 +76,8 @@ import StorageOrphans from '../commands/storage/orphans.js';
 // `run()`, which vitest clocks (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/runtime';
 import '@objectstack/objectql';
-import '@objectstack/platform-objects/plugin';
-import '@objectstack/service-settings';
+import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
+import { SettingsServicePlugin } from '@objectstack/service-settings';
 import '@objectstack/service-storage';
 import '@objectstack/plugin-audit';
 
@@ -539,5 +546,57 @@ describe('[#21391] a one-shot boot arms no lifecycle sweep', () => {
     } finally {
       await kernel.shutdown();
     }
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('[#21471] no mode creates key material in an empty key home, in a development posture', () => {
+  /** Everything that decides the crypto posture and where the key home is. */
+  const KEY_ENV = [
+    'NODE_ENV', 'OS_SECRET_KEY', 'OS_DEV_CRYPTO_KEY', 'OBJECTSTACK_DEV_CRYPTO_KEY',
+    'OS_HOME', 'OBJECTSTACK_HOME', 'OS_CRYPTO_AUTOKEY',
+  ] as const;
+  const fileEnv: Record<string, string | undefined> = {};
+  let home: string;
+
+  beforeEach(() => {
+    for (const k of KEY_ENV) fileEnv[k] = process.env[k];
+    for (const k of KEY_ENV) delete process.env[k];
+    // Neither `test` (no disk, ephemeral key) nor `production` (refuses
+    // without a key): the posture in which the default provider MINTS.
+    process.env.NODE_ENV = 'development';
+    home = mkdtempSync(join(dir, 'key-home-'));
+    process.env.OS_HOME = home;
+  });
+
+  afterEach(() => {
+    for (const k of KEY_ENV) {
+      if (fileEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = fileEnv[k];
+    }
+  });
+
+  it('the control: the settings service composed with its default provider mints a key file there', async () => {
+    const c = prepareCase([]);
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${c.dbFile}`,
+      projectRoot: dir,
+      // The report's own boot, with the composition `os secret orphans` used to pass.
+      deferSchemaDdl: true,
+      readOnlyProbe: true,
+      extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
+    });
+    await stack.shutdown();
+    expect(readdirSync(home)).toEqual(['dev-crypto-key']);
+  }, CASE_TIMEOUT_MS);
+
+  it.each([...NO_WRITE, ...WRITE])('$label', async ({ run, argv }) => {
+    const c = prepareCase(argv);
+    const result = await runJson(run, c.argv);
+
+    // The run reached its report or its refusal, never a failed boot: a boot
+    // that never bound the settings service would leave the home empty too.
+    expect(result.payload?.error, JSON.stringify(result.payload).slice(0, 400)).not.toBe('boot_failed');
+    expect(readdirSync(home), 'key material was created in the key home').toEqual([]);
   }, CASE_TIMEOUT_MS);
 });
