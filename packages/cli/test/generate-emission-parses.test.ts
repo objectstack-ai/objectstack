@@ -62,6 +62,7 @@ import { describe, expect, it } from 'vitest';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
 import { metadataFileName } from '../src/utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../src/utils/emitted-source-parses.js';
+import { probeBindings } from './helpers/scaffold-bindings.js';
 
 /**
  * `toSnakeCase` as `generate.ts` spells it. Restated rather than exported
@@ -96,7 +97,15 @@ function emissionsFor(type: string, generate: (name: string) => string, name: st
   };
 }
 
-const ROSTER = GENERATOR_SCAFFOLD_TARGETS.map((t) => ({ type: t.type, generate: t.generate }));
+// [#21325] A binding scaffold (`view`, `action`, `flow`, `app`) renders against
+// references resolved off the project's stack, and throws without them. What
+// this file judges is the NAME in identifier positions, so each is handed the
+// probe stack's bindings (`helpers/scaffold-bindings.ts`), which only ever
+// land inside string literals.
+const ROSTER = GENERATOR_SCAFFOLD_TARGETS.map((t) => ({
+  type: t.type,
+  generate: (name: string) => t.generate(name, undefined, probeBindings(t)),
+}));
 
 describe('[#16541] the roster this pin runs over is derived from GENERATORS', () => {
   it('covers the seven scaffolding subcommands, and any added later', () => {

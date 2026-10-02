@@ -31,8 +31,19 @@
  *
  * One exception the census above could not see, because it stops at
  * `os validate` (#20215): the RUNTIME registers a views container under the
- * object it binds to and refuses, at boot, one whose own `name` disagrees —
- * so a view's `name` is an object name, and is prefixed with its `object`.
+ * object it binds to and refuses, at boot, one whose own `name` disagrees.
+ * Since #21325 the container writes no `name` at all — its registered key is
+ * its `object` — so that exception is read through `registeredItemName`.
+ *
+ * ## Where the bound object comes from (#21325)
+ *
+ * A `view`, `action`, `flow` or `app` scaffold no longer derives the object it
+ * binds from its own name: the command resolves it against the project's
+ * stack and hands it to `generate`. So the SET below is composed the way an
+ * author builds it — the object first, then each binding scaffold handed that
+ * object (and the action the flow), resolved through `stackBindingCandidates`,
+ * the reader the command uses. The prefix then reaches every binding through
+ * the one place it is applied: the object scaffold's own `name`.
  *
  * ## Why `defineStack` and not the per-artifact parse
  *
@@ -58,7 +69,9 @@ import {
 } from '@objectstack/spec';
 import { singularToPlural } from '@objectstack/spec/shared';
 import { runAuthoringRules, splitBySeverity, FLOW_TRIGGER_UNKNOWN_OBJECT } from '@objectstack/lint';
-import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { GENERATOR_SCAFFOLD_TARGETS, stackBindingCandidates, type ScaffoldBindings } from '../src/commands/generate.js';
+import { registeredItemName } from '../src/utils/scaffold-wiring.js';
+import { probeBindings } from './helpers/scaffold-bindings.js';
 import { BUNDLE_REQUIRE_EXTERNALS } from '../src/utils/config.js';
 import { readProjectNamespace } from '../src/utils/project-namespace.js';
 
@@ -90,11 +103,25 @@ async function materialize(type: string, source: string): Promise<Record<string,
   return ((mod as { default?: unknown }).default ?? mod) as Record<string, unknown>;
 }
 
-/** Every generator's scaffold for `name`, keyed by type. */
+/**
+ * Every generator's scaffold for `name`, keyed by type, composed the way an
+ * author builds the set (#21325): the object first, then the flow bound to it,
+ * then every other scaffold, each binding resolved off the set so far.
+ */
 async function generateAll(name: string, namespace?: string): Promise<Record<string, Record<string, unknown>>> {
   const out: Record<string, Record<string, unknown>> = {};
-  for (const target of GENERATOR_SCAFFOLD_TARGETS) {
-    out[target.type] = await materialize(target.type, target.generate(name, namespace));
+  const order = ['object', 'flow', ...GENERATOR_SCAFFOLD_TARGETS.map((t) => t.type).filter((t) => t !== 'object' && t !== 'flow')];
+  for (const type of order) {
+    const target = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === type)!;
+    const { objects, flows } = stackBindingCandidates({
+      objects: out.object ? [out.object] : [],
+      flows: out.flow ? [out.flow] : [],
+    });
+    const bindings: ScaffoldBindings | undefined = Object.keys(target.binds).length === 0 ? undefined : {
+      ...(target.binds.object ? { object: objects[0] } : {}),
+      ...(target.binds.flow ? { flow: flows[0] } : {}),
+    };
+    out[type] = await materialize(type, target.generate(name, namespace, bindings));
   }
   return out;
 }
@@ -156,7 +183,7 @@ function objectNamesWritten(a: Record<string, Record<string, unknown>>) {
   return {
     'object.name': a.object.name,
     'view.object': a.view.object,
-    'view.name (its object key)': a.view.name,
+    'view (its registered key)': registeredItemName('views', a.view),
     'action.objectName': a.action.objectName,
     'flow start.config.objectName': flowStart?.config?.objectName,
     'app navigation[0].objectName': nav?.objectName,
@@ -172,11 +199,27 @@ describe('[#20197] `namesObject` is what each template actually does', () => {
   // declares `namesObject`, so a template that writes an object name without
   // the flag would silently lose the prefix again. Derived from the output,
   // never from a list: a generator added tomorrow is measured the day it lands.
-  it.each(GENERATOR_SCAFFOLD_TARGETS.map((t) => [t.type, t] as const))(
+  const unbound = GENERATOR_SCAFFOLD_TARGETS.filter((t) => Object.keys(t.binds).length === 0);
+  const bound = GENERATOR_SCAFFOLD_TARGETS.filter((t) => t.binds.object !== undefined);
+
+  it.each(unbound.map((t) => [t.type, t] as const))(
     '`os g %s` declares namesObject exactly when its output depends on the namespace',
     (_type, target) => {
       const dependsOnNamespace = target.generate(STEM, NS) !== target.generate(STEM);
       expect(target.namesObject).toBe(dependsOnNamespace);
+    },
+  );
+
+  // [#21325] A binding scaffold's object is resolved against the namespace by
+  // the COMMAND, before rendering, so it must declare `namesObject` — and the
+  // template must write exactly the object it was handed, the namespace
+  // changing nothing: a template that re-derived the object would differ here.
+  it.each(bound.map((t) => [t.type, t] as const))(
+    '`os g %s` binds an object: it declares namesObject, and writes the object it is handed',
+    (_type, target) => {
+      expect(target.namesObject).toBe(true);
+      const bindings = probeBindings(target);
+      expect(target.generate(STEM, NS, bindings)).toBe(target.generate(STEM, undefined, bindings));
     },
   );
 });
@@ -190,11 +233,9 @@ describe('[#20197] under a manifest namespace, the generated set passes the gate
       'action.objectName': PREFIXED,
       'flow start.config.objectName': PREFIXED,
       'app navigation[0].objectName': PREFIXED,
-      // [#20215] A views container's own `name` is its object key: the
-      // runtime registers the container under the object it binds to and
-      // refuses one whose `name` disagrees (`registerMetadataCollections`),
-      // so it carries the prefix like the binding beside it.
-      'view.name (its object key)': PREFIXED,
+      // [#20215] A views container is registered under the object it binds
+      // to; since #21325 it writes no `name`, so its key is its `object`.
+      'view (its registered key)': PREFIXED,
     });
     // The census: no gate judges these against the namespace, so they are
     // written exactly as they were before this change.
