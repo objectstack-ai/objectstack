@@ -1,5 +1,189 @@
 # @objectstack/metadata-core
 
+## 17.6.0
+
+### Patch Changes
+
+- 3572916: The shared engine case tables and the published contract suites in metadata-core no longer cite tracker numbers in their case labels; each label states its case in words
+  
+  Clause-②: no
+  
+  Several labels these tables and suites ship ended with an issue-tracker number where the case belonged. A
+  test driven from them printed that number as part of its name, and a failing assertion quoted it as the
+  reason. The number goes; where the label did not already say what the case is, it now does.
+  
+  - `ENGINE_DELETE_DISPATCH_CASES`, `ENGINE_UPDATE_DISPATCH_CASES` and `ENGINE_FINDONE_PREDICATE_CASES`:
+    the `what` labels of 22 rows. Among them, the compare-and-set rows now say the by-id path would drop the
+    CAS guard; the payload-id rows say which declared `where.id` would be silently dropped; and the falsy
+    `where.id` boundary says it is a scalar, so neither the different-row refusal nor the non-scalar refusal
+    applies.
+  - `@objectstack/metadata-core/testing`: the repository contract suite's `serialized-form identity` group
+    title, and two `why` texts of `OBJECT_SCHEMA_MASK_CASES` (the empty-readable-set refusal, and the
+    write-capable exemption, which now names the schema write gate, `manage_metadata`).
+  
+  Text only: no case is added, removed or re-ordered, and no `options`, `data`, `expect`, `expectId`, `id`,
+  `readable` or `context` value moves. A suite that selects or skips these cases by their label text (a
+  `-t` filter, a skip list) needs the new spelling.
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [24d521e]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [1a75e39]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

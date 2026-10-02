@@ -1,5 +1,602 @@
 # @objectstack/core
 
+## 17.6.0
+
+### Minor Changes
+
+- 05a7547: fix(core,objectql)!: a `datetime` value names a year from 1000 to 9999 at both engine doors, so one before year 1000 is refused as a written value and as a filter comparand; a `date` keeps 0001 to 9999
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE at the two engine doors: a datetime whose UTC year falls in 0001..0999, refused VALIDATION_FAILED (field code invalid_date) as a written value and INVALID_FILTER / 400 as a comparand. No authorable key, spelling, export or stored metadata shape moves: FieldSchema's datetime type, every object definition and every query shape parse as before, and @objectstack/core and @objectstack/objectql export nothing new and nothing less (isOutsideTemporalYearRange keeps its signature). A datetime already stored before year 1000 is record data, not metadata: nothing converts it, no conversion is registered, and it is never shifted; the body says how an operator finds such rows and that a write carrying one is refused, which is guidance about data, not a rewrite of any consumer's code or metadata. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a value range and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the engine accepts as a `datetime`. The one range function both doors ask, `isOutsideTemporalYearRange` in `@objectstack/core`, now takes a lower bound per kind: a `datetime` starts at year 1000 (its UTC year), a `date` stays at 0001, and both still end at 9999. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A `datetime` whose UTC year falls in 0001..0999, which both doors accepted before:
+  
+  - **The write door** (the record validator), in every spelling it took: an ISO instant string, a bare `YYYY-MM-DD` (midnight UTC), a zone-naive `YYYY-MM-DD HH:MM`, and a `Date`. It answers `VALIDATION_FAILED` with the field's `invalid_date` code, on `engine.insert`, `engine.update` (one row or many) and the dry-run `engine.validate`, so on `POST /api/v1/data/:object`, `PATCH /api/v1/data/:object/:id` and each row of `POST /api/v1/data/:object/import` too. A number was already refused there, because a `datetime` is stored as text.
+  - **The comparand door** (the temporal-comparand door), in every spelling: an ISO string, a `Date` and epoch milliseconds as a number. It answers `INVALID_FILTER` / 400 at `where`, at a per-aggregation `filter` and at `having`, on the engine and on `POST /api/v1/data/:object/query`. The analytics native-SQL strategy asks the same predicate, so it declines such a comparand and the query reaches this door.
+  - The year is the instant's UTC year: `1000-01-01T00:00:00+08:00` is year 999 in UTC and is refused, and `0999-12-31T23:00:00-02:00` is year 1000 in UTC and is read.
+  
+  **What an author sees.** The comparand refusal names the field, the value, its position and the range: "an instant whose UTC year falls outside the years 1000 to 9999, the years a datetime value may name". It then says why the floor sits at 1000, instead of the misorder words that a year past 9999 still gets: MySQL documents its `DATETIME` from year 1000 only, and reads one stored in the years 0001 to 0099 back a century late. A comparand in those years that was already refused for its spelling or its day (a non-ISO spelling, a day that does not exist) is now named by its year first, as one past 9999 already was. The write refusal is the existing `invalid_date` sentence for a `datetime` field.
+  
+  **Why.** MySQL documents `DATETIME` from year 1000, and it reads a stored `DATETIME` in 0001..0099 back a century late through its client's instant parser (`0009-03-04 10:00` comes back as `2004-09-03T10:00Z`), which ADR-0053 D-F2 keeps. The range is the contract on every backend, so SQLite, PostgreSQL and the in-memory driver, which held these years, refuse them too. No writer or query of a `datetime` before year 1000 was found.
+  
+  **A `datetime` already stored before year 1000.** Nothing rewrites it, and nothing shifts it into the range. It reads back as before, and on MySQL a year in 0001..0099 still presents a century late. To find such rows, filter the field with `$lt` on `1000-01-01T00:00:00.000Z`, the floor's first instant, which both doors admit; the comparison runs on the stored value, so it finds them on MySQL as well. An update that leaves the field out is accepted. A write that carries a year below 1000 is refused, so the field can be written again with an instant from year 1000 on, or with `null`, and the author decides which.
+  
+  **Unchanged.** A `date` keeps 0001..9999, padded to four digits as before. A `time` column still reads the time of day of an instant in 0001..0999, and a `time` comparand refused for another reason keeps that reason's words. Every year from 1000 to 9999 on a `datetime`, and every refusal outside 0001..9999 on either kind, answers as before, apart from the range the words name.
+- b785c3b: fix: `sum` / `avg` answer the same double on every face the platform owns, added with one compensated fold that `@objectstack/core` now exports as `compensatedSum` (#20544)
+  
+  Clause-②: yes
+  
+  **New export.** `@objectstack/core` exports `compensatedSum(nums)`: the sum of
+  `nums`, added in order with Kahan-Babuska-Neumaier compensation, which is the
+  summation SQLite (3.43 and later) uses for its own `sum` and `avg`. It moved
+  here from `@objectstack/objectql`'s rows path (`in-memory-aggregation.ts`),
+  which now imports it instead of keeping a private copy.
+  
+  **What changed.** Three folds still added a group's values naively, and now call
+  the same function:
+  
+  - `@objectstack/driver-memory`'s `aggregate()` and `find()` with aggregations,
+    the path `engine.aggregate` takes on an in-memory datasource;
+  - `@objectstack/driver-memory`'s analytics face (`MemoryAnalyticsService`),
+    whose `sum` / `avg` measures are now a `$group` `$accumulator` in place of
+    mingo's `$sum` / `$avg`;
+  - `@objectstack/service-analytics`' draft preview.
+  
+  Over a `number` column holding `0.1`, `0.2` and `0.3`, each of them answered
+  `0.6000000000000001` / `0.20000000000000004`. They now answer `0.6` /
+  `0.19999999999999998`, as SQLite and the engine's rows path do. Over
+  `1e16, 1, -1e16` they answered `0` and now answer `1`. On driver-memory,
+  `engine.aggregate` gave two answers depending on its path: `having { s: { $eq:
+  0.6 } }` kept the group on the rows path and dropped it on the native path. It
+  now keeps it on both.
+  
+  **What did not move.** Two addends, integers whose running total stays within
+  2^53, and a non-finite total give the same answer as before. Which values count
+  as addends did not change either: booleans as 1 / 0, and nulls and non-numeric
+  strings left out, as each face already had it. `count`, `min` and `max` are
+  untouched. The analytics face's pipeline dump (`result.sql`) now renders the
+  accumulator's functions by name, so a `sum` measure and an `avg` measure still
+  dump differently.
+  
+  **Residual.** PostgreSQL and MySQL add their doubles natively without
+  compensation, and the platform does not wrap that arithmetic. So over three or
+  more fractions their native path can still differ from these faces in the last
+  place. An exact `$eq` on a fractional sum compares doubles; compare with a range.
+- 2473e26: fix(core,objectql)!: a temporal filter comparand is refused with `INVALID_FILTER` / 400 exactly when the same value is refused as a written value — a day that does not exist (`"2026-02-30"`) is no longer rolled over or compared as text, and a non-ISO `datetime` spelling (`"07/15/2026 10:00"`) is no longer read in the server's zone (#20549); and a `time` comparand whose instant has no four-digit UTC year (`"+010000-01-01T10:00:00Z"`) is refused rather than compared as text (#20480)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a filter comparand VALUE at the engine's temporal-comparand door (where, a per-aggregation filter, having) and, through the same predicate, the analytics raw-SQL decline: no authorable key, spelling or stored shape of metadata moves, `packages/spec` is untouched, and no stored row is read or rewritten. What is refused is a temporal string naming a day that does not exist, a datetime string outside the ISO spellings, and a bare integer string; which instant such a string meant (a host zone, a locale's day order, a year or epoch milliseconds) is not something a ledger entry can decide. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a comparand value check (not `registered` / `already-registered`); and the change is runtime behaviour, not a TypeScript declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what a `date`, a `datetime` and a `time` field accept as a filter comparand. It ships as `minor` under the launch-window convention for accept-set narrowings (`check-changeset-no-major` refuses `major` until GA; the breaking-ness is carried by this banner and the ADR-0087 disposition above).
+  
+  The record validator already refused the `date` / `datetime` classes as written values (`VALIDATION_FAILED` / `invalid_date`). The comparand door was wider, so a filter admitted what a write refused and answered the wrong rows. The two predicates moved into `@objectstack/core`'s `isUninterpretableTemporalComparand`, and both doors now ask that one rule. A comparand is refused with `INVALID_FILTER` / 400, naming the field, before any driver read, at `where`, a per-aggregation `filter` and `having`:
+  
+  - **A day that does not exist**, on a `date` or as the day part of a `datetime`: `"2026-02-30"`, `"2026-02-29"` (2026 is not a leap year), `"2026-04-31"`, `"2026-02-30T10:00:00Z"`. `"2028-02-29"` is a real day and is read.
+  - **A `datetime` string in any spelling but the ISO 8601 ones the platform writes**, after trimming: `YYYY-MM-DD` (midnight UTC); `YYYY-MM-DDTHH:MM[:SS[.fraction]]` followed by `Z`, a `±HH:MM` or `±HHMM` offset, or nothing (a zone-naive wall clock is UTC, ADR-0074); and `YYYY-MM-DD HH:MM[:SS[.fraction]]` with no zone. Refused now, for example: `"07/15/2026 10:00"`, `"2026/07/15 10:00"`, `"15 July 2026 10:00"`, `"07/08/2026"`, `"Wed, 15 Jul 2026 10:00:00 GMT"`, `"2026-07-15 10:00:00+08:00"` (write it with a `T`), and a bare integer string such as `"2026"` or `"1784109600000"`.
+  - **An instant on a `time` column in either class above.** A `time` column reads a comparand that is not a bare wall clock as an instant, by the `datetime` rule, and keeps its UTC time of day — so `"07/15/2026 10:00"` was the host zone's time of day, and `"1784109600000"` a string of epoch milliseconds. A wall clock (`"10:00"`, `"10:00:00.5"`), an ISO instant, a `Date` and an epoch-millisecond number are read as before, in a four-digit year (next).
+  - **An instant on a `time` column whose UTC year has no four-digit spelling**, in every spelling (#20480): `"+010000-01-01T10:00:00Z"`, `"-000001-01-01T10:00:00Z"`, `"9999-12-31T23:00:00-02:00"` (year 10000 in UTC), and the epoch-millisecond number or `Date` of any of them. A `time` column keeps the UTC time of day of an instant only when that instant spells a four-digit year; any other one reached the driver as written and was compared with the stored `HH:MM:SS` text. No time of day is read from an extended year. Year 0 (`"0000-06-15T10:00:00Z"`) spells four digits, and its time of day is read as before.
+  
+  Epoch milliseconds stay a `datetime` comparand as a JSON number: `{ "$gt": 1784109600000 }` is read exactly as before. As a string, a bare integer was read as epoch milliseconds, so `"2026"` meant two seconds after 1970 and matched every later row; send the number, or an ISO instant.
+  
+  What a caller sees through `POST /api/v1/data/:object/query`, the process in America/New_York, PostgreSQL 16 at `Asia/Shanghai`:
+  
+  | `where` | memory | SQLite | PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|:--|
+  | `datetime` `$eq "2026-02-30T10:00:00Z"` | 200, the row stored at `2026-03-02T10:00:00.000Z` | the same | the same | 400 `INVALID_FILTER` |
+  | `datetime` `$eq "07/15/2026 10:00"`, `"2026/07/15 10:00"` | 200, the row at `2026-07-15T14:00:00.000Z`, the server process's zone | the same | the same | 400 `INVALID_FILTER` |
+  | `date` `$eq "2026-02-30"` | 200 `[]`, compared as text | the same | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  | `datetime` `$gt "2026"` | 200, every row (read as 2026 epoch milliseconds) | the same | the same | 400 `INVALID_FILTER` |
+  | `time` `$gt "+010000-01-01T10:00:00Z"`, rows `09:00` / `10:30` / `12:00` | 200, 3 of 3 (compared as text) | the same | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  | `time` `$gt` the number of that instant | 200 `[]` | 200, 3 of 3 | 500 `DATABASE_ERROR` | 400 `INVALID_FILTER` |
+  
+  The refusal names the field and the value, says the filter was not applied, and names the spellings that are read. The rows a non-ISO comparand matched were a property of the deployment host: the same request answered differently on two servers.
+  
+  **Who is affected.** A caller that filters a `date` or `datetime` field with a string: a REST or SDK client, a saved report or view filter, a dashboard's analytics query (the raw-SQL strategy declines such a comparand, and the engine refuses it), an MCP `query_records` call written by a model. A `{placeholder}` such as `{30_days_ago}`, the empty string, a JS `Date` and an epoch-millisecond number are unchanged.
+  
+  **Unchanged**, measured identical before and after on memory, SQLite and PostgreSQL:
+  
+  - a real leap day: `date` `"2028-02-29"`, `datetime` `"2028-02-29T10:00:00Z"`;
+  - each ISO spelling above, compared as the same instant whatever the host's zone: `"2026-07-15T14:00:00Z"`, `"2026-07-15T22:00:00+08:00"`, `"2026-07-15 14:00"` (UTC, not the host zone);
+  - a `date` comparand with a leading real `YYYY-MM-DD`, still compared as that day (`"2026-07-15T10:00:00Z"` on a `date` is July 15);
+  - the same wall clock as a 2026 instant on a `time` column: `$gt "2026-07-15T10:00:00Z"` answers the `10:30` and `12:00` rows, as does its epoch-millisecond number or `Date`;
+  - the year range 0001..9999, and every written value (the record validator now asks the same rule it copied, and answers exactly as before).
+- 889139c: fix(plugin-security): `security/explain` resolves the user it explains in the organization enforcement resolves them in, so a member whose membership in the caller's organization has ended is no longer explained holding that organization's grants (#20580)
+  
+  When an administrator explains another user, the explanation is computed in the administrator's own organization. Enforcement does one more thing for that same user first: under a walled tenancy posture (`isolated` or `group`), it drops an organization claim that no current membership backs, and the user resolves with no active organization, so only their global grants apply. The explainer skipped that check. For a user whose membership in the administrator's organization had ended, the explanation listed that organization's grants, and the verdicts they decide, while enforcement applied none of them.
+  
+  The explainer now asks the same check before it resolves the user, and resolves them where it says. `@objectstack/core` exports that check as `vetOrganizationClaim(claimedOrganizationId, accessibleOrgIds, tenancyPosture)`. It returns the claimed organization while a current membership backs it or while no wall is enforced, and `undefined` once the claim is dropped. `resolveAuthzContext` asks the same function for a session's claim, so the two cannot disagree. This is a new export with no behaviour change to `resolveAuthzContext`.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A current member's explanation.
+  - The `single` posture, where no claim is dropped on either side.
+  - Explaining yourself, and a caller with no active organization.
+- a6866da: fix(core): a date or time in the years 0001..0099 is read as written, not as 1900..1999, wherever a UTC instant is built from year / month / day / time parts
+  
+  `Date.UTC(year, …)` and `new Date(year, …)` read a year from 0 to 99 as 1900 + year. Core built its instants from parts that way, so every day of the years 0001..0099 (inside the supported range 0001..9999) landed in the 1900s at the sites below, with no error.
+  
+  - `@objectstack/core`: **new export** `wallClockToUtcMs(parts)`, the epoch milliseconds of a `WallClockParts` read as UTC. It is `Date.UTC` without the two-digit-year remap: `month` is 1-12, omitted time components are 0, and every component rolls over past its end as `Date.UTC` rolls it (`month: 13` is next January, `day: 0` the previous month's last day, `hour: 24` the next midnight). A `NaN` component gives `NaN`. Every site below now builds through it:
+    - `zonedWallClockToUtcMs` and `zonedDateStartToUtcMs`, the wall clock and the zone-offset read. The offset read also takes the zone's era, so a wall clock early on 0001-01-01 in a zone west of UTC, whose offset probe lands in year 0, reads right.
+    - `bucketKeyToCalendarRange` (`0050` spans 0050-01-01..0051-01-01, not 1950..1951; `0050-01-01` as a `day` key is no longer `null`) and `bucketDateKey`'s ISO week (0050-01-01 is in week 52 of 0049, not of 1949).
+    - The date macros: `{1976_years_ago}` resolves to `0050-09-30`, not `1950-09-30`. A macro that lands in 0001..0999 is now spelled with a four-digit year, as the `date` storage form spells it (`0055-06-15`, not `55-06-15`, which names no day).
+  - `@objectstack/service-analytics`: the preview evaluator's `week` key and the `compareTo` bucket alignment build their days through `wallClockToUtcMs`.
+  - `@objectstack/trigger-schedule`: a time-relative window's day bounds build through `wallClockToUtcMs`.
+  
+  What an author sees: `POST /api/v1/data/:object/import` stores the `datetime` cell `0050-01-01 10:00` as `0050-01-01T10:00:00.000Z`, and in `Asia/Shanghai` as `0050-01-01T01:54:17.000Z` (the zone's local mean time for that year). Before, it stored `1950-01-01T10:00:00.000Z` and `1950-01-01T02:00:00.000Z` and reported the row `ok`. Measured through the import route and read back through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16; the `2026-07-15 10:00` control is stored the same before and after. Every year from 0100 on builds exactly as before.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- 89801cd: **A flow `http` node's `signingSecret` now signs the request on every arm, with one scheme, and a secret that does not resolve refuses the node instead of letting the request leave unsigned.**
+  
+  `signingSecret` is declared as "HMAC-SHA256 secret → X-Objectstack-Signature", with no arm named. Only the durable arm honoured it, because only the messaging outbox signed. The default inline request, and a `durable: true` node on a host with no messaging HTTP outbox (which degrades to that inline request), were sent without the header while the run reported success.
+  
+  - `@objectstack/core`: **new exports** `signHttpBody(body, secret)` and `HTTP_SIGNATURE_HEADER`, the outbound HTTP signature scheme: `X-Objectstack-Signature: sha256=<lowercase hex HMAC-SHA256 of the exact body bytes>`, where a request with no body is signed over the empty string. They were `@objectstack/service-messaging`'s own, and they moved here so a sender with no outbox can sign with the same code.
+  - `@objectstack/service-messaging`: `signHttpBody` and `HTTP_SIGNATURE_HEADER` are still exported under the same names. They are now re-exports of the `@objectstack/core` bindings, not a second implementation. Delivery rows and the headers the outbox sends are unchanged.
+  - `@objectstack/service-automation`: the `http` node's inline request carries `X-Objectstack-Signature` whenever `signingSecret` is set. It is computed over the exact body the node sends (its JSON serialization of `config.body`, or the empty string when there is none), so a receiver that verifies with `signHttpBody` over the bytes it received accepts it on every arm.
+    - A non-empty `signingSecret` that renders to nothing at run time now fails the node with a guard refusal naming `config.signingSecret`, and nothing is sent. This covers a `{token}` with no value in the run, or one that renders the empty string. The refusal is on every arm, including the outbox arm, which used to enqueue such a delivery unsigned. A fault edge does not route it. The fix is to give the run the value the template reads.
+    - An authored `signingSecret: ''` still sends unsigned on purpose, on every arm.
+  
+  Clause-②: yes (widening) — two new exports on `@objectstack/core`'s root. Nothing is removed or renamed on any package. The one newly refused case is a node whose authored secret did not resolve, which the published contract already said signs.
+- bbcd20c: An import row now says which of its fields the write dropped, on the dry run and on the commit. A column mapped to a `formula` field, a static `readonly` field or a runtime-owned field is legally stripped by the engine: the row still succeeds, and the create door already reported the strip as `droppedFields`. The import row answered a bare `ok` / `created` on both halves, so a file whose formula column was ignored read exactly like a file that wrote it. `runImport` now copies the engine's own per-row report onto each `ok` row as `ImportRowResult.droppedFields`: from the `validateData` verdict on the dry run, from the row's `insertManyData` outcome, and from the `createData` / `updateData` response of a single-row write. The synchronous route, the async job's results and the job's dry run all carry it; no REST change was needed.
+  
+  Clause-②: yes (widening)
+  
+  - **Verbatim, in the engine's vocabulary.** The events are the engine's `DroppedFieldsEvent`s, one per reason (`computed`, `readonly`, `readonly_when`, `primary_key`). The import reads no reason and keeps no list of non-writable types, so a reason the engine adds later reaches the row unchanged. A reader that branches on `reason` must stay exhaustive.
+  - **Where the key is absent although something may have been dropped.** A create batched through `createManyData` (a protocol without `insertManyData`) is reported only as a batch-level union that names no row, so those rows carry no key. And a row the import would UPDATE is previewed in `update` mode, which runs no `readonlyWhen` or primary-key strip, so its dry run can name fewer fields than its commit. The `ImportRowResultSchema.droppedFields` describe now says both.
+  - **Unchanged:** `ok`, `action`, the counters, the failed rows and the async job's results cap. A clean row, a failed row and a skipped row carry no `droppedFields`.
+  
+  `ImportProtocolLike.insertManyData`'s declared outcome now names the optional `droppedFields` it already answered with.
+- dcd3309: fix(core,objectql)!: a relative-date placeholder that resolves outside its field's years is refused `INVALID_FILTER` / 400, naming the placeholder and the year it resolved to, instead of reaching the driver and answering the wrong rows
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE at the engine's filter-resolution stage: a relative-date placeholder (a date macro such as {8000_years_from_now}) whose resolved day or instant falls outside its column's years, refused INVALID_FILTER / 400 on where, a per-aggregation filter and having. No authorable key, spelling, export or stored metadata shape moves: every filter, view, dataset and query shape parses as before, the date-macro vocabulary is unchanged, and @objectstack/core and @objectstack/objectql export nothing new and nothing less (resolveFilterToken and resolveFilterTokens keep their signatures). The resolver's spelling of a day outside 0001..9999 changes, and that day was never a value any reader read as the day it names. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a value range or a resolved value and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the engine answers for a filter carrying a relative-date placeholder. A date macro is resolved after the temporal-comparand door, which steps around a placeholder, so the year range that door asks of a literal never saw the value one resolved to. It does now, through the same function, core's `isOutsideTemporalYearRange`, by the column's kind: a `date` takes the years 0001 to 9999 and a `datetime` 1000 to 9999. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A date macro whose resolved value falls outside its column's years, on a declared `date` or `datetime` field (or, on a `time` field, one that resolves to an instant whose UTC year has no four-digit spelling), at `where` (on `find`, `findOne`, `count`, `aggregate`, a multi-row `update` and `delete`), at a per-aggregation `filter`, at `having` (by the aggregated column's kind), and through `judgeFilter`. On REST that is `POST /api/v1/data/:object/query` and every other door that reads through the engine. Measured before this on InMemoryDriver and SqlDriver on SQLite, over a `datetime` field with a row in 2026 and a row in 1500:
+  
+  - `$gt {8000_years_from_now}` answered both rows, and the right answer was none;
+  - `$lt {2027_years_ago}` answered the 1500 row, because the resolver spelled year -1 as `-1-10-01` and that text was read as a day in 2001, and the right answer was none;
+  - `$lt {1977_years_ago}` resolved to year 49, below the `datetime` floor of 1000, which now applies to a resolved placeholder as it does to a literal;
+  - on a `time` field, `$gt {8000_years_from_now}` answered every row: the `time` rule keeps no time of day from an instant whose UTC year has no four-digit spelling, so it compared as text. Such a placeholder is refused now in the words a literal of that instant gets.
+  
+  **What an author sees.** The refusal names the field, the placeholder as written, its position, the value it resolved to and that value's year, in the temporal-comparand door's words for the year class: `filter on 'opened_at' compares a declared datetime field against "{8000_years_from_now}" at where.opened_at.$gt, a relative-date placeholder that resolved to "+010026-10-01" (the year 10026), an instant whose UTC year falls outside the years 1000 to 9999 …`. It ends by asking for a placeholder whose offset lands inside those years.
+  
+  **The resolver's spelling** (`@objectstack/core`). A date macro that lands on a day outside 0001..9999 now resolves to that day in the expanded-year form of ECMAScript's date time string format, `+010026-10-01` or `-000001-10-01` (year 0 is `0000-10-01`). It used to take the storage rule's unpadded spelling, `10026-10-01` or `-1-10-01`, which `Date.parse` reads through the host's legacy parser in the host's zone, so a day in year -1 read as one in 2001 and could not be judged. Every consumer of `resolveFilterToken` and `resolveFilterTokens` sees the new spelling for such a day only. A day inside 0001..9999 and a sub-day placeholder's instant are spelled as before.
+  
+  **Unchanged.** A placeholder that resolves inside its column's years answers as before; a `date` keeps the years 0001 to 0999, which a `datetime` refuses, and a `time` field reads the time of day of any instant with a four-digit year, year 0 included. A placeholder on a column with no temporal kind (text, number) and a context placeholder such as `{current_user_id}` are not judged by this range. Every literal comparand answers as before.
+- f6ccca4: fix(objectql,rest): a `date` or `datetime` value refused for its year says so — "must be a date in the years 0001 to 9999" / "must be a datetime whose UTC year falls in the years 1000 to 9999" — instead of "must be a valid date (ISO-8601)", which was false for a value such as `0500-07-15T10:00:00Z` (#20846)
+  
+  Clause-②: yes (widening) — one new export on `@objectstack/core`'s root, `SUPPORTED_TEMPORAL_YEARS`. No value's verdict moves and no wire key moves: the field code stays `invalid_date` and its `constraint` stays `{ type }`.
+  
+  `POST` / `PATCH /api/v1/data/:object` and each row of `POST /api/v1/data/:object/import`
+  refuse a `date` outside the years 0001 to 9999 and a `datetime` whose UTC year falls
+  outside 1000 to 9999. When the value itself is readable — an ISO 8601 string such as
+  `0500-07-15T10:00:00Z` or `+010000-01-01`, or a `Date` — the refusal's message now
+  names the kind's years. An author who read "not valid ISO" rewrote the spelling, and no
+  spelling of that year is admitted.
+  
+  - `@objectstack/spec`: the validation message catalog gains `invalid_date_range` and
+    `invalid_datetime_range` in `en`, `zh-CN`, `ja-JP` and `es-ES`. They are two more
+    sentences of the `invalid_date` code, never a wire value. The years are the template
+    parameters `{{firstYear}}` / `{{lastYear}}`. A deployment that overrides a message
+    under `validation.field.invalid_date` or `validation.field.invalid_datetime` does not
+    cover these values. To override their text, define
+    `validation.field.invalid_date_range` / `validation.field.invalid_datetime_range`.
+  - `@objectstack/core`: `SUPPORTED_TEMPORAL_YEARS` (`{ date: { first: 1, last: 9999 },
+    datetime: { first: 1000, last: 9999 } }`, frozen) is the range
+    `isOutsideTemporalYearRange` judges by. It is exported so a refusal names the range
+    from the source the doors use, never a copy of its numbers.
+  - `@objectstack/objectql` and `@objectstack/rest`: the record validator and the import's
+    cell reader choose the range sentence for such a value. An import cell with more than
+    four year digits (`+010000-01-01`) is refused by the import's reader. It used to read
+    "is not a valid date" and now gets the same range sentence as the write door.
+  
+  **What is not affected.** Which values are refused is unchanged, and so is the refusal's
+  code (`invalid_date`) and `constraint`. A value that is not readable keeps its sentence:
+  "must be a valid date (ISO-8601)" at the write door, `"…" is not a valid date` at the import.
+  So does a number, which is never a written `date` or `datetime`.
+- d1633f3: fix: the analytics native-SQL path answers a measure its response declares `number` as a number on every dialect, presented by the one rule `driver-sql`'s `aggregate()` applies, which `@objectstack/core` now exports as `AGGREGATE_ANSWER_KIND` and `presentAsNumber` (#20889)
+  
+  Clause-②: yes (widening)
+  
+  **New exports.** `@objectstack/core` exports two names, moved here unchanged
+  from `@objectstack/driver-sql`, which now imports them instead of keeping them
+  private:
+  
+  - `AGGREGATE_ANSWER_KIND`: what each declared aggregate function answers.
+    `count`, `count_distinct`, `sum` and `avg` answer `'number'`; `min` and `max`
+    answer `'column'`, a value of the aggregated column.
+  - `presentAsNumber(value)`: the `'number'` presentation. A string `Number()`
+    reads as a number becomes that number. Any other value is returned as given:
+    a number, `null`, a boolean, empty or blank text, or text that reads as NaN.
+  
+  **What changed.** On PostgreSQL, `POST /api/v1/analytics/query` and
+  `POST /api/v1/analytics/dataset/query` answered through `NativeSQLStrategy`
+  returned count, count_distinct, sum, avg, and min / max over a numeric column
+  as strings, such as `count: "2"` and
+  `sum: "500.000000000000000000000000000000"`, while `fields[]` declared
+  `number`. A dataset's `row_count` did the same, and a measure-scoped count
+  mixed `"1"` with the number `0` in one column. SQLite answered numbers. The
+  strategy now presents each measure column by its declared aggregate function,
+  through the same table and presenter as `SqlDriver.aggregate()`. `min` / `max`
+  are presented only when their column is declared numeric, so `max` over a text
+  column, every dimension, and expression measures keep the value the database
+  returned.
+  
+  **Precision.** The answer is one JS number, the policy `driver-sql`'s
+  `aggregate()` already applies. A total that needs more digits than a double
+  holds, such as `9007199254740993`, answers the nearest double
+  (`9007199254740992`), which is also what SQLite and the engine path answer.
+  
+  **What did not move.** `@objectstack/driver-sql`'s behaviour is unchanged: its
+  `aggregate()` reads the same table, and its read presenter calls the same
+  function. The answers on SQLite are byte-identical. The arithmetic of the
+  analytics native statement did not change either. On PostgreSQL its `sum` and
+  `avg` still add exact decimals, so `0.1 + 0.2` answers `0.3` where the engine
+  path answers `0.30000000000000004`.
+- 8368f1c: feat(core): the bulk-import runner, its row coercion, the mapping apply and the field-meta map now live in `@objectstack/core`, beside `bulkWrite` (#20919)
+  
+  `runImport` (with `sanitizeRowError` and its option/result types), the cell
+  coercion (`coerceRow`, `coerceFieldValue`, `parseDateCell`, `parseNumberCell`,
+  `parseBooleanCell`, `matchOption`, `splitMulti`, `isBlank`), the `mapping`
+  artifact pipeline (`applyMappingToRows`, `refuseUnknownMappingTargets`,
+  `MappingArtifactLike`, `MappingFailure`, `ApplyMappingOptions`) and the field
+  metadata map (`buildFieldMetaMap`, `ExportFieldMeta`) are exported from
+  `@objectstack/core`. They moved here unchanged from `@objectstack/rest` so the
+  connector sync executor in `@objectstack/service-automation` writes through the
+  same runner as the HTTP import door without depending on the HTTP layer. Nothing
+  to change for consumers: `@objectstack/rest` re-exports every name it exported
+  before.
+- 58a77db: fix(service-analytics)!: the analytics read scope and the native `where` answer `$contains` / `$notContains` on a multi-valued or JSON-stored field by membership, with the one construct `driver-sql` emits, now exported from `@objectstack/core` (#20987)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a correction of which rows two analytics SQL faces answer for one operator on one declared field class: the read scope `compileScopedFilterToSql` compiles from a row policy, and the native strategy's rendering of a query's `where`. No authorable key, spelling, export or stored shape of metadata moves; `packages/spec` is untouched, and the contract sentence the faces now meet (`FILTER_OPERATORS.$contains`) is the one already declared. A policy or filter that was written stays written as it was, and what it now selects is what the data door already selected for it, so there is nothing a ledger entry could rewrite. The new refusal on a datasource whose SQL dialect the host cannot name is a refusal of a query, not of stored metadata. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter operator's reading (not `registered` / `already-registered`); and the change is runtime behaviour plus one additive export, not a declaration change (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the analytics doors answer for one class of read. A row policy (the read scope the analytics plugin compiles from the security service, or a host's own `getReadScope`) whose `$contains` or `$notContains` names a field declared multi-valued (`multiple: true` on a multi-capable type, or a multi-option type) or JSON-stored now selects the rows holding the comparand as an ELEMENT of the stored list. It used to select every row whose stored JSON text contained the comparand as a substring, so on SQLite a policy could admit rows outside it, and on PostgreSQL every query under such a policy answered `500` (MySQL was not measured). An analytics count under such a policy now equals what the same caller reads through the data door. On a datasource whose SQL dialect the analytics host cannot name, such a policy now refuses the query (`READ_SCOPE_COMPILE_FAILED` / `500`) instead of falling back to the substring reading. It ships as `minor` under the launch-window convention.
+  
+  **The `where`.** `POST /api/v1/analytics/query`, the dataset door and `/analytics/sql` on the native strategy render the same membership test for a `$contains` / `$notContains` in a query's `where` (or a dataset's `runtimeFilter`) on such a field: on PostgreSQL the query answers rows where it answered `500`, and on SQLite the count stops over-counting (`$contains`) and under-counting (`$notContains`). On a datasource whose dialect the host cannot name, the operator on such a field is refused `INVALID_FILTER` / `400`. The ObjectQL strategy already answered membership and is unchanged.
+  
+  **Unchanged.** On a scalar text field `$contains` stays the substring test, on every face. `$notContains` keeps its NULL rule: a row with no value satisfies it. A host that wires no field metadata keeps the substring reading, because it cannot tell a JSON column from a text one; the analytics plugin wires it from the data engine.
+  
+  **New export.** `@objectstack/core` exports `jsonMembershipPredicate(dialect, emitters, value)` and `jsonMembershipCandidates(value)`, with the `JsonMembershipDialect` and `JsonMembershipEmitters` types: the per-dialect membership construct (#17590) moved from `@objectstack/driver-sql`, where it was module-private, and made placeholder-agnostic. `@objectstack/driver-sql` imports it and emits byte-identical statements and bindings.
+  
+  **What to do after upgrading.** Nothing, unless a policy or a dashboard filter relied on the substring reading of a multi-valued or JSON-stored field: such a filter now selects members only, as the data door always did. A host whose analytics `sqlDialect` hook answers nothing for a SQL datasource should answer `'sqlite'`, `'postgres'` or `'mysql'`, or the operator on such a field is refused.
+- a11faee: fix(objectql)!: a per-aggregation `filter` refuses `$in` / `$nin` / `$eq` / `$ne` / an ordering / `$between` / implicit equality on a declared JSON-stored field with `INVALID_FILTER` / 400, in the words `where` refuses them in, instead of counting rows the stored arrays cannot support
+  
+  Clause-②: yes (widening)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at the engine's per-aggregation filter position: the operator x declared-type pairs refused are exactly the pairs driver-sql's where has refused on a JSON-stored column since its column-type gate landed, and the per-aggregation position now answers them the same way. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema, AggregationNodeSchema and every object and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query the engine answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour plus ADDITIONS only (three new @objectstack/core exports and one new optional trailing parameter on applyInMemoryAggregation), with no published interface or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts in one position, `aggregations[i].filter`, on every driver and for every caller that reaches the engine: the REST query door (`POST /api/v1/data/:object/query`), a flow or hook, and the analytics strategy that lowers a dataset measure's filter onto `engine.aggregate`. The published `applyInMemoryAggregation(rows, ast, timezone, fields)` narrows the same way when it is handed a field map. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field the object declares JSON-stored (a structured-JSON type such as `json` or `address`, an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`), a per-aggregation `filter` that compares the field with `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin` or implicit equality (`{ "owners": "u1" }`) is refused with `INVALID_FILTER` / 400, whatever the comparand (`null` and an empty list included), at any depth under `$and` / `$or` / `$not`, and before any driver is asked for a row, so an empty table refuses it too. That is the set `driver-sql`'s `where` refuses on such a column, for the same reason.
+  
+  **What an author sees now.** The same 400 body the same filter gets as a `where`: the filter WAS NOT APPLIED, the comparison can never equal one member of a stored list, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership, or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message, as they are for `where`, and the full diagnostic, naming both and the aggregation position, goes to the server log.
+  
+  **Why a refusal.** The engine evaluates a per-aggregation filter itself, and it compared the whole stored array against a scalar. Measured through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16 over six rows of a `multiple: true` lookup, two of them holding `u1`: `{ owners: { $in: ['u1', 'u9'] } }` counted 0, `{ owners: { $nin: ['u1', 'u9'] } }` counted all 6, the two rows it was asked to exclude among them, `$gt` / `$lte` / `$between` counted 4 / 1 / 5, and `{ tags: { $eq: 'red' } }` counted the row holding `['red']` by JS loose equality. The same filters in `where` were 400 on both dialects.
+  
+  **Who is affected.** A dashboard, report, dataset measure or caller whose per-aggregation filter compares a JSON-stored field with one of those operators and read the count as a real answer. Also a host calling `applyInMemoryAggregation` directly with a `fields` map: it now judges each `aggregations[i].filter` against that map before any row (an empty `rows` array included) and throws the same `INVALID_FILTER` / 400. It takes an optional fifth argument, `reportWithheld(diagnostic)`, which receives the withheld field, operator and position; without it the diagnostic is dropped. A call without `fields` judges nothing, as before. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not JSON-stored; `having`; `where`; and a host whose engine has no declaration for the object, where nothing is judged.
+  
+  **`@objectstack/core`** (three new root exports): `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, `jsonColumnOperatorRefusalText(field, op, bare)` and its return type `JsonColumnOperatorRefusalText` (`{ message, diagnostic }`). They are the operator set and the two texts (the withheld message and the full diagnostic) of the JSON-column refusal, so `driver-sql`'s `where` and the engine's per-aggregation filter refuse with one set and one sentence.
+  
+  **`@objectstack/driver-sql`**: no behaviour change. Its JSON-column gate reads the set and the text from `@objectstack/core`; every refusal it prints is byte for byte what it printed before.
+- 2c1cef3: fix(core)!: a filter that aims `$startsWith`, `$endsWith`, `$icontains`, `$like` or `$ilike` at a field stored as a JSON column is refused with `INVALID_FILTER` / 400, as `$eq` / `$in` / `$nin` already are, instead of matching the field's serialized text or failing at query time
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape on a JSON-stored column: the five text operators join the operator set driver-sql's where and the engine's per-aggregation filter already refuse there, through the one shared set in @objectstack/core. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema, ViewFilterRuleSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query a driver answers, not what any metadata says, and the refusal itself names the spelling to use. The other categories are closed on facts: @objectstack/core publishes (not unpublished); no ADR-0087 id covers a text operator on a multi-valued field, and filter-text-operator-declared-type-refused covers declared non-text types only, so this diff neither registers nor reuses one (not registered / already-registered); and the change is runtime behaviour only, with no published interface or type narrowed or removed: the exported set keeps its ReadonlySet of string type, and objectql's search expander changes only which operator it emits for a multi-valued field (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows which filters are answered on a field stored as a JSON column, on every face that reads `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`: `driver-sql`'s `where` (and `driver-sqlite-wasm` and `driver-turso`'s local transport, which inherit it) on every read and write face that lowers a filter, and the engine's per-aggregation `filter`. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field declared multi-valued (an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`) or structured-JSON (`json`, `address`, …), a filter using `$startsWith`, `$endsWith`, `$icontains`, or the staged pattern pair `$like` / `$ilike`, is refused with `INVALID_FILTER` / 400, at any depth under `$and` / `$or` / `$not`. The per-aggregation `filter` refuses the three declared ones; it already refused `$like` / `$ilike` as operators it does not evaluate. Through the engine, a structured-JSON field was already refused all seven text operators by the text-operator declared-type door, which still answers first there, in its own words; what moves for it is a direct driver call.
+  
+  **What an author sees.** The body the equality family already gets there, byte for byte: the filter WAS NOT APPLIED, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message and named in the server-log diagnostic; a filter positively marked as the caller's own reads them named.
+  
+  **Why a refusal.** Such a column stores the serialization `["u1","u2"]`, and none of these five operators has a membership reading. Measured through `POST /api/v1/data/:object/query` on a multi-value lookup and a `tags` field: on SQLite `$startsWith: "["` and `$endsWith: "]"` matched every row with a value, `$startsWith: "u1"` matched none of the rows holding `u1`, and `$icontains: "U1"` also matched the row holding only `u10`; on PostgreSQL 16 every one failed at query time with a `500` `DATABASE_ERROR`, a `json` column having no `LIKE` operator; the per-aggregation `filter` counted 0 for each. No membership reading is invented for a prefix, suffix or case-folded test.
+  
+  **Who is affected.** A saved filter, list view, dashboard widget, report or caller that aims one of these operators at a multi-valued or JSON-stored field. On SQLite it read rows that matched the stored brackets and quotes; it now gets the 400. On PostgreSQL it already failed, with a 500. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **`@objectstack/objectql`: `$search` over a multi-valued field answers by membership.** The search expander (`$search` on `find`, `findOne` and `aggregate`, the REST `search` / `$search` parameter included) used to emit `$in` for a term matching a `select` option label and `$icontains` for any other term, against every field in the resolved search set. On a multi-valued field both are refused by the gate above, so one such field in the set failed the whole search: a label term answered 400 on every dialect, and any other term answered 500 on PostgreSQL and, with this change, 400 on SQLite. The auto-default set includes a `select` declared `multiple: true`, as in `examples/app-todo`'s `todo_task.tags`, and `searchableFields` may name a `tags` field or a multi-valued lookup. Such a field is now matched by membership: a term matching option labels becomes one `$contains` per matched option value, and any other term, or any term on a field with no options, becomes `$contains` of the term. No search answers 400 or 500 for it any more. **The visible cost:** to hit a multi-valued field, a term must now equal one of its members or match one of its option labels; SQLite used to match substrings of the stored array's serialized text as well, so a term like `wood` found a row tagged `redwood`, and it no longer does. Scalar fields are searched exactly as before.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not JSON-stored, the scalar text column included; `driver-memory`; and `driver-turso`'s remote transport, which compiles its own filters.
+- 097ef80: fix: the analytics native-SQL path aggregates with the engine's own aggregate policies, so one query answers one number whichever strategy serves it: `sum` / `avg` accumulate in double, a PostgreSQL boolean aggregand is cast, and an all-NULL `sum` answers `0`. The operand policies move from `@objectstack/driver-sql` to `@objectstack/core` (#21042)
+  
+  Clause-②: yes (widening)
+  
+  **New exports.** `@objectstack/core` exports the aggregate operand policies, moved here from `@objectstack/driver-sql`, where they were module-private. The driver now imports them and emits byte-identical statements.
+  
+  - `AGGREGATE_ACCUMULATION`: what each declared aggregate function accumulates in on PostgreSQL and MySQL. `avg` accumulates in double; `sum` accumulates in double over a fractional column; the counts, `min` and `max` take the column as stored.
+  - `aggregandColumnClass(shape)`: the one column-class predicate those policies read, over a column's declared `{ type, multiple }`. It answers `'fractional'`, `'integral'`, `'boolean'`, or `undefined` for every other column, a multi-valued one included. The type `AggregandColumnClass` names the three classes.
+  - `POSTGRES_BOOLEAN_AGGREGAND_CAST`: the functions whose boolean aggregand is cast to `int` on PostgreSQL. These are `sum`, `avg`, `min` and `max`; the two counts are never cast.
+  - `doubleAccumulationOperand(operand, dialect)`: the column's text, parsed as a double, spelled for `'postgres'` or `'mysql'`.
+  - `aggregandOperandSql(func, columnClass, dialect, operand)`: the operand an aggregate wraps, with the cast inside the double operand. The type `AggregandSqlDialect` names its dialects (`'sqlite'`, `'postgres'`, `'mysql'`, `'unknown'`).
+  
+  **What changed.** `POST /api/v1/analytics/query` and `POST /api/v1/analytics/dataset/query` served by `NativeSQLStrategy` (the default on a SQL driver) skipped three policies `SqlDriver.aggregate()` applies. So the ObjectQL strategy and `engine.aggregate` answered differently for the same query. Measured on SQLite and PostgreSQL 16.13:
+  
+  - On PostgreSQL, `sum` / `avg` over an exact-decimal column, and `avg` over an integer one, added exact decimals. For example, `0.1 + 0.2` answered `0.3` and `11 / 9` answered `1.222222222222222`, where the engine answers `0.30000000000000004` and `1.2222222222222223`. The native statement now accumulates in double, as the driver does.
+  - On PostgreSQL, `sum` / `avg` / `min` / `max` over a boolean field answered `500` (`function sum(boolean) does not exist`). The native statement now casts the boolean aggregand to `int`, as the driver does, and answers the numbers the engine answers.
+  - On every dialect, a group whose aggregand is NULL in every row, and a measure-scoped `sum` that admits no row, answered `sum` `null` at the cube door. The strategy now folds a `null` answer to `emptyGroupValueFor` (`@objectstack/spec`) for every measure, so that `sum` answers `0`. `avg`, `min` and `max` over nothing stay `null`. The dataset door already answered `0`.
+  
+  This is no narrowing: each answer moves to the value the platform already declared for the same query.
+  
+  **What did not move.** `@objectstack/driver-sql`'s statements and answers are unchanged: a move-proof test compiles each aggregate function over each column class on SQLite, PostgreSQL and MySQL, and the statements equal the ones captured before the move. SQLite's native statement is unchanged, because neither operand policy applies there. A host that relays no field declarations to the analytics service, or names no SQL dialect, gets today's native arithmetic.
+- 1bd14c9: fix(core)!: a date macro whose offset lands past every instant a JavaScript `Date` can hold is refused `INVALID_FILTER` / 400, naming the placeholder, instead of resolving to the text `Invalid Date` or throwing an uncoded `RangeError`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a VALUE in @objectstack/core's filter-placeholder resolver: a date macro (such as {300000_years_ago} or {99999999999999999999_minutes_ago}) whose offset lands past every instant a JavaScript Date can hold, refused INVALID_FILTER / 400 by resolveFilterToken and resolveFilterTokens. No authorable key, spelling, export or stored metadata shape moves: every filter, view, dataset and query shape parses as before, the date-macro vocabulary is unchanged, and @objectstack/core exports nothing new and nothing less (resolveFilterToken and resolveFilterTokens keep their signatures; the error class is module-private). The categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a value range or a resolved value and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what `resolveFilterToken` and `resolveFilterTokens` answer for one class of inputs, and so what every door that resolves filter placeholders answers. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What is refused now.** A relative-date placeholder whose offset lands past the instants a JavaScript `Date` can hold names no day and no time. The resolver used to answer a day-or-coarser one (`{300000_years_ago}`) with the text `Invalid Date`, which compares as text, and to throw an uncoded `RangeError: Invalid time value` for a sub-day one (`{99999999999999999999_minutes_ago}`). Measured before this through `engine.find` on InMemoryDriver and `POST /api/v1/data/:object/query` on SqlDriver over SQLite, over a `datetime` field with a row in 2026 and a row in 1500:
+  
+  - `$lt {300000_years_ago}` answered both rows, and `judgeFilter` answered `{ ok: true }`;
+  - `$lt {99999999999999999999_minutes_ago}` threw the uncoded `RangeError` from `engine.find` and `judgeFilter`, and the REST door answered `500 INTERNAL_ERROR`.
+  
+  Both are refused now with `INVALID_FILTER` / 400 at every position the engine resolves (`where` on `find`, `findOne`, `count`, `aggregate`, a multi-row `update` and `delete`, a per-aggregation `filter`, `having`) and through `judgeFilter`, before any driver read. Every other caller of `resolveFilterToken` / `resolveFilterTokens` receives the same coded error in place of the text or the `RangeError`. The refusal is the same on every column, because the resolver does not know the column: such a placeholder names no value at all.
+  
+  **What an author sees.** `Relative-date placeholder "{300000_years_ago}" names no instant: its offset lands past every instant a JavaScript Date can hold, so it resolves to no day and no time, and it is refused rather than compared. A date value names a year from 0001 to 9999, and a datetime value a year from 1000 to 9999: use a relative-date placeholder whose offset lands inside those years.` The thrown error carries `code: 'INVALID_FILTER'`, `status: 400` and `token` (the placeholder's name), the code the engine already answers for a placeholder that resolves outside its column's years.
+  
+  **Unchanged.** A placeholder that names an instant resolves as before, including one past the years 0001..9999 that a `Date` still holds (`{273847_years_ago}` resolves to `-271821-09-30`); the engine's per-column year range judges that one, as before. Context placeholders and an unknown placeholder answer as before.
+- d2bc644: fix(plugin-security): a row-level `check` judges a lone scalar written to a declared multi-valued field as the one-member list it is stored as, so the write and the read the same policy scopes give one answer for one row (#21238)
+  
+  Clause-②: yes (widening)
+  
+  The write door stores a lone scalar sent to a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `lookup` / `user` / `file` / `image` flagged `multiple: true`) as a one-member list: `tags: 'x'` is stored as `["x"]`. The row-level write `check` judged the value as sent on the insert and on a by-id update, because both images are formed before the write door runs. Measured through `ObjectQL.insert` with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set, with the same predicate as `using` and `check`:
+  
+  | `check` | written | write, before | stored | read |
+  |---|---|---|---|---|
+  | `record.tags.contains('x')` | `'x'` | 403 | `["x"]` | shown |
+  | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
+  | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
+  
+  Now the image's value on every field the object declares multi-valued goes through the same rule the write door stores it by, before the check is judged. The first and third rows are admitted. The second is refused: a policy that forbids a member from tagging a row `x` can no longer be passed by sending `'x'` instead of `['x']`. A lone scalar now gets exactly the verdict its stored list gets, on the insert, a by-id update and a predicate update. That includes a policy that compares such a field with a scalar comparison (`==`, `!=`, `in`, an ordering), which the read refuses with `INVALID_FILTER` / 400: there `'x'` used to get the opposite of the verdict `['x']` got, and now gets the same one.
+  
+  Unchanged: a field the object does not declare multi-valued is judged as written; a list, `null`, a blank string and an object are judged as written, as the write door leaves them; the check's comparands are left as written, since `contains` takes one member; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
+  
+  **`@objectstack/core`** (one new root export, so `minor`; this export is the widening the `Clause-②: yes (widening)` line declares): `multiValueStorageForm(value)`, the rule itself. It wraps a string, a number or a boolean into a one-member list and returns every other value as the same value. `@objectstack/objectql`'s `normalizeMultiValueFields` now calls it, with no change in what the write door stores (`patch`). `@objectstack/plugin-security` is `minor` because the set of writes its check admits widens (the first and third rows above); that is a security-floor behaviour change, not the declared widening.
+
+### Patch Changes
+
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- cd901d7: fix(plugin-security): `security/explain` answers enforcement's refusal at the object level too, and explains another user in the organization they are resolved in (#20604)
+  
+  Clause-②: no
+  
+  Two answers of `POST /api/v1/security/explain` disagreed with what the same principal's own request gets from enforcement.
+  
+  **A row-level policy that compares two fields of no shared comparison class** (text against a number, or any field against a file field, a formula field, or a field that holds a list or an object). The SQL driver refuses to compile such a read, so the find answers `INVALID_FILTER` / 400. A by-id update or delete fails closed at its row-level gate, and an insert whose check judges the policy is refused with `INVALID_FILTER` / 400. An object-level explanation (no `recordId`) still answered `allowed: true`, the `rls` layer `narrows`, and the predicate as `readFilter`, for every operation. A `recordId` that no row carries was answered `visible: false` with no deciding layer. Both are now refused with the envelope a record-grained explanation already gives: `INVALID_FILTER` / 400, with the message that names the policy and both fields. A request that the capability gate or the CRUD grant denies is still explained as denied there.
+  
+  **Another user explained by an administrator.** The explanation now carries the organization the user is resolved in, as enforcement's context for that user does. Before, a current member of the administrator's organization was explained with no organization. Under `isolated`, that member was reported denied on a tenant object their own find reads. Under every posture, a permission set that their organization authored (a `sys_permission_set` row scoped to that organization) was missing from the explanation and from the verdicts it decides.
+  
+  `@objectstack/core`: the API-key arm of `resolveAuthzContext` asks `vetOrganizationClaim` for its membership rule, as the session arm does. This is a refactor with no behaviour change. A key whose owner is no longer a member of its organization is still refused.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A comparison between two fields of one class keeps its verdicts, at the object level and per record.
+  - Explaining yourself.
+  - A removed member's explanation (no organization, as enforcement resolves them).
+- 856321f: A date-bucket key spells its year with four digits at every granularity, as the SQL drivers' bucket expressions do, so the in-memory and pushed-down paths key a day in 0001..0999 alike and a drill-down from such a key finds its range.
+  
+  A `date` value names a year from 0001 to 9999, so these keys are reachable through a `date` field and through a stored `datetime` row. For 0050-06-15, `strftime('%Y-%m')` on SQLite and `to_char(…, 'YYYY-MM')` on PostgreSQL answer `0050-06`, while `bucketDateKey` answered `50-06`: the same `groupBy` keyed the same rows differently depending on which path ran it.
+  
+  - **`@objectstack/core` `bucketDateKey`** pads the year to four digits: `0050`, `0050-Q2`, `0050-06`, `0050-06-15`, and the ISO week key `0050-W24` (early January 0050 is `0049-W52`, its ISO week-year). The engine's in-memory `groupBy` and the memory cube face delegate to it, so both now answer the drivers' key. A year from 1000 to 9999 is spelled as before.
+  - **`@objectstack/core` `bucketKeyToCalendarRange`** reads exactly what `bucketDateKey` writes. Its week arm checked a key against the unpadded label, so a padded key such as `0050-W01` answered `null`; it now answers `{ start: '0050-01-03', end: '0050-01-10' }`. An unpadded key (`50-06`, `49-W52`) is not a bucket key and still answers `null`.
+  - **`@objectstack/service-analytics`** mints the `compareTo` alignment key through `bucketDateKey` instead of spelling it locally, so a comparison row in 0001..0999 merges onto its bucket (`0050-06`) instead of being appended under `50-06`.
+- 6b004c0: `isUninterpretableTemporalComparand` reads a bare wall clock on a `time` column by the spec's `ClockTimeValueSchema` (`@objectstack/spec/data`), not by a private copy of it (#20771)
+  
+  Clause-②: no
+  
+  The wall-clock half of core's `time` rule (`HH:MM[:SS[.fraction]]`, hours 00 to 23, minutes and seconds 00 to 59, no time zone) was spelled twice: once as the spec's `ClockTimeValueSchema`, the stored form of a `time` value, and once as a private regex in `@objectstack/core`. The two admitted the same strings, but nothing tied them together, so an edit to either one changed one side only. Core now asks the spec schema. Every caller of `isUninterpretableTemporalComparand('time', …)` therefore answers from the rule the spec's `time` default gate uses: the engine's temporal-comparand door, the analytics comparand check, the record validator's `time` arm and the import's `time` coercion.
+  
+  Unchanged:
+  
+  - Every string gets the verdict it got before. Measured over 8,655,360 generated strings: 8,640 read by both the old regex and the schema, the rest refused by both, 0 answered differently.
+  - An instant, a number or a `Date` on a `time` column is judged as before.
+- 682873d: fix(core): the refusal a filter gets for a scalar comparison or text operator on a multi-value or JSON field reads true on every backend that prints it, and reaches a REST caller whole
+  
+  Clause-②: no
+  
+  The `INVALID_FILTER` / 400 refusal `driver-sql`'s `where`, the engine's per-aggregation `filter` and `driver-memory` all print (`jsonColumnOperatorRefusalText`) explained itself with `driver-sql`'s storage ("a field this driver stores as a JSON TEXT column") and the two wrong answers SQL used to give. That is untrue on the engine and on `driver-memory`. The message was also 748 characters, and the REST envelope cuts a 4xx message at 499 plus an ellipsis, so callers on SQLite and PostgreSQL read `…Refused rather than compiled because the answ…` and never reached the sentence saying the field and the operator were withheld.
+  
+  The message now reads, on every backend, in 486 characters: `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison or text operator at a multi-value or JSON field, which it cannot test for one member.`, then the same `$contains` / `$or` of `$contains` remedy, then `For no value, use "$null" or "$empty".` (a `null` comparand such as `{ f: null }`, `$eq: null` or `$ne: null` is refused too, and `$contains` could not express it), then `The field and the operator are withheld from the message; the full diagnostic is in the server log.` The diagnostic (the server-log text, and what a filter's own author is shown) gives the same reason with the operator named, names the field, and spells the remedy with the field's name. It drops the storage and the SQL history too, and is now whole on the wire for field names up to 26 characters (it was 643 characters or more and always cut).
+  
+  Code, status, the refused operator set and the `$contains` remedy are unchanged. A client that matched on the old words `JSON TEXT column` or `Refused rather than compiled` should match on `code: "INVALID_FILTER"` instead.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [24d521e]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [1a75e39]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

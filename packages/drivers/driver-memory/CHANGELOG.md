@@ -1,5 +1,400 @@
 # @objectstack/driver-memory
 
+## 17.6.0
+
+### Minor Changes
+
+- f1e921a: feat(spec)!: `$empty` joins `FILTER_OPERATORS`, and the view operators `is_empty` / `is_not_empty` lower to it (#20446)
+  
+  A stored 「is empty」 / 「is not empty」 — `['field', 'is_empty', …]`, `isempty`, `is_not_empty`, `isnotempty`, in a view rule, a sharing rule or any filter array — now lowers to `{ field: { $empty: true | false } }` instead of `$null`. `$empty` is answered by the field's DECLARED type: a text-like field is empty when it is null or `''`, a multi-value field (multiselect, checkboxes, tags, or a select / radio / lookup / user / file / image with `multiple: true`) when it is null or `[]`, and every other type only when it is null. So an 「is empty」 rule on a text field now also finds `''`, and on a multi-value field also finds `[]`, which the `$null` lowering missed. `is_not_empty` is its exact complement. `$empty` is in `FILTER_OPERATORS` (and `ALL_OPERATORS`) now, and `canonicalAstOperator` folds the empty pair onto `is_empty` / `is_not_empty` rather than onto `is_null` / `is_not_null`. On `@objectstack/driver-memory`, a QueryAST comparison node (`{ type: 'comparison', operator: 'is_empty' }`) is answered by the same declared-type arm.
+  
+  **BREAKING**: two things accepted before are refused now, each loudly and with its fix.
+  
+  - **A `{ $empty: … }` object written as a field value** (a `where` pasted into an insert or update payload) is refused with `VALIDATION_FAILED` (`invalid_type`, "$empty is a filter operator, not a value"). Before, a text-like field stored it as data.
+    FROM `update('task', { title: { $empty: true } })` → TO write the value itself (`{ title: '' }`, `{ title: null }`); a filter belongs in `where`.
+  - **`is_empty` / `is_not_empty` where no face holds the column's declared type** is refused with `INVALID_FILTER` / 400 (`READ_SCOPE_COMPILE_FAILED` / 500 on an analytics read scope). The `$null` lowering answered these. The compositions:
+    - the built-in `id`, which no object declares. FROM `['id', 'is_empty', true]` → TO `['id', 'is_null', true]` / `is_not_null`;
+    - a federated (external) object on a driver that does not implement `registerExternalObject` (driver-memory, driver-mongodb). The boot already reports such an object as NOT bound to its remote table, naming it, and its reads answered from a table named after the object. FROM `is_empty` on such an object → TO bind it on a driver that implements federation (driver-sql and its heirs, driver-turso);
+    - an `AnalyticsService` constructed without `sourceFieldMeta`. FROM such a host → TO pass `sourceFieldMeta` (the package README shows it), or filter with `is_null` / `is_not_null`;
+    - a multi-value column on a SQL dialect `driver-sql` does not model (a knex client other than SQLite, PostgreSQL or MySQL). FROM `['tags', 'is_empty', true]` there → TO `['tags', 'is_null', true]` / `is_not_null`.
+  
+  Stored sharing rules and views that use 「is empty」 are not rewritten; they are re-read under the new meaning. Production rules that use 「is empty」 on a text or multi-value field were not measured; each finds more rows (the `''` / `[]` ones) from this release.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered filter-is-empty-lowers-to-empty-operator -->
+- 793fb83: `MemoryAnalyticsService` (the in-memory analytics cube face) now runs the two shared filter comparand doors every other analytics face runs, then the shared filter lowering of ADR-0053 D-D1 (as amended), before it compiles a query's `where`. It also compiles `$or` and `$null`, the two parts of the lowering's output it could not.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: no spec key, export name or stored row moves. What changes is which filter comparand values one runtime face of this package accepts, to the set every other face already accepts; which value the caller meant by a refused comparand is not something a ledger entry can decide. The package publishes (not `unpublished`); no ADR-0087 id covers a comparand check (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `query()` and `generateSql()` now refuse, with `INVALID_FILTER` / 400, filter comparands they used to answer. Each is refused the same way by every other analytics face and by the query engine, so a filter that worked here worked nowhere else. Measured on a fixture where `d` is `'v1'`, `'v2'`, `null` and absent:
+  
+  - `undefined` in any comparand position — `{ d: undefined }` and `{ d: { $eq: undefined } }` answered the no-value rows, `{ d: { $ne: undefined } }` the valued ones, `{ d: { $in: ['v1', undefined] } }` row `v1`;
+  - a `null` member of `$in` / `$nin` (`{ d: { $in: ['v1', null] } }` answered `v1` and both no-value rows), and a `null` under an ordering operator (`{ d: { $gt: null } }` answered no row);
+  - a scalar where `$in` / `$nin` takes a list (`{ d: { $in: 'v1' } }`);
+  - a plain object, a `Map` or a binary value as a comparand — `{ d: { $ne: { a: 1 } } }` and `{ d: new Map() }` answered EVERY row.
+  
+  The fix is to write the comparand you mean: `null` or `{ $null: true }` for "has no value", a list for `$in` / `$nin` (and `{ $null: true }` in a `$or` for "one of these, or no value"), a scalar for an ordering operator.
+  
+  Corrected answers, each now what the live query path (`find()`) returns:
+  
+  - a bigint comparand within 2^53 (`{ n: { $gt: 2n } }`) is read as its number and answered; beyond 2^53 it is refused `INVALID_FILTER` / 400. Both used to fail with an uncoded error.
+  - `$between` is answered as its two bounds, with a bare-day maximum widened to the whole day before it is converted to the field's storage form; it was refused.
+  - `$null` (true: no value; false: has a value) and `$or` (a `{}` branch is TRUE, `$or: []` is FALSE) are compiled on both exits; they were refused. `$not`, `$startsWith`, `$endsWith` and `$empty` stay refused. `ANALYTICS_FILTER_CAPABILITIES` names `$null` and the `$or` combinator accordingly.
+  
+  The `generateSql()` echo and the `query()` pipeline dump for `$ne`, `$nin` and `$notContains` now show the lowering's NULL escape around this face's own guard — `(d IS NULL OR (d IS NULL OR d != 'v1'))` — the same rows as before.
+- 95fed33: `MemoryAnalyticsService` lowers the `FilterArray` spelling of `where` instead of dropping it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: no spec key, export name or stored row moves. What changes is which `where` values one runtime face of this package answers: a `where` array that `isFilterAST` rejects, which `AnalyticsQuerySchema.where` (a `FilterConditionSchema`) never admitted, is now refused as the analytics `where` door and the query engine already refuse it, where it used to answer every row. Which filter the caller meant by such an array is not something a ledger entry can decide. The package publishes (not `unpublished`); no ADR-0087 id covers a runtime filter-shape refusal (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  An array `where` such as `[['stage', '=', 'won']]` used to skip every filter step of the
+  analytics (cube) face: `query()` aggregated every row and `generateSql()` echoed no `WHERE`,
+  while the object spelling `{ stage: 'won' }` answered its rows. The array is now lowered by
+  `@objectstack/spec`'s `isFilterAST` / `parseFilterAST` — the lowering the analytics `where` door
+  and the engine already apply — so both spellings answer the same rows and echo the same `WHERE`
+  on both exits. `[]` still means no filter.
+  
+  **BREAKING**: `query()` and `generateSql()` now refuse, with `INVALID_FILTER` / 400, a `where`
+  array that is not a filter — one `isFilterAST` rejects. Each such array used to answer EVERY row
+  and echo no `WHERE`; the analytics `where` door and the query engine refuse the same shapes.
+  Measured on a fixture where `d` is `'v1'`, `'v2'`, `null` and absent, each of these answered all
+  four rows:
+  
+  - an infix join, `[['d', '=', 'v1'], 'or', ['d', '=', 'v2']]`;
+  - an operator outside the filter-array vocabulary, `[['d', 'sounds_like', 'v1']]`;
+  - a list of scalars, `[1, 2, 3]`;
+  - a cube-style entry list, `[{ member: 'd', operator: 'equals', values: ['v1'] }]`.
+  
+  An array that does lower but carries a comparand or operator the face refuses in its object
+  spelling (`[['d', 'in', 'v1']]`, `[['d', 'starts_with', 'v']]`) is now refused as that object
+  spelling is; it too used to answer every row.
+  
+  The fix is to write the filter you mean: the prefix form `['or', condA, condB]` for an infix
+  join, an operator from the filter-array vocabulary, or the `FilterCondition` object.
+- f8178ff: fix(driver-memory): `$contains` / `$notContains` on a multi-valued or JSON-stored field answer by membership, as the SQL drivers do
+  
+  Clause-②: yes (widening) — one new public method on the exported `InMemoryDriver` class, `filterContainsTest`; its return type `MemoryContainsTest` is not re-exported from the package entry. No accepted filter key or operator is added: `$contains` and `$notContains` keep their declared shape.
+  
+  On a field whose declaration makes it JSON-stored (`multiple: true` on a `lookup`, `user`, `select`, `radio`, `file` or `image` field, a `multiselect`, `checkboxes` or `tags` field, or a structured type such as `json`), the in-memory driver now answers `{ field: { $contains: v } }` by whole-element membership: some element of the stored array equals `v`. It used to match each element by substring, so `u1` matched a row storing `['u10']` and `'red'` matched a row storing `['redwood']`. A number member answered nothing: `{ nums: { $contains: '1' } }` missed `[1, 2]`. `$notContains` is the exact complement, and a row with no value still satisfies it. A scalar text column keeps the case-exact substring test.
+  
+  `driver-sql` gives the same answer on SQLite, PostgreSQL and MySQL; the two drivers were measured over the same fixture. The answer holds on every face of this driver:
+  
+  - `find()` and `count()`, in both filter spellings;
+  - the nested-relation filter on a multi-valued relation, which the engine lowers to one `$contains` per related id;
+  - `MemoryAnalyticsService`'s query, and its SQL echo, which now renders SQLite's `json_each` membership construct for such a column.
+  
+  The comparand is still a string. A number or boolean member is named by its text: `'1'` matches the stored number `1` (and `'1.50'` the number `1.5`), `'true'` matches the boolean `true`, and `'null'` matches a `null` member. A field the driver holds no declaration for, such as a field on an object never passed through `syncSchema`, keeps the substring reading.
+  
+  New: `InMemoryDriver.filterContainsTest(object, field, value)` returns the one test every face above lowers `$contains` to. It is a narrow seam for the analytics face, beside `filterSubstringPattern` and `filterComparandStorageForm`. The added public method is why this entry is `minor`.
+  
+  **If your tests relied on the old answer:** on the in-memory driver, a filter that matched an id by prefix or a tag by substring now returns only the member rows. That is what SQL already returned in production. Write `$contains` with the whole member value.
+- a3dc817: fix(driver-memory, driver-mongodb)!: a non-boolean `$exists` comparand is refused with `INVALID_FILTER` / 400, as `$null`'s is, instead of selecting the rows with no value (#20897)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered filter-query-face-comparands-refused-at-save) this narrows the query faces to the rule that registered entry already records: its reason states that every query face refuses a non-boolean $null / $exists flag, and its replacement is this change's whole migration (a flag is the boolean itself; $exists true is "has a value", false "has no value"). This change makes that statement true on the two drivers that did not yet refuse. No authorable key, spelling, export or published type moves, and no stored row is read or rewritten; a stored filter carrying such a flag is already refused when it is saved, by that entry. -->
+  
+  **BREAKING**: this narrows what the in-memory driver and the MongoDB driver accept in a filter. A `$exists` comparand that is not a boolean (a string, a number, `null`, `undefined`, an object) is now refused with `INVALID_FILTER` / 400, where these two drivers used to answer it. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  `FieldOperatorsSchema` declares `$exists` as a boolean, and `driver-sql`, `driver-sqlite-wasm` and both Turso transports already refused any other comparand. The in-memory driver and the MongoDB driver did not: they read `$exists` as `value === true`, so every other value asked for the rows with NO value. `{ stage: { $exists: "yes" } }` and `{ stage: { $exists: 1 } }` returned the rows without a stage, the opposite of what was written. `0`, `null` and the string `"false"` landed on that same side by the same default, not because anything read them. The in-memory driver's analytics face read the same flag by truthiness and answered the valued rows for the same filter, so that driver gave two different answers.
+  
+  **What an author sees now.** `400 INVALID_FILTER` with `driver-sql`'s message, beginning `Operator "$exists" on field "FIELD" requires a boolean comparand (true or false).` and naming the position (`filter.stage.$exists`). On the in-memory driver the refusal covers `find`, `findOne`, `count`, `aggregate`, `updateMany`, `deleteMany` and the analytics face (`query()` and `generateSql()`). There, an `undefined` or object comparand is refused first by that face's comparand-type check, also `INVALID_FILTER` / 400, in its own words. A refused write changes nothing.
+  
+  **What to write instead.** Write the boolean itself. `"$exists": true` matches rows whose field has a value, and `"$exists": false` matches rows whose field has none.
+  
+  **Who is affected.** A caller that sent a non-boolean `$exists` to `InMemoryDriver` or `MongoDBDriver` (a test suite, a local or embedded deployment, a flow or hook calling the engine in-process) and read the answer as a real one. On `SqlDriver` the same filter was already a 400.
+  
+  **Unchanged.** `$exists: true` and `$exists: false` answer exactly as before. The aggregation `filter` and `having` positions, which the engine evaluates itself after the driver, are not changed by this entry.
+- 45ce12a: fix(driver-memory)!: on a declared JSON-stored field, the query path and the analytics face refuse `$eq` / `$ne` / an ordering / `$between` / `$in` / `$nin` / implicit equality with `INVALID_FILTER` / 400, in the words the SQL family refuses them in, instead of answering each per element
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at this driver's filter gate: the operator x declared-type pairs refused are exactly the pairs driver-sql's where refuses on a JSON-stored column and the engine's per-aggregation filter refuses on the same declared fields, read from the one set @objectstack/core holds. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query this driver answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour, with no published export or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (`@objectstack/driver-memory`): this narrows what the driver's filter doors accept, for every caller that reaches them: `find`, `findOne`, `count`, `updateMany`, `deleteMany` and `aggregate` with a `where`, through the engine or called directly, and `MemoryAnalyticsService`'s `query` and `generateSql`. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What is refused.** On a field the object declares JSON-stored (a structured-JSON type such as `json` or `address`, an inherently multi-value option type such as `tags`, `multiselect` or `checkboxes`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`), a `where` that compares the field with `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin` or implicit equality (`{ "owners": "u1" }`) is refused with `INVALID_FILTER` / 400, whatever the comparand (`null` and an empty list included), at any depth under `$and` / `$or` / `$not`, before any row is read. On the analytics face a `where` key is a cube member, judged by the field it resolves to. That is the set `driver-sql` refuses on such a column, for the same reason.
+  
+  **What an author sees now.** The body `driver-sql` answers for the same filter: the filter WAS NOT APPLIED, the comparison can never equal one member of a stored list, and the spelling to use, `{ "FIELD": { "$contains": "a" } }` for membership, or an `$or` of `$contains` for any-of. The field and the operator are withheld from the message, and the full diagnostic, naming both and the position in the filter, is written to the driver's (or the analytics service's) logger at `warn`.
+  
+  **Why a refusal.** This driver answered each of those operators per element, through mingo's array semantics. Measured through `engine.find` over six rows of a `multiple: true` lookup, two of them holding `u1`: `{ owners: { $eq: 'u1' } }` and `{ owners: { $in: ['u1', 'u9'] } }` returned those two rows, `$nin` the other four, and `{ owners: { $gt: 'u1' } }` four rows by comparing each member as text, where every SQL dialect answers the same filters 400. An application whose tests run on this driver passed on a filter its production backend refuses.
+  
+  **Who is affected.** A test suite, demo or dev setup on this driver that filters a JSON-stored field with one of those operators and read the per-element rows as the answer. Write `$contains` for "holds this member", an `$or` of `$contains` for "holds any of these", and `$not` around either for the exclusion.
+  
+  **Unchanged.** `$contains` and `$notContains` (membership on such a field), `$exists`, `$null` and `$empty`; every operator on a field that is not declared JSON-stored; and an object this driver holds no declaration for (one never passed through `syncSchema`), where nothing is judged and every operator answers as before. `InMemoryDriver` gains one method, `filterFieldDeclarations`, tagged `@internal`: it exists so the analytics face judges its `where` by the same declarations, and it is not a consumer contract.
+
+### Patch Changes
+
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- b785c3b: fix: `sum` / `avg` answer the same double on every face the platform owns, added with one compensated fold that `@objectstack/core` now exports as `compensatedSum` (#20544)
+  
+  Clause-②: yes
+  
+  **New export.** `@objectstack/core` exports `compensatedSum(nums)`: the sum of
+  `nums`, added in order with Kahan-Babuska-Neumaier compensation, which is the
+  summation SQLite (3.43 and later) uses for its own `sum` and `avg`. It moved
+  here from `@objectstack/objectql`'s rows path (`in-memory-aggregation.ts`),
+  which now imports it instead of keeping a private copy.
+  
+  **What changed.** Three folds still added a group's values naively, and now call
+  the same function:
+  
+  - `@objectstack/driver-memory`'s `aggregate()` and `find()` with aggregations,
+    the path `engine.aggregate` takes on an in-memory datasource;
+  - `@objectstack/driver-memory`'s analytics face (`MemoryAnalyticsService`),
+    whose `sum` / `avg` measures are now a `$group` `$accumulator` in place of
+    mingo's `$sum` / `$avg`;
+  - `@objectstack/service-analytics`' draft preview.
+  
+  Over a `number` column holding `0.1`, `0.2` and `0.3`, each of them answered
+  `0.6000000000000001` / `0.20000000000000004`. They now answer `0.6` /
+  `0.19999999999999998`, as SQLite and the engine's rows path do. Over
+  `1e16, 1, -1e16` they answered `0` and now answer `1`. On driver-memory,
+  `engine.aggregate` gave two answers depending on its path: `having { s: { $eq:
+  0.6 } }` kept the group on the rows path and dropped it on the native path. It
+  now keeps it on both.
+  
+  **What did not move.** Two addends, integers whose running total stays within
+  2^53, and a non-finite total give the same answer as before. Which values count
+  as addends did not change either: booleans as 1 / 0, and nulls and non-numeric
+  strings left out, as each face already had it. `count`, `min` and `max` are
+  untouched. The analytics face's pipeline dump (`result.sql`) now renders the
+  accumulator's functions by name, so a `sum` measure and an `avg` measure still
+  dump differently.
+  
+  **Residual.** PostgreSQL and MySQL add their doubles natively without
+  compensation, and the platform does not wrap that arithmetic. So over three or
+  more fractions their native path can still differ from these faces in the last
+  place. An exact `$eq` on a fractional sum compares doubles; compare with a range.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- d3f88fa: fix(driver-memory): a cube `where` `$lte` on a bare day keeps the whole day on a declared `datetime` field (#20661)
+  
+  Clause-②: no
+  
+  `MemoryAnalyticsService` put a `$lte` comparand into the field's storage form before it applied the whole-day rule for a bare-day upper bound. On a field declared `datetime` (through `syncSchema`) the storage form of `'2026-07-28'` is the instant `'2026-07-28T00:00:00.000Z'`, and the whole-day rule does not widen an instant. So `where: { created_at: { $lte: '2026-07-28' } }` compiled an inclusive bound at that midnight and dropped every row later in the named day, while `find()` with the same filter kept them. `generateSql()` echoed the same narrowed bound.
+  
+  Both exits now follow ADR-0053's order: the bare day is widened first, and only the resulting bound is converted to the storage form. On a declared `datetime` field the example compiles `created_at < '2026-07-29T00:00:00.000Z'` and answers the same rows as `find()`. On `9999-12-31`, the last supported day, a declared `datetime` field now asks only for a value (`IS NOT NULL` in the echo), as an undeclared field already did.
+  
+  Unchanged: an undeclared field, a declared `date` field, a full timestamp or `Date` comparand (inclusive, as written), and a `timeDimensions[].dateRange` end, which already widened the day before building its bounds. `$between` stays refused on this face (`INVALID_FILTER`, 400). Nothing is removed or renamed, and there is nothing to migrate.
+- 8fec76a: refactor(driver-memory): the cube face's own whole-day bound and the in-memory reference matcher are deleted; no answer a caller gets moves (#5930 step 4, #20822)
+  
+  Clause-②: no
+  
+  - **`MemoryAnalyticsService` (the cube face).** Its `where` door has run the shared `lowerFilterCondition` (`@objectstack/spec/data`) since #5930 step 3, on every column. A bare-day `$lte` therefore reaches the `lte` row already lowered: as `$lt` the next day, or as `$null: false` on `9999-12-31`. The row's own copy of that rule is deleted, and the `lte` row now compiles the comparison it is handed on both exits. The rows `query()` returns and the SQL `generateSql()` echoes are unchanged. An explicit `dateRange` end still widens a bare day through its own window arm (ADR-0053 D-D1 item 8).
+  - **The reference matcher (`memory-matcher.ts`, `match()`) is retired** (ruling D6 on #5930). No production code called it and the package never exported it: the published `dist` exports are the same 33 names before and after. `InMemoryDriver` keeps `getValueByPath`, the one helper it imported from that module. The matcher's tests now assert the live query path (`InMemoryDriver.find`), the shared filter shape gate, or the spec predicate the matcher evaluated.
+- 8460592: fix: the whole-day bound on a bare `YYYY-MM-DD` upper bound is applied at the seams only — `DatabaseLoader.queryHistory` in driver mode becomes one, the engine seam lowers type-blind for an object with no field map, and `InMemoryDriver` drops its own copy (ADR-0053 D-D1 items 5 and 7, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/metadata` — `DatabaseLoader.queryHistory` in driver mode lowers its own filter.** With a raw `IDataDriver` (`MetadataManager.setDatabaseDriver`) the history filter reaches the driver without passing any seam. The loader now runs the shared `lowerFilterCondition` (`@objectstack/spec/data`) on it, typed by the history object it syncs: `until: 'YYYY-MM-DD'` reads `recorded_at < next day`, so every version recorded on that day is kept on every driver, and an instant `until` is kept as written. Engine mode is unchanged (the engine's own `where` seam lowers it). Before this, the whole day was kept only by each driver's own copy of the rule; with `@objectstack/driver-memory`'s copy deleted below, `until` = today would have gone from every version of the day to none.
+  - **`@objectstack/objectql` — an object with no field map is lowered type-blind.** The engine's `where` seam (on `find`, `findOne`, `count`, `update`, `delete` and `aggregate`'s `where` / `aggregations[i].filter`) reads the object's declared field map and rewrites a declared `datetime` column only. For an object the registry does not hold there is no declaration to read, and the seam now applies the whole-day rules to every column (a bare-day `$lte` becomes `$lt` the next day, a `$between` splits), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the declared type. It used to leave such an object to each driver's own copy. Visible on `SqlDriver`: a bare-day `$lte` on a non-`datetime` column of an unregistered object that holds ISO instant text now keeps the whole day; a `datetime` or `date` column answers as before. An object with a field map is unchanged.
+  - **`@objectstack/driver-memory` — `InMemoryDriver` compiles the comparison it is handed.** Its four copies of the whole-day rule are deleted (the `$lte` and `$between` arms of the filter translator, the `<=` and `between` arms of the AST-node translator). A read through the engine hands it a `where` the engine's seam has already lowered, so on that path a declared `datetime` column keeps the whole named day, and a declared `date` column answers as before. A row-level security `using` filter is not lowered by the engine's seam: the security middleware ANDs it into the query's `where` after that seam has run, and only the RLS compile seam lowers it, rewriting just the columns its field guard declares `datetime`. Two answers converge on what `SqlDriver` already returns (ADR-0053 D-D1 item 7's scope): on a registered object, a bare-day `$lte` / `$between` on a declared `text` column holding ISO instant text, or on a column the object does not declare, is now compared as written, where this driver used to widen it to the whole day. One path narrows outside those two: an RLS `using` policy with a bare-day upper bound, on an object whose declared fields the security plugin cannot resolve, is compiled with no field guard, so the RLS compile seam reads no column as `datetime` and the bound reaches this driver as written, where this driver used to widen it to the whole day; that holds until #20822 group 2 makes the RLS compile seam type-blind when it has no guard. A direct `find()` that passed no seam gets the comparison it wrote (item 5); lower the filter with `lowerFilterCondition` first to keep the whole-day reading.
+- 682873d: fix(core): the refusal a filter gets for a scalar comparison or text operator on a multi-value or JSON field reads true on every backend that prints it, and reaches a REST caller whole
+  
+  Clause-②: no
+  
+  The `INVALID_FILTER` / 400 refusal `driver-sql`'s `where`, the engine's per-aggregation `filter` and `driver-memory` all print (`jsonColumnOperatorRefusalText`) explained itself with `driver-sql`'s storage ("a field this driver stores as a JSON TEXT column") and the two wrong answers SQL used to give. That is untrue on the engine and on `driver-memory`. The message was also 748 characters, and the REST envelope cuts a 4xx message at 499 plus an ellipsis, so callers on SQLite and PostgreSQL read `…Refused rather than compiled because the answ…` and never reached the sentence saying the field and the operator were withheld.
+  
+  The message now reads, on every backend, in 486 characters: `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison or text operator at a multi-value or JSON field, which it cannot test for one member.`, then the same `$contains` / `$or` of `$contains` remedy, then `For no value, use "$null" or "$empty".` (a `null` comparand such as `{ f: null }`, `$eq: null` or `$ne: null` is refused too, and `$contains` could not express it), then `The field and the operator are withheld from the message; the full diagnostic is in the server log.` The diagnostic (the server-log text, and what a filter's own author is shown) gives the same reason with the operator named, names the field, and spells the remedy with the field's name. It drops the storage and the SQL history too, and is now whole on the wire for field names up to 26 characters (it was 643 characters or more and always cut).
+  
+  Code, status, the refused operator set and the `$contains` remedy are unchanged. A client that matched on the old words `JSON TEXT column` or `Refused rather than compiled` should match on `code: "INVALID_FILTER"` instead.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

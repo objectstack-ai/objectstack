@@ -1,5 +1,264 @@
 # Changelog
 
+## 17.6.0
+
+### Minor Changes
+
+- 33b6e8b: feat(plugin-auth): a host declares its own sign-in handoff route with `hostSignInHandoff`, and the `no_sign_in_account_at_boot` boot report stops calling that deployment a dead end (#20861)
+  
+  Clause-②: yes (widening)
+  
+  `AuthPluginOptions` gains one option, `hostSignInHandoff?: boolean` (default
+  `false`). The HOST that constructs the plugin sets it when it signs people in
+  through a handoff route of its own: a route that is not a login-page provider
+  and that creates the session without writing a `sys_account` row. A hosted
+  kernel whose owner signs in through the control plane is the case it is for.
+  That owner can still sign in when the login page shows no platform sign-in
+  button:
+  
+  ```ts
+  new AuthPlugin({ /* … */ hostSignInHandoff: true });
+  ```
+  
+  With it declared, human `sys_user` rows and zero `sys_account` rows are that
+  deployment's normal state. The boot report then logs the shape at `debug` and
+  names `hostSignInHandoff` as the reason. It no longer logs an `error` saying
+  nobody can sign in. The option's only reader is that boot report.
+  
+  - It is a declaration, not a detection. The option is the only way to set it:
+    there is no environment variable or setting. Nothing infers it from an
+    environment's name, from a control plane's platform-SSO flag, or from missing
+    rows.
+  - The login page is not changed. `getPublicConfig()` returns the same value with
+    or without the option, and no provider is registered.
+  - Set it only where the host really serves such a route. On a deployment with
+    no such route, the option turns the error for a deployment nobody can sign in
+    to into a quiet `debug` line.
+  - A deployment that does not declare it gets the same report as before. That
+    includes every self-hosted deployment with no delegated sign-in path.
+
+### Patch Changes
+
+- 4d04b6b: Provenance comments in `plugin-auth` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no type, schema, export, log or refusal text, or runtime behaviour changes.
+- e47355b: Auth, webhook and outbound-delivery refusals, warnings and field help no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these three packages show to operators, administrators and callers pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/plugin-auth`: an unrecognised audience posture is refused because it must not fall through to a more permissive posture than the one intended; the `ObjectQL` adapter's case-insensitive warning says the `$ieq` operator is deliberately deferred until there is demonstrated pull for it; the `internal`-column refusal says the column is withheld from every ordinary read and recovered only through the engine's accessor; the 2FA re-enrollment errors say a re-enrolled TOTP secret may be live at sign-in without having been confirmed; the walled-owner boot warning says a declared owner is stamped verified only when an operator-provisioned path creates the account; the OTP send-budget lines name the budget without a number.
+  - `@objectstack/plugin-webhooks`: the parked-event record says the event is recorded rather than delivered unsigned (or without its authored headers) and rather than discarded without a trace; the redeliver refusals say a delivery that cannot be signed is refused rather than sent unsigned; the zero-trigger warning says the `api` trigger was removed because nothing could fire it; the seed and legacy-migration warnings say a credential is never stored in cleartext instead and that a failed migration leaves it cleartext in `definition_json`.
+  - `@objectstack/service-messaging`: the `sys_http_delivery` field help for `attempts` (in every shipped locale) says a parked row is not redeliverable because it carries no signature; the `headers_json` and `error` help and the outbox refusals drop their citations; the notification `ack()` refusal says cancelling a pending row is not part of the outbox contract until a live consumer needs it.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 432c8ab: fix(plugin-auth): the OIDC discovery documents answer on every boot, including one whose first request arrives before the auth instance is built
+  
+  Clause-②: no
+  
+  - `GET /.well-known/openid-configuration` and `GET /.well-known/oauth-authorization-server` used to be mounted only after the better-auth instance finished building, in the background. When the server answered any request before that (a readiness probe, for example), the router was already sealed. The late mount failed, the failure was logged, and both documents answered 404 until the process restarted. The RFC 8414 path-inserted alias and the two RFC 9728 protected-resource documents had the same problem.
+  - All five routes are now mounted while the auth routes are registered, before the server opens its socket. Each request waits for the auth instance and then serves the document. A route that cannot be mounted now fails the boot instead of being logged and skipped.
+  - When the OIDC provider plugin is degraded, these paths answer as they did before, as if they were not mounted. A boot-time error line still reports this.
+  - If the auth instance cannot be built, a discovery request answers a server error, and the next request tries the build again. Before, these paths kept answering 404.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- 55012df: fix(plugin-auth): the compliance-ledger rows the admin identity endpoints write record the admin's decisions, never a value of a field of the user (#21174)
+  
+  Clause-②: no
+  
+  The admin create-user and set-user-password endpoints each write their own `sys_audit_log` row beside the rows plugin-audit's CRUD mirror writes for the same call. That row's free `metadata` copied values the call had just written into fields of the user. The ledger's read side narrows the mirror's before/after snapshots to what each reader is served, but it cannot narrow free metadata without deriving masking a second time, so a ledger reader the data plane withholds one of those fields from was served its value through the explicit row.
+  
+  The explicit row now carries only the admin's decisions — which operation ran, whether the password was generated, whether the account's address is a generated placeholder, whether the membership was bound and to which organization — plus its reference to the user (`object_name` and `record_id`). The values the call writes into the user's fields are recorded where they already were: on the mirror's `create` and `update` rows for those same writes, in the snapshot columns the read side narrows per reader. The decision set is a closed type, so a field value no longer compiles into the row.
+  
+  Migration: a reader that took a user field's value from the explicit row's metadata reads it from the mirror's row for the same write instead (its after-snapshot), served according to the reader's field access. Rows written before this release are stored data and are not rewritten.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [6f1f1c1]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [eb4b17c]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [67c1b11]
+- Updated dependencies [72f8c38]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [165c1d4]
+- Updated dependencies [d7b9817]
+- Updated dependencies [f80e2a6]
+- Updated dependencies [22e584c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [7afdc5c]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [e47355b]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f115b1f]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [8f78495]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [e161ad3]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [514001a]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [bafb8c9]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [7a606a9]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [454bbb6]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [04b202e]
+- Updated dependencies [422db78]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/rest@17.6.0
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/service-messaging@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes
