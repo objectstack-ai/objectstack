@@ -15,10 +15,10 @@
  * The consumer that forced it is `packages/objectql`'s ADR-0076 lean entry.
  * `@objectstack/objectql/core` re-exports `engine.ts`, whose boot-loop
  * registrar has to mint the same registry key as this package's registrars
- * (#14399), so it imports {@link deriveViewContainerObject} rather than
+ * (commit 3c1bbd2a8), so it imports {@link deriveViewContainerObject} rather than
  * hand-copying the chain a fifth time — and reaching it through the root entry
  * made that lean closure load the manager and the filesystem machinery for a
- * function that touches neither. Measured on the built artifacts (#14680):
+ * function that touches neither. Measured on the built artifacts (commit 3bd9b3498):
  * through the root entry that call site loaded SIX extra modules into
  * `@objectstack/objectql/core`'s module-init closure —
  * `packages/metadata/dist/index.js`, `js-yaml`, `glob`, `chokidar` (two

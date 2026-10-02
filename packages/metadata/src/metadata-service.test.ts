@@ -297,7 +297,7 @@ describe('MetadataManager — IMetadataService Contract', () => {
   });
 
   // ==========================================
-  // Overlay / Customization — REMOVED (#13135, ADR-0049)
+  // Overlay / Customization — REMOVED (commit 9e0ba21a1, ADR-0049)
   // ==========================================
   //
   // The `overlay management` cases left with the manager's paper-protocol

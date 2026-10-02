@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14921 — two files sharing one stem are REFUSED, never resolved by
+ * Commit c1d274de7 — two files sharing one stem are REFUSED, never resolved by
  * extension precedence.
  *
  * ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@
  * set.
  *
  * ---------------------------------------------------------------------------
- * The rule this pins (maintainer ruling on #14921, via the director seat,
+ * The rule this pins (maintainer ruling, landed as commit c1d274de7, via the director seat,
  * 2026-09-05 — option 1 of three, verbatim 「同意」)
  * ---------------------------------------------------------------------------
  * Two files sharing a stem across the REGISTERED extensions is an authoring
@@ -123,7 +123,7 @@ beforeAll(async () => {
     await fs.writeFile(path.join(cleanDir, rel), body, 'utf-8');
   }
   // Nested twin of a FLAT name. Not a collision: a nested file is neither
-  // listed nor resolvable (#14486), so it derives no name to collide with.
+  // listed nor resolvable (commit 4b4d5a331), so it derives no name to collide with.
   await fs.writeFile(
     path.join(cleanDir, 'crm', 'solo.json'),
     JSON.stringify({ name: 'nested-solo' }),
@@ -242,7 +242,7 @@ describe('#14921 PIN 2 — one file per stem is still listed AND loadable', () =
 
   it('CONTROL: a NESTED file sharing a flat name is not a collision', async () => {
     // `crm/solo.json` sits beside a flat `solo.json`. A nested file derives no
-    // resolvable name at all (#14486), so there is nothing for it to collide
+    // resolvable name at all (commit 4b4d5a331), so there is nothing for it to collide
     // with — and treating basenames as the unit would refuse this good tree.
     const loader = loaderFor(cleanRoot);
 
@@ -280,7 +280,7 @@ describe('#14921 PIN 3 — the loadMany() two-body symptom is gone', () => {
     const bodies = await loaderFor(cleanRoot).loadMany<{ name?: string }>(TYPE);
 
     // Flat AND nested, exactly as before: this walk was never narrowed to the
-    // listed set (#14486 RECORD), and this card does not narrow it either.
+    // listed set (commit 4b4d5a331's RECORD), and this card does not narrow it either.
     expect(bodies.map(b => b.name).sort()).toEqual(['alpha', 'beta', 'nested-solo', 'solo']);
   });
 });
@@ -288,7 +288,7 @@ describe('#14921 PIN 3 — the loadMany() two-body symptom is gone', () => {
 describe('#14921 CONTROL — the refusal reads the REGISTERED extension set', () => {
   it('`dual.json` + `dual.js` is NOT ambiguous under the default set', async () => {
     // `.js` carries no registered serializer there, so it derives no name —
-    // the same reason #14486 stopped listing it.
+    // the same reason commit 4b4d5a331 stopped listing it.
     const loader = loaderFor(probeRoot);
 
     expect(await loader.list(TYPE)).toEqual(['dual']);
@@ -349,7 +349,7 @@ describe('#14921 CONTROL — a storage OUTAGE still degrades, it is not swept up
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     manager.registerLoader(new OutageLoader());
 
-    // Degraded, exactly as #14423 left it: an array, short and served.
+    // Degraded, exactly as commit a56baa2bd left it: an array, short and served.
     expect(await manager.listNames(TYPE)).toEqual([]);
   });
 

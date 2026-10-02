@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14423 items 1 and 2 — the two plural reads that disagreed, made to agree.
+ * Items 1 and 2 of the card commit a56baa2bd answered — the two plural reads that disagreed, made to agree.
  *
  * ---------------------------------------------------------------------------
  * The defects
@@ -353,7 +353,7 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
     });
 
     it("COST of the audit's by-name rung: `loadDiagnosed` is exactly ONE `findOne` per name", async () => {
-        // The other half of the #14423 cost question (the ruling's item 6).
+        // The other half of the cost question commit a56baa2bd answered (the ruling's item 6).
         // The keyed enumeration above is `{find:1, findOne:0}`; the by-name
         // rung the audit adds costs one `findOne` per name PROBED — and it
         // probes only the handlers still unaccounted for after set

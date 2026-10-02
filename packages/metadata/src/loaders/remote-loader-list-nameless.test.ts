@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #15037 — `RemoteLoader.list()` declares `Promise<string[]>` and maps a
+ * The defect commit efc5447ee fixed — `RemoteLoader.list()` declares `Promise<string[]>` and maps a
  * nameless body straight through, so `listNames()` can hand a caller a literal
  * `undefined` where the type says a `string`.
  *
@@ -31,7 +31,7 @@
  *   DatabaseLoader   `rows.map(row => row.name as string)`
  *                    `.filter(name => typeof name === 'string')`  — guarded
  *   MemoryLoader     `Array.from(typeStore.keys())`               — store keys
- *   FilesystemLoader narrowed by #14486 to names `findFile()` resolves
+ *   FilesystemLoader narrowed by commit 4b4d5a331 to names `findFile()` resolves
  *   RemoteLoader     `items.map(i => i.name)`                     — unguarded
  *
  * So the repair is `DatabaseLoader`'s guard, one file away: same directory,
@@ -39,7 +39,7 @@
  * "Refuse loudly" was NOT taken, and that is a landed decision rather than a
  * preference — `DatabaseLoader`'s guard is a silent `.filter()`, and
  * `FilesystemLoader`'s narrowing carries a maintainer ruling (via the director
- * seat on #14486, 2026-09-02, direction A, with B explicitly refused) whose
+ * seat, 2026-09-02, recorded in commit 4b4d5a331, direction A, with B explicitly refused) whose
  * own reasoning is this card's:
  *
  *   「A name in the list that `get()` answers `null` for is the silent failure
@@ -193,7 +193,7 @@ describe('#15037 RemoteLoader.list() keeps the `string[]` its signature declares
 
 describe('#15037 the repair reaches MetadataManager', () => {
   it('listNames() and get() give the same answer for every name', async () => {
-    // The #14486 shape, reused on the `RemoteLoader` face as triage asked.
+    // Commit 4b4d5a331's shape, reused on the `RemoteLoader` face as triage asked.
     // Before the guard, `listNames()` carried `undefined`, and `get()` for it
     // fetched `.../object/undefined` and answered `undefined` — the list and
     // the door disagreeing, which is the failure an author reads as their own
@@ -225,7 +225,7 @@ describe('#15037 RECORD: what this repair deliberately leaves alone', () => {
   it('RECORD: loadMany() still returns the bodies list() no longer names', async () => {
     // The guard narrows `list()` only. Filtering the body read would change
     // what `MetadataManager.loadMany()` aggregates — a different direction
-    // (#14341/#14205 fixed items going MISSING; this card is about one
+    // (commit 2e471e362 and #14205 fixed items going MISSING; this card is about one
     // APPEARING as `undefined`) and not this card's. `loadMany` keys nothing,
     // so a nameless body is still legitimately served there.
     const bodies = await loader().loadMany<Record<string, unknown>>(TYPE);
