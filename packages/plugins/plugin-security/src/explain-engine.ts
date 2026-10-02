@@ -50,6 +50,13 @@ import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledPolicyNameOf } from './rls-compiler.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
+  declaredJsonStoredColumns,
+  findJsonColumnCheckRefusal,
+  jsonColumnCheckRefusalError,
+  type DeclaredJsonStoredColumns,
+  type JsonColumnCheckRefusal,
+} from './rls-check-stored-form.js';
+import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
@@ -892,23 +899,53 @@ function policyMembersOf(node: unknown): unknown[] {
 }
 
 /**
- * [#20431] The names of the policies in a compiled business-RLS filter that
- * carry a refused field-to-field comparison — the attribution the RLS write
- * check logs for the same refusal. The composed filter is one policy's filter,
- * `{ $or: [...] }` of them, or (the object-level pass, #20604) either one
- * `$and`-composed beside the tenant wall or a delegator's filter;
- * `compiledPolicyNameOf` recognises each policy by identity
- * ({@link policyMembersOf}).
+ * [#20431] The names of the policies in a compiled row filter whose own filter
+ * `refuses` — the attribution the RLS write check logs for the same refusal.
+ * The composed filter is one policy's filter, `{ $or: [...] }` of them, or (the
+ * object-level pass, #20604) either one `$and`-composed beside the tenant wall
+ * or a delegator's filter; `compiledPolicyNameOf` recognises each policy by
+ * identity ({@link policyMembersOf}).
+ *
+ * [#21319] `refuses` is the rule of the refusal being answered: the spec's
+ * comparison-class rule for a field-to-field comparison, the JSON-column rule
+ * for an operator the read refuses on a declared JSON-stored column.
  */
 function refusedPolicyNamesOf(
   filter: Record<string, unknown>,
-  fields: NonNullable<MatchesFilterOptions['fields']>,
+  refuses: (member: Record<string, unknown>) => boolean,
 ): string[] {
   const names = policyMembersOf(filter)
-    .filter((m) => findCrossFieldClassRefusal(m as Record<string, unknown>, fields) !== null)
+    .filter((m) => refuses(m as Record<string, unknown>))
     .map((m) => compiledPolicyNameOf(m) ?? '(unnamed)');
   return [...new Set(names)];
 }
+
+/**
+ * [#20431] Who carries a refused filter, as explain's refusal names it: the
+ * policies {@link refusedPolicyNamesOf} found, or the filter itself when it
+ * found none.
+ */
+function refusalSubjectOf(object: string, policies: readonly string[]): string {
+  return policies.length === 0
+    ? `A row-level filter on '${object}'`
+    : `The row-level security ${policies.length === 1 ? 'policy' : 'policies'} ` +
+      `${policies.map((p) => `'${p}'`).join(', ')} on '${object}'`;
+}
+
+/**
+ * [#20431] Why explain answers with a refusal and no verdict. The last sentence
+ * of every refusal explain gives, so it is the part a long subject may cut.
+ */
+const EXPLAIN_ANSWERS_THE_REFUSAL =
+  'Enforcement refuses every request this filter scopes (the find answers INVALID_FILTER / 400), so explain answers ' +
+  'with the same refusal and reports no verdict.';
+
+/**
+ * [#21319] How explain's JSON-column refusal names the filters it judged in
+ * the refusal's `path` ({@link findJsonColumnCheckRefusal}): the row filters a
+ * read runs under, which the report calls `rowFilter`.
+ */
+const ROW_FILTER_ROOT = 'rowFilter';
 
 /**
  * [#20431] What explain answers when the record matcher refuses a
@@ -940,17 +977,59 @@ function crossFieldRefusalForExplain(
   fields: NonNullable<MatchesFilterOptions['fields']>,
 ): Error {
   const policies = filter !== null && typeof filter === 'object'
-    ? refusedPolicyNamesOf(filter as Record<string, unknown>, fields)
+    ? refusedPolicyNamesOf(filter as Record<string, unknown>, (m) => findCrossFieldClassRefusal(m, fields) !== null)
     : [];
-  const subject = policies.length === 0
-    ? `A row-level filter on '${object}'`
-    : `The row-level security ${policies.length === 1 ? 'policy' : 'policies'} ` +
-      `${policies.map((p) => `'${p}'`).join(', ')} on '${object}'`;
   const err = new Error(
     'Compare a field only with a field of the same class, or fix the declaration of the one that is ' +
-      `declared with the wrong type. ${subject} cannot be evaluated: ${refusal.diagnostic}. Enforcement ` +
-      'refuses every request this filter scopes (the find answers INVALID_FILTER / 400), so explain answers ' +
-      'with the same refusal and reports no verdict.',
+      `declared with the wrong type. ${refusalSubjectOf(object, policies)} cannot be evaluated: ` +
+      `${refusal.diagnostic}. ${EXPLAIN_ANSWERS_THE_REFUSAL}`,
+  );
+  const { code, status } = cause as { code?: string; status?: number };
+  return Object.assign(err, { code, status, cause });
+}
+
+/**
+ * [#21319] What explain answers when a row filter aims an operator the read
+ * refuses at a column the object declares JSON-stored: the read's refusal.
+ *
+ * The read a policy scopes is compiled by the driver, which refuses
+ * `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, and implicit
+ * equality, on such a column with `INVALID_FILTER` / 400 whatever the rows; the
+ * RLS write check refuses the same operators since #21254. The record matcher
+ * would evaluate them instead, so explain answered `visible: true`, decided by
+ * the policy, for a record whose find was refused. The rule is the write
+ * check's, imported ({@link findJsonColumnCheckRefusal}): one operator set and
+ * one traversal for the three judges of one policy, and ⛔ no copy of either.
+ *
+ * The shape is {@link crossFieldRefusalForExplain}'s, so explain gives one
+ * answer shape for every refusal: a thrown error with no decision, carrying
+ * the refusal as its `cause` and taking its code and status from it. The
+ * cause is the error the write check throws for the same refusal (core's
+ * message, the read's envelope), so the envelope has one constructor here.
+ *
+ * The message is core's diagnostic (`jsonColumnOperatorRefusalText`), which
+ * names the field and the operator, then the policy that carries it, for the
+ * reason the cross-class refusal names its columns: explain publishes the
+ * same predicate to the same caller. Core's own message withholds both and
+ * points to the server log; explain logs nothing, so that sentence would be
+ * false here. The diagnostic leads because it holds the remedy: its length
+ * grows only with the field's name, while the subject lists every refusing
+ * policy, so under the REST door's bound a subject-first order would cut the
+ * remedy for long policy names. The subject and the reason come last.
+ */
+function jsonColumnRefusalForExplain(
+  refusal: JsonColumnCheckRefusal,
+  object: string,
+  filter: Record<string, unknown>,
+  jsonStored: DeclaredJsonStoredColumns,
+): Error {
+  const cause = jsonColumnCheckRefusalError(refusal);
+  const policies = refusedPolicyNamesOf(
+    filter,
+    (m) => findJsonColumnCheckRefusal([m], jsonStored, ROW_FILTER_ROOT) !== null,
+  );
+  const err = new Error(
+    `${refusal.diagnostic} ${refusalSubjectOf(object, policies)} cannot be evaluated. ${EXPLAIN_ANSWERS_THE_REFUSAL}`,
   );
   const { code, status } = cause as { code?: string; status?: number };
   return Object.assign(err, { code, status, cause });
@@ -961,6 +1040,15 @@ function crossFieldRefusalForExplain(
  * refusal answered the way explain answers it: a field-to-field comparison of
  * no shared comparison class becomes {@link crossFieldRefusalForExplain}, and
  * any other refusal of the matcher's propagates as the matcher raised it.
+ *
+ * [#21319] Before the matcher reads the record, the filter is judged by the
+ * JSON-column rule the read and the write check apply: an operator in
+ * `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, or implicit equality, aimed at a column
+ * the object declares JSON-stored becomes {@link jsonColumnRefusalForExplain}.
+ * It reads the declaration, never the record, so it refuses for every record
+ * or for none. What still answers on such a column is unchanged: the
+ * membership pair (`$contains` / `$notContains`) and the presence predicates.
+ * No declared columns → no JSON-stored column → no judgement, as before.
  */
 function matchUnderDeclaredColumns(
   record: Record<string, unknown>,
@@ -968,6 +1056,12 @@ function matchUnderDeclaredColumns(
   object: string,
   declaredColumns: MatchesFilterOptions | undefined,
 ): boolean {
+  if (filter !== null && typeof filter === 'object') {
+    const node = filter as Record<string, unknown>;
+    const jsonStored = declaredJsonStoredColumns(declaredColumns);
+    const jsonRefusal = findJsonColumnCheckRefusal([node], jsonStored, ROW_FILTER_ROOT);
+    if (jsonRefusal) throw jsonColumnRefusalForExplain(jsonRefusal, object, node, jsonStored);
+  }
   try {
     return matchesFilterCondition(record, filter as any, declaredColumns);
   } catch (e) {
@@ -1002,6 +1096,13 @@ function matchUnderDeclaredColumns(
  * the `cause` are the record-grained pass's. It is asked only when the spec's
  * classification finds a refused comparison, so no filter the find runs is
  * evaluated here. No declared columns → no judgement, as before.
+ *
+ * [#21319] The same holds for an operator the read refuses on a declared
+ * JSON-stored column, measured the same way: the object-level report said
+ * `allowed: true` with `rls` `narrows` for every operation, and a record id no
+ * row carries was reported `visible: false`, while the find answered 400. So
+ * the JSON-column rule ({@link findJsonColumnCheckRefusal}) is the second
+ * classification that asks {@link matchUnderDeclaredColumns}, which answers it.
  */
 function refuseWhatTheMatcherRefuses(
   filter: unknown,
@@ -1010,7 +1111,11 @@ function refuseWhatTheMatcherRefuses(
 ): void {
   const fields = declaredColumns?.fields;
   if (!fields || filter === null || typeof filter !== 'object') return;
-  if (findCrossFieldClassRefusal(filter as Record<string, unknown>, fields) === null) return;
+  const node = filter as Record<string, unknown>;
+  if (
+    findCrossFieldClassRefusal(node, fields) === null &&
+    findJsonColumnCheckRefusal([node], declaredJsonStoredColumns(declaredColumns), ROW_FILTER_ROOT) === null
+  ) return;
   matchUnderDeclaredColumns({}, filter, object, declaredColumns);
 }
 
@@ -1082,6 +1187,10 @@ async function applyRecordAttribution(
   // it already answers the matcher's other `INVALID_FILTER` refusals: the
   // explanation fails with the envelope the find fails with, and no record
   // verdict is reported.
+  // [#21319] The same answer, by the same seam, for an operator the read
+  // refuses on a column the object declares JSON-stored (a multi-valued field,
+  // or a structured-JSON type): `matchUnderDeclaredColumns` judges it before
+  // the matcher reads the record.
   const matches = (filter: unknown): boolean | undefined => {
     if (!recordExists) return undefined;
     if (filter == null) return true;

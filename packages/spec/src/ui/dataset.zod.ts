@@ -276,9 +276,11 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `31971ff1e`; re-derived at that pin 2026-10-01 — `dataset-format.ts` and
-   * `date-display.ts` are byte-identical to `e420df310`, so every anchor below
-   * held unmoved and was re-READ in place. At `e420df310` (2026-09-30)
+   * `89cad75d5`; re-derived at that pin 2026-10-02 — `dataset-format.ts` and
+   * `date-display.ts` are byte-identical to `31971ff1e`, so every anchor below
+   * held unmoved and was re-READ in place. At `31971ff1e` (2026-10-01) both
+   * files were byte-identical to `e420df310`, so every anchor held unmoved and
+   * was re-READ in place. At `e420df310` (2026-09-30)
    * `dataset-format.ts` was byte-identical to `db11afd49`, so `formatMeasureDate` `:229-263`, its call
    * at `:369` and its datetime arm `:259`-`:261` did not move and were re-READ
    * in place, and `date-display.ts` changed (+68/-1, objectui `858eafb4f`,

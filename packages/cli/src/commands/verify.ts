@@ -35,6 +35,7 @@ import {
   errorCodeFields,
   isReportedError,
 } from '../utils/format.js';
+import { reserveStdoutForJson } from '../utils/json-stdout.js';
 
 /**
  * Should this `os verify` run boot an org-scoped (multi-tenant) stack?
@@ -131,6 +132,26 @@ export default class Verify extends Command {
    */
   async run(): Promise<void> {
     const { flags } = await this.parse(Verify);
+
+    // [#21324] Under `--json`, stdout is the report's channel and nothing
+    // else's: the payload leaves through `emitJson` (the real stdout), and
+    // every other byte written to `process.stdout` for the rest of this run is
+    // forwarded to stderr. Measured on a clean stack that reaches the runtime
+    // stage, 318 lines landed on stdout ahead of the document, from three
+    // independent writers — the kernel's `ObjectLogger` (174 lines, 5 of them
+    // WARN: `info`/`warn` go to stdout by design, `packages/core/src/logger.ts`),
+    // the ObjectQL registry's `console.log` (143 `[Registry] Installed
+    // package: …` lines) and `HonoServerPlugin`'s `console.log` on stop. A
+    // kernel logger level reaches only the first, and `silent` would throw the
+    // degraded-boot WARN lines away with it; the stream reservation reaches all
+    // three and destroys nothing — the route `bootSchemaStack` took for the
+    // same defect (commit 2b641ddd4, `../utils/json-stdout.ts`).
+    //
+    // Taken before `loadConfig`, so nothing the run prints can precede it, and
+    // never released: `os verify` is one-shot, its last act is the payload and
+    // the exit, and a booted stack's late timers must not land under the
+    // document. The text face owns stdout and takes no reservation.
+    if (flags.json) reserveStdoutForJson();
 
     try {
       await this.runVerification(flags);
@@ -264,7 +285,10 @@ export default class Verify extends Command {
       (rls?.positionCoverage.notRun.length ?? 0);
 
     if (flags.json) {
-      this.log(JSON.stringify({ app: crud.app, config: absolutePath, multiTenant, crud, rls, hardFailures }, null, 2));
+      // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
+      // report has to leave through the real stream — and awaiting the write
+      // drains a report larger than one pipe buffer before `this.exit` below.
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, hardFailures });
     } else {
       this.log(formatReport(crud));
       if (rls) this.log(formatRlsReport(rls));

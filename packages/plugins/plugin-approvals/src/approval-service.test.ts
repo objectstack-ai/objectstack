@@ -3587,6 +3587,142 @@ describe('ApprovalService — participant visibility (#3590)', () => {
   });
 });
 
+// ── "My Pending" reads the acting path's position addresses (#21350) ───
+//
+// A request routed to a position nobody held when it opened keeps the literal
+// `position:<p>` slot (a 15.x-era one reads `role:<p>`), and the console asks
+// "My Pending" under `role:<p>`. `resolveActor` has always admitted a holder of
+// `p` under either spelling, but the list filter matched the caller's
+// `approverId` literally and the participant gate keyed on the user id alone —
+// so the request was missing from the inbox of the very user who could decide
+// it. All three now read ONE equivalence (`approver-address.ts`).
+describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+  };
+  /** A signed-in caller whose server-resolved `positions` are `positions`. */
+  const holding = (userId: string, positions: unknown[]) =>
+    ({ userId, tenantId: 't1', positions, permissions: [] }) as any;
+  /** Staffed into the routed position; neither the submitter nor an admin. */
+  const REVIEWER = holding('u_reviewer', ['sales_manager']);
+  /** Holds a position — just not the routed one. */
+  const BYSTANDER = holding('u_bystander', ['finance']);
+  const SPELLINGS = ['role:sales_manager', 'position:sales_manager'] as const;
+
+  /** Routed to a position the fake directory staffs with nobody → a literal slot. */
+  const routedTo = (type: 'position' | 'role', value = 'sales_manager') => ({
+    object: 'opportunity', recordId: 'opp1', runId: 'run_1', nodeId: 'approve_step',
+    flowName: 'deal_approval',
+    config: { approvers: [{ type: type as any, value }], behavior: 'first_response' as const },
+    record: { id: 'opp1', amount: 100 },
+  });
+  /** Open the scene. An empty slate under the default policy still opens a row; an auto-approval is a broken scene. */
+  const open = async (svc: ApprovalService, input: ReturnType<typeof routedTo>) => {
+    const out = await svc.openNodeRequest(input, CTX);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
+
+  it('a holder of the position finds the request under EITHER spelling — list, count and the request itself', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position')); // submitter u1
+    expect(req.pending_approvers).toEqual(['position:sales_manager']);
+
+    for (const spelling of SPELLINGS) {
+      // The console's own identity list: user id, then the position address.
+      const filter = { status: 'pending' as const, approverId: ['u_reviewer', spelling] };
+      const listed = await svc.listRequests(filter, REVIEWER);
+      expect(listed.map(r => r.id), `listed under '${spelling}'`).toEqual([req.id]);
+      expect(await svc.countRequests(filter, REVIEWER), `counted under '${spelling}'`).toBe(1);
+    }
+    expect(await svc.getRequest(req.id, REVIEWER)).not.toBeNull();
+  });
+
+  it('a 15.x-era `role:` slot is found under the `position:` spelling too', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    // `role` is the deprecated approver type; its literal keeps the authored spelling.
+    const req = await open(svc, routedTo('role'));
+    expect(req.pending_approvers).toEqual(['role:sales_manager']);
+
+    for (const spelling of SPELLINGS) {
+      const listed = await svc.listRequests({ status: 'pending', approverId: ['u_reviewer', spelling] }, REVIEWER);
+      expect(listed.map(r => r.id), `listed under '${spelling}'`).toEqual([req.id]);
+    }
+  });
+
+  it('negative control: a user who does not hold the position sees nothing, under either spelling', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position'));
+
+    for (const spelling of SPELLINGS) {
+      const filter = { status: 'pending' as const, approverId: ['u_bystander', spelling] };
+      expect(await svc.listRequests(filter, BYSTANDER), `listed under '${spelling}'`).toEqual([]);
+      expect(await svc.countRequests(filter, BYSTANDER), `counted under '${spelling}'`).toBe(0);
+    }
+    expect(await svc.listRequests(undefined, BYSTANDER)).toEqual([]);
+    expect(await svc.getRequest(req.id, BYSTANDER)).toBeNull();
+  });
+
+  it('negative control: a spelling the acting path does not admit folds onto nothing', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position'));
+
+    // SYS sees every row, so a miss here is the FILTER's verdict alone.
+    expect((await svc.listRequests({ approverId: 'role:sales_manager' }, SYS)).map(r => r.id)).toEqual([req.id]);
+    for (const address of ['team:sales_manager', 'org_membership_level:sales_manager', 'sales_manager']) {
+      expect(await svc.listRequests({ approverId: address }, SYS), `'${address}' must not fold`).toEqual([]);
+    }
+  });
+
+  it('the acting path is unchanged: the holder decides under the stored spelling, the bystander is refused', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, routedTo('position'));
+
+    await expect(
+      svc.decideNode(req.id, { decision: 'approve', actorId: 'position:sales_manager' }, BYSTANDER),
+    ).rejects.toThrow(/^FORBIDDEN: cannot act as 'position:sales_manager'/);
+
+    const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'position:sales_manager' }, REVIEWER);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+  });
+
+  // `resolveActor` must admit EXACTLY what it admitted before the equivalence
+  // moved into `approver-address.ts`. The oracle is the pre-extraction
+  // predicate, verbatim; the matrix crosses both spellings with near misses and
+  // with position names that contain a prefix themselves.
+  it('resolveActor admits exactly the identities the pre-extraction predicate admitted', async () => {
+    const svc = svcFor(makeFakeEngine());
+    const preExtraction = (named: string, positions: unknown[]) =>
+      positions.some((position) => named === `position:${position}` || named === `role:${position}`);
+    const NAMED = [
+      'position:cfo', 'role:cfo', 'team:cfo', 'org_membership_level:cfo', 'positions:cfo', 'Position:cfo',
+      'cfo', 'position:', 'role:', 'position:role:cfo', 'role:position:cfo', 'position:cfo ', 'u_other',
+    ];
+    const POSITION_SETS: unknown[][] = [[], ['cfo'], ['finance', 'cfo'], ['role:cfo'], ['position:cfo'], [''], [7]];
+    let admittedCount = 0;
+    for (const positions of POSITION_SETS) {
+      for (const named of NAMED.concat(['position:7', 'role:7'])) {
+        const admitted = await (svc as any).resolveActor(named, holding('u_caller', positions)).then(
+          (actor: string) => { expect(actor).toBe(named); return true; },
+          (err: Error) => { expect(err.message).toMatch(/^FORBIDDEN: cannot act as /); return false; },
+        );
+        expect(admitted, `named '${named}' with positions ${JSON.stringify(positions)}`)
+          .toBe(preExtraction(named, positions));
+        if (admitted) admittedCount++;
+      }
+    }
+    // Both arms of the matrix are exercised — not a sweep of refusals only.
+    expect(admittedCount).toBeGreaterThan(5);
+  });
+});
+
 // ── The ordering invariant the dead-run sweep rests on (#3456) ─────────
 //
 // `releaseDeadRunRequests` recalls a PENDING request whose owning run has
