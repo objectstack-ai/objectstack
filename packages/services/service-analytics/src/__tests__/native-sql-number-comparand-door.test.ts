@@ -37,20 +37,23 @@
  * with it, and which strategy answered; every narrowing cell asserts the
  * native statement bound the numbers the engine handed its driver.
  *
- * ## Two cells the engine face does not answer with this verdict
+ * ## One cell the engine face does not answer with this verdict
  *
- * Pinned on the native face alone ({@link NATIVE_ONLY_CELLS}), each measured
- * on both faces:
+ * Pinned on the native face alone ({@link NATIVE_ONLY_CELLS}), measured on
+ * both faces: a relationship-path member (`account_credit`, the cube dimension
+ * over `account.credit`). The engine face refuses every cross-object filter
+ * (`INVALID_FIELD` / 400, "cannot evaluate a cross-object filter"), so it never
+ * reaches a comparand. The native face joins, and judges the member at the
+ * related object's declared column.
  *
- * - A relationship-path member (`account_credit`, the cube dimension over
- *   `account.credit`): the engine face refuses every cross-object filter
- *   (`INVALID_FIELD` / 400, "cannot evaluate a cross-object filter"), so it
- *   never reaches a comparand. The native face joins, and judges the member at
- *   the related object's declared column.
- * - An array at an ordering operator (`$gt: [10]`): the shared analytics
- *   lowering hands the engine the list's first member, so the engine door
- *   never sees the array (the engine face answered 200, 2). The spec's verdict
- *   refuses a list where one number belongs, and the native face answers it.
+ * [#21448] A second cell stood here: an array at an ordering operator
+ * (`$gt: [10]`), which the shared analytics lowering handed the engine as its
+ * first member (the engine face answered 200, 2) while the native face refused
+ * it with this verdict. The shared comparand-shape face now refuses a list at
+ * every scalar operator, whatever the column type, before either face's
+ * verdict runs, so that cell is a both-faces pin in {@link CELLS}, answered in
+ * the face's words, and this verdict's `array` arm is no longer reached at a
+ * scalar operator.
  *
  * Each filter handed in is deep-frozen, and so is each registered dataset's
  * own `filter` and its measures' `filter`s: narrowing is copy-on-write, so an
@@ -188,6 +191,11 @@ const CELLS: ReadonlyArray<readonly [filter: unknown, engine: Answer, label: str
   [{ $or: [{ amount: 'abc' }, { note: 'x' }] }, REFUSED, 'under $or'],
   [{ price: 'abc' }, REFUSED, 'a currency field'],
   [{ share: 'abc' }, REFUSED, 'a percent field'],
+  // [#21448] A list where one number belongs: the shared comparand-shape face
+  // refuses it before either face's verdict runs, whatever the column type.
+  // Pinned on the native face alone until then, because the engine face
+  // answered 200, 2 — the analytics lowering handed the engine the first member.
+  [{ amount: { $gt: [10] } }, REFUSED, 'a list where one number belongs'],
   // Not the verdict's subject: the null tests.
   [{ amount: null }, 0, 'the null test'],
   [{ amount: { $ne: null } }, 3, 'the negated null test'],
@@ -201,7 +209,6 @@ const CELLS: ReadonlyArray<readonly [filter: unknown, engine: Answer, label: str
 const NATIVE_ONLY_CELLS: ReadonlyArray<readonly [filter: unknown, native: Answer, binds: readonly unknown[] | null, label: string]> = [
   [{ account_credit: 'abc' }, REFUSED, null, 'a relationship path, judged at the related object\'s number column'],
   [{ account_credit: { $gt: '100' } }, 2, [100], 'a relationship path, narrowed at the related object\'s number column'],
-  [{ amount: { $gt: [10] } }, REFUSED, null, 'a list where one number belongs'],
 ];
 
 /** Narrowing cells: the native statement binds exactly the numbers the engine handed its driver. */
@@ -301,7 +308,9 @@ for (const cell of DRIVER_CELLS) {
         } else {
           expect(viaNative.rawSql, 'refused before any statement ran').toBe(0);
           const message = (viaNative.answer as { message?: string }).message ?? '';
-          expect(message).toContain(`'${member}'`);
+          // The number verdict quotes the member '…'; the shared comparand-shape
+          // face, which answers a list first (#21448), quotes it "…".
+          expect([`'${member}'`, `"${member}"`].some((quoted) => message.includes(quoted)), message).toBe(true);
           expect(message).toContain('where');
         }
         return viaNative;
