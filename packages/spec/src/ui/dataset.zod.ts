@@ -9,7 +9,12 @@ import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
-import { ANALYTICS_COLUMN_PATH, ANALYTICS_COLUMN_REFERENCE } from '../data/analytics-column-reference';
+import {
+  ANALYTICS_COLUMN_PATH,
+  ANALYTICS_COLUMN_REFERENCE,
+  rowWildcardOutsideCount,
+  rowWildcardOutsideCountRefusal,
+} from '../data/analytics-column-reference';
 
 /**
  * Analytics Dataset — the one semantic layer (ADR-0021).
@@ -98,11 +103,12 @@ const DATASET_NO_SQL =
  * empty `field` (it skips one); a stored `count` measure with `field: ''` is
  * repaired on load by the D2 conversion `dataset-count-measure-empty-field-removed`.
  *
- * A measure admits the row wildcard `'*'` (a count's `COUNT(*)`); a dimension
- * does not — the restriction, and its measurement, are stated on
- * {@link ANALYTICS_COLUMN_PATH}. An empty string is refused on both: on a
- * measure the wildcard's spelling is `'*'` or no `field` at all, and on a
- * dimension it names nothing to group by.
+ * A measure admits the row wildcard `'*'` (a count's `COUNT(*)`) under
+ * `aggregate: 'count'` only — the measure's refinement asks the one shared
+ * predicate (#21409); a dimension does not admit it at all. Both restrictions,
+ * and their measurements, are stated in `../data/analytics-column-reference.ts`.
+ * An empty string is refused on both: on a measure the wildcard's spelling is
+ * `'*'` or no `field` at all, and on a dimension it names nothing to group by.
  */
 const DATASET_FIELD_EXPRESSION_REFUSED =
   'A SQL expression there names no single field, so no platform check can judge which fields it reads, '
@@ -239,15 +245,16 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
   aggregate: AggregationFunction.optional().describe('Aggregation (sum/avg/count/...); omit when `derived` is set')
     .meta({ title: 'Aggregate' }),
   /**
-   * Base field, or `relationship[.relationship].field` path, or `'*'`. Optional
-   * for `count` (count(*)). A column reference only (#21220, see
-   * `DATASET_FIELD_EXPRESSION_REFUSED`): a SQL expression or an empty string is
-   * refused at parse.
+   * Base field, or `relationship[.relationship].field` path, or `'*'` for a
+   * `count`. Optional for `count` (count(*)). A column reference only (#21220,
+   * see `DATASET_FIELD_EXPRESSION_REFUSED`): a SQL expression or an empty string
+   * is refused at parse, and `'*'` under any other aggregate is refused by the
+   * schema's refinement below (#21409).
    */
   field: z.string()
     .regex(ANALYTICS_COLUMN_REFERENCE, { error: () => DATASET_MEASURE_FIELD_NOT_COLUMN })
     .optional()
-    .describe('Aggregated field: a base field, a relationship path, or "*"; optional for count(*). Never a SQL expression.')
+    .describe('Aggregated field: a base field, a relationship path, or "*" for a count; optional for count(*). Never a SQL expression.')
     .meta({ title: 'Field' }),
   /**
    * Measure-scoped filter (e.g. only won deals for "won_amount"). [#20080] A
@@ -395,6 +402,21 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     /** Names of other measures in this dataset (2+ for ratio/difference). */
     of: z.array(SnakeCaseIdentifierSchema).min(1),
   }).optional().meta({ title: 'Derived From' }),
+}).superRefine((measure, ctx) => {
+  // [#21409] `'*'` is the row wildcard a `count` aggregates (`COUNT(*)`), and
+  // only a `count` consumes it: under any other aggregate — or none, as on a
+  // `derived` measure — it names no column. Measured at
+  // `POST /analytics/dataset/query` before this rule: `{ aggregate: 'sum',
+  // field: '*' }` compiled to `SUM(*)` and answered 500 on both strategies.
+  // Cross-field, so a refinement (a declared dropped-refinement site). The rule
+  // is the ONE predicate the cube measure calls too (`MetricSchema`).
+  if (rowWildcardOutsideCount(measure.field, measure.aggregate)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['field'],
+      message: rowWildcardOutsideCountRefusal('measures[].field', 'aggregate', measure.aggregate),
+    });
+  }
 }));
 
 /**
