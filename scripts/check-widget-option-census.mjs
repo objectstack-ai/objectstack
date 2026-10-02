@@ -26,9 +26,15 @@
  * renderer, and WARNED ABOUT here: a false positive on legal metadata, which is
  * the shape that gets a diagnostic deleted by the next person who hits it.
  *
- * The reverse direction is not a defect: `description` is genuinely undeclared
- * in the schema and genuinely written into `options` by `translateDashboard`.
- * So this gate asserts an ASYMMETRY, never an equality -- see NON_DECLARED_MEMBERS.
+ * The reverse direction -- a census member the schema does not declare -- is
+ * legal only through a ledger row naming the code that writes it
+ * (NON_DECLARED_MEMBERS). So this gate asserts an ASYMMETRY, never an
+ * equality. The ledger is EMPTY today: its one row was `description`, the
+ * metric sub-caption `translateDashboard` overlaid from a `subCaption` bundle
+ * entry, and #21257 (ruling C on objectui#11389) retired that channel at both
+ * ends, so the key left the census with its writer. An empty ledger is what
+ * makes the gate assert that nothing writes an undeclared key into `options`:
+ * `description` returning to the census reads UNDECLARED-AND-UNLEDGERED.
  *
  * ## Why a gate script rather than a test in the package
  *
@@ -90,8 +96,9 @@
  * Importing it would make this gate claim `packages/objectql/src/engine.ts`,
  * `packages/runtime/src/app-plugin.ts`, `examples/app-showcase/src/coverage.ts`
  * and five more as its population -- a fabricated watch hint on eight files it
- * never opens, named to every dispatch that touches them. The three files this
- * gate reads are spelled below as literals, and they are the whole population.
+ * never opens, named to every dispatch that touches them. The files this gate
+ * reads are spelled below as literals, and they are the whole population: the
+ * spec and the parser, plus each ledger row's evidence file (none since #21257).
  *
  * ## Zero is a refusal, never a pass
  *
@@ -147,22 +154,22 @@ const CENSUS_NAME = 'CONSUMED_WIDGET_OPTION_KEYS';
  * in the census, must still be absent from the schema, and its witness must
  * still be present in code (not prose) in the file named.
  *
- * ⛔ Do not "align the two sides" by deleting `description` from the census.
- * It is a real read site in this repo, and removing it would make
- * `translateDashboard`'s own output warn.
+ * Empty since #21257. Its one row was `description` -- the metric sub-caption
+ * channel, written by `translateDashboard` (witness `description: subCaption`
+ * in `packages/spec/src/system/i18n-resolver.ts`) -- and ruling C on
+ * objectui#11389 retired that channel at both ends: the overlay is gone, the
+ * `subCaption` bundle key is a tombstone, and a widget keeps one authored
+ * description, `widget.description`. The row left WITH the key, as its own
+ * `WITNESS GONE` text prescribes. ⛔ Do not re-add `description` to the census
+ * without a writer to witness: the ruling brings a sub-caption back, if ever,
+ * as a declared widget-level key outside `options`, never as
+ * `options.description`.
+ *
+ * The self-test drives the row checks with a fixture ledger (`judge`'s
+ * `ledger` parameter), so the mechanism stays proven while the real table is
+ * empty.
  */
-const NON_DECLARED_MEMBERS = [
-  {
-    key: 'description',
-    evidence: 'packages/spec/src/system/i18n-resolver.ts',
-    witness: 'description: subCaption',
-    why:
-      'the metric sub-caption channel: `translateDashboard` writes the resolved '
-      + '`subCaption` into the widget\'s `options.description`, documented on '
-      + '`WidgetLike.options`. Undeclared in the schema on purpose -- it is a '
-      + 'RESOLVER output, not an authorable query key.',
-  },
-];
+const NON_DECLARED_MEMBERS = [];
 
 // ── Source reading ──────────────────────────────────────────────────────────
 
@@ -366,7 +373,7 @@ export function censusKeys(source) {
  *
  * `evidence` maps a ledger row's `evidence` path to its source text.
  */
-export function judge({ spec, parser, evidence = {} }) {
+export function judge({ spec, parser, evidence = {}, ledger = NON_DECLARED_MEMBERS }) {
   const problems = [];
 
   const declared = declaredKeys(spec);
@@ -408,7 +415,7 @@ export function judge({ spec, parser, evidence = {} }) {
   }
 
   // ── The other direction, which is legal only through a ledger row ─────────
-  const ledgerByKey = new Map(NON_DECLARED_MEMBERS.map((r) => [r.key, r]));
+  const ledgerByKey = new Map(ledger.map((r) => [r.key, r]));
   for (const key of census.keys) {
     if (declaredSet.has(key) || ledgerByKey.has(key)) continue;
     problems.push(
@@ -416,13 +423,13 @@ export function judge({ spec, parser, evidence = {} }) {
       + `    does not declare it and NON_DECLARED_MEMBERS in ${SELF} does not record it.\n`
       + '    A census member with no schema declaration needs a real write site: name the\n'
       + '    file and the witness in NON_DECLARED_MEMBERS, or remove the key. An unrecorded\n'
-      + '    one reads exactly like `description` and is how a second exemption arrives\n'
-      + '    without anyone deciding it should.',
+      + '    one is how an exemption arrives without anyone deciding it should -- the way\n'
+      + '    `description`, the retired metric sub-caption, would come back.',
     );
   }
 
   // ── Both ends of every ledger row ─────────────────────────────────────────
-  for (const row of NON_DECLARED_MEMBERS) {
+  for (const row of ledger) {
     if (!censusSet.has(row.key)) {
       problems.push(
         `STALE LEDGER ROW: NON_DECLARED_MEMBERS records \`${row.key}\`, which is no longer in\n`
@@ -557,12 +564,28 @@ const censusFixture = (keys) =>
   + '];\n';
 
 const CENSUS_FIXTURE = censusFixture([
-  'dateGranularity', 'description', 'limit', 'sortBy', 'sortOrder', 'stageOrder',
+  'dateGranularity', 'limit', 'sortBy', 'sortOrder', 'stageOrder',
 ]);
 
-const EVIDENCE_FIXTURE = {
-  'packages/spec/src/system/i18n-resolver.ts':
-    'if (subCaption) next.options = { ...w.options, description: subCaption };\n',
+/**
+ * A FIXTURE ledger row, so the row checks stay proven while the real
+ * NON_DECLARED_MEMBERS is empty (#21257 retired its one row). The key and the
+ * writer are invented on purpose: a real-looking row here would read as a
+ * claim about the tree.
+ */
+const FIXTURE_LEDGER_ROW = {
+  key: 'fixtureCaption',
+  evidence: 'fixture/widget-writer.ts',
+  witness: 'fixtureCaption: resolved',
+  why: 'self-test fixture: an undeclared key a resolver writes into `options`.',
+};
+
+/** The base tree plus one ledgered, witnessed, non-declared census member. */
+const LEDGERED = {
+  spec: SPEC_FIXTURE,
+  parser: censusFixture(['dateGranularity', 'fixtureCaption', 'limit', 'sortBy', 'sortOrder', 'stageOrder']),
+  evidence: { 'fixture/widget-writer.ts': 'next.options = { ...w.options, fixtureCaption: resolved };\n' },
+  ledger: [FIXTURE_LEDGER_ROW],
 };
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -601,11 +624,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a property commented OUT on a line → GREEN': 1,
   'key-shaped text inside a .describe() STRING → GREEN': 1,
   'a nested inline z.object({}) → the reader still reaches the LAST key past it': 1,
-  'a second undeclared census member with no ledger row → RED': 1,
-  '`description` alone stays legal — the ledgered exemption → GREEN': 1,
+  'an undeclared census member with no ledger row → RED': 1,
+  '`description` back in the census with no writer to ledger → RED (the retired sub-caption)': 1,
+  'a ledgered, witnessed non-declared member stays legal → GREEN': 1,
   "the ledger row's witness gone from the evidence file → RED": 1,
   'the witness present only as PROSE in the evidence file → RED': 1,
-  '`description` removed from the census → RED as a stale row, not silence': 1,
+  'a ledgered key removed from the census → RED as a stale row, not silence': 1,
   'the schema renamed away → REFUSE, never a clean run': 1,
   'the census array emptied → REFUSE, never a clean run': 1,
   'a spread inside the shape → REFUSE (the keys come from elsewhere)': 1,
@@ -618,10 +642,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 function selfTest() {
-  const base = { spec: SPEC_FIXTURE, parser: CENSUS_FIXTURE, evidence: EVIDENCE_FIXTURE };
+  const base = { spec: SPEC_FIXTURE, parser: CENSUS_FIXTURE, evidence: {}, ledger: [] };
   const cases = [
     {
       label: 'the real shape, read cleanly → GREEN',
@@ -682,8 +706,9 @@ function selfTest() {
       // `nestedFake` must not be named: depth is the other half of the rule.
       label: 'a nested inline z.object({}) → the reader still reaches the LAST key past it',
       tree: {
-        parser: censusFixture(['dateGranularity', 'description', 'limit', 'sortBy', 'sortOrder', 'stageOrder', 'window']),
-        evidence: EVIDENCE_FIXTURE,
+        parser: censusFixture(['dateGranularity', 'limit', 'sortBy', 'sortOrder', 'stageOrder', 'window']),
+        evidence: {},
+        ledger: [],
         spec: SPEC_FIXTURE
           .replace('  sortBy:', '  window: z.object({ nestedFake: z.string() }).optional(),\n  sortBy:')
           .replace("    .describe('Explicit category order'),", "    .describe('Explicit category order'),\n  tailKey: z.string().optional(),"),
@@ -694,36 +719,48 @@ function selfTest() {
       rejects: [/nestedFake/, /`window`/],
     },
     {
-      label: 'a second undeclared census member with no ledger row → RED',
-      tree: { ...base, parser: censusFixture(['dateGranularity', 'description', 'invert', 'limit', 'sortBy', 'sortOrder', 'stageOrder']) },
+      label: 'an undeclared census member with no ledger row → RED',
+      tree: { ...base, parser: censusFixture(['dateGranularity', 'invert', 'limit', 'sortBy', 'sortOrder', 'stageOrder']) },
       expect: 'red',
+      mutates: ["'invert'"],
       wants: [/UNDECLARED-AND-UNLEDGERED/, /`invert`/],
     },
     {
-      label: '`description` alone stays legal — the ledgered exemption → GREEN',
-      tree: base,
+      // #21257: the empty ledger IS the assertion that nothing writes the
+      // retired sub-caption key. Putting `description` back in the census
+      // without a writer must red, naming it — never pass as an exemption.
+      label: '`description` back in the census with no writer to ledger → RED (the retired sub-caption)',
+      tree: { ...base, parser: censusFixture(['dateGranularity', 'description', 'limit', 'sortBy', 'sortOrder', 'stageOrder']) },
+      expect: 'red',
+      mutates: ["'description'"],
+      wants: [/UNDECLARED-AND-UNLEDGERED/, /`description`/],
+    },
+    {
+      label: 'a ledgered, witnessed non-declared member stays legal → GREEN',
+      tree: LEDGERED,
       expect: 'green',
+      mutates: ["'fixtureCaption'"],
     },
     {
       label: 'the ledger row\'s witness gone from the evidence file → RED',
-      tree: { ...base, evidence: { 'packages/spec/src/system/i18n-resolver.ts': 'const unrelated = 1;\n' } },
+      tree: { ...LEDGERED, evidence: { 'fixture/widget-writer.ts': 'const unrelated = 1;\n' } },
       expect: 'red',
-      wants: [/WITNESS GONE/, /description/],
+      wants: [/WITNESS GONE/, /fixtureCaption/],
     },
     {
       label: 'the witness present only as PROSE in the evidence file → RED',
       tree: {
-        ...base,
-        evidence: { 'packages/spec/src/system/i18n-resolver.ts': '// once wrote description: subCaption here\nconst x = 1;\n' },
+        ...LEDGERED,
+        evidence: { 'fixture/widget-writer.ts': '// once wrote fixtureCaption: resolved here\nconst x = 1;\n' },
       },
       expect: 'red',
       wants: [/WITNESS GONE/],
     },
     {
-      label: '`description` removed from the census → RED as a stale row, not silence',
-      tree: { ...base, parser: censusFixture(['dateGranularity', 'limit', 'sortBy', 'sortOrder', 'stageOrder']) },
+      label: 'a ledgered key removed from the census → RED as a stale row, not silence',
+      tree: { ...LEDGERED, parser: CENSUS_FIXTURE },
       expect: 'red',
-      wants: [/STALE LEDGER ROW/, /description/],
+      wants: [/STALE LEDGER ROW/, /fixtureCaption/],
     },
     {
       label: 'the schema renamed away → REFUSE, never a clean run',
