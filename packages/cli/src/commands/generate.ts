@@ -1890,6 +1890,12 @@ function refuseGeneration(headline: string, lines: readonly string[]): never {
   process.exit(1);
 }
 
+/** `a flow`, `an action` — the type's name with the article it takes. */
+function article(type: string, capitalized = false): string {
+  const a = /^[aeiou]/.test(type) ? 'an' : 'a';
+  return `${capitalized ? a[0].toUpperCase() + a.slice(1) : a} ${type}`;
+}
+
 /** `a, b and c` — a stack's own names, listed for the author to pick from. */
 function listed(names: readonly string[]): string {
   const quoted = names.map((n) => `'${n}'`);
@@ -1948,12 +1954,14 @@ export function resolveScaffoldBindings(args: {
   const g = `${CLI_ALIAS} g`;
   const what = binds.flow ? 'an object and a flow' : 'an object';
   const refuse = (headline: string, lines: string[]): ScaffoldBindingVerdict => ({ ok: false, headline, lines });
+  const aType = article(type);
+  const AType = article(type, true);
 
   if (project.kind !== 'loaded') {
     return refuse(
       `\`${g} ${type}\` binds ${what}, and there is no objectstack.config.{ts,js,mjs} here to bind in`,
       [
-        `A ${type} is written against metadata the project's stack declares, and what it binds`,
+        `${AType} is written against metadata the project's stack declares, and what it binds`,
         'is checked against that stack before anything is written. Outside a project there is',
         'nothing to check it against. Nothing was written.',
         '',
@@ -1977,7 +1985,7 @@ export function resolveScaffoldBindings(args: {
       return refuse(
         `\`${g} ${type} ${name}\` binds object '${objectName}', which this stack does not declare`,
         [
-          `A ${type} is named after the object it binds, and that object has to be one the stack`,
+          `${AType} is named after the object it binds, and that object has to be one the stack`,
           'declares — a view of an object nobody declared lists nothing. Nothing was written.',
           '',
           declaredObjects,
@@ -1996,7 +2004,7 @@ export function resolveScaffoldBindings(args: {
         return refuse(
           `--object ${typed} names no object this stack declares`,
           [
-            `A ${type} is bound to an object the stack declares, so it is checked before anything`,
+            `${AType} is bound to an object the stack declares, so it is checked before anything`,
             'is written. Nothing was written.',
             '',
             declaredObjects,
@@ -2006,7 +2014,10 @@ export function resolveScaffoldBindings(args: {
       }
       bindings.object = object;
       said.push(
-        `  ${chalk.dim('Object:')} ${chalk.white(object.name)} ${chalk.dim('(--object)')}${object.name !== typed ? ns : ''}`,
+        `  ${chalk.dim('Object:')} ${chalk.white(object.name)} `
+          + chalk.dim(object.name !== typed && namespace
+            ? `(--object ${typed}, prefixed by manifest.namespace '${namespace}')`
+            : '(--object)'),
       );
     } else if (objects.length === 1) {
       bindings.object = objects[0];
@@ -2016,7 +2027,7 @@ export function resolveScaffoldBindings(args: {
       );
     } else if (objects.length === 0) {
       return refuse(
-        `a ${type} binds an object, and this stack declares none`,
+        `${aType} binds an object, and this stack declares none`,
         [
           `Generate the object first, then bind the ${type} to it. Nothing was written.`,
           '',
@@ -2026,14 +2037,14 @@ export function resolveScaffoldBindings(args: {
       );
     } else {
       return refuse(
-        `a ${type} binds an object, and this stack declares ${objects.length}: name one with --object`,
+        `${aType} binds an object, and this stack declares ${objects.length}: name one with --object`,
         [
-          `Which object a ${type} acts on is yours to say, so it is not picked for you. Nothing`,
+          `Which object ${aType} acts on is yours to say, so it is not picked for you. Nothing`,
           'was written.',
           '',
           declaredObjects,
           '',
-          `    ${g} ${type} ${name} --object ${objectNames[0]}`,
+          `    ${g} ${type} ${name} --object <object>`,
         ],
       );
     }
@@ -2050,7 +2061,7 @@ export function resolveScaffoldBindings(args: {
         return refuse(
           `--flow ${flags.flow} names no flow this stack declares`,
           [
-            `A ${type} runs a flow the stack declares, so it is checked before anything is`,
+            `${AType} runs a flow the stack declares, so it is checked before anything is`,
             'written. Nothing was written.',
             '',
             declaredFlows,
@@ -2068,7 +2079,7 @@ export function resolveScaffoldBindings(args: {
       );
     } else if (flows.length === 0) {
       return refuse(
-        `a ${type} runs a flow, and this stack declares none`,
+        `${aType} runs a flow, and this stack declares none`,
         [
           `Generate the flow first, then the ${type} that runs it. Nothing was written.`,
           '',
@@ -2078,14 +2089,14 @@ export function resolveScaffoldBindings(args: {
       );
     } else {
       return refuse(
-        `a ${type} runs a flow, and this stack declares ${flows.length}: name one with --flow`,
+        `${aType} runs a flow, and this stack declares ${flows.length}: name one with --flow`,
         [
-          `Which flow a ${type} runs is yours to say, so it is not picked for you. Nothing was`,
+          `Which flow ${aType} runs is yours to say, so it is not picked for you. Nothing was`,
           'written.',
           '',
           declaredFlows,
           '',
-          `    ${g} ${type} ${name}${objectArg} --flow ${flows[0]}`,
+          `    ${g} ${type} ${name}${objectArg} --flow <flow>`,
         ],
       );
     }
@@ -4023,8 +4034,8 @@ export function unusedBindingFlagRefusal(
       headline: `\`${CLI_ALIAS} g ${type}\` takes no --${key}`,
       lines: [
         generator?.binds?.[key] === 'name'
-          ? `A ${type} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
-          : `A ${type} binds no ${key}, so --${key} would name nothing it writes.`,
+          ? `${article(type, true)} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
+          : `${article(type, true)} binds no ${key}, so --${key} would name nothing it writes.`,
         `--${key} is read by: ${typesBinding(key, 'flag')}. Nothing was written.`,
       ],
     };
