@@ -465,8 +465,14 @@ function refusedMeasureFinding(
  * ⛔ No hop is walked here: this only picks the object the shared walk starts
  * on. A bare column and the row wildcard `'*'` have no hop, and `'*'` resolves
  * to nothing.
+ *
+ * [#21439] Exported for `field-no-consumers` (`validate-field-consumers.ts`),
+ * which credits every field a cube member's path reads by asking this
+ * function about each prefix of the path — so a cube hop is resolved one way
+ * in this package, and that is the door's way. Not re-exported from the
+ * package barrel.
  */
-function resolveCubeColumn(
+export function resolveCubeColumn(
   graph: ObjectGraph,
   cube: AnyRec,
   baseObject: string,
