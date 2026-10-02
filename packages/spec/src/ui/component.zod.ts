@@ -783,10 +783,13 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
-     * `containers.tsx` is byte-identical across the hop from `e420df310`
+     * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
+     * `containers.tsx` is byte-identical across the hop from `31971ff1e`
      * (`git diff --quiet`), so both anchors were re-READ in place, each still
-     * the read point this record names: `946-952` and `1005`. At `e420df310`
+     * the read point this record names: `946-952` and `1005`. At `31971ff1e`
+     * (2026-10-01) `containers.tsx` was byte-identical across the hop from
+     * `e420df310` (`git diff --quiet`), so both anchors were re-READ in place,
+     * each still the read point this record names: `946-952` and `1005`. At `e420df310`
      * (2026-09-30) `containers.tsx` changed again across the hop from
      * `db11afd49` (40
      * insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot
@@ -981,7 +984,15 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `31971ff1e28f`, re-read there 2026-10-01: across the hop
+ * (`.objectui-sha` = `89cad75d5570`, re-read there 2026-10-02: across the hop
+ * from `31971ff1e28f` `record-details.tsx`, `record-highlights.tsx`,
+ * `record-quick-actions.tsx` and the three `permissions` files are
+ * byte-identical, so NO anchor in those six moved; `record-related-list.tsx`
+ * gained the `localizeColumnLabels` helper above every cited line and a
+ * comment at its `columns` hand-off below them (objectui#10993 batch 4,
+ * +32/-1), so every anchor in it MOVED by 28 with its cited text
+ * byte-identical: `298` -> `326`, `316` -> `344`, `352` -> `380`, `365-373`
+ * -> `393-401`. At `31971ff1e28f`, 2026-10-01: across the hop
  * from `e420df310f5b` `record-details.tsx`, `record-highlights.tsx` and the
  * three `permissions` files are byte-identical, so NO anchor in those five
  * moved; `record-related-list.tsx` changed one docblock line above the gate
@@ -1019,22 +1030,22 @@ export const PageCardProps = strictObject({
  *
  * 1. CAPABILITIES, NOT OBJECT ACTIONS. Every block gates through
  *    `perms.hasCapabilities(required)` — `record-details.tsx:244`,
- *    `record-highlights.tsx:102`, `record-related-list.tsx:365`,
+ *    `record-highlights.tsx:102`, `record-related-list.tsx:393`,
  *    `record-quick-actions.tsx:273` — and never `perms.can(objectName, …)`;
  *    each renderer's docblock states the capability "is not object-scoped"
  *    (`record-details.tsx:233`, `record-highlights.tsx:81`,
- *    `record-related-list.tsx:352`, `record-quick-actions.tsx:262`). `read`
+ *    `record-related-list.tsx:380`, `record-quick-actions.tsx:262`). `read`
  *    is looked up in the capability set like any other name.
  * 2. ALL OF THEM. `MePermissionsProvider.tsx:416` is
  *    `required.every((p) => held.has(p))`.
  * 3. THE OUTCOME. Each block returns a `role="status"` "Insufficient
  *    permissions to view …" notice instead of its content —
  *    `record-details.tsx:244-252`, `record-highlights.tsx:160-173`,
- *    `record-related-list.tsx:365-373`, `record-quick-actions.tsx:273-281`.
+ *    `record-related-list.tsx:393-401`, `record-quick-actions.tsx:273-281`.
  *    Checks that already withhold the content run first on two of them (no
  *    record bound, `record-details.tsx:188`; no object,
- *    `record-related-list.tsx:298`; the related object's read gate,
- *    `record-related-list.tsx:316`), which is why the text says "wherever it
+ *    `record-related-list.tsx:326`; the related object's read gate,
+ *    `record-related-list.tsx:344`), which is why the text says "wherever it
  *    would otherwise render" rather than promising the notice unconditionally.
  * 4. PRESENTATION ONLY. The gate is renderer code: nothing in this repo's
  *    server packages reads a page component's `requiredPermissions`. The data
@@ -2221,10 +2232,13 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
-     * `containers.tsx` is byte-identical across the hop from `e420df310`
+     * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
+     * `containers.tsx` is byte-identical across the hop from `31971ff1e`
      * (`git diff --quiet`), so both anchors were re-READ in place, each still
-     * the read point this record names: `1171-1177` and `1220`. At `e420df310`
+     * the read point this record names: `1171-1177` and `1220`. At `31971ff1e`
+     * (2026-10-01) `containers.tsx` was byte-identical across the hop from
+     * `e420df310` (`git diff --quiet`), so both anchors were re-READ in place,
+     * each still the read point this record names: `1171-1177` and `1220`. At `e420df310`
      * (2026-09-30) `containers.tsx` changed again across the hop from
      * `db11afd49` (40
      * insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot
@@ -2504,11 +2518,12 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
+   * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
    * `button.tsx`, `lib/lazy-icon.tsx`, `renderers/action/resolve-icon.ts` and the
-   * generated `lucide-record-icon-names.ts` are all byte-identical to `e420df310`
+   * generated `lucide-record-icon-names.ts` are all byte-identical to `31971ff1e`
    * across the hop onto this pin, so every anchor below holds unmoved and was
-   * re-checked in place; they were byte-identical to `db11afd49` across the hop
+   * re-checked in place; they were byte-identical to `e420df310` across the hop
+   * onto `31971ff1e` (2026-10-01), byte-identical to `db11afd49` across the hop
    * onto `e420df310` (2026-09-30), and byte-identical to `dd3f7e1be` across the hop
    * onto `db11afd49` (2026-09-29) as well. At `dd3f7e1be` (2026-09-28)
    * `button.tsx` and `lib/lazy-icon.tsx` are byte-identical to `f8a9d0fb0`
@@ -2978,9 +2993,13 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `31971ff1e`; first measured at `.objectui-sha`
+ * against, `.objectui-sha` = `89cad75d5`; first measured at `.objectui-sha`
  * pin `f8a9d0fb0`, every read point below re-derived at the current pin
- * 2026-10-01: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
+ * 2026-10-02: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, all
+ * four `action-*.tsx` renderers, `basic/data-list.tsx` and `ui/button.tsx`
+ * are byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor
+ * below held unmoved and was re-read in place. At `31971ff1e` (2026-10-01):
+ * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
  * `action-group.tsx`, `action-menu.tsx` and `action-icon.tsx` are
  * byte-identical to `e420df310`, so their anchors held unmoved, and
  * `action-button.tsx` changed only inside its registration (+9/-1,
@@ -4105,10 +4124,18 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
+   * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
+   * `plugin-dashboard/src/index.tsx`, `MetricWidget.tsx`, `MetricCard.tsx`
+   * and `lazy-icon.tsx` are byte-identical to `31971ff1e`, so their anchors
+   * hold unmoved and were re-read in place; `ObjectMetricWidget.tsx` changed
+   * (+68/-4, objectui#11254: a `resolveFieldScale` import, the
+   * `widthPattern` / `ownFractionDigits` helpers and the field-width
+   * `inferredFormat` memo, none of it touching `icon`), and both its anchors
+   * MOVED with their cited text byte-identical: the destructure `230` ->
+   * `255`, the forward `595` -> `659`. At `31971ff1e` (2026-10-01)
    * `plugin-dashboard/src/index.tsx`, `ObjectMetricWidget.tsx`,
-   * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are all
-   * byte-identical to `e420df310`, so every anchor below holds unmoved and was
+   * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` were all
+   * byte-identical to `e420df310`, so every anchor held unmoved and was
    * re-read in place; they were byte-identical to `db11afd49` across the hop
    * onto `e420df310` (2026-09-30) as well. At `db11afd49` (2026-09-29)
    * `MetricWidget.tsx` and `lazy-icon.tsx` are byte-identical to `dd3f7e1be`;
@@ -4145,7 +4172,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * runs three files:
    * `plugin-dashboard/src/index.tsx:252` publishes it as a designer input
    * on the registered `object-metric` block;
-   * `ObjectMetricWidget.tsx:230` destructures it and forwards it at `:595` to
+   * `ObjectMetricWidget.tsx:255` destructures it and forwards it at `:659` to
    * `MetricWidget`; `MetricWidget.tsx:351-360` resolves it via
    * `getLazyIcon(icon)` — guarded on `typeof icon === 'string'`, because the
    * React prop also accepts a ready-made node — and `:412-421` draws it in the
@@ -4234,8 +4261,11 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
- * `ObjectKanban.tsx` changed on this hop only in the comment above its
+ * (`.objectui-sha` = `89cad75d5`; re-measured there 2026-10-02 —
+ * `ObjectKanban.tsx` is byte-identical across the hop from `31971ff1e`
+ * (`git diff --quiet`), so the anchor did not move and was re-read in place.
+ * At `31971ff1e` (2026-10-01)
+ * `ObjectKanban.tsx` changed on that hop only in the comment above its
  * `navigation` read (+12/-14, objectui#8652: the key is now declared on
  * `ObjectKanbanSchema`), far below the anchor, which did not move and was
  * re-read in place. At `e420df310` (2026-09-30)
@@ -4306,7 +4336,21 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `31971ff1e`; re-measured there
+   * repo builds against (`.objectui-sha` = `89cad75d5`; re-measured there
+   * 2026-10-02 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
+   * row-cap member), `ElementDataSourceGate.tsx` and `element-data-source.ts`
+   * are byte-identical to `31971ff1e`, so the query `715-725`, the default
+   * `:97`, the `queryFilter` resolution `:584-585`, the import `:10`,
+   * `:218-220`, `:437-456` and `:268-272` did not move and were re-read in
+   * place; `plugin-kanban/src/index.tsx` changed only in the registration's
+   * `navigation` docblock and input description (+7/-5, objectui#11293:
+   * `page` now opens the record through the host's record navigator), far
+   * below the mapping, which did not move from `487-491`; `objectql.ts`
+   * MOVED the member `4588` -> `4661` byte-identical, still inside
+   * `ObjectKanbanSchema`; and `plugin-kanban.mdx` rewrote its `navigation`
+   * Properties row (objectui#11293) and gained a `swimlaneField` row
+   * (objectui#11355), both below the `limit` row, which, with the
+   * `limit: 250` snippet, did not change. At `31971ff1e`, re-measured there
    * 2026-10-01 — `plugin-kanban/src/types.ts` (still no row-cap member) and
    * `ElementDataSourceGate.tsx` are byte-identical to `e420df310`, so
    * `:218-220` and `:437-456` did not move; `ObjectKanban.tsx` changed only in
@@ -4395,7 +4439,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
    * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
    * declares the member at all — imported at `ObjectKanban.tsx:10` and
-   * declaring `limit?: number` at `packages/types/src/objectql.ts:4588`,
+   * declaring `limit?: number` at `packages/types/src/objectql.ts:4661`,
    * and `content/docs/plugins/plugin-kanban.mdx`
    * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
    * an author following the published docs wrote a node the save gate
