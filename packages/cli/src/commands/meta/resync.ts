@@ -128,9 +128,21 @@ export default class MetaResync extends Command {
       printStep('Booting runtime stack…');
     }
 
+    // [#21391] A run that can never reach the write — no `--yes`, and nobody
+    // at a terminal to confirm (`--json`, or stdin not a TTY) — answers
+    // `confirmation_required` and writes nothing, so it boots READ-ONLY, the
+    // boot `os migrate plan` takes. A run that may write keeps the plain boot:
+    // `sys_permission_set` must exist before the resync writes into it, and
+    // the interactive prompt comes after the boot.
+    const mayWrite = flags.yes || (!flags.json && process.stdin.isTTY === true);
+
     let stack;
     try {
-      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'] });
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        ...(mayWrite ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
+      });
     } catch (error: any) {
       if (flags.json) await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
       else printError(error.message || String(error));

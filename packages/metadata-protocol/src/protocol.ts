@@ -8363,6 +8363,13 @@ export class ObjectStackProtocolImplementation implements
                 // through), and re-deriving here from the row this call just
                 // read is a byte-identical, never-stale restatement of the
                 // same items — not a duplicate.
+                //
+                // [#21334] An upsert by name replaces whatever the merge seated
+                // under that name, so the name has to be one the container may
+                // write. {@link expandRuntimeViewContainer} decides it: on
+                // another package's object every name a container expands
+                // derives from the container's own name, never one of that
+                // package's `<object>.<key>` names.
                 if (isView) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
@@ -16131,6 +16138,45 @@ export class ObjectStackProtocolImplementation implements
      * expanded under the WRONG key or not at all. The three-deep fallback is
      * kept, unchanged, for every container written before this field was
      * consulted here.
+     *
+     * ## A container on ANOTHER package's object (#21334)
+     *
+     * The spec names every expanded view `<object>.<key>`: a bare `list` (one
+     * that names no key) takes `<object>.default`, a `form` `<object>.form`,
+     * and each named member its own key. For a container of the object's own
+     * package those are that package's names, and it still expands there. For
+     * a container saved under any other name, in another package or in none,
+     * on an object a code package owns, they are the OTHER package's names:
+     * ADR-0005 keys an overlay by its own name, and ADR-0126 rules out a silent
+     * override, so a row named `x` may not replace an item named
+     * `<object>.<key>`. Both callers set each expansion by name — the list's
+     * inline pass over the merged items, the registry's bare key — so the
+     * expansion used to replace the packaged view on the object door (and, on
+     * an unscoped kernel, on the by-name read too), wearing the shadowed
+     * artifact's `_packageId` and protection.
+     *
+     * So, on another package's object, every name the container expands
+     * derives from its own name (triage's ruling, and the seat's answer that
+     * extends it to the keyed members): the bare `list` is
+     * `<object>.<container name>`, and every other member is
+     * `<object>.<container name>.<key>` — the spec's own key rule and its
+     * in-container de-duplication, run under the container's name (see
+     * {@link expandUnderOwnName}). The qualified forms are the ones the spec
+     * accepts for a ViewItem (`ViewItemNameSchema`); the flat container name on
+     * an expanded item is refused there, so the list door would serve it
+     * badged invalid. The view container contract (`view.zod.ts`, ADR-0017
+     * §3.2) names the container after its object and states no arm for a name
+     * another package owns, which is why the arm taken is the container's own
+     * name rather than a refusal at save.
+     *
+     * Such a container adds views to the object; it never declares the
+     * object's default, so none of its views carries `isDefault` — the
+     * switcher's default stays the owning package's (the by-name override and
+     * a user's own saved default are the routes that change it).
+     *
+     * Every expanded item carries the container's OWN package and, where that
+     * package ships an artifact of the same name, that artifact's envelope —
+     * never the envelope of an artifact another package ships.
      */
     private expandRuntimeViewContainer(
         type: string,
@@ -16146,23 +16192,136 @@ export class ObjectStackProtocolImplementation implements
             ?? container?.form?.data?.object
             ?? (typeof container.name === 'string' ? container.name : undefined);
         if (!viewObject) return [];
+        const ownPackageId = this.runtimeViewContainerPackage(type, container, options);
+        const crossPackage = this.isAnotherPackagesObject(viewObject, ownPackageId);
+        const expanded: ReadonlyArray<Record<string, unknown>> = crossPackage
+            ? this.expandUnderOwnName(type, viewObject, container, ownPackageId)
+            : (expandViewContainer(viewObject, container) as unknown as Record<string, unknown>[]);
         const out: Record<string, unknown>[] = [];
-        for (const vi of expandViewContainer(viewObject, container)) {
+        for (const vi of expanded) {
             // Carry the container's package provenance onto each expanded item
             // so the package-disable filter and ADR-0048 artifact scoping judge
             // them by the same owner the container has.
-            const item: Record<string, unknown> = { ...(vi as any) };
-            if (container._packageId !== undefined && item._packageId === undefined) {
-                item._packageId = container._packageId;
-            }
-            const viArtifact = this.lookupArtifactItem(
-                type,
-                vi.name,
-                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
-            );
-            out.push(mergeArtifactProtection(item, viArtifact) as Record<string, unknown>);
+            const item: Record<string, unknown> = { ...vi };
+            // [#21334] Not the object's default: its owning package's is.
+            if (crossPackage) delete item.isDefault;
+            if (ownPackageId !== undefined) item._packageId = ownPackageId;
+            // [#21334] Only the container's own package's artifact lends its
+            // envelope; another package's artifact of this name is not this
+            // item's to wear.
+            const viArtifact = ownPackageId === undefined
+                ? undefined
+                : this.lookupArtifactItem(type, String(item.name), ownPackageId);
+            const ownArtifact = (viArtifact as { _packageId?: unknown } | undefined)?._packageId === ownPackageId
+                ? viArtifact
+                : undefined;
+            out.push(mergeArtifactProtection(item, ownArtifact) as Record<string, unknown>);
         }
         return out;
+    }
+
+    /**
+     * [#21334] The package a runtime view container row belongs to: the
+     * package its row is bound to, else — for a package-less row that is the
+     * name-keyed overlay of a packaged item (ADR-0005), such as a tenant's
+     * overlay of a package's `<object>` container — the package of the
+     * artifact it overlays, which is the slot the package-aware merge seats
+     * it in. `undefined` for a package-less row that overlays nothing.
+     */
+    private runtimeViewContainerPackage(
+        type: string,
+        container: Record<string, any>,
+        options: { packageId?: string | null },
+    ): string | undefined {
+        for (const bound of [container._packageId, options.packageId]) {
+            if (typeof bound === 'string' && bound !== '' && bound !== 'sys_metadata') return bound;
+        }
+        if (typeof container.name !== 'string' || container.name === '') return undefined;
+        const overlaid = (this.lookupArtifactItem(type, container.name) as { _packageId?: unknown } | undefined)
+            ?._packageId;
+        return typeof overlaid === 'string' && overlaid !== '' ? overlaid : undefined;
+    }
+
+    /**
+     * [#21334] True when a code package owns `object` and it is not
+     * `ownPackageId`. The discriminator is `getPackagedObjectOwner`, the same
+     * "does a code package ship this?" test {@link classifyObjectContribution}
+     * asks. A runtime-authored object has no packaged owner, so a container on
+     * one keeps today's `<object>.<key>` names; so does a registry that cannot
+     * answer.
+     */
+    private isAnotherPackagesObject(object: string, ownPackageId: string | undefined): boolean {
+        const registry: any = (this.engine as any)?.registry;
+        const owner = typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(object)
+            : undefined;
+        const ownerPackageId: unknown = owner?.packageId;
+        return typeof ownerPackageId === 'string' && ownerPackageId !== '' && ownerPackageId !== ownPackageId;
+    }
+
+    /**
+     * [#21334] Expand a container on another package's object under its own
+     * name. The spec's expander runs with `<object>.<container name>` as its
+     * base, so every member it knows — today a named `list`, `listViews`,
+     * `formViews`, `form` — comes out as `<object>.<container name>.<key>`,
+     * de-duplicated by the spec's own rule, and a member kind the spec adds
+     * later is placed the same way. Each item's `object` is set back to the
+     * object it binds.
+     *
+     * The bare `list` is lent the container's name as its key, then served as
+     * `<object>.<container name>` itself, its `config` the list as authored.
+     * Where the owning package ships that very name (a container named after
+     * one of that package's keys), it stays at the spelling the spec gave it,
+     * `<object>.<container name>.<container name>`, so it never takes the
+     * packaged view's name.
+     *
+     * A container with no name of its own has nothing to expand under, and
+     * expands nothing.
+     */
+    private expandUnderOwnName(
+        type: string,
+        object: string,
+        container: Record<string, any>,
+        ownPackageId: string | undefined,
+    ): Record<string, unknown>[] {
+        const ownName = typeof container.name === 'string' && container.name !== '' ? container.name : undefined;
+        if (ownName === undefined) return [];
+        const under = `${object}.${ownName}`;
+        const expandAt = under;
+        const list = container.list;
+        const bare = !!list && typeof list === 'object' && !(typeof list.name === 'string' && list.name !== '');
+        const source = bare ? { ...container, list: { ...list, name: ownName } } : container;
+        const bareSpelled = `${expandAt}.${ownName}`;
+        const underIsShipped = this.isShippedByAnotherPackage(type, under, ownPackageId);
+        return expandViewContainer(expandAt, source).map((vi) => {
+            const item: Record<string, any> = { ...vi, object };
+            const name = String(item.name);
+            const fromBare = bare
+                && item.viewKind === 'list'
+                && item.config?.name === ownName
+                && name.startsWith(bareSpelled)
+                && /^(_\d+)?$/.test(name.slice(bareSpelled.length));
+            if (fromBare) {
+                const authored = { ...item.config };
+                delete authored.name;
+                item.config = authored;
+                if (!underIsShipped) {
+                    item.name = under;
+                    delete item._diagnostics;
+                }
+            }
+            return item;
+        });
+    }
+
+    /**
+     * [#21334] True when a code package other than `ownPackageId` ships an
+     * artifact named `name` — the one case where the bare list's own name is
+     * not free to take.
+     */
+    private isShippedByAnotherPackage(type: string, name: string, ownPackageId: string | undefined): boolean {
+        const shipped = (this.lookupArtifactItem(type, name) as { _packageId?: unknown } | undefined)?._packageId;
+        return typeof shipped === 'string' && shipped !== '' && shipped !== ownPackageId;
     }
 
     /**

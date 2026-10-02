@@ -8,14 +8,16 @@
  * What is pinned here, door by door:
  *   1. The accept set the ruling's execution parameters name — a bare
  *      identifier, a dotted identifier path, and `'*'` — parses
- *      byte-identically to before, on a measure and a dimension alike.
+ *      byte-identically to before, on a measure and a dimension alike, with
+ *      one later narrowing (#21409): `'*'` only on a `count` measure. That
+ *      half is pinned in `analytics-row-wildcard-count-only.test.ts`.
  *   2. The refusal: every other value — an expression, a quoted or
  *      `$`-prefixed spelling, an empty string, a broken path — is refused at
  *      `…sql` with the prescription, whose first sentence states the contract
  *      and whose body names the ADR-0021 dataset form.
  *   3. The rule is a `pattern` in the published JSON Schema too, so a
  *      document validated against `json-schema/**` is judged as the parse
- *      judges it.
+ *      judges it — a measure's with the `'*'` arm, a dimension's without it.
  *   4. Every door that carries a cube refuses it: `CubeSchema`, the
  *      `analytics_cube` write-door binding, `defineCube()` and `defineStack()`
  *      (the last with its STACK_SCHEMA_INVALID / 422 envelope).
@@ -116,8 +118,9 @@ describe('cube member sql — the accept set is unchanged for every column refer
   });
 
   it('a dimension admits a bare column and a relationship path — parsed byte-identically', () => {
-    // `'*'` is in the accept set the execution parameters name for both members.
-    for (const sql of ['status', 'account.industry', 'account.owner.region', '_private', '*']) {
+    // `'*'` left a dimension's accept set with #21409: no aggregate consumes it
+    // there (refused in `analytics-row-wildcard-count-only.test.ts`).
+    for (const sql of ['status', 'account.industry', 'account.owner.region', '_private']) {
       const dim = { label: 'D', type: 'string', sql };
       const r = DimensionSchema.safeParse(dim);
       expect(r.success, sql).toBe(true);
@@ -162,7 +165,7 @@ describe('cube member sql — an expression is refused at parse, with the prescr
 });
 
 describe('cube member sql — the rule reaches the published JSON Schema as a pattern', () => {
-  it('both members carry the same `pattern` on `sql`, and it judges values as the parse does', () => {
+  it('both members carry a `pattern` on `sql` — the dimension\'s is the measure\'s without the `*` arm — and each judges values as the parse does', () => {
     const metricSql = (z.toJSONSchema(MetricSchema, { io: 'input', unrepresentable: 'any' }) as {
       properties: Record<string, { pattern?: string }>;
     }).properties.sql!;
@@ -170,10 +173,22 @@ describe('cube member sql — the rule reaches the published JSON Schema as a pa
       properties: Record<string, { pattern?: string }>;
     }).properties.sql!;
     expect(metricSql.pattern).toBeDefined();
-    expect(dimensionSql.pattern).toBe(metricSql.pattern);
-    const pattern = new RegExp(metricSql.pattern!);
-    for (const sql of ['amount', 'account.amount', '*']) expect(pattern.test(sql), sql).toBe(true);
-    for (const sql of EXPRESSIONS) expect(pattern.test(sql), sql).toBe(false);
+    // [#21409] One column path; the dimension states the one restriction, the
+    // row-wildcard arm, and nothing else.
+    expect(metricSql.pattern!.startsWith('^(?:\\*|') && metricSql.pattern!.endsWith(')$')).toBe(true);
+    expect(dimensionSql.pattern).toBe(`^${metricSql.pattern!.slice('^(?:\\*|'.length, -')$'.length)}$`);
+    const metric = new RegExp(metricSql.pattern!);
+    const dimension = new RegExp(dimensionSql.pattern!);
+    for (const sql of ['amount', 'account.amount']) {
+      expect(metric.test(sql), sql).toBe(true);
+      expect(dimension.test(sql), sql).toBe(true);
+    }
+    expect(metric.test('*')).toBe(true);
+    expect(dimension.test('*')).toBe(false);
+    for (const sql of EXPRESSIONS) {
+      expect(metric.test(sql), sql).toBe(false);
+      expect(dimension.test(sql), sql).toBe(false);
+    }
   });
 });
 

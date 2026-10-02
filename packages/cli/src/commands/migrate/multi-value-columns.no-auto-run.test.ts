@@ -90,8 +90,14 @@ describe('nothing on the boot / reconcile path invokes this command (#11733)', (
     ];
     // Only this command's own suites. `commands/migrate/index.ts` deliberately
     // does NOT default to it either — the bare `os migrate` is the plan.
+    //
+    // [#21391] Plus one reader, named: the one-shot boot family's enumeration
+    // pin, which RUNS every `bootSchemaStack` caller's modes against a
+    // database and asserts the run wrote nothing it was not asked to. A test,
+    // never a boot path; any other reader still has to say why.
+    const FAMILY_PIN = 'utils/schema-migrate.one-shot-family.integration.test.ts';
     expect(importers.filter((p) => !isTestFile(p))).toEqual([]);
-    expect(importers.every((p) => p.startsWith('commands/migrate/multi-value-columns.'))).toBe(true);
+    expect(importers.every((p) => p.startsWith('commands/migrate/multi-value-columns.') || p === FAMILY_PIN)).toBe(true);
   });
 
   it('the command never routes the remedy through the reconciler', () => {

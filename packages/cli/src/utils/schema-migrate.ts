@@ -132,8 +132,19 @@ export function findSqlDriverForKernel(kernel: unknown): SqlDriverLike | null {
 }
 
 /**
- * Arms the SQL driver's deferred-DDL mode before boot schema-sync can run
- * (#3917).
+ * The kernel services under which `ObjectQLPlugin.init()` publishes the engine.
+ * Both names point at one `ObjectQL` instance; it is shadowed once.
+ */
+const ENGINE_SERVICES = ['objectql', 'data'] as const;
+
+/** One order for deferred work, whichever drivers it came from: the driver's own. */
+function sortPendingSchemaWork(work: PendingSchemaWork[]): PendingSchemaWork[] {
+  return work.sort((a, b) => a.table.localeCompare(b.table) || a.kind.localeCompare(b.kind));
+}
+
+/**
+ * Arms deferred-DDL mode on EVERY SQL driver the boot connects, before any of
+ * them can schema-sync (#3917, #21391).
  *
  * Timing is the whole point, and it is why this is a plugin rather than a call
  * in `bootSchemaStack`. The kernel runs **every** plugin's `init()` (Phase 1)
@@ -142,6 +153,31 @@ export function findSqlDriverForKernel(kernel: unknown): SqlDriverLike | null {
  * `syncRegisteredSchemas` — the create-table/add-column DDL this issue is about
  * — in its `start()`. An `init()` that depends on the datasource plugin
  * therefore lands in the one window where the driver exists and no DDL has run.
+ *
+ * ## Every SQL datasource, not the first one (#21391)
+ *
+ * This used to arm the first `driver.*` SQL service it found, which is the
+ * default datasource. Any other SQL datasource reaches the engine through
+ * `engine.registerDriver` alone: `DatasourceConnectionService.connect()` (how
+ * `AppPlugin.start()` connects the datasources an artifact declares, and it
+ * then calls `syncObjectSchema` for the objects bound to each), a host
+ * plugin's `drivers.register`, or `ObjectQLPlugin.start()` handing the engine
+ * a `driver.*` service some later `init()` published. Each of those schema-synced
+ * on a dry run. So the deferral is armed on three paths:
+ *
+ *  - every `driver.*` service published so far (the default among them);
+ *  - every driver the engine already holds, through its public accessors (the
+ *    default by name, and the driver each registered object resolves to);
+ *  - every driver registered from here on: `registerDriver` is shadowed on the
+ *    engine instance the kernel publishes, and the shadow arms the driver
+ *    BEFORE the engine holds it, then forwards the same instance. This is the
+ *    seam `createDeclarationBootWriteGuard` uses for the same reason; that
+ *    module's header states why an own property on the instance is what every
+ *    caller reaches.
+ *
+ * {@link drivers} keeps what was armed, so the stack can report every
+ * datasource's held-back work and flush all of it on the operator's say-so.
+ * No driver changes: each one keeps its own deferred set and its own flush.
  */
 class DeferSchemaDdlPlugin {
   name = 'com.objectstack.cli.defer-schema-ddl';
@@ -149,25 +185,105 @@ class DeferSchemaDdlPlugin {
   /** Ordering, not optionality: our init must follow the one that registers `driver.*`. */
   dependencies = ['com.objectstack.runtime.default-datasource'];
 
-  driver: SqlDriverLike | null = null;
+  /** Every driver this boot deferred, in the order it was armed. */
+  readonly drivers: SqlDriverLike[] = [];
+
+  /** Engines whose `registerDriver` is shadowed, and what to restore. */
+  private readonly shadows: Array<{
+    engine: Record<string, unknown>;
+    original: PropertyDescriptor | undefined;
+    shadow: (...args: unknown[]) => unknown;
+  }> = [];
 
   init = async (ctx: any) => {
-    this.driver = findSqlDriverVia((name) => ctx.getService(name));
-    if (!this.driver) {
-      // No SQL driver (memory/mongo) — nothing issues DDL, nothing to defer.
-      ctx.logger?.debug?.('[defer-schema-ddl] no SQL driver — deferral not armed');
+    for (const name of SQL_DRIVER_SERVICES) {
+      try { this.arm(ctx.getService(name)); } catch { /* not registered */ }
+    }
+    const services: Map<string, unknown> | undefined = ctx.getServices?.();
+    for (const [name, service] of services?.entries?.() ?? []) {
+      if (typeof name === 'string' && name.startsWith('driver.')) this.arm(service);
+    }
+    for (const name of ENGINE_SERVICES) {
+      let engine: unknown;
+      try { engine = ctx.getService(name); } catch { /* not registered */ }
+      if (engine && typeof engine === 'object') this.shadowEngine(engine as Record<string, unknown>);
+    }
+    if (this.drivers.length === 0) {
+      // No SQL driver yet (memory/mongo). Nothing has DDL to defer; a SQL
+      // driver registered later is armed on arrival by the shadow above.
+      ctx.logger?.debug?.('[defer-schema-ddl] no SQL driver yet — deferral armed on arrival');
+    }
+  };
+
+  /** Arm one driver. Idempotent; a non-SQL driver has nothing to defer. */
+  arm(driver: unknown): void {
+    if (!driver || typeof driver !== 'object') return;
+    const d = driver as SqlDriverLike;
+    if (this.drivers.includes(d)) return;
+    if (typeof d.setDeferredDdl === 'function') {
+      d.setDeferredDdl(true);
+      this.drivers.push(d);
       return;
     }
-    if (typeof this.driver.setDeferredDdl !== 'function') {
+    if (typeof d.detectManagedDrift === 'function' && typeof d.applyMigrationEntries === 'function') {
       // Fail loudly rather than silently boot-syncing: the caller asked for a
       // dry run and this driver cannot give one.
+      const name = (driver as { name?: unknown }).name;
       throw new Error(
-        'The active SQL driver does not support deferred schema DDL, so this command cannot ' +
-        'guarantee a dry run. Upgrade @objectstack/driver-sql.',
+        `The SQL driver${typeof name === 'string' ? ` '${name}'` : ''} does not support deferred schema DDL, ` +
+        'so this command cannot guarantee a dry run. Upgrade @objectstack/driver-sql.',
       );
     }
-    this.driver.setDeferredDdl(true);
-  };
+  }
+
+  /** Arm what the engine holds, and every driver it is handed from now on. */
+  private shadowEngine(engine: Record<string, unknown>): void {
+    if (this.shadows.some((s) => s.engine === engine)) return; // `objectql` and `data` are one instance
+    const registerDriver = engine.registerDriver;
+    if (typeof registerDriver !== 'function') return;
+    this.armHeld(engine);
+    const original = Object.getOwnPropertyDescriptor(engine, 'registerDriver');
+    const shadow = (...args: unknown[]): unknown => {
+      // Arm BEFORE forwarding: the connect that registers a driver calls
+      // `syncObjectSchema` on it in the very next statement.
+      this.arm(args[0]);
+      return Reflect.apply(registerDriver as (...a: unknown[]) => unknown, engine, args);
+    };
+    Object.defineProperty(engine, 'registerDriver', {
+      value: shadow,
+      writable: true,
+      configurable: true,
+      enumerable: original?.enumerable ?? false,
+    });
+    this.shadows.push({ engine, original, shadow });
+  }
+
+  /** The drivers the engine already holds, through the accessors it makes public. */
+  private armHeld(engine: Record<string, unknown>): void {
+    const e = engine as {
+      getDefaultDriverName?: () => unknown;
+      getDriverByName?: (name: string) => unknown;
+      getDriverForObject?: (name: string) => unknown;
+      registry?: { getAllObjects?: () => unknown };
+    };
+    const name = e.getDefaultDriverName?.();
+    if (typeof name === 'string') this.arm(e.getDriverByName?.(name));
+    if (typeof e.getDriverForObject !== 'function') return;
+    const objects = e.registry?.getAllObjects?.();
+    for (const obj of Array.isArray(objects) ? objects : []) {
+      const objectName = (obj as { name?: unknown } | null)?.name;
+      if (typeof objectName === 'string') this.arm(e.getDriverForObject(objectName));
+    }
+  }
+
+  /** Put every shadowed `registerDriver` back, unless something else now sits on top of ours. */
+  release(): void {
+    for (const { engine, original, shadow } of this.shadows.splice(0)) {
+      if (Object.getOwnPropertyDescriptor(engine, 'registerDriver')?.value !== shadow) continue;
+      if (original) Object.defineProperty(engine, 'registerDriver', original);
+      else delete engine.registerDriver;
+    }
+  }
 }
 
 /**
@@ -239,20 +355,28 @@ export async function bootSchemaStack(
      */
     composeHostStack?: boolean;
     /**
-     * Boot WITHOUT touching the target database (#3917).
+     * Boot WITHOUT touching the target database's schema (#3917).
      *
-     * Boot schema-sync issues create-table / add-column DDL, and the artifact's
-     * inline seed writes rows — both used to happen before `os migrate plan`
-     * rendered its "dry run" and before `os migrate apply` asked `[y/N]`. With
-     * this set, the driver registers metadata but records the physical work
-     * instead of performing it ({@link SchemaStack.pendingSchemaWork}), and the
-     * seed is suppressed, so the boot is read-only and the plan describes the
-     * database as it actually is. Call {@link SchemaStack.flushSchemaDdl} after
-     * confirmation to perform the work.
+     * Boot schema-sync issues create-table / add-column DDL, which used to
+     * happen before `os migrate plan` rendered its "dry run" and before
+     * `os migrate apply` asked `[y/N]`. With this set, every SQL driver the
+     * boot connects registers metadata but records the physical work instead
+     * of performing it ({@link SchemaStack.pendingSchemaWork}), so the plan
+     * describes the database as it actually is. Call
+     * {@link SchemaStack.flushSchemaDdl} after confirmation to perform the work.
+     * (The artifact's inline seed is off on every boot through here, set or
+     * not: see the `skipSeedData` note in the body.)
      *
-     * Commands that boot in order to READ AND WRITE DATA (`os meta resync`,
-     * `os migrate files-to-references`) must leave this off — they need the
-     * tables to exist.
+     * [#21391] **Every no-write mode sets this, with {@link readOnlyProbe}**:
+     * the read-only boot. A command's writes happen only in its own apply step,
+     * and a dry run, a scan or a report never reaches schema sync. The
+     * enumeration pin `schema-migrate.one-shot-family.integration.test.ts` runs
+     * every caller's no-write modes against a database and fails on any byte
+     * that moves, and fails by file name on a caller it has not been told
+     * about.
+     *
+     * A WRITE mode that needs the tables to exist before it writes (`--apply`
+     * of the data commands, `os meta resync --yes`) leaves this off.
      */
     deferSchemaDdl?: boolean;
     /**
@@ -303,8 +427,20 @@ export async function bootSchemaStack(
   const stack = await createStandaloneStack({
     projectRoot: opts.projectRoot ?? process.cwd(),
     ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}),
-    ...(defer ? { skipSeedData: true } : {}),
+    // [#21391] No seed loader on a one-shot CLI boot — unconditional, and NOT
+    // keyed on `deferSchemaDdl`, for the reason `runPlatformMigrations` below
+    // is not. The artifact's inline seed UPSERTS every seeded row on every
+    // boot (`updated_at` bumped, `organization_id` stamped, an operator's edit
+    // put back to the seed's value). Keyed on `defer`, it ran under every
+    // no-write mode that booted plain, and it still runs under every `--apply`
+    // / `--delete`: a write the operator never saw in the preview, riding along
+    // with the one they confirmed. Seeding stays with the boots that serve.
+    skipSeedData: true,
     ...(opts.readOnlyProbe ? { sqliteAbsentFile: 'empty-in-memory' as const } : {}),
+    // [#21391] No lifecycle sweep either. A one-shot boot used to arm it on an
+    // unref'd timer whose first run is a minute out, so "it never sweeps" was
+    // a timing fact. Not armed, it is a structural one.
+    armLifecycleSweep: false,
     // [#9380] No boot repair migrations on a one-shot CLI boot — unconditional,
     // and NOT keyed on `deferSchemaDdl`.
     //
@@ -316,16 +452,18 @@ export async function bootSchemaStack(
     // every one of them is a command that reports or applies exactly what the
     // operator asked for:
     //
-    //   • `os migrate plan` / `os migrate duplicates` boot deferred + read-only
-    //     and are declared dry runs;
-    //   • `os migrate meta` / `value-shapes` / `recorded-by` / `resume` /
-    //     `summary-nulls` / `files-to-references` boot NOT deferred and are
-    //     STILL dry-run-by-default ("a dry run writes NOTHING"). Keying this off
-    //     `defer` would have left that whole second group repairing rows behind
-    //     a report — the more dangerous half, and the quieter one;
-    //   • `os migrate apply` / `os meta resync` do write, but only the change
-    //     the operator confirmed. A repair riding along is a change they never
-    //     saw in the plan (which is #8725's separate complaint).
+    //   • every no-write mode — `os migrate plan` / `duplicates`, and the
+    //     default mode of every other command booted here — boots deferred +
+    //     read-only (#21391) and is a declared dry run or report;
+    //   • the write modes — `--apply` of `os migrate meta --stored` /
+    //     `value-shapes` / `recorded-by` / `summary-nulls` /
+    //     `files-to-references` / `audit-metadata-bodies`, `os migrate resume
+    //     --run`, `os secret orphans --delete`, `os meta resync --yes` — boot
+    //     NOT deferred, so a `defer`-keyed policy would have left all of them
+    //     repairing rows. They write, but only the change the operator
+    //     confirmed; `os migrate apply` likewise. A repair riding along is a
+    //     change they never saw in the plan (which is #8725's separate
+    //     complaint).
     //
     // The serving boots — `os dev`, `os serve`, `os start` — do not come
     // through here and take the default, which is where an install gets
@@ -340,8 +478,9 @@ export async function bootSchemaStack(
   for (const plugin of stack.plugins) {
     await kernel.use(plugin);
   }
-  if (defer) {
-    await kernel.use(new DeferSchemaDdlPlugin() as any);
+  const deferral = defer ? new DeferSchemaDdlPlugin() : null;
+  if (deferral) {
+    await kernel.use(deferral as any);
   }
   // #12938 — the deployment's own object set, when this command asked for it.
   // Registered here, after the data stack, for the same reason `extraPlugins`
@@ -351,7 +490,8 @@ export async function bootSchemaStack(
     ? await buildSchemaMigrationPlugins({
         basePlugins: stack.plugins,
         cwd: opts.projectRoot ?? process.cwd(),
-        skipSeedData: defer,
+        // The same answer the standalone stack got above: never on this boot.
+        skipSeedData: true,
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
@@ -400,9 +540,12 @@ export async function bootSchemaStack(
 
   // Read AFTER the pass above — that is the step which fills both of them.
   const managedTableCount = driver ? (driver as any).managedObjectFields?.size ?? 0 : 0;
-  const pendingSchemaWork = defer && driver?.previewDeferredSchemaWork
-    ? await driver.previewDeferredSchemaWork()
-    : [];
+  // [#21391] Every datasource the deferral armed, not only the default's.
+  const pendingSchemaWork: PendingSchemaWork[] = [];
+  for (const d of deferral?.drivers ?? []) {
+    if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await d.previewDeferredSchemaWork()));
+  }
+  sortPendingSchemaWork(pendingSchemaWork);
 
   return {
     driver,
@@ -433,9 +576,16 @@ export async function bootSchemaStack(
         return [];
       }
     },
-    flushSchemaDdl: async () => (defer && driver?.flushDeferredSchemaDdl
-      ? await driver.flushDeferredSchemaDdl()
-      : []),
+    flushSchemaDdl: async () => {
+      // [#21391] Every armed datasource, in the order it was armed; then the
+      // stack stops deferring drivers registered from here on.
+      const performed: PendingSchemaWork[] = [];
+      for (const d of deferral?.drivers ?? []) {
+        if (d.flushDeferredSchemaDdl) performed.push(...(await d.flushDeferredSchemaDdl()));
+      }
+      deferral?.release();
+      return sortPendingSchemaWork(performed);
+    },
     composition,
     /**
      * Tear the one-shot stack down through the kernel's own teardown — the
@@ -458,6 +608,7 @@ export async function bootSchemaStack(
      * `destroy()` closes the ones it owns); a second disconnect is a no-op.
      */
     shutdown: async () => {
+      deferral?.release();
       try { await kernel.shutdown(); } catch { /* teardown is best-effort */ }
       try { await driver?.disconnect?.(); } catch { /* ignore */ }
       // Only now — `kernel.shutdown()` is itself two INFO lines ("Graceful
