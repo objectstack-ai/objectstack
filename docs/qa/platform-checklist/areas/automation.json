@@ -1408,10 +1408,10 @@
     },
     {
       "id": "automation.packaged-flow-subflow-disable-refusal",
-      "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enable is never guarded",
+      "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1433,7 +1433,7 @@
         "map pair: POST /api/v1/automation/showcase_one_task_signoff/toggle {\"enabled\": false} — record the answer",
         "after each refusal: GET /api/v1/data/sys_metadata_activation and assert NO row exists for the refused flow; then prove it is still ARMED — trigger a run through its caller (PATCH a showcase_task to status='done' for the notify pair) and confirm the child's subflow step executed",
         "remedy sequence (the refusal's own instruction): POST /api/v1/automation/showcase_task_done_notify_owner/toggle {\"enabled\": false} (the CALLER — it has no packaged callers of its own, so this lands), then RETRY POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record what it answers",
-        "enable arm: toggle showcase_task_done_notify_owner back ON, then — with the caller armed — POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": true} (a no-op enable of an already-armed flow) and confirm it is never refused",
+        "enable arm, child FIRST: POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": true} while its caller is still off (confirm it is never refused), then toggle showcase_task_done_notify_owner back ON, then repeat the child's enable with the caller armed (a no-op enable). ⚠️ Enabling the CALLER while its packaged subflow is still disabled is refused by design since 679f95e (#20711) — 409 RESOURCE_CONFLICT 'cannot be enabled while 1 packaged subflow it calls is disabled … Enable it first' — so the caller-first order is not a fail of this item",
         "teardown: re-enable anything left disabled (or discard the isolated DB)"
       ],
       "acceptance": [
@@ -1456,15 +1456,15 @@
           "evidence": "the ledger read (absence) + the caller run's step-log excerpt"
         },
         {
-          "clause": "ENABLE is never guarded — arming a flow cannot break a caller, so the enable arm answers 2xx regardless of callers",
+          "clause": "enabling a CHILD (a called subflow) is never guarded — arming it cannot break a caller, so the child's enable answers 2xx regardless of its callers' state",
           "oracle": "api",
-          "verify": "step 6's enable answers 2xx with no DELETE_RESTRICTED (guard is on the !enabled branch only, engine.ts; pinned engine-level at flow-activation-ledger.test.ts)",
+          "verify": "both of step 6's child enables answer 2xx with no DELETE_RESTRICTED (the disable guard runs on the !enabled branch, engine.ts; pinned engine-level at flow-activation-ledger.test.ts). The separate enable-side guard on a CALLER (679f95e, #20711) is not this clause's subject",
           "evidence": "the enable response"
         },
         {
           "clause": "the refusal's own remedy is followable: after disabling the calling flow first, the child's disable lands (2xx + ledger row active=false)",
           "oracle": "api",
-          "verify": "step 5's retry. ⚠️ EXPECTED FAIL at af56546, kept as the assertion on purpose: packagedSubflowCallers scans the REGISTERED flow map with no activation check (engine.ts — it skips self and non-packaged callers, nothing else), so a disabled caller still guards and the retry still answers 409 — while both the engine's own refusal message ('Disable the calling flow(s) first…') and ADR-0126 §7.3's rationale ('The refusal is honest, actionable (disable the callers first, or don't)') name exactly this sequence as the way out. A red here is a product finding about the remedy sentence — the door tells the administrator to do something it then refuses — already tracked by the #12438 sweep; record it, do NOT soften this clause to match the scan",
+          "verify": "step 5's retry answers 2xx and the ledger row reads active=false — the sequence both the engine's own refusal message ('Disable the calling flow(s) first…') and ADR-0126 §7.3's rationale ('The refusal is honest, actionable (disable the callers first, or don't)') name as the way out. (Authored as an expected fail at af56546, when the caller scan had no activation check; fixed by 36d043b, #20724, and 0d9349f, #20759.) A 409 on the retry is the fail — the door telling the administrator to do something it then refuses",
           "evidence": "the caller's successful disable + the retry's full answer, side by side with the first refusal's remedy sentence"
         }
       ],
@@ -1492,7 +1492,8 @@
           "date": "2026-08-26",
           "change": "new — the ADR-0126 §7.3 disable guard had only engine-level unit pins and no HTTP-level assertion anywhere: the wire 409 DELETE_RESTRICTED with callers named, the map-caller arm, the no-row-on-refusal invariant, and the never-guarded enable. The remedy-sequence clause (disable the caller first) is authored as an expected fail: the shipped scan consults registration only (engine.ts), so the refusal's own named remedy does not currently unblock the child — the clause keeps the promise the door itself makes and flags the red as a tracked product finding",
           "ref": "#12438"
-        }
+        },
+        { "revision": 2, "date": "2026-10-02", "change": "retired clause 5's expected-fail note and re-ordered step 6. The remedy sequence now holds (36d043b #20724, 0d9349f #20759): on 17.6.0 the caller's disable then the child's retry both answer 200 and the ledger reads active=false. Step 6's caller-first enable is refused by design since 679f95e (#20711, 409 RESOURCE_CONFLICT naming the disabled subflow), so the step enables the child first and clause 4 is scoped to a child's enable. Measured by the 17.6.0 release-verification run", "ref": "#21330" }
       ]
     },
     {
@@ -1500,7 +1501,7 @@
       "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1564,7 +1565,7 @@
         {
           "clause": "the honest clause — the clone OUTLIVES the process and REACHES Studio: after a cold restart over the same database file the clone still exists and dispatches, and it is listed on a Studio Automations rail (it is 'an ordinary org/install-owned flow', ADR-0126 §7.1, under the shipped 'customize in Studio' promise §1.3 — the Setup page's own copy says 'Editing happens in Studio')",
           "oracle": "api",
-          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process, and the flow present in metadata a Studio rail can list. ⚠️ EXPECTED FAIL at af56546, kept as the assertion on purpose: the clone route registers through automationService.registerFlow ONLY — no sys_metadata write anywhere in the arm (domains/automation.ts) — so the boot flow pull has nothing to re-register and the clone vanishes on restart; and the Studio Automations rail lists PACKAGE-scoped metadata (objectui StudioDesignSurface.tsx loadPackageSurfaces(client,'flow',packageId)) while the clone's _packageId was deliberately stripped (flow-clone.ts), so it is reachable in no rail. A red here is a product finding already tracked by the #12438 sweep (clone registered engine-only); record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
+          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process, and the flow present in metadata a Studio rail can list. DURABILITY holds since cb4c31d (#20907, with the clone save path #20761): the clone survives a cold restart and still dispatches. ⚠️ REACHABILITY is an EXPECTED FAIL, kept as the assertion on purpose: the Studio Automations rail lists PACKAGE-scoped metadata (objectui StudioDesignSurface.tsx loadPackageSurfaces(client,'flow',packageId)) while the clone is stored with package_id null (_packageId deliberately stripped, flow-clone.ts), so it is reachable in no rail — tracked at #21332. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
           "evidence": "the post-restart GET (present or 404) + the meta/flow listing showing where, if anywhere, the clone is held"
         }
       ],
@@ -1595,7 +1596,8 @@
           "date": "2026-08-26",
           "change": "new — the ADR-0126 §7.1 clone door landed with route-level mocked pins only; nothing asserted the live contract (double-fire with the notice verbatim, references not re-pointed, the refusal arms on the real dispatcher) and nothing anywhere asked the two questions the honest clause pins: the clone registers engine-only (no sys_metadata write) and its _packageId is stripped, so restart survival and Studio reachability — both halves of the ADR's own 'ordinary flow' promise — are authored as an expected-fail probe rather than left unasked",
           "ref": "#12438"
-        }
+        },
+        { "revision": 2, "date": "2026-10-02", "change": "clause 7's expected-fail note now names only the reachability half. The durability half was fixed by cb4c31d (#20907, with #20761): on 17.6.0 the clone survives a cold restart, reads back with its edited label and still fires (release-verification run). The reachability half still fails — no Studio surface lists a package-less flow — and is now filed as #21332 instead of resting on the #12438 sweep", "ref": "#21330" }
       ]
     },
     {
