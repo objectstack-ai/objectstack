@@ -516,8 +516,9 @@ export interface ApprovalActionRow {
   /**
    * The pending-approver slot this action was taken as: the slot's address in
    * its stored spelling, exactly as it stood in the request's
-   * `pending_approvers` when the action was admitted — a `position:<p>`
-   * address (or its older `role:<p>` spelling), an email, or a user id.
+   * `pending_approvers` when the action was admitted — a `position:<name>`
+   * address (or `role:<name>`, the deprecated pre-rename spelling), an email,
+   * or a user id.
    *
    * "Who acted" and "as which slot" are two facts. One holder of a position
    * can act for it, and one person can hold several slots, so the slot is
@@ -531,8 +532,8 @@ export interface ApprovalActionRow {
    * Absent means one of two things, and this member alone does not tell them
    * apart: the action was not admitted through a slot (a submitter's own
    * action, a system action, or an admin override — see `via_override`), or
-   * the row was written before the slot was recorded — "not recorded", which
-   * is not the same claim as "no slot".
+   * the row was written before the slot was recorded. So absent alone never
+   * proves that no slot was involved: "not recorded" is not the same claim.
    */
   acted_as?: string;
 }
