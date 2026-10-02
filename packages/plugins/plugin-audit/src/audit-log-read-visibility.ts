@@ -32,9 +32,10 @@
  *    `update` on a `sys_user`, and the auth-event sink's `login` / `logout`,
  *    which name the session (`auth-event-audit.ts`). Judged by the record gate.
  *    A record that no longer exists is read by no caller, so its rows are
- *    excluded for every caller that is not system context: every `delete` row,
- *    every other row about a deleted record, and every `logout` row (sign-out
- *    deletes the session it names).
+ *    excluded for every caller that is not system context and does not hold
+ *    the audit capability below: every `delete` row, every other row about a
+ *    deleted record, and every `logout` row (sign-out deletes the session it
+ *    names).
  *  - **Rows about no record** — they name no `record_id` and their action is
  *    not a record action: the run-level `import` (plugin-auth's user import),
  *    `config_change` (service-settings) and `platform_admin_standing_change`
@@ -57,6 +58,18 @@
  * The field-level redaction composes with this gate unchanged: of the rows
  * this gate keeps, a snapshot still serves a parent field only to a reader the
  * security service serves that field unmasked.
+ *
+ * ## The audit capability (#21260, ruling B on #21175)
+ *
+ * A caller holding {@link LEDGER_AUDIT_CAPABILITY} is not narrowed by this
+ * gate: it is served the deletion and sign-out trail, the rows about records
+ * it cannot open, and a broad read whole (the gate's pre-scan, and so its
+ * bound, never runs for it). It still needs the ledger's own object grant,
+ * and the field redaction still narrows every snapshot it is served. Platform
+ * administrators hold it by default (`ADMIN_FULL_ACCESS_CAPABILITIES` in
+ * `@objectstack/spec`); every other position only by explicit grant. The
+ * exemption is the shared mechanism's (`ParentRecordGate.exemptCapability`),
+ * declared here and nowhere else: the activity stream's gate declares none.
  *
  * System-context reads (the platform-admin standing boot reading its last
  * roster, the writers' own reads) and context-less programmatic calls are not
@@ -99,11 +112,20 @@ export function isLedgerRowAboutNoRecord(row: Record<string, unknown>): boolean 
   return typeof action === 'string' && action !== '' && !RECORD_ACTIONS.has(action);
 }
 
+/**
+ * The compliance ledger's audit capability: its holder is exempt from this
+ * gate. Declared in `PLATFORM_CAPABILITIES` (`@objectstack/spec/security`) and
+ * granted by `ADMIN_FULL_ACCESS_CAPABILITIES`; this spelling is pinned against
+ * both in `audit-log-read-visibility.test.ts`.
+ */
+export const LEDGER_AUDIT_CAPABILITY = 'view_all_audit_log';
+
 const LEDGER_GATE: ParentRecordGate = {
   object: LEDGER_OBJECT,
   seam: 'audit log read visibility',
   denyAll: { id: '__audit_log_parent_denied__' },
   outsideClass: { fields: ['action'], test: isLedgerRowAboutNoRecord },
+  exemptCapability: LEDGER_AUDIT_CAPABILITY,
 };
 
 /**

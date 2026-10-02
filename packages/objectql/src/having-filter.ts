@@ -140,6 +140,20 @@
 // Before, `$exists` was read by truthiness (`"false"` kept the valued rows) and
 // a third `$null` value constrained nothing. See
 // {@link nonBooleanFlagComparandError}.
+//
+// [#21255] …and on BOTH positions the class rule `where` applies to EVERY
+// `{ $field }` comparison, not only to an `addDays` pair: two columns are
+// comparable only within one of the spec's `CROSS_FIELD_COMPARISON_CLASSES`,
+// asked of the spec's own verdict (`crossFieldComparisonVerdict`). A plain
+// reference across two classes — a `datetime` against a `date`, a text against
+// a number — is refused `INVALID_FILTER` / 400 in the words `where` refuses the
+// same pair in. Before, only an `addDays` pair was judged, so a plain one
+// reached `@objectstack/formula`, which answered a `datetime` against a bare
+// day by its whole-day reading of the day: measured on `SqlDriver` over
+// better-sqlite3 through `engine.aggregate`, a per-aggregation
+// `{ closed_at: { $lte: { $field: 'due_on' } } }` counted 4 of 6 rows and a
+// `having` of `max(closed_at)` against a `day` bucket kept 4 of 6 groups, where
+// the `where` twin was a 400. See {@link crossClassReferenceViolation}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -158,6 +172,14 @@ import {
   CLOCK_TIME_TYPES,
   INSTANT_TYPES,
   NUMERIC_VALUE_TYPES,
+} from '@objectstack/spec/data';
+// [#21255] The cross-field comparison CLASS — the spec's one classification,
+// which `driver-sql`'s `where` compiler reads too — so a plain `{ $field }` here
+// is judged by the table that judges it there, never by a copy of it.
+import {
+  crossFieldComparisonVerdict,
+  type CrossFieldComparisonClass,
+  type CrossFieldComparisonFieldMeta,
 } from '@objectstack/spec/data';
 // [#5702] The retired operators and the prescription a refusal prints. HAVING is
 // the fifth of the five refusal sites `RETIRED_FILTER_OPERATORS`' own doc names,
@@ -666,11 +688,24 @@ function unknownHavingColumnError(
  * "is" — an aggregated column is computed, not stored. Unlike `driver-sql`'s,
  * this diagnostic is not withheld: every column it names is the author's own
  * projection, as in {@link unresolvedFieldReferenceError}.
+ *
+ * [#21255] …and the refusal of a PLAIN reference across two classes
+ * ({@link assertSameClassReference}), in the same words: `withAddDays` says
+ * which of the two the author wrote, and the rest of the sentence — how an
+ * aggregated column's class is read — is the same for both.
  */
-function offsetPairError(field: string, op: string, ref: string, path: string, reason: string): Error {
+function columnPairError(
+  field: string,
+  op: string,
+  ref: string,
+  path: string,
+  reason: string,
+  withAddDays: boolean,
+): Error {
+  const written = withAddDays ? `{ "$field": "${ref}" } with addDays` : `{ "$field": "${ref}" }`;
   return invalidFilterError(
     `Operator "${op}" on field "${field}" at ${path} compares against another column `
-    + `({ "$field": "${ref}" } with addDays), which cannot be evaluated here: ${reason} An aggregated `
+    + `(${written}), which cannot be evaluated here: ${reason} An aggregated `
     + `column's class is read off the query: a groupBy projection takes its field's declared type (a `
     + `"day" date bucket is a date, a coarser bucket a text label), count / count_distinct / sum / avg `
     + `are numeric, and min / max take the type of the field they read.`,
@@ -690,7 +725,7 @@ function assertOffsetPairIsTemporal(
   classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): void {
   const reason = offsetPairViolation(field, reference, classes);
-  if (reason !== undefined) throw offsetPairError(field, op, String(reference.$field), path, reason);
+  if (reason !== undefined) throw columnPairError(field, op, String(reference.$field), path, reason, true);
 }
 
 /**
@@ -711,9 +746,7 @@ function offsetPairViolation(
   const refClass = classes.get(ref);
   const targetClass = classes.get(field);
   if (refClass !== undefined && targetClass !== undefined && refClass !== targetClass) {
-    return `"${field}" is ${targetClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
-      + `differently in SQL (storage-class ordering) than in memory (JS coercion) — compare same-class `
-      + `columns.`;
+    return crossClassReason(field, targetClass, ref, refClass);
   }
   if (refClass !== undefined && refClass !== 'date' && refClass !== 'datetime') {
     return `addDays adds whole days to a date or datetime column, and "${ref}" is ${refClass} — an offset `
@@ -728,6 +761,89 @@ function offsetPairViolation(
       + `must be a number of days.`;
   }
   return undefined;
+}
+
+/**
+ * [#20127] `driver-sql`'s sentence for two columns of different classes on
+ * `where` (`applyCrossFieldComparison`), with "is stored as" read as "is".
+ * [#21255] Written once, here, for the two rules that print it — the `addDays`
+ * pair's ({@link offsetPairViolation}) and a plain reference's
+ * ({@link crossClassReferenceViolation}).
+ */
+function crossClassReason(
+  field: string,
+  fieldClass: CrossFieldComparisonClass,
+  ref: string,
+  refClass: CrossFieldComparisonClass,
+): string {
+  return `"${field}" is ${fieldClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
+    + `differently in SQL (storage-class ordering) than in memory (JS coercion) — compare same-class `
+    + `columns.`;
+}
+
+/**
+ * [#21255] The class rule `where` applies to EVERY `{ $field }` comparison —
+ * "Two columns are comparable only within one of" the spec's
+ * `CROSS_FIELD_COMPARISON_CLASSES` — returned as the reason a plain reference
+ * breaks it, or `undefined` when it holds or is not this rule's to judge.
+ *
+ * The verdict is the spec's `crossFieldComparisonVerdict`, the classification
+ * `driver-sql`'s `crossFieldComparisonClass` delegates to, so a pair this
+ * position refuses is a pair `where` refuses, in the same class names. Only its
+ * `cross-class` answer is refused here:
+ *
+ * - `comparable` — one class on both sides — answers as before;
+ * - `no-class` (a list or an object, a file field, a formula) and `unjudged` (a
+ *   type outside `FieldType`) are not this rule's: the first is a different
+ *   refusal on `where` (the column has no scalar stored form), and the second
+ *   names no class at all;
+ * - a side with no declaration — a registry-less host, a column the map does
+ *   not list (`id`), a column whose type the query cannot tell — is not
+ *   judged: the fail-open direction every declared-type door of the engine
+ *   takes, and the posture an `addDays` pair already has there.
+ *
+ * An `addDays` pair is judged by {@link offsetPairViolation} instead, unchanged.
+ */
+function crossClassReferenceViolation(
+  field: string,
+  ref: string,
+  target: CrossFieldComparisonFieldMeta | undefined,
+  referent: CrossFieldComparisonFieldMeta | undefined,
+): string | undefined {
+  if (target === undefined || referent === undefined) return undefined;
+  const verdict = crossFieldComparisonVerdict(target, referent);
+  if (verdict.verdict !== 'cross-class') return undefined;
+  return crossClassReason(field, verdict.left, ref, verdict.right);
+}
+
+/**
+ * [#21255] The plain-reference half of the class rule on `having`, judged
+ * against each aggregated column's TYPE ({@link aggregatedRowColumnTypes}): a
+ * `count` is a `number`, a `day` bucket a `date`, `min` / `max` the type of the
+ * field they read — the same reading {@link aggregatedRowColumnClasses}
+ * classes. The type, not that class, is what the spec's verdict is asked of,
+ * because the class lumps a file field's projection in with text, where the
+ * spec gives it no class.
+ */
+function assertSameClassReference(
+  field: string,
+  op: string,
+  reference: Record<string, unknown>,
+  path: string,
+  types: ReadonlyMap<string, string | undefined>,
+): void {
+  const ref = String(reference.$field);
+  const reason = crossClassReferenceViolation(field, ref, columnTypeMeta(types, field), columnTypeMeta(types, ref));
+  if (reason !== undefined) throw columnPairError(field, op, ref, path, reason, false);
+}
+
+/** [#21255] An aggregated column's type, in the shape the spec's verdict reads. */
+function columnTypeMeta(
+  types: ReadonlyMap<string, string | undefined>,
+  name: string,
+): CrossFieldComparisonFieldMeta | undefined {
+  const type = types.get(name);
+  return type === undefined ? undefined : { type };
 }
 
 /**
@@ -780,8 +896,16 @@ export function aggregatedRowColumns(groupBy: unknown, aggregations: unknown): s
  * [#20127] An aggregated column's comparison class — `driver-sql`'s
  * cross-field vocabulary (`crossFieldComparisonClass`), so the words a `having`
  * refusal prints are the words the same pair gets on `where`.
+ *
+ * [#21255] Named by the spec's `CROSS_FIELD_COMPARISON_CLASSES` rather than
+ * spelled again here: the six names are one list. What this face derives per
+ * column is the class of its TYPE by the value-class sets
+ * ({@link classOfDeclaredType}), and it is NOT the spec's verdict on the no-class
+ * families: a structured-JSON, multi-option or file type reads as `text` here
+ * (the spec: no class), so the plain-reference rule asks the spec's verdict of
+ * the type instead ({@link crossClassReferenceViolation}).
  */
-export type AggregatedColumnClass = 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time';
+export type AggregatedColumnClass = CrossFieldComparisonClass;
 
 /** The aggregation functions whose result is a number whatever they read. */
 const NUMERIC_RESULT_FUNCTIONS: ReadonlySet<string> = new Set(['count', 'count_distinct', 'sum', 'avg']);
@@ -1032,7 +1156,11 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  * - [#20127] a reference whose `addDays` pairs columns the offset has no
  *   meaning on — not two temporal columns of one class, or an offset column
  *   that is not numeric — judged against `classes` when the caller passes it
- *   ({@link offsetPairError});
+ *   ({@link columnPairError});
+ * - [#21255] a PLAIN reference between columns of two comparison classes — a
+ *   `datetime` against a `date`, a text against a number — judged by the
+ *   spec's verdict against `types` ({@link aggregatedRowColumnTypes}) when the
+ *   caller passes it ({@link assertSameClassReference}), in the same words;
  * - [#20123] and, once the whole clause has passed those, a KEY naming no
  *   column of the aggregated row, at any depth —
  *   {@link unknownHavingColumnError}. Last on purpose: a condition on a column
@@ -1048,9 +1176,10 @@ export function assertHavingIsEvaluable(
   having: unknown,
   columns: readonly string[],
   classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  types?: ReadonlyMap<string, string | undefined>,
 ): void {
   const unknownKeys: Array<{ key: string; path: string }> = [];
-  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns, classes, unknownKeys });
+  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns, classes, types, unknownKeys });
   if (unknownKeys.length > 0) throw unknownHavingColumnError(unknownKeys, columns);
 }
 
@@ -1241,7 +1370,11 @@ function declaredReferenceNames(fields: Record<string, unknown>): ReadonlySet<st
 /**
  * [#20148] A `{ $field }` in a per-aggregation filter that `where`'s
  * cross-field rules refuse — a referent the object does not declare, or an
- * `addDays` pair the offset has no meaning on.
+ * `addDays` pair the offset has no meaning on. [#21255] Or a plain reference
+ * between two fields of different comparison classes, which `where` refuses
+ * whether or not it carries an offset: the capability boundary below names the
+ * same-class rule beside the offset's, as `where`'s names "compared as the same
+ * type class".
  *
  * The WORDS follow `where`'s. `driver-sql` refuses the same comparison in a
  * `where` with the fields, the operator and the specific reason withheld from
@@ -1257,10 +1390,10 @@ function withheldAggregationReferenceError(root: string): Error {
   // the sentence saying where the withheld half went is never the part cut off.
   return invalidFilterError(
     `A { "$field" } reference in \`${root}\` cannot be evaluated. It must name a field the object `
-    + `declares, and an addDays offset applies only between two date or two datetime fields, read from `
-    + `an integer or a numeric field; evaluated anyway, its count would be silently wrong. The fields, the `
-    + `operator and the reason are withheld from the message, as for the same comparison in a `
-    + `\`where\`; the full diagnostic is in the server log.`,
+    + `declares, compared as the same type class, and an addDays offset applies only between two date `
+    + `or two datetime fields, read from an integer or a numeric field; evaluated anyway, its count would `
+    + `be silently wrong. The fields, the operator and the reason are withheld from the message, as for `
+    + `the same comparison in a \`where\`; the full diagnostic is in the server log.`,
   );
 }
 
@@ -1276,6 +1409,12 @@ function withheldAggregationReferenceError(root: string): Error {
  * declared, then the `addDays` pair rule. A filter KEY the object does not
  * declare (or a formula) has no class here, so the same-class half of the pair
  * rule does not judge it.
+ *
+ * [#21255] …and a reference with no offset takes the class rule `where` gives
+ * every `{ $field }` comparison, by the spec's verdict on the two declared
+ * fields ({@link crossClassReferenceViolation}): a `datetime` against a `date`
+ * counted by `@objectstack/formula`'s whole-day reading of the day, where the
+ * `where` twin is a 400. Same refusal, same withholding, same log line.
  */
 function assertAggregationFilterReferencesAreDeclared(
   filter: unknown,
@@ -1326,14 +1465,29 @@ function assertAggregationFilterReferencesAreDeclared(
             `the addDays offset "${String(offset.$field)}" is not a declared field of "${declared.object}" — `
             + `only declared fields can be referenced.`);
         }
-        if (offset !== undefined) {
-          const reason = offsetPairViolation(key, target, classes);
-          if (reason !== undefined) refuse(key, op, at, ref, reason);
-        }
+        const reason = offset !== undefined
+          ? offsetPairViolation(key, target, classes)
+          : crossClassReferenceViolation(key, ref, declaredFieldMeta(map, key), declaredFieldMeta(map, ref));
+        if (reason !== undefined) refuse(key, op, at, ref, reason);
       }
     }
   };
   walk(filter, root);
+}
+
+/**
+ * [#21255] A declared field in the shape the spec's cross-field verdict reads
+ * — its `type`, and its `multiple` flag, which moves a multi-capable type to
+ * the list-or-object family. `undefined` when the map does not declare it with
+ * a readable type.
+ */
+function declaredFieldMeta(
+  fields: Record<string, unknown>,
+  name: string,
+): CrossFieldComparisonFieldMeta | undefined {
+  const type = declaredFieldType(fields, name);
+  if (type === undefined) return undefined;
+  return { type, multiple: (fields[name] as { multiple?: unknown }).multiple === true };
 }
 
 /**
@@ -1354,6 +1508,12 @@ interface EvaluableScope {
    * it — what an `addDays` pair is judged against. `undefined` = not judged.
    */
   classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>;
+  /**
+   * [#21255] Each column's TYPE ({@link aggregatedRowColumnTypes}) — what a
+   * plain reference's class rule asks the spec's verdict of. `undefined` = not
+   * judged.
+   */
+  types?: ReadonlyMap<string, string | undefined>;
   /** [#20123] Keys naming none of `columns`, collected in walk order. */
   unknownKeys?: Array<{ key: string; path: string }>;
 }
@@ -1422,8 +1582,11 @@ function assertConditionIsEvaluable(
     if (REFERENCE_COMPARISON_OPERATORS.has(op)) {
       if (isFieldReferenceShape(target)) {
         assertReferenceResolves(target, `${path}.${op}`, scope.columns);
-        if (scope.classes && target.addDays !== undefined) {
-          assertOffsetPairIsTemporal(field, op, target, `${path}.${op}`, scope.classes);
+        if (target.addDays !== undefined) {
+          if (scope.classes) assertOffsetPairIsTemporal(field, op, target, `${path}.${op}`, scope.classes);
+        } else if (scope.types) {
+          // [#21255] A plain reference: the class rule `where` applies to it too.
+          assertSameClassReference(field, op, target, `${path}.${op}`, scope.types);
         }
       }
       continue;

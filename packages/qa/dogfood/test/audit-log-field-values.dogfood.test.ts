@@ -41,8 +41,11 @@
 //
 // [#21175] The ledger's parent-record read gate composes on the same read
 // path: the deleted record's rows (its create and delete snapshots) are served
-// to no caller that is not system context, so the doors below serve the live
-// record's rows only. They are still WRITTEN, and the armed check still reads
+// to no caller that is neither system context nor a holder of the ledger's
+// audit capability (#21260), and no set below grants that capability, so the
+// doors below serve the live record's rows only (a holder is served the
+// deleted record's snapshots, narrowed: `audit-log-audit-capability.dogfood.
+// test.ts`). They are still WRITTEN, and the armed check still reads
 // every class in them at rest; what the redaction does with them is pinned on
 // its own function in plugin-audit's `audit-log-field-redaction.test.ts`.
 //

@@ -62,7 +62,11 @@ import {
 
 const ACTIVITY_OBJECT = 'sys_activity';
 
-/** The activity stream's gate: every row naming no parent is excluded. */
+/**
+ * The activity stream's gate: every row naming no parent is excluded, and no
+ * caller is exempt. The compliance ledger's audit capability exempts its holder
+ * from the ledger's gate only (#21260: the ruling names the ledger).
+ */
 const ACTIVITY_GATE: ParentRecordGate = {
   object: ACTIVITY_OBJECT,
   seam: 'activity read visibility',

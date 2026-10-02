@@ -209,8 +209,14 @@ every field is `readonly`, so the ledger is never written through a form.
 Programmatic queries go through `services.data` against `sys_audit_log`. Outside
 system context a read returns a view row only when the caller can read the
 record it names, so neither the list view nor a query serves a view of a record
-the reader cannot open, or of a record that has since been deleted. Those rows
-stay stored, and a system-context read still returns them. Rows carry the
+the reader cannot open, or of a record that has since been deleted, unless the
+reader holds the `view_all_audit_log` capability. Its holder is served every
+ledger row its grant on `sys_audit_log` reaches (under a walled tenancy
+posture, its own organization's rows), with each snapshot still narrowed by
+field-level security. Platform administrators hold it by default;
+anyone else holds it only through a permission set whose `systemPermissions`
+grant it. Those rows stay stored, and a system-context read still returns them.
+Rows carry the
 ADR-0057 `audit` lifecycle class: retained hot for
 90 days, then archived for seven years where an `archive` datasource is
 registered.
