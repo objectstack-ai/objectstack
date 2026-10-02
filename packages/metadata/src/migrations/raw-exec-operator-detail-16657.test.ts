@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16657] The per-table `error` these migrations return names the DIALECT.
+ * [commit 5a95b0e93] The per-table `error` these migrations return names the DIALECT.
  *
  * Every migration in this directory reports per table rather than throwing, and
  * the caller stores or prints that report. Since #16019 the raw-SQL seam

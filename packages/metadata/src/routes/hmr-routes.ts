@@ -25,7 +25,7 @@
  *      pipelines (e.g. `os dev` watching TS sources) to invalidate
  *      previews after rebuilding the artifact.
  *
- * ## The `/dev/` in the path is ENFORCED, not merely declared (#12140)
+ * ## The `/dev/` in the path is ENFORCED, not merely declared (commit f4e7ae5c7)
  *
  * `registerMetadataHmrRoutes` mounts NOTHING and returns `null` unless the
  * process is running an explicit `NODE_ENV=development` posture — see
@@ -108,7 +108,7 @@ export interface MetadataHmrHub {
 }
 
 /**
- * The one decision behind this module's dev-only posture (#12140): may this
+ * The one decision behind this module's dev-only posture (commit f4e7ae5c7): may this
  * process serve `/api/v1/dev/metadata-events` at all?
  *
  * ## Only a literal `development` opens it — everything else is closed

@@ -2404,6 +2404,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Lifecycle",
         helpText: "State machine defining conversation flow"
       },
+      structuredOutput: {
+        label: "Structured Output",
+        helpText: "Output contract for the agent's final answer: JSON format, the JSON Schema it is checked against, retries, fallback format and transform steps. Enforced by the cloud AI runtime."
+      },
       skills: {
         label: "Skills",
         helpText: "Skill names (Agent→Skill→Tool architecture)"

@@ -91,7 +91,7 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         // …and the fixture also carries the SILENT controls: a `record.`-rooted
         // predicate whose string literal contains identifier-shaped text, a
         // FIELD-level `current_user` predicate (which resolves there since
-        // objectui#6010 — and, since objectui#6110 + #6111, resolves at SECTION
+        // objectui#6010 — and, since objectui#6110 + objectui#6111, resolves at SECTION
         // level too — so it must never be flagged), and a second view that is
         // entirely healthy.
         expect(leadFields.at(-2).visibleWhen.source).toBe('record.note != "status unqualified"');
@@ -220,11 +220,11 @@ describe('artifact door — unbound form-predicate roots are announced to the op
     });
 
     it('says NOTHING about a SECTION-level current_user predicate either', async () => {
-        // ⚠️ INVERTED IN PLACE (#13072). This case read "DOES flag the same
+        // ⚠️ INVERTED IN PLACE (commit 200d255e7). This case read "DOES flag the same
         // root at section level, and prints the section vocabulary there", and
         // asserted one warning quoting `bound roots on a form SECTION:
         // 'record', 'previous', 'parent', 'data'`. That vocabulary was derived
-        // from the section contract sentence #12914 replaced: objectui#6110
+        // from the section contract sentence commit f887e5249 replaced: objectui#6110
         // threads the host shell's predicate scope into `isSectionVisible`
         // where it used to pass `undefined`, and objectui#6111 evaluates the
         // authored section `visibleWhen` on the `section-divider` pseudo-field

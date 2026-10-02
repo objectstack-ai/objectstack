@@ -1174,7 +1174,7 @@ export class MetadataManager implements IMetadataService {
         await this.admitLoaderItems(loader, type, items);
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
-        // [#14921] Same discrimination as `listNames`, and needed for the same
+        // [commit c1d274de7] Same discrimination as `listNames`, and needed for the same
         // reason: `admitLoaderItems` refuses an ambiguous stem BEFORE it
         // contributes anything, so absorbing it here would drop every item
         // this loader holds into a `degraded` partial set — an authoring error
@@ -1586,7 +1586,7 @@ export class MetadataManager implements IMetadataService {
   /**
    * List all names of metadata items of a given type
    *
-   * ## [#14423] One loader's fault does not take the whole enumeration down
+   * ## [commit a56baa2bd] One loader's fault does not take the whole enumeration down
    *
    * This loop used to be bare — `const result = await loader.list(type)` with
    * no `try`, while the two sibling plural reads (`list()` via
@@ -1630,7 +1630,7 @@ export class MetadataManager implements IMetadataService {
         result.forEach(item => names.add(item));
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
-        // [#14921] PROPAGATE, never absorb: an ambiguous metadata stem is an
+        // [commit c1d274de7] PROPAGATE, never absorb: an ambiguous metadata stem is an
         // authoring error, not an outage. Degrading it here would answer with
         // a set that silently omits every name this loader holds while the
         // server keeps reporting healthy — precisely the silence the refusal
@@ -1638,7 +1638,7 @@ export class MetadataManager implements IMetadataService {
         if (isAmbiguousMetadataStemError(e)) {
           throw e;
         }
-        // [#14423] Parity with `loadMany` and `list()` — see this method's
+        // [commit a56baa2bd] Parity with `loadMany` and `list()` — see this method's
         // docblock. Same seam, same verdict, same helper.
         this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
@@ -2341,7 +2341,7 @@ export class MetadataManager implements IMetadataService {
   }
 
   // ==========================================
-  // Overlay / Customization Management — REMOVED (#13135, ADR-0049)
+  // Overlay / Customization Management — REMOVED (commit 9e0ba21a1, ADR-0049)
   // ==========================================
   //
   // The in-memory overlay limb (`getOverlay` / `saveOverlay` / `removeOverlay`
@@ -2765,7 +2765,7 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * [#14423] {@link loadMany}, read under the identity the STORE holds each
+   * [commit a56baa2bd] {@link loadMany}, read under the identity the STORE holds each
    * item by — the keyed plural read, beside the unkeyed one.
    *
    * ## Why a second method and not a widened `loadMany`
@@ -2790,7 +2790,7 @@ export class MetadataManager implements IMetadataService {
    * `register()` registry; a caller wanting that set has those. Reading the
    * loaders alone is also what makes this the enumerable twin of
    * {@link loadDiagnosed}, which walks the same loaders by name — that pairing
-   * is the point on the audit side of #14423, where an enumeration and a
+   * is the point on the audit side of commit a56baa2bd, where an enumeration and a
    * by-name read that disagree about a population make one subsystem accuse
    * another of a defect neither has.
    *
@@ -2838,7 +2838,7 @@ export class MetadataManager implements IMetadataService {
    * own key for each item — {@link loadManyKeyed}'s per-loader body.
    *
    * Distinct from {@link admitLoaderItems} on exactly one axis, and that axis
-   * is the whole of #14423: the fallback for a loader with no
+   * is the whole of the defect commit a56baa2bd fixed: the fallback for a loader with no
    * `loadManyKeyed`. `admitLoaderItems` falls back to `loadMany` keyed by
    * `data.name` — the pre-#14205 behaviour, verbatim, which drops a nameless
    * body. Here the fallback is `list()` + a per-name `load()`, so a loader

@@ -27,7 +27,7 @@ import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/co
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
-// [#13279] Both predicates moved to `@objectstack/types` — see its
+// [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
 // `driver-error-classification.ts` `## Home` section. The verdicts are
 // byte-identical; only the import path changed.
 import { isMissingTableError, isSchemaAlreadyExistsError } from '@objectstack/types';
@@ -79,7 +79,7 @@ import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-i
  * because a guard on some arms and not others re-opens the drift the single
  * spelling closed.
  *
- * Reachability is MEASURED, not assumed (#14409, landed `3ecb7dc1a`): mysql2
+ * Reachability is MEASURED, not assumed (commit `3ecb7dc1a`): mysql2
  * 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero
  * `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in
  * 275760..294276 — years Postgres itself stores. Unguarded,
@@ -940,7 +940,7 @@ export class DatabaseLoader implements MetadataLoader {
    *          with its empty value.
    */
   private rethrowUnlessTableUnprovisioned(error: unknown): void {
-    // [#13324] Every caller of this helper reads `this.tableName`, so that is
+    // [commit 4cda78c9b] Every caller of this helper reads `this.tableName`, so that is
     // the relation whose emptiness they are about to trust — a failure naming
     // any OTHER relation (a view over a dropped base table) is not evidence
     // about it and stays loud.
