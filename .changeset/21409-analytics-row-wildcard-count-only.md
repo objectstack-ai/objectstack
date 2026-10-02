@@ -47,12 +47,16 @@ declared in `dropped-refinements.baseline.json`. The dimension half is a
 ## FROM → TO
 
 ```
-FROM  defineDataset({ name: 'deal_metrics', label: 'Deal Metrics', object: 'deal',
+FROM  { name: 'deal_metrics', label: 'Deal Metrics', object: 'deal',
         dimensions: [{ name: 'stage', field: 'stage' }],
-        measures: [{ name: 'deals', aggregate: 'sum', field: '*' }] })
-      -> parsed; every query selecting `deals` answered 500 DATABASE_ERROR
-TO    -> ZodError at measures.0.field (custom):
+        measures: [{ name: 'deals', aggregate: 'sum', field: '*' }] }
+      -> DatasetSchema.parse accepted it; a dataset query selecting `deals`
+         answered 500 DATABASE_ERROR
+TO    -> DatasetSchema.parse throws a ZodError at measures.0.field (custom):
          `measures[].field` is the row wildcard `'*'` under `aggregate: 'sum'`. …
+         defineStack({ datasets }) refuses it at datasets.N.measures.0.field (422
+         STACK_SCHEMA_INVALID), and POST /api/v1/analytics/dataset/query answers
+         400 VALIDATION_FAILED for an inline or a saved copy
 
       measures: [{ name: 'deals', aggregate: 'count' }]                  // a row count
       measures: [{ name: 'deal_value', aggregate: 'sum', field: 'amount' }] // an aggregate of a column
