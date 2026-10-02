@@ -5,7 +5,7 @@
  * methods take `DriverQuery`, not a type that repeats the object name.
  *
  * `distinct` / `aggregate` / `performAggregation` are NOT declared on
- * `IDataDriver`, so #5181's narrowing and #6075's follow-through never reached
+ * `IDataDriver`, so #5181's narrowing and commit d367f03d6's follow-through never reached
  * them: their first argument was already the object name while the query type
  * (`QueryInput` / `QueryAST`) still *required* `object`, so a caller holding
  * only a `where` could not name a type for it and reached for `as any` —

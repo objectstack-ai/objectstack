@@ -20,12 +20,12 @@
  * ```
  *
  * ⛔ Asserting "the refusal still happens" proves NOTHING here — the refusal
- * was already correct, and #13197 / #13239 already pin it. That assertion was
+ * was already correct, and commit 56c093c4d / #13239 already pin it. That assertion was
  * green throughout the defect's entire life. **The discriminating fact is that
  * THE ROW COUNT DOES NOT MOVE**, so every test below reads the store after the
  * refusal rather than stopping at the envelope.
  *
- * The fix is `updateMany`'s posture, one method over: #13197 made that method
+ * The fix is `updateMany`'s posture, one method over: commit 56c093c4d made that method
  * prepare and check every row before mutating any of it, precisely so a
  * half-applied batch cannot happen. The two batch paths of this driver now
  * give the SAME answer to "is a batch atomic?" — they disagreed for as long as

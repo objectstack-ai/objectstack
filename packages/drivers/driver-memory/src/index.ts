@@ -18,7 +18,7 @@ export {
   MULTI_TENANT_UNSUPPORTED_CODE,
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
-  // [#16589] Seam 3 — the per-call refusal. Exported on the same reasoning as
+  // [commit 555a89cbd] Seam 3 — the per-call refusal. Exported on the same reasoning as
   // the two boot seams above: a consumer asserting this driver's behaviour under
   // a tenant scope needs the refusal's identity, not its message text.
   assertCallNotTenantScoped,
@@ -26,13 +26,13 @@ export {
 } from './memory-tenancy-guard.js';
 export type { TenancyAwareSchema } from './memory-tenancy-guard.js';
 
-// [#13197, #13239] Uniqueness on BOTH declaration surfaces — field-level
+// [commit 56c093c4d, #13239] Uniqueness on BOTH declaration surfaces — field-level
 // `unique` and object-level declared `indexes[]` — with the refusal's wire
 // identity and the scoping helpers, exported so a consumer can assert the
 // envelope (`code` AND `status`, never merely "it threw") without
 // string-matching the message.
 //
-// [#16729] `computeAndRecordTenantField` is published BESIDE `tenantFieldOf`,
+// [commit 0f38ab084] `computeAndRecordTenantField` is published BESIDE `tenantFieldOf`,
 // not kept private, because publishing only the inner half is what let this
 // package diverge in the first place: `tenantFieldOf` mirrors
 // `SqlDriver.computeTenantField`, the stickiness lives in the wrapper AROUND
