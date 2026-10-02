@@ -26,7 +26,21 @@ import {
   // by reference: the grid draws the same key through the same shared
   // component `ListView` does, so one declaration judges both doors.
   EmptyStateSchema,
+  // [#21445] `object-grid.rowHeight` / `.rowColor` are the list view's own row
+  // height and row colour schemas, and `.conditionalFormatting` is the list
+  // view's own member (read off `ListViewSchema.shape`, the one place that
+  // declares the rule shape): the grid reads each with exactly that shape, so
+  // one declaration judges both doors.
+  RowHeightSchema,
+  RowColorConfigSchema,
+  ListViewSchema,
 } from './view.zod';
+// [#21445] `object-grid.bulkActionDefs` is the list view's bulk-action def,
+// by identity — the element `ListViewSchema.bulkActionDefs` declares.
+import { BulkActionDefSchema } from './bulk-action.zod';
+// [#21445] `object-grid.aggregations[].type` is the query AST's own aggregation
+// vocabulary — the six functions the grid computes are exactly its members.
+import { AggregationFunction } from '../data/query.zod';
 // [#21229] `object-grid.exportOptions` is the list view's export options OBJECT,
 // by identity — not the list view's union, whose legacy bare-array arm lifts to
 // `{ formats }` while the grid reads `.formats` and lifts nothing. Declared
@@ -3776,6 +3790,53 @@ const FILTERS_TO_FILTER = { filters: 'filter' } as const;
 const GridPageSizeSchema = z.number().int().positive();
 
 /**
+ * [#21445] One `object-grid` group-header aggregation — the shape the grid's
+ * grouping hooks read (`useGroupedData` / `useServerGroupHeaders`, measured at
+ * the `.objectui-sha` pin `89cad75d55`): `field` plus `type`, and nothing
+ * else. Module-private: the member below is its only carrier, and no list-view
+ * schema declares an `aggregations` member to share it with.
+ */
+const GridAggregationSchema = lazySchema(() => strictObject({
+  surface: 'this `object-grid` aggregation',
+  history:
+    'Until this shape was declared, `aggregations` was `z.unknown()`: an unknown function, a '
+    + 'missing `field` or a mis-spelled key passed, and the group header drew a `0` nothing computed, or no number at all.',
+}, {
+  field: z.string().describe('Field whose values the function aggregates within each group (ignored by `count`)'),
+  type: AggregationFunction.describe('Aggregation function — `count` (the group\'s row count), `sum`, `avg`, `min`, `max` or `count_distinct`'),
+}));
+
+/**
+ * [#21445] `object-grid`'s built-in affordance toggles — the four members a
+ * read point names at the `.objectui-sha` pin `89cad75d55` (see the member).
+ * Module-private for the same reason as {@link GridAggregationSchema}.
+ *
+ * `read` and `import` are `guidance`, not members: objectui's TypeScript
+ * `ObjectGridSchema` declares both, and no grid read point reads either, so a
+ * declaration here would publish two toggles that toggle nothing.
+ */
+const GridOperationsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-grid` operations block',
+  history:
+    'Until this shape was declared, `operations` was `z.unknown()`: any value passed, and a '
+    + 'mis-spelled toggle was ignored while the grid applied its replace-not-merge default.',
+  guidance: {
+    read:
+      '`operations.read` has no reader on `object-grid`: the grid always lists the records it is '
+      + 'bound to, and a toggle here would toggle nothing. Delete the key; record read access is '
+      + 'governed by the object\'s permissions.',
+    import:
+      '`operations.import` has no reader on `object-grid`: the grid draws no import affordance, so '
+      + 'a toggle here would toggle nothing. Delete the key.',
+  },
+}, {
+  create: z.boolean().optional().describe('Show the add-row affordance (also gated by the user\'s create permission)'),
+  update: z.boolean().optional().describe('Offer the row menu\'s generic Edit entry'),
+  delete: z.boolean().optional().describe('Offer the row menu\'s generic Delete entry'),
+  export: z.boolean().optional().describe('`false` hides the export menu that `exportOptions` enables'),
+}));
+
+/**
  * `object-grid` (objectui `plugin-grid/src/ObjectGrid.tsx` @ `eb7f586b`).
  * Read points per key: `objectName` (throughout), `columns`/`fields` (:714-715),
  * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
@@ -3804,6 +3865,24 @@ const GridPageSizeSchema = z.number().int().positive();
  * control `schema.editable` in `ObjectGrid.tsx`. It is declared ahead of its
  * reader on purpose (the BUILD objectui#11068 chose), and its describe carries
  * the `[EXPERIMENTAL — not enforced]` marker that says so; see the member.
+ *
+ * [#21445] Seven members re-measured at the `.objectui-sha` pin `89cad75d55`,
+ * same file, and typed with the shape each read point takes — they were
+ * `z.unknown()` (`bulkActionDefs` an array of it), so `rowHeight: 42` passed
+ * every door and the grid substituted or dropped the value in silence:
+ * `rowHeight` (`resolveRowHeightMode`, :1311, five values, else `compact`),
+ * `rowColor` (`useRowColor`, :2955, `field` + `colors`), `conditionalFormatting`
+ * (`resolveConditionalFormatting`, :2964), `navigation`
+ * (`useNavigationOverlay`, :2894), `aggregations` (`useGroupedData` and
+ * `useServerGroupHeaders`, :3095 / :3113, `{ field, type }` with the six query
+ * aggregation functions), `bulkActionDefs` (`resolveBulkActions`, :4778) and
+ * `operations` (`create` :5468, `update` / `delete` :1898-1899, `export`
+ * :4088 / :5340 / :6141 — the four members any read point names). The first
+ * four and `bulkActionDefs` take the list view's own schemas by reference;
+ * `aggregations` and `operations` have no list-view counterpart and declare
+ * the measured shape here. In the same change `resizableColumns` — read only
+ * as `schema.resizable ?? schema.resizableColumns` (:5361) — retires to a
+ * tombstone naming `resizable`.
  */
 export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid`',
@@ -4035,7 +4114,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   searchableFields: z.array(z.string()).optional()
     .describe('Fields the toolbar search queries; a non-empty list enables search'),
   showSearch: z.boolean().optional().describe('Show the search box (read only when `searchableFields` is absent)'),
-  rowHeight: z.unknown().optional().describe('Row density mode (e.g. compact / comfortable)'),
+  /**
+   * [#21445] The list view's own {@link RowHeightSchema}, by reference.
+   * `resolveRowHeightMode` (`ObjectGrid.tsx:1311` at the pin `89cad75d55`)
+   * admits exactly these five values — it tests membership against a table
+   * typed `Record<RowHeight, …>`, so the renderer's set and this one are the
+   * same set — and answers `compact` for anything else, so `42` or `'huge'`
+   * rendered as a compact grid with no report.
+   */
+  rowHeight: RowHeightSchema.optional()
+    .describe('Row height — one of `compact`, `short`, `medium`, `tall`, `extra_tall`; the same values a list view\'s `rowHeight` takes'),
   /**
    * [#20831] The list view's own `GroupingConfigSchema`, by reference — ⛔ not
    * a copy of its shape. objectui types this key as the spec's
@@ -4047,16 +4135,64 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * every row into one empty group. Judged the same way on every door now.
    */
   grouping: GroupingConfigSchema.optional().describe('Row grouping config'),
-  aggregations: z.unknown().optional().describe('Group aggregation config (sum/avg/… per column)'),
-  conditionalFormatting: z.unknown().optional().describe('Conditional row/cell formatting rules'),
-  rowColor: z.unknown().optional().describe('Row color rules'),
+  /**
+   * [#21445] Per-group numbers in a grouped grid's group headers. No list-view
+   * schema declares this member, so the shape is the one the grid reads:
+   * `useGroupedData` and `useServerGroupHeaders` (`ObjectGrid.tsx:3095` /
+   * `:3113` at the pin `89cad75d55`) take an array of `{ field, type }` and
+   * compute each `type` — `sum`, `count`, `avg`, `min`, `max`,
+   * `count_distinct`, the query AST's own {@link AggregationFunction}
+   * vocabulary, by reference. `count` is the group's row count whatever
+   * `field` names. An object, an unknown function or a missing `field` used to
+   * pass here and draw a `0` nothing computed (client-side grouping) or no
+   * number at all (server-side grouping).
+   */
+  aggregations: z.array(GridAggregationSchema).optional()
+    .describe('Per-group aggregations drawn in a grouped grid\'s group headers — `[{ field, type }]`, `type` one of `count`, `sum`, `avg`, `min`, `max`, `count_distinct` (`count` is the group\'s row count, whatever `field` names)'),
+  /**
+   * [#21445] The list view's own `conditionalFormatting` member, by reference
+   * (`ListViewSchema.shape.conditionalFormatting` — the rule shape is declared
+   * nowhere else): an ordered array of `{ condition, style }`, the first rule
+   * whose CEL predicate holds styling the row. The grid evaluates its rules
+   * through the same shared evaluator the list view uses
+   * (`resolveConditionalFormatting`, `ObjectGrid.tsx:2964` at the pin
+   * `89cad75d55`), so one declaration judges both doors. ⚠️ That evaluator
+   * also tolerates two objectui-native rule spellings (`{ field, operator,
+   * value, backgroundColor, … }` and `{ expression, … }`); neither is declared
+   * on the list view, and the grid does not open a second dialect the list
+   * view refuses.
+   */
+  conditionalFormatting: ListViewSchema.shape.conditionalFormatting
+    .describe('Conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to the row'),
+  /**
+   * [#21445] The list view's own {@link RowColorConfigSchema}, by reference:
+   * `useRowColor` (`ObjectGrid.tsx:2955` at the pin `89cad75d55`) reads
+   * exactly `field` and `colors`.
+   */
+  rowColor: RowColorConfigSchema.optional()
+    .describe('Row colour by field value — `{ field, colors }`, the same block a list view\'s `rowColor` declares'),
   selection: z.unknown().optional().describe('Selection config ({ type: none | single | multiple })'),
   selectable: z.unknown().optional().describe('Legacy selection shorthand, read only when `selection` is absent. Prefer `selection`'),
   rowActions: z.array(z.unknown()).optional().describe('Per-row action names'),
   bulkActions: z.array(z.unknown()).optional().describe('Bulk action names shown on selection'),
   batchActions: z.array(z.unknown()).optional().describe('Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`)'),
-  bulkActionDefs: z.array(z.unknown()).optional().describe('Inline bulk-action definitions (full defs, not names)'),
-  navigation: z.unknown().optional().describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
+  /**
+   * [#21445] The list view's own bulk-action def, {@link BulkActionDefSchema},
+   * by identity — the element `ListViewSchema.bulkActionDefs` declares. The
+   * grid folds these defs through `resolveBulkActions` (`ObjectGrid.tsx:4778`
+   * at the pin `89cad75d55`) exactly as a list view's are folded, so the
+   * schema that refuses a no-op `custom` def there refuses it here.
+   */
+  bulkActionDefs: z.array(BulkActionDefSchema).optional()
+    .describe('Inline bulk-action definitions (full defs, not names) — the same `BulkActionDef` entries a list view\'s `bulkActionDefs` declares'),
+  /**
+   * [#21445] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the same carrier `object-kanban`, `object-calendar` and
+   * `object-timeline` take. `useNavigationOverlay` (`ObjectGrid.tsx:2894` at
+   * the pin `89cad75d55`) types its own mode union as that schema's.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })'),
   editable: z.boolean().optional().describe('Enable inline cell editing'),
   singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
   /**
@@ -4073,8 +4209,28 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    */
   keyboardNavigation: z.boolean().optional()
     .describe('[EXPERIMENTAL — not enforced] Arrow-key cell navigation on the WAI-ARIA grid pattern. Defaults to on when `editable` is set; a read-only grid keeps its Tab behaviour unless this is `true`. No renderer reads it yet: it is declared ahead of the grid\'s keyboard-navigation build, so authoring it changes nothing today'),
-  resizable: z.boolean().optional().describe('Allow column resize (read before `resizableColumns`)'),
-  resizableColumns: z.boolean().optional().describe('Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`)'),
+  resizable: z.boolean().optional().describe('Allow column resize (the renderer default is on)'),
+  /**
+   * REMOVED (#21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A,
+   * `resizable` is canonical). The legacy second spelling of `resizable`,
+   * read only as `schema.resizable ?? schema.resizableColumns` — measured at
+   * the `.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`.
+   * One switch, two spellings, and a grid authoring both silently ignored this
+   * one. Zero writers in either repository, so there is no window. objectui#6152
+   * retires the read on its own schedule, once a released spec carries this.
+   *
+   * The live mechanism is `resizable`. The protocol-18 conversion
+   * `object-grid-resizable-columns-removed` renames the key when `resizable`
+   * is absent (the value was the grid's setting) and deletes it when
+   * `resizable` is present (it was never read then).
+   */
+  resizableColumns: retiredKey(
+    '`object-grid` property `resizableColumns` was removed in @objectstack/spec 17.7.0 (ADR-0049) — '
+    + 'it was the legacy second spelling of `resizable`, read only when `resizable` was absent, so one '
+    + 'switch had two spellings and a grid authoring both silently ignored this one. Use `resizable`. '
+    + 'Rename the key; the value (a boolean) is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
   frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
   showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
@@ -4099,7 +4255,20 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    */
   exportOptions: ListViewExportOptionsSchema.optional()
     .describe("Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }`"),
-  operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
+  /**
+   * [#21445] The grid's built-in affordance toggles. No list-view schema
+   * declares this member, so the shape is the one the grid reads: four
+   * booleans, each named by a read point at the pin `89cad75d55` — `create`
+   * (the add-row affordance, `ObjectGrid.tsx:5468`), `update` / `delete` (the
+   * row menu's generic Edit / Delete entries, `:1898-1899`) and `export`
+   * (`:4088`, `:5340`, `:6141`). A declared block REPLACES the grid's default
+   * rather than merging under it (`:1818-1822`), so a row affordance the block
+   * does not name is withheld. Nothing reads `read` or `import`, which
+   * objectui's TypeScript twin declares; each is refused with that reason
+   * rather than accepted as a toggle that toggles nothing.
+   */
+  operations: GridOperationsSchema.optional()
+    .describe('Built-in affordance toggles `{ create?, update?, delete?, export? }` (booleans). A declared block replaces the grid\'s default: `update` / `delete` not named are withheld from the row menu, `create` enables the add-row affordance, and `export: false` hides the export menu'),
   /**
    * Data source binding — `ViewDataSchema`, the #5090-pinned authority the
    * objectui registry declares against (`plugin-grid/src/index.tsx:225`

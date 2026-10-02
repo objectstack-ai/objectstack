@@ -166,7 +166,7 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Node Type',
       required: false,
       maxLength: 255,
-      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate (#3801) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows — except the one class of terminal row that carries a restorable consumed suspension (a run whose resume consumed its pause and then failed downstream), which keeps the paused node\'s type so a restore re-arms the gate.',
+      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate, which decides from the paused node\'s type who may continue the run (an approval pause only through its owning service) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows — except the one class of terminal row that carries a restorable consumed suspension (a run whose resume consumed its pause and then failed downstream), which keeps the paused node\'s type so a restore re-arms the gate.',
       group: 'State',
     }),
 
@@ -231,7 +231,7 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Trigger Type',
       required: false,
       maxLength: 255,
-      description: 'What fired this run — the runtime trigger event (record-after-update / schedule / api / time_relative / manual / …). Null on rows written before #7533, which is NOT the same as "no trigger": every run has one.',
+      description: 'What fired this run — the runtime trigger event (record-after-update / schedule / api / time_relative / manual / …). Null on rows written before run history recorded its trigger (they were not backfilled), which is NOT the same as "no trigger": every run has one.',
       group: 'Trigger',
     }),
 
@@ -285,7 +285,7 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Trigger Record',
       required: false,
       maxLength: 255,
-      description: 'Id of the record that fired this run — the correlation from a run back to its cause, and the reason the run log is usable as an audit trail for record_change flows. Null for record-less trigger kinds and for rows written before #7533.',
+      description: 'Id of the record that fired this run — the correlation from a run back to its cause, and the reason the run log is usable as an audit trail for record_change flows. Null for record-less trigger kinds and for rows written before run history recorded its trigger (they were not backfilled).',
       group: 'Trigger',
     }),
 
@@ -321,7 +321,7 @@ export const SysAutomationRun = ObjectSchema.create({
     steps_json: Field.textarea({
       label: 'Steps',
       required: false,
-      description: 'JSON step log: for a paused run, the steps executed so far (resume state); for a terminal history row, the bounded per-node step log (durable run detail, #2585).',
+      description: 'JSON step log: for a paused run, the steps executed so far (resume state); for a terminal history row, the bounded per-node step log, so a finished run\'s per-node detail survives a restart.',
       group: 'State',
     }),
 

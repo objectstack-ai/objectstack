@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { StateMachineSchema } from '../automation/state-machine.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { strictObject } from '../shared/strict-object';
@@ -338,7 +337,37 @@ export const AgentSchema = lazySchema(() => strictObject({
   /** Cognition */
   instructions: z.string().describe('System Prompt / Prime Directives'),
   model: AIModelConfigSchema.optional(),
-  lifecycle: StateMachineSchema.optional().describe('[EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet.'),
+
+  /**
+   * [REMOVED — #21320] The agent conversation state machine. ADR-0049
+   * enforce-or-remove, ruled D (retire) on objectstack-ai/cloud#2569: it was
+   * parsed and never read — no runtime in this repository or in cloud moved an
+   * agent through a declared state or refused an undeclared transition, and
+   * every enforcement design measured there was a subset statechart
+   * interpreter beside Flow, the two-engine shape ADR-0020 already rejected.
+   * What it reached for is served elsewhere: a phase of a conversation is a
+   * skill with its own `instructions` and `tools`, selected by
+   * `triggerConditions` (ADR-0064); multi-step process orchestration is a Flow
+   * (ADR-0019); a record's status transitions are the `state_machine`
+   * validation rule (ADR-0020).
+   *
+   * Tombstoned rather than deleted, for the two channels `retiredKey()` gives
+   * (`shared/retired-key.ts`): `tsc` refuses the key (its input type is
+   * `never`), and the parse answers with the prescription rather than a bare
+   * unrecognized-key error. This was the last authorable door to the XState
+   * `StateMachineSchema` (`automation/state-machine.zod.ts`), which left with
+   * it. The ADR-0087 conversion `agent-lifecycle-removed` deletes the key from
+   * stored rows and existing sources.
+   */
+  lifecycle: retiredKey(
+    '`agent.lifecycle` was removed in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — '
+    + 'no runtime ever read it: no agent moved through a declared state and no transition was '
+    + 'ever refused. Delete the key. A phase of a conversation is a skill with its own '
+    + '`instructions` and `tools`, selected by its `triggerConditions` (ADR-0064); multi-step '
+    + 'process orchestration is a Flow (ADR-0019); a record\'s status transitions are a '
+    + '`state_machine` validation rule on the object (ADR-0020). '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /**
    * ADR-0063 §1 / ADR-0064 — the product surface this agent IS. The kernel

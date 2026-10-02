@@ -131,7 +131,7 @@ describe('kernel:ready audit (wiring)', () => {
         const warnings = auditWarnings(warnSpy);
         expect(warnings).toHaveLength(1);
         expect(warnings[0]).toContain('crm_billing');
-        expect(warnings[0]).toContain('#2612');
+        expect(warnings[0]).toContain('catalog descriptors (descriptor-only contract)');
         await kernel.shutdown();
     });
 
