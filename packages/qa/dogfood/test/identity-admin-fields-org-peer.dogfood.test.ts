@@ -164,11 +164,11 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
 
     await assertArmed([
       armedWhen({
-        control: 'the declared group is non-empty, names the sign-in trail, and leaves the deactivation flag out',
+        control: 'the declared group is non-empty and names the sign-in trail',
         disarmedBy: 'a renamed or emptied group would make every "no group field" assertion below pass over nothing',
-        observe: async () => ({ size: GROUP.length, trail: GROUP.includes('last_login_ip'), flagOut: !GROUP.includes('banned') }),
-        armed: (o) => o.size > 0 && o.trail && o.flagOut,
-        describe: (o) => `group of ${o.size}; sign-in trail in it: ${o.trail}; deactivation flag outside: ${o.flagOut}`,
+        observe: async () => ({ size: GROUP.length, trail: GROUP.includes('last_login_ip') }),
+        armed: (o) => o.size > 0 && o.trail,
+        describe: (o) => `group of ${o.size}; sign-in trail in it: ${o.trail}`,
       }),
       armedWhen({
         control: 'the colleague row and its activity rows at rest carry group values',
@@ -200,6 +200,10 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
 
   afterAll(async () => {
     await stack?.stop?.();
+  });
+
+  it('the deactivation flag is declared outside the group (directory status: every user picker filters on it)', () => {
+    expect(GROUP).not.toContain('banned');
   });
 
   it('a member reading a colleague is served no group field; the directory fields and the deactivation flag are served', async () => {
