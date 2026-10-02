@@ -255,8 +255,9 @@ export const StandaloneStackConfigSchema = z.object({
      * a timing fact: the first sweep waits `DEFAULT_LIFECYCLE_INITIAL_DELAY_MS`
      * on an unref'd timer, so the one-shot was expected to exit first. With
      * `false` the sweep is never armed (`ObjectQLPlugin`'s `lifecycle.enabled`),
-     * which makes it a structural fact. The `lifecycle` service stays
-     * registered, so a caller can still run `sweep()` explicitly.
+     * which makes it a structural fact. `enabled` is the service's master
+     * switch, so an explicit `sweep()` on such a boot is inert too: it returns
+     * an empty report and reads nothing.
      */
     armLifecycleSweep: z.boolean().optional(),
 });
