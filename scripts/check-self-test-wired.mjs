@@ -99,10 +99,43 @@
  * A row whose evidence is gone FAILS. A row whose script gets wired FAILS. The
  * list only ever shrinks.
  *
+ * ## The declared-alias population (#21351)
+ *
+ * The sources above all start from what a workflow NAMES, so the one shape
+ * this gate's purpose most needs to see sat outside it: a root `package.json`
+ * alias whose expansion carries `--self-test` and that no workflow step runs.
+ * Delete the only step that runs such an alias and its script drops out of
+ * `named`, out of the population, and out of every audit -- the removal is
+ * exactly the invisible act this gate exists to make visible. The card that
+ * opened this source records the specimen: a +325/-68 edit to
+ * `scripts/pm/issue-transfer.mjs`, whose self-test has 75 cases, landed with
+ * this gate green and that self-test unrun, because its alias
+ * (`check:pm-issue-transfer`) was named by no step.
+ *
+ * So every root alias whose expansion carries `--self-test` is now a member in
+ * its own right, read from the SAME parse of `package.json` and through the
+ * SAME `expandAlias` the workflow half uses -- `pnpm <alias>` chains included,
+ * because an alias whose chain reaches a self-test declares that self-test as
+ * surely as one that spells it. Each member must have every script its
+ * expansion self-tests run with `--self-test` by some workflow step -- directly,
+ * or through any alias a step names -- or covered by a `SELF_TEST_RUN_OTHERWISE`
+ * row, or the alias must carry a `SELF_TEST_ALIASES_OUTSIDE_CI` row whose reason
+ * says why that self-test cannot run in CI. A member's `--self-test` literal
+ * that the anchor cannot attribute to a script path is a finding too, so the
+ * population is "every alias carrying the literal" by construction, not "every
+ * alias the anchor happens to parse".
+ *
+ * ⛔ Kept OUT of `population`. That export means "the self-tests CI runs", and
+ * the sibling gate spawns each of them; an alias member CI does not run --
+ * the one this source exists to flag, or an allowlisted one that needs the
+ * network -- has no business in that sweep. The alias roster travels beside it
+ * as `aliasDeclarations`.
+ *
  * ## Refusals, never quiet passes (#4690)
  *
  * An empty population, a missing workflow directory, a `package.json` with no
- * scripts, or a ledger row naming a file that cannot be read are all exit 1
+ * scripts or with no alias whose expansion carries `--self-test`, or a ledger
+ * row naming a file that cannot be read are all exit 1
  * naming what could not be read. "Nothing to check" and "the walk found
  * nothing" are the two readings this gate is built to keep apart.
  *
@@ -283,6 +316,28 @@ const SELF_TEST_RUN_OTHERWISE = [
   },
 ];
 
+/**
+ * Root `package.json` aliases whose expansion carries `--self-test` and whose
+ * self-test is deliberately NOT run in CI (#21351) -- one that needs a full
+ * build, a live service or the network, say. A row is `{ alias, why }`, and
+ * `why` is the reason in writing: an empty one is a finding.
+ *
+ * Measured when this list was introduced (objectstack `main` at 23365eaedf):
+ * 170 root aliases carry `--self-test`, and every one of them has that
+ * self-test run by some workflow step. No alias qualified, so the list is
+ * EMPTY, and empty is its intended steady state.
+ *
+ * A row is checked on every run, and FAILS when its alias no longer exists,
+ * when that alias's expansion no longer carries `--self-test`, or when a
+ * workflow now runs every self-test it declares -- so the list cannot outlive
+ * its reasons. Whether a self-test genuinely cannot run in CI is a judgement
+ * about the self-test, and making that judgement is the maintainer's, never the
+ * landing author's way out of wiring one.
+ *
+ * @type {ReadonlyArray<{alias: string, why: string}>}
+ */
+const SELF_TEST_ALIASES_OUTSIDE_CI = Object.freeze([]);
+
 /** Read a file's code with comments masked, so prose never decides anything. */
 export function codeOf(relPath, source) {
   if (relPath.endsWith('.sh')) {
@@ -440,6 +495,131 @@ export function auditLedger({ ledger, carriers, named, selfTested, sourceOf }) {
   return findings;
 }
 
+/** The flag with the same right boundary `INVOCATION_RE` puts on it. */
+const FLAG_LITERAL_RE = /--self-test(?![\w-])/g;
+
+/**
+ * THE DECLARED-ALIAS ROSTER (#21351): every root alias whose expansion carries
+ * `--self-test`, mapped to the sorted scripts that expansion self-tests.
+ *
+ * Membership goes through `expandAlias`, the reader the workflow half already
+ * uses, so a `pnpm <alias>` chain that reaches a self-test makes its caller a
+ * member too. An alias whose OWN text spells the flag is a member as well, even
+ * when the anchor attributes that literal to no script path
+ * (`node scripts/x.mjs --json --self-test`): such an alias lands in
+ * `unattributedAliasFlags` with the count the anchor missed, so a spelling the
+ * anchor cannot read reddens instead of dropping the alias out of the roster.
+ *
+ * @param {Record<string, string>} pkgScripts the root `package.json` scripts, parsed ONCE by the caller
+ * @returns {{aliasDeclarations: Map<string, string[]>, unattributedAliasFlags: Map<string, number>}}
+ */
+export function collectAliasDeclarations(pkgScripts) {
+  const aliasDeclarations = new Map();
+  const unattributedAliasFlags = new Map();
+  for (const alias of Object.keys(pkgScripts).sort()) {
+    const command = pkgScripts[alias];
+    if (typeof command !== 'string') continue;
+    const declared = expandAlias(alias, pkgScripts).selfTested;
+    const literals = (command.match(FLAG_LITERAL_RE) ?? []).length;
+    const attributed = [...command.matchAll(INVOCATION_RE)].filter((m) => m[2]).length;
+    if (declared.size > 0 || literals > 0) aliasDeclarations.set(alias, [...declared].sort());
+    if (literals > attributed) unattributedAliasFlags.set(alias, literals - attributed);
+  }
+  return { aliasDeclarations, unattributedAliasFlags };
+}
+
+/**
+ * The declared-alias verdict (#21351): an alias declaring a self-test that no
+ * workflow step runs -- directly, through this alias, or through any alias a
+ * step names -- and that no `SELF_TEST_RUN_OTHERWISE` row covers, unless the
+ * alias carries a `SELF_TEST_ALIASES_OUTSIDE_CI` row.
+ *
+ * Per alias, never per script: the finding names the alias, because the alias
+ * is the declaration an author reads and the thing a workflow step runs. Two
+ * aliases declaring one script are two findings, and a row for one of them
+ * excuses that one alone.
+ */
+export function auditAliasPopulation({ aliasDeclarations, unattributedAliasFlags, selfTested, ledger, allowlist }) {
+  const ledgered = new Set(ledger.map((row) => row.script));
+  const allowlisted = new Set(allowlist.map((row) => row.alias));
+  const findings = [];
+  for (const alias of [...aliasDeclarations.keys()].sort()) {
+    const scripts = aliasDeclarations.get(alias);
+    const missed = unattributedAliasFlags.get(alias) ?? 0;
+    if (missed > 0) {
+      findings.push({
+        kind: 'alias-self-test-unattributed',
+        alias,
+        text:
+          `pnpm ${alias}\n` +
+          `    This root package.json alias spells \`--self-test\` ${missed} time(s) where no script path\n` +
+          '    stands directly before it, so this gate cannot tell which self-test it declares, and\n' +
+          '    cannot tell whether CI runs it. Spell it `node scripts/<file> --self-test`, the flag\n' +
+          '    immediately after the path, which is the spelling every workflow step uses.',
+      });
+    }
+    if (allowlisted.has(alias)) continue;
+    const unrun = scripts.filter((s) => !selfTested.has(s) && !ledgered.has(s));
+    if (unrun.length === 0) continue;
+    findings.push({
+      kind: 'alias-self-test-not-run',
+      alias,
+      text:
+        `pnpm ${alias}\n` +
+        `    This root package.json alias self-tests ${unrun.join(', ')}, and no workflow\n` +
+        '    step runs that self-test: not through this alias, not through any alias a step names,\n' +
+        '    and not by the script path. A self-test CI never runs is a phantom check, and deleting\n' +
+        '    the only step that ran one is exactly the act this gate exists to make visible.\n' +
+        `    Wire \`pnpm ${alias}\` into the workflow step that already runs its\n` +
+        '    neighbours. That is the whole remedy, and it is the landing author\'s.\n' +
+        '    ⛔ Do not add a SELF_TEST_ALIASES_OUTSIDE_CI row to clear this. A row records a\n' +
+        '    self-test that genuinely cannot run in CI — it needs a full build, a live service or\n' +
+        '    the network — with that reason in writing, and judging that is\n' +
+        `    ${RATCHET_AUTHORITY_MARKER}, never a way out of wiring.`,
+    });
+  }
+  return findings;
+}
+
+/**
+ * The allowlist's own hygiene (#21351): every row carries its reason, names a
+ * live alias that still declares a self-test, and is still needed.
+ */
+export function auditAliasAllowlist({ allowlist, pkgScripts, aliasDeclarations, selfTested, ledger }) {
+  const ledgered = new Set(ledger.map((row) => row.script));
+  const findings = [];
+  for (const row of allowlist) {
+    const where = `SELF_TEST_ALIASES_OUTSIDE_CI row for \`${row.alias}\``;
+    const push = (kind, text) => findings.push({ kind, alias: row.alias, text: `${where}\n    ${text}` });
+    if (typeof row.why !== 'string' || row.why.trim() === '') {
+      push(
+        'unexplained-alias-allowlist-row',
+        'it carries no reason. A row exists to put in writing why this self-test cannot run in\n' +
+          '    CI; a row without one is a silenced finding.',
+      );
+      continue;
+    }
+    if (typeof pkgScripts[row.alias] !== 'string') {
+      push('stale-alias-allowlist-row', 'no root package.json alias of that name exists any more. Delete the row.');
+      continue;
+    }
+    const scripts = aliasDeclarations.get(row.alias);
+    if (scripts === undefined) {
+      push('stale-alias-allowlist-row', 'its expansion no longer carries `--self-test`. Delete the row.');
+      continue;
+    }
+    if (scripts.length > 0 && scripts.every((s) => selfTested.has(s) || ledgered.has(s))) {
+      const by = [...new Set(scripts.flatMap((s) => [...(selfTested.get(s) ?? [])]))].sort().join(', ');
+      push(
+        'alias-allowlist-row-outlived-its-reason',
+        `a workflow now runs every self-test it declares${by ? ` (${by})` : ''},\n` +
+          '    so the exemption is spent. Delete the row.',
+      );
+    }
+  }
+  return findings;
+}
+
 /**
  * Walk `scripts/` for candidate entry points, keyed relative to `root`.
  *
@@ -498,7 +678,7 @@ function walkActionFiles(dir, root, out = []) {
  *
  * @returns {string | null} the refusal message body, or null when the reading stands
  */
-export function refusalFor({ files, rootCarriers, workflows, pkgScriptCount, named, population }) {
+export function refusalFor({ files, rootCarriers, workflows, pkgScriptCount, named, population, aliasDeclarations }) {
   if (files.length === 0) return 'the walk over scripts/ found no files — a broken walk, not a clean tree (#4690).';
   if (rootCarriers.size === 0) {
     return 'no script under scripts/ carries a `--self-test` — this tree has dozens, so the reader is broken (#4690).';
@@ -508,6 +688,13 @@ export function refusalFor({ files, rootCarriers, workflows, pkgScriptCount, nam
   if (named.size === 0) return 'no workflow names any scripts/ file — the workflow reader is broken (#4690).';
   if (population.length === 0) {
     return 'no script CI runs ships a `--self-test` — the population reader is broken, not the tree (#4690).';
+  }
+  // The declared-alias roster's own floor (#21351), LAST so a reading that
+  // fails an earlier arm keeps that arm's message. A reading built without the
+  // roster at all is refused too: an absent roster audits nothing, and that
+  // must not read like a roster that is clean.
+  if (!(aliasDeclarations instanceof Map) || aliasDeclarations.size === 0) {
+    return 'no root package.json alias carries `--self-test` in its expansion — this tree has dozens, so the alias reader is broken.';
   }
   return null;
 }
@@ -559,6 +746,9 @@ export function collectPopulation({ root = ROOT } = {}) {
     actions: [],
     population: [],
     packageLocal: [],
+    pkgScripts: {},
+    aliasDeclarations: new Map(),
+    unattributedAliasFlags: new Map(),
     workflowDir: WORKFLOW_DIR,
     actionDir: ACTION_DIR,
     sourceOf,
@@ -606,6 +796,11 @@ export function collectPopulation({ root = ROOT } = {}) {
   // ONE corpus into the extraction: a step CI runs is a step CI runs, whichever
   // of the two files it is written in.
   const { named, selfTested } = collectInvocations([...workflows, ...actions], pkgScripts);
+
+  // The declared-alias roster (#21351), from the SAME parse of package.json the
+  // extraction above just used -- ⛔ never a second read of it, which is a
+  // second answer to "what does this alias run" waiting to disagree.
+  const { aliasDeclarations, unattributedAliasFlags } = collectAliasDeclarations(pkgScripts);
 
   // The population's SECOND source: the package-local gate lane (#15342).
   //
@@ -666,6 +861,9 @@ export function collectPopulation({ root = ROOT } = {}) {
     actions,
     population,
     packageLocal,
+    pkgScripts,
+    aliasDeclarations,
+    unattributedAliasFlags,
     workflowDir: WORKFLOW_DIR,
     actionDir: ACTION_DIR,
     sourceOf,
@@ -684,11 +882,28 @@ function main() {
   // sibling gate consumes the SAME answer rather than a second one (#15414).
   const read = collectPopulation();
   if (read.refusal) refuse(read.refusal);
-  const { files, carriers, named, selfTested, population, packageLocal, workflows, actions, sourceOf } = read;
+  const {
+    files, carriers, named, selfTested, population, packageLocal, workflows, actions, sourceOf,
+    pkgScripts, aliasDeclarations, unattributedAliasFlags,
+  } = read;
 
   const findings = [
     ...auditPopulation({ carriers, named, selfTested, ledger: SELF_TEST_RUN_OTHERWISE }),
     ...auditLedger({ ledger: SELF_TEST_RUN_OTHERWISE, carriers, named, selfTested, sourceOf }),
+    ...auditAliasPopulation({
+      aliasDeclarations,
+      unattributedAliasFlags,
+      selfTested,
+      ledger: SELF_TEST_RUN_OTHERWISE,
+      allowlist: SELF_TEST_ALIASES_OUTSIDE_CI,
+    }),
+    ...auditAliasAllowlist({
+      allowlist: SELF_TEST_ALIASES_OUTSIDE_CI,
+      pkgScripts,
+      aliasDeclarations,
+      selfTested,
+      ledger: SELF_TEST_RUN_OTHERWISE,
+    }),
   ];
 
   const wired = population.filter((s) => selfTested.has(s));
@@ -697,7 +912,9 @@ function main() {
     `(comments masked, ${packageLocal.length} of them package-local gate(s) CI names by path); ` +
     `${population.length} of those are run by ${workflows.length} workflow(s) and ` +
     `${actions.length} composite action(s); ` +
-    `${wired.length} have their self-test run through the flag, ${SELF_TEST_RUN_OTHERWISE.length} through a recorded route.`;
+    `${wired.length} have their self-test run through the flag, ${SELF_TEST_RUN_OTHERWISE.length} through a recorded route; ` +
+    `${aliasDeclarations.size} root package.json alias(es) carry \`--self-test\` in their expansion, ` +
+    `${SELF_TEST_ALIASES_OUTSIDE_CI.length} of them allowlisted as run outside CI.`;
 
   if (findings.length > 0) {
     console.error(`\ncheck-self-test-wired: ${findings.length} finding(s)\n`);
@@ -708,7 +925,9 @@ function main() {
 
   console.log(
     `✓ check-self-test-wired: every one of the ${population.length} script(s) CI runs that ship a ` +
-      '`--self-test` has that self-test run by CI.',
+      '`--self-test` has that self-test run by CI, and every one of the ' +
+      `${aliasDeclarations.size} root package.json alias(es) declaring one has it run by CI or carries a ` +
+      `written reason it cannot be (${SELF_TEST_ALIASES_OUTSIDE_CI.length} allowlisted).`,
   );
   console.log(scope);
 }
@@ -762,11 +981,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'left boundary': 6,
   'alias resolution': 4,
   'population verdict': 4,
+  // #21351: the declared-alias population — membership, the deleted-step pin,
+  // every crediting route, the allowlist both ways, its staleness arms, and the
+  // same verdict end to end through the shared reading.
+  'declared alias population': 22,
   'population declaration': 7,
   'live corpus': 3,
   'ledger hygiene': 9,
   'live ledger': 4,
-  'the exported population': 8,
+  'the exported population': 9,
   // #19229: the composite-action corpus. A firing control (a self-test wired
   // ONLY inside an action counts as wired), a dark control (with the action
   // file gone the same tree reports it unwired), the absence case that must NOT
@@ -777,7 +1000,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -979,6 +1202,185 @@ function selfTest() {
     ok(
       run('    - run: node scripts/g.mjs\n', [{ script: 'scripts/g.mjs', via: 'drives', evidence: 'scripts/t.mjs', why: 'x' }]).length === 0,
       'a ledgered script still reddened the population audit',
+    );
+  }
+
+  // ── The declared-alias population (#21351) ──────────────────────────────
+  //
+  // The population above starts from what a workflow NAMES, so deleting the
+  // only step that runs an alias took its script out of every audit at once.
+  // These cases hold the alias roster as a population of its own: the deleted
+  // step reddens, naming the alias; every crediting route stays green; the
+  // allowlist excuses exactly the alias it names; and each allowlist row goes
+  // stale the moment its reason does.
+  battery('declared alias population');
+  {
+    const pkg = {
+      'check:a': 'node scripts/a.mjs --self-test && node scripts/a.mjs',
+      'check:chain': 'pnpm check:a',
+      'check:b': 'node scripts/b.mjs',
+      'check:extra': 'node scripts/x.mjs --self-test-extra',
+    };
+    const roster = collectAliasDeclarations(pkg);
+    const audit = (text, { allowlist = [], ledger = [], scripts = pkg } = {}) => {
+      const held = scripts === pkg ? roster : collectAliasDeclarations(scripts);
+      const { selfTested } = collectInvocations(wf(text), scripts);
+      return auditAliasPopulation({ ...held, selfTested, ledger, allowlist });
+    };
+    const names = (findings) => findings.map((f) => `${f.kind}:${f.alias}`).sort().join(' ');
+
+    // Membership.
+    ok(
+      roster.aliasDeclarations.get('check:a')?.join() === 'scripts/a.mjs'
+        && roster.aliasDeclarations.get('check:chain')?.join() === 'scripts/a.mjs',
+      'an alias declaring a self-test — by spelling it, or through a `pnpm <alias>` chain — is not in the roster',
+    );
+    ok(
+      !roster.aliasDeclarations.has('check:b') && !roster.aliasDeclarations.has('check:extra'),
+      'an alias with no `--self-test` (or only `--self-test-extra`, which is not that flag) was admitted to the roster',
+    );
+
+    // ⭐ The current-roster shape: a step runs the alias.
+    ok(audit('    - run: pnpm check:a\n').length === 0, 'control — an alias a workflow step runs must produce no finding');
+    // ⭐ The pin: the only step that ran it is gone.
+    const deleted = audit('    - run: echo nothing\n');
+    ok(
+      names(deleted) === 'alias-self-test-not-run:check:a alias-self-test-not-run:check:chain'
+        && deleted.every((f) => f.text.startsWith(`pnpm ${f.alias}\n`) && f.text.includes('scripts/a.mjs')),
+      `deleting the only step that runs an alias did not redden naming that alias and its script — got [${names(deleted)}]`,
+    );
+    ok(
+      names(audit('    - run: node scripts/a.mjs\n')) === 'alias-self-test-not-run:check:a alias-self-test-not-run:check:chain',
+      'a step running the script WITHOUT the flag was credited as running its self-test',
+    );
+
+    // Every crediting route.
+    ok(audit('    - run: node scripts/a.mjs --self-test\n').length === 0, 'a self-test a step runs by the script path was not credited to the alias');
+    ok(audit('    - run: pnpm check:chain\n').length === 0, 'a self-test a step runs through a CHAIN alias was not credited');
+    ok(
+      audit('    - run: echo nothing\n', { ledger: [{ script: 'scripts/a.mjs', via: 'inline', evidence: 'x', why: 'x' }] }).length === 0,
+      'a script whose self-test a SELF_TEST_RUN_OTHERWISE row records as run was still reported unrun',
+    );
+
+    // The allowlist excuses exactly the alias it names.
+    ok(
+      names(audit('    - run: echo nothing\n', { allowlist: [{ alias: 'check:a', why: 'needs the network' }] }))
+        === 'alias-self-test-not-run:check:chain',
+      'an allowlist row did not excuse its own alias, or excused a DIFFERENT alias declaring the same script',
+    );
+
+    // Per script, inside one alias.
+    {
+      const pair = { 'check:pair': 'node scripts/p.mjs --self-test && node scripts/q.mjs --self-test' };
+      const got = audit('    - run: node scripts/p.mjs --self-test\n', { scripts: pair });
+      ok(
+        got.length === 1 && got[0].text.includes('scripts/q.mjs') && !got[0].text.includes('scripts/p.mjs'),
+        'an alias with one self-test run and one not did not name exactly the unrun one',
+      );
+    }
+
+    // A flag the anchor cannot attribute reddens rather than dropping the alias.
+    {
+      const late = {
+        'check:late': 'node scripts/l.mjs --json --self-test',
+        'check:ok': 'node scripts/l.mjs --self-test --json',
+      };
+      const held = collectAliasDeclarations(late);
+      ok(
+        held.aliasDeclarations.has('check:late') && held.unattributedAliasFlags.get('check:late') === 1
+          && !held.unattributedAliasFlags.has('check:ok'),
+        'a `--self-test` with no script path directly before it dropped its alias out of the roster, or the '
+          + 'attributed spelling beside it was counted as unattributed',
+      );
+      ok(
+        names(audit('    - run: pnpm check:late && pnpm check:ok\n', { scripts: late })) === 'alias-self-test-unattributed:check:late',
+        'an alias whose `--self-test` the anchor cannot attribute did not redden',
+      );
+    }
+
+    // The allowlist's own hygiene.
+    const hygiene = (rows, text = '    - run: echo nothing\n', scripts = pkg) => {
+      const held = scripts === pkg ? roster : collectAliasDeclarations(scripts);
+      const { selfTested } = collectInvocations(wf(text), scripts);
+      return auditAliasAllowlist({ allowlist: rows, pkgScripts: scripts, ...held, selfTested, ledger: [] });
+    };
+    ok(hygiene([{ alias: 'check:a', why: 'needs the network' }]).length === 0, 'control — a row still needed and explained must produce no finding');
+    ok(
+      hygiene([{ alias: 'check:gone', why: 'needs the network' }])[0]?.kind === 'stale-alias-allowlist-row',
+      'a row for an alias that no longer exists did not redden',
+    );
+    ok(
+      hygiene([{ alias: 'check:b', why: 'needs the network' }])[0]?.kind === 'stale-alias-allowlist-row',
+      'a row for an alias whose expansion no longer carries `--self-test` did not redden',
+    );
+    ok(
+      hygiene([{ alias: 'check:a', why: 'needs the network' }], '    - run: pnpm check:a\n')[0]?.kind
+        === 'alias-allowlist-row-outlived-its-reason',
+      'a row for an alias a workflow now runs did not redden — the list would keep a reason that is gone',
+    );
+    ok(
+      hygiene([{ alias: 'check:a', why: '  ' }])[0]?.kind === 'unexplained-alias-allowlist-row',
+      'a row with no reason in writing did not redden',
+    );
+
+    // End to end, through the SHARED reading: the deleted step is invisible to
+    // the named-population audit and visible to this one. The first half is
+    // the hole; the second is the repair.
+    const fixtureRoots = [];
+    try {
+      // `scripts/z.mjs` is a wired neighbour on both trees, so the shared
+      // reading's other floors hold and the only difference is the alias step.
+      const makeRoot = (step) => {
+        const dir = mkdtempSync(join(tmpdir(), 'check-self-test-wired-alias-'));
+        fixtureRoots.push(dir);
+        const files = {
+          'scripts/a.mjs': "if (process.argv.includes('--self-test')) { process.exit(0); }\n",
+          'scripts/z.mjs': "if (process.argv.includes('--self-test')) { process.exit(0); }\n",
+          'package.json': JSON.stringify({ scripts: { 'check:a': 'node scripts/a.mjs --self-test && node scripts/a.mjs' } }),
+          '.github/workflows/lint.yml': `jobs:\n  a:\n    steps:\n      - run: node scripts/z.mjs --self-test\n${step}`,
+        };
+        for (const [rel, contents] of Object.entries(files)) {
+          mkdirSync(dirname(join(dir, rel)), { recursive: true });
+          writeFileSync(join(dir, rel), contents);
+        }
+        return collectPopulation({ root: dir });
+      };
+      const verdicts = (read) => [
+        ...auditPopulation({ carriers: read.carriers, named: read.named, selfTested: read.selfTested, ledger: [] }),
+        ...auditAliasPopulation({ ...read, ledger: [], allowlist: [] }),
+      ];
+      const wired = makeRoot('      - run: pnpm check:a\n');
+      ok(
+        wired.refusal === null && wired.aliasDeclarations.get('check:a')?.join() === 'scripts/a.mjs' && verdicts(wired).length === 0,
+        `the wired fixture tree did not read clean (${wired.refusal ?? 'findings'}), so the case below proves nothing`,
+      );
+      const unwired = makeRoot('');
+      const found = unwired.refusal === null ? verdicts(unwired) : [];
+      ok(
+        unwired.refusal === null
+          && auditPopulation({ carriers: unwired.carriers, named: unwired.named, selfTested: unwired.selfTested, ledger: [] }).length === 0
+          && found.length === 1 && found[0].kind === 'alias-self-test-not-run' && found[0].alias === 'check:a',
+        'with the only step deleted, the shared reading did not report that alias unwired — the removal is '
+          + 'invisible again',
+      );
+      ok(
+        !unwired.population.includes('scripts/a.mjs'),
+        'an alias member CI does not run was put into `population`, which the sibling gate spawns as "the '
+          + 'self-tests CI runs"',
+      );
+    } finally {
+      for (const dir of fixtureRoots) rmSync(dir, { recursive: true, force: true });
+    }
+
+    // The live roster: the source cannot go quiet on the tree it guards.
+    const live = collectPopulation();
+    ok(
+      live.refusal === null && live.aliasDeclarations.size > 0,
+      `the live alias roster is empty or unreadable (${live.refusal ?? 'empty'}) — a reader that stopped reading`,
+    );
+    ok(
+      SELF_TEST_ALIASES_OUTSIDE_CI.every((row) => typeof row.alias === 'string' && typeof row.why === 'string' && row.why.trim() !== ''),
+      'a live SELF_TEST_ALIASES_OUTSIDE_CI row has no alias or no reason in writing',
     );
   }
 
@@ -1192,6 +1594,7 @@ function selfTest() {
       pkgScriptCount: 1,
       named: new Map([['scripts/g.mjs', new Set(['lint.yml'])]]),
       population: ['scripts/g.mjs'],
+      aliasDeclarations: new Map([['check:g', ['scripts/g.mjs']]]),
     };
     ok(refusalFor(healthy) === null, 'control — a healthy reading was refused, so the arms below prove nothing');
     ok(
@@ -1211,6 +1614,12 @@ function selfTest() {
       (refusalFor({ ...healthy, population: [] }) ?? '').includes('population reader is broken'),
       'an EMPTY population was not refused — this is the floor the sibling gate leans on now that it '
         + 'no longer computes one of its own (#4690)',
+    );
+    ok(
+      (refusalFor({ ...healthy, aliasDeclarations: new Map() }) ?? '').includes('alias reader is broken')
+        && (refusalFor({ ...healthy, aliasDeclarations: undefined }) ?? '').includes('alias reader is broken'),
+      'an empty or absent declared-alias roster was not refused — the alias population would audit nothing '
+        + 'and read exactly like a clean one',
     );
 
     // The live reading, which is what both gates actually run on.
@@ -1289,7 +1698,14 @@ runs:
     - shell: bash
       run: node scripts/g.mjs --self-test
 `;
-    const BASE = { 'scripts/g.mjs': GATE_SOURCE, 'package.json': '{"scripts":{"noop":"true"}}\n', '.github/workflows/lint.yml': CALLER_WF };
+    // The alias is there because the shared reading now refuses a tree whose
+    // package.json declares no self-test alias at all; no step names it, so it
+    // credits nothing and moves neither control below.
+    const BASE = {
+      'scripts/g.mjs': GATE_SOURCE,
+      'package.json': '{"scripts":{"check:g":"node scripts/g.mjs --self-test"}}\n',
+      '.github/workflows/lint.yml': CALLER_WF,
+    };
     try {
       // ⭐ FIRING control.
       const withAction = collectPopulation({
@@ -1395,7 +1811,7 @@ runs:
   }
   console.log(
     `check-self-test-wired --self-test: ${SELF_TEST_RUN_OTHERWISE.length} live ledger row(s) verified, plus the ` +
-      'comment mask, the right boundary, alias resolution and both audit directions' +
+      'comment mask, the right boundary, alias resolution, the declared-alias population and both audit directions' +
       ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every battery at or` +
       ' above its pinned floor.',
   );

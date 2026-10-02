@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16838] A SCALAR comparand against a stored ARRAY value — the VALUE side of
+ * [commit b90aff81f] A SCALAR comparand against a stored ARRAY value — the VALUE side of
  * the equality arm, and the third bad direction of `==` that #16810 recorded
  * and deliberately did not repair.
  *

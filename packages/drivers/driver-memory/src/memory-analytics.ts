@@ -358,7 +358,7 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`) —
   // and, since #20874, the SAME test it builds, membership or substring.
   notContains: ({ raw, containment }) => ({ $not: containment(raw[0]) }),
-  // [#13195] A presence flag, not a comparand — and "present" means HAS A
+  // [commit 9dac1ae01] A presence flag, not a comparand — and "present" means HAS A
   // VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in PR
   // #5962, ruled onto this face 2026-08-30. It used to emit `{$exists: <bool>}`
   // and hand it to mingo, which reads key presence, so this exit EXECUTED the
@@ -555,7 +555,7 @@ function globSubstringPattern(value: unknown): string {
  * `memory-analytics-echo-operator-coverage.test.ts` so it could not be closed
  * in silence.
  *
- * [#13195] It was not closed in silence: the maintainer ruled on 2026-08-30
+ * [commit 9dac1ae01] It was not closed in silence: the maintainer ruled on 2026-08-30
  * that `$exists` means HAS A VALUE (`!= null`) on every exit — #5298 leg 3 /
  * #5369, shipped in PR #5962 and until then still unmet here — so the mingo
  * twin now emits `{$ne: null}` / `{$eq: null}`. SQL's `IS NOT NULL` was already
@@ -660,7 +660,7 @@ function sizeDistinctSet(values: readonly unknown[]): number {
 }
 
 /**
- * [#11065] `path`, with a BOOLEAN rendered as the number it is worth — the
+ * [commit 20950404c] `path`, with a BOOLEAN rendered as the number it is worth — the
  * aggregand expression `$sum` and `$avg` consume on this face, and, since the
  * #11152 ruling (maintainer 2026-08-28: booleans aggregate as numbers on every
  * face, no per-aggregate exception), `$min` and `$max` as well.

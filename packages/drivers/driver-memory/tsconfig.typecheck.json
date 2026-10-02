@@ -8,7 +8,7 @@
 // does not export it, and `pnpm --filter @objectstack/driver-memory typecheck`
 // still exited 0. A wrong key or a wrong import here cost nothing at author
 // time, which is the whole defect: the ADR-0049 manifest retirements
-// (#11332 / #10724 / #4914) lean on the `retiredKey()` DOUBLE channel -- tsc
+// (commit dce5cd4f0 / commit be21955ba / #4914) lean on the `retiredKey()` DOUBLE channel -- tsc
 // (input typed `never`) plus parse -- and the tsc half was blind at the only
 // two places in this repo where a plugin manifest is authored in TypeScript.
 //
