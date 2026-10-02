@@ -37,7 +37,9 @@ import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/
  * — declared in the same object literal as the two that WERE implemented. And
  * it is a shape real rules produce: `SqlDriver.applyFilterCondition` compiles it
  * with `whereNot`/`orWhereNot` (framework#2704, added to close this same
- * silent-filter-bypass family), `driver-memory`'s matcher and
+ * silent-filter-bypass family), `driver-memory`'s query path
+ * (`memory-driver-document-not.test.ts`; its reference matcher did too until
+ * commit `8fec76a2b` retired it) and
  * `matchesFilterCondition` both evaluate it, and CEL `!expr` in a permission /
  * RLS read scope lowers to `{ $not: {…} }` (`formula/src/cel-to-filter.ts`). So
  * one RLS scope answered correctly on a local SqlDriver and broke on Turso

@@ -4648,6 +4648,48 @@ export interface MetadataAuthoringGateContext {
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
 
 /**
+ * [#20790] A metadata type's WRITE-ONLY credential channel — where the
+ * credentials its bodies carry are stored instead of in the body, on the
+ * platform's one secret seam (#7799: a `secret`-typed field the engine
+ * encrypts, masks on every read and dereferences only through
+ * `resolveSecretField`). Registered per type by the domain plugin that owns
+ * the type's credential-location table (the automation plugin holds `flow`'s),
+ * beside its authoring gate.
+ *
+ * Every write that lands a body at rest consults it:
+ *  - `saveMetaItem` calls {@link store} immediately before the put, after the
+ *    carry-forward, and persists what it returns;
+ *  - the runtime authoring gate reads {@link heldPaths} as restored positions,
+ *    on an active save and on the draft → active promotion;
+ *  - a restore (rollback, revert) stores {@link strip}'s body.
+ *
+ * ⛔ Not a second secret mechanism and not a per-door redaction: the read
+ * projection stays the type's redactor; this only decides where a credential
+ * is STORED.
+ */
+export interface MetadataCredentialChannel {
+    /**
+     * Move every explicit credential in `body` into the channel for
+     * `(name, state)` and return the body without any — what is stored. An
+     * absent credential means "unchanged". THROWS (with an ADR-0112
+     * `code`/`status`) to refuse the save; nothing may have been put then.
+     */
+    store(args: { name: string; state: 'draft' | 'active'; body: unknown }): Promise<unknown>;
+    /**
+     * The positions in `item` (dotted, item-relative — `redactedKeys`'
+     * spelling) whose credential is withheld from the body and held by the
+     * channel, so the gate reads them as present. `state: 'draft'` for a draft
+     * being promoted.
+     */
+    heldPaths(args: { name: string; state: 'draft' | 'active'; item: unknown }): Promise<readonly string[]>;
+    /**
+     * The body a restore stores: every credential removed, and nothing written
+     * to the channel — it keeps its current credential.
+     */
+    strip(body: unknown): unknown;
+}
+
+/**
  * Which authoring channel a kernel's metadata writes arrive on (#6710).
  *
  * ADR-0005 carves out "the package author's own bootstrap channel" from the
@@ -4907,6 +4949,9 @@ export class ObjectStackProtocolImplementation implements
      */
     private authoringGates = new Map<string, MetadataAuthoringGate>();
 
+    /** [#20790] Per-type write-only credential channels — see {@link registerCredentialChannel}. */
+    private credentialChannels = new Map<string, MetadataCredentialChannel>();
+
     /**
      * Once-per-process dedupe for stored-row conversion notices
      * (`conversionId|type|name`). `getMetaItems`/`getMetaItem` re-read
@@ -5155,6 +5200,35 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20790] Register the write-only credential channel for a metadata type
+     * (see {@link MetadataCredentialChannel}). Called by the domain plugin that
+     * owns the type's credentials — the automation plugin registers `flow`'s.
+     * Singular or plural type names both resolve; one channel per type, a
+     * second registration replaces the first (idempotent re-init).
+     */
+    registerCredentialChannel(type: string, channel: MetadataCredentialChannel): void {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        this.credentialChannels.set(singular, channel);
+    }
+
+    /** [#20790] The registered credential channel of `type`, if any. */
+    private credentialChannelFor(type: string): MetadataCredentialChannel | undefined {
+        return this.credentialChannels.get(PLURAL_TO_SINGULAR[type] ?? type);
+    }
+
+    /**
+     * [#20790] R2 — the body-derivation a restore passes to
+     * `repo.restoreVersion`: the type's channel strip, so a restored version
+     * that still holds a credential (one written before the move) never puts
+     * it back at rest, and the channel keeps its current one. `undefined` for a
+     * type with no channel — the history body is restored byte for byte.
+     */
+    private restoredBodyDerivation(type: string): ((body: unknown) => unknown) | undefined {
+        const channel = this.credentialChannelFor(type);
+        return channel ? (body) => channel.strip(body) : undefined;
+    }
+
+    /**
      * Run the registered authoring gate for an about-to-persist body (#3050).
      * No-op when no gate is registered for the type. A gate throw PROPAGATES
      * (with its status/code) — that is the contract: the write is rejected
@@ -5258,9 +5332,10 @@ export class ObjectStackProtocolImplementation implements
          * [#20611] How to learn the positions in `body` that this write's
          * carry-forward will fill from the stored row — the credentials the read
          * path withheld, which a body saved back after a read arrives without.
-         * Stated by `saveMetaItem`, the one door whose body can arrive that way;
-         * the draft→active promotion judges the stored draft row, which already
-         * holds what that draft's own save carried forward, so it states nothing.
+         * Stated by `saveMetaItem`, the one door whose body can arrive that way,
+         * and [#20790] by the draft→active promotion for a type with a
+         * write-only credential channel: the stored draft row holds what its own
+         * save carried forward, but not what that save moved into the channel.
          *
          * A function, called only once the gate is known to run (after the
          * early returns below): a draft save, the package-author channel and
@@ -7776,8 +7851,16 @@ export class ObjectStackProtocolImplementation implements
             state: 'active',
             packageId: args.packageId,
         });
-        if (!body) return [];
-        return redactedPathsCarriedForward(args.type, args.item, body);
+        const carried = body ? redactedPathsCarriedForward(args.type, args.item, body) : [];
+        // [#20790] A credential the write-only channel holds is withheld from
+        // the stored body too, so the carry-forward restores nothing there —
+        // and it is still present: the channel keeps it across this save.
+        const held = await this.credentialChannelFor(args.type)?.heldPaths({
+            name: args.name,
+            state: 'active',
+            item: args.item,
+        });
+        return held && held.length > 0 ? [...new Set([...carried, ...held])] : carried;
     }
 
     /**
@@ -17732,6 +17815,25 @@ export class ObjectStackProtocolImplementation implements
             packageId: request.packageId ?? null,
             item: request.item,
         });
+        // [#20790] …and then OUT of the body: a type with a write-only
+        // credential channel (`flow`, registered by the automation plugin)
+        // stores every explicit credential there and persists the body without
+        // it — the bytes a read serves. Last, after the carry-forward, so a
+        // credential the stored row still held (one written before the channel
+        // existed) moves with this save instead of being dropped. A refusal
+        // (no crypto provider) throws before the put: nothing is written.
+        // ⚠️ The channel write precedes the put, so a put that then fails (a
+        // version conflict) leaves the new credential in the channel.
+        {
+            const channel = this.credentialChannelFor(singularTypeForRepo);
+            if (channel) {
+                request.item = await channel.store({
+                    name: request.name,
+                    state: mode === 'draft' ? 'draft' : 'active',
+                    body: request.item,
+                });
+            }
+        }
         try {
             const result = await repo.put(ref, request.item, {
                 parentVersion,
@@ -18921,6 +19023,20 @@ export class ObjectStackProtocolImplementation implements
                 // different narrowings, both needed for a package to be
                 // judged as a self-consistent unit.
                 ...(request.pending !== undefined ? { pending: request.pending } : {}),
+                // [#20790] The publish gate's restored-credential read. The
+                // stored draft holds no credential the write-only channel
+                // holds — the draft's own save moved it there — so the gate is
+                // told where one is held (the draft's row, or the live one the
+                // promotion keeps) and reads it as present.
+                ...(this.credentialChannelFor(singularType)
+                    ? {
+                        restoredCredentialPaths: () => this.credentialChannelFor(singularType)!.heldPaths({
+                            name: request.name,
+                            state: 'draft',
+                            item: draftForGate.body,
+                        }),
+                    }
+                    : {}),
             })
             : [];
 
@@ -22038,11 +22154,14 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
+                    const restoreDerivation = this.restoredBodyDerivation(it.type);
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
+                        // [#20790] R2 — the type's credential-channel strip.
+                        ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
@@ -22428,12 +22547,16 @@ export class ObjectStackProtocolImplementation implements
         // real outage (#4867).
         const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
         try {
+            const restoreDerivation = this.restoredBodyDerivation(singularType);
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
                 actor: request.actor ?? null,
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
+                // [#20790] R2 — a rollback past the credential move keeps the
+                // write-only channel's current credential and stores none.
+                ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not

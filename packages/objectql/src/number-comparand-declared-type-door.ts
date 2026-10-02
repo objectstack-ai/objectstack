@@ -43,8 +43,9 @@
  * | `having` on `sum(amount)`: `$gt "abc"` | 200, no group | 200, no group | 200, no group |
  *
  * One client mistake, three answers, one of them a server fault; and a numeric
- * string read two ways (the memory matcher compares `12 > "12"` without
- * coercing it, the SQL backends bind it with numeric affinity or input).
+ * string read two ways (`InMemoryDriver`'s query path hands the comparison to
+ * mingo, which compares `12 > "12"` without coercing it; the SQL backends bind
+ * it with numeric affinity or input).
  *
  * ## The door's two answers
  *

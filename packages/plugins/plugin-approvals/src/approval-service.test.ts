@@ -3723,6 +3723,215 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
   });
 });
 
+// ── Every slot reader takes the caller's acting addresses (#21379) ─────
+//
+// #21350 moved the position-address equivalence into `approver-address.ts`
+// and pointed the list filter and the participant gate at it. Four readers
+// still keyed a slot on the bare user id: `can_act`, the decision methods'
+// slot test, the already-acted probe and — for a `user` approver authored as
+// an email — the participant gate's email half. A holder of a position whose
+// slot reads `position:<p>` therefore saw the request with `can_act: false`,
+// was refused with the default actor and with the console's `role:<p>`,
+// could decide it only by naming `position:<p>`, and lost sight of it after.
+// One pin per reader below; `approver-address-readers.test.ts` enumerates
+// them and fails on a slot-against-caller comparison written anywhere else.
+describe('ApprovalService — every slot reader takes the acting addresses (#21379)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+  };
+  const holding = (userId: string, positions: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ userId, tenantId: 't1', positions, permissions: [], ...extra }) as any;
+  /** Staffed into the routed position; neither the submitter nor an admin. */
+  const HOLDER = holding('u_holder', ['sales_manager']);
+  /** Holds a position — just not the routed one. */
+  const BYSTANDER = holding('u_bystander', ['finance']);
+  /** `CTX` (u1) submits every request here and holds no position. */
+  const SUBMITTER = CTX;
+  /** A platform admin who holds no slot — the #3424 override, not a slot holder. */
+  const ADMIN = holding('root', [], { permissions: ['admin_full_access'] });
+  const SLOT = 'position:sales_manager';
+
+  let recordSeq = 0;
+  /** Open one request routed by `approvers`, each on its own record. */
+  const open = async (svc: ApprovalService, approvers: any[], behavior = 'first_response') => {
+    const recordId = `opp_${++recordSeq}`;
+    const out = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_${recordSeq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval',
+      config: { approvers, behavior: behavior as any },
+      record: { id: recordId, amount: 100 },
+    }, SUBMITTER);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
+  const toPosition = [{ type: 'position', value: 'sales_manager' }];
+  const actionsOf = (engine: any, requestId: string, action: string) =>
+    (engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === requestId && a.action === action);
+  /** `can_act` as `attachViewers` serves it to `ctx` — for a caller the participant gate hides it from too. */
+  const servedCanAct = async (svc: ApprovalService, row: any, ctx: any) => {
+    const copy = { ...row };
+    (svc as any).attachViewers([copy], ctx, await (svc as any).actingCaller(ctx));
+    return copy.viewer.can_act as boolean;
+  };
+
+  it('can_act: the default actor\'s decision answer, as a table — holder, bystander, submitter, admin', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const rows: Array<[string, any, { canAct: boolean; canOverride: boolean; decides: 'slot' | 'override' | 'refused' }]> = [
+      ['holder', HOLDER, { canAct: true, canOverride: false, decides: 'slot' }],
+      ['bystander', BYSTANDER, { canAct: false, canOverride: false, decides: 'refused' }],
+      ['submitter', SUBMITTER, { canAct: false, canOverride: false, decides: 'refused' }],
+      ['admin', ADMIN, { canAct: false, canOverride: true, decides: 'override' }],
+    ];
+    for (const [label, ctx, want] of rows) {
+      const req = await open(svc, toPosition);
+      expect(req.pending_approvers, label).toEqual([SLOT]);
+      // Served to whoever may read it; the bystander may not, so the flag is
+      // read off the same `attachViewers` call the read path makes.
+      const served = await svc.getRequest(req.id, ctx);
+      if (label === 'bystander') expect(served, 'the bystander is no participant').toBeNull();
+      else {
+        expect(served?.viewer?.can_act, `${label}: served can_act`).toBe(want.canAct);
+        expect(served?.viewer?.can_override, `${label}: served can_override`).toBe(want.canOverride);
+      }
+      expect(await servedCanAct(svc, req, ctx), `${label}: can_act`).toBe(want.canAct);
+
+      // The decision with the DEFAULT actor (no `actorId`, what the REST
+      // route passes when the body names nobody).
+      const decided = await svc.decideNode(req.id, { decision: 'approve' } as any, ctx).then(
+        () => (actionsOf(engine, req.id, 'approve')[0]?.via_override ? 'override' : 'slot'),
+        (err: Error) => { expect(err.message, label).toMatch(/^FORBIDDEN: actor '.+' is not a pending approver$/); return 'refused'; },
+      );
+      expect(decided, `${label}: decision`).toBe(want.decides);
+      // ⭐ The rule the docblock states: can_act IS "admitted as a slot holder".
+      expect(want.canAct, label).toBe(decided === 'slot');
+    }
+  });
+
+  it('decision slot test: the default actor and BOTH spellings take the position slot; the decision records the slot\'s stored spelling', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    for (const actorId of [undefined, 'role:sales_manager', 'position:sales_manager']) {
+      const req = await open(svc, toPosition);
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId } as any, HOLDER);
+      expect(out.finalized, `actor ${actorId ?? '(default)'}`).toBe(true);
+      expect(out.request.status).toBe('approved');
+      const [act] = actionsOf(engine, req.id, 'approve');
+      expect(act.actor_id, `recorded for actor ${actorId ?? '(default)'}`).toBe(SLOT);
+      expect(act.via_override).toBe(false);
+    }
+    // A 15.x-era slot keeps its own spelling, under the default actor too.
+    const legacy = await open(svc, [{ type: 'role', value: 'sales_manager' }]);
+    expect(legacy.pending_approvers).toEqual(['role:sales_manager']);
+    await svc.decideNode(legacy.id, { decision: 'reject' } as any, HOLDER);
+    expect(actionsOf(engine, legacy.id, 'reject')[0].actor_id).toBe('role:sales_manager');
+
+    // This widens nobody: holding A position is not holding THIS one.
+    const req = await open(svc, toPosition);
+    await expect(svc.decideNode(req.id, { decision: 'approve' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'role:sales_manager' }, BYSTANDER))
+      .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
+  });
+
+  it('decision slot test, the siblings: send back, request info, comment and reassign admit the holder\'s default actor and refuse the bystander', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+    // Send back's slot test runs before it looks for the flow's revise edge,
+    // so the holder gets PAST it (to the missing-flow refusal) and the
+    // bystander does not.
+    await expect(svc.sendBack(req.id, { comment: 'rework' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+    await expect(svc.sendBack(req.id, { comment: 'rework' } as any, HOLDER))
+      .rejects.toThrow(/^VALIDATION_FAILED: send-back requires the owning flow definition/);
+
+    await expect(svc.requestInfo(req.id, { comment: 'why?' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+    await svc.requestInfo(req.id, { comment: 'why?' } as any, HOLDER);
+    expect(actionsOf(engine, req.id, 'request_info')[0].actor_id).toBe(SLOT);
+
+    await expect(svc.comment(req.id, { comment: 'hi' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not on this request");
+    await svc.comment(req.id, { comment: 'hi' } as any, HOLDER);
+    expect(actionsOf(engine, req.id, 'comment')[0].actor_id).toBe(SLOT);
+
+    await expect(svc.reassign(req.id, { to: 'u_next' } as any, BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: 'u_bystander' is not a pending approver on this request");
+    // With `from` unnamed, the slot handed over is the one the holder takes.
+    const moved = await svc.reassign(req.id, { to: 'u_next' } as any, HOLDER);
+    expect(moved.request.pending_approvers).toEqual(['u_next']);
+    const [reassigned] = actionsOf(engine, req.id, 'reassign');
+    expect([reassigned.actor_id, reassigned.reassign_from, reassigned.via_override]).toEqual([SLOT, SLOT, false]);
+  });
+
+  it('decision slot test feeds the multi-approver tally: a default-actor approval consumes exactly the position slot', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, [...toPosition, { type: 'user', value: 'u9' }], 'unanimous');
+    expect(req.pending_approvers).toEqual([SLOT, 'u9']);
+
+    const first = await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    expect(first.finalized).toBe(false);
+    expect(first.request.pending_approvers).toEqual(['u9']);
+    const second = await svc.decideNode(req.id, { decision: 'approve' } as any, asUser('u9'));
+    expect(second.finalized).toBe(true);
+  });
+
+  it('already-acted probe: the holder keeps sight of a request they decided under the position slot', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+    await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+
+    expect(await svc.getRequest(req.id, HOLDER), 'the holder, after deciding').not.toBeNull();
+    expect((await svc.listRequests(undefined, HOLDER)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.getRequest(req.id, BYSTANDER), 'the bystander').toBeNull();
+    // The flip side is the POSITION's: a decision recorded under
+    // `position:<p>` stays visible to whoever holds `p`.
+    expect(await svc.getRequest(req.id, holding('u_successor', ['sales_manager']))).not.toBeNull();
+  });
+
+  it('the email-keyed slot (a `user` approver authored as an email): listed, served with can_act, decided by the default actor, and kept in sight', async () => {
+    const engine = makeFakeEngine();
+    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    await engine.insert('sys_user', { id: 'u_other', email: 'other@example.com' });
+    const svc = svcFor(engine);
+    const MAIL = holding('u_mail', []);
+    const OTHER = holding('u_other', []);
+    const req = await open(svc, [{ type: 'user', value: 'mail.reviewer@example.com' }]);
+    expect(req.pending_approvers).toEqual(['mail.reviewer@example.com']);
+
+    // The console's identity list: user id, then email.
+    const filter = { status: 'pending' as const, approverId: ['u_mail', 'mail.reviewer@example.com'] };
+    expect((await svc.listRequests(filter, MAIL)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.countRequests(filter, MAIL)).toBe(1);
+    expect((await svc.getRequest(req.id, MAIL))?.viewer?.can_act).toBe(true);
+
+    // Control: another account's email is not this slot.
+    expect(await svc.getRequest(req.id, OTHER)).toBeNull();
+    expect(await servedCanAct(svc, req, OTHER)).toBe(false);
+    await expect(svc.decideNode(req.id, { decision: 'approve' } as any, OTHER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_other' is not a pending approver");
+
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, MAIL);
+    expect(out.finalized).toBe(true);
+    expect(actionsOf(engine, req.id, 'approve')[0].actor_id).toBe('mail.reviewer@example.com');
+    expect(await svc.getRequest(req.id, MAIL), 'after deciding').not.toBeNull();
+  });
+
+  it('the default actor takes a user-id slot before a position slot it could also take', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, [{ type: 'user', value: 'u_holder' }, ...toPosition], 'unanimous');
+    expect(req.pending_approvers).toEqual(['u_holder', SLOT]);
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    expect(out.request.pending_approvers).toEqual([SLOT]);
+    expect(actionsOf(engine, req.id, 'approve')[0].actor_id).toBe('u_holder');
+  });
+});
+
 // ── The ordering invariant the dead-run sweep rests on (#3456) ─────────
 //
 // `releaseDeadRunRequests` recalls a PENDING request whose owning run has
