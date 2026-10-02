@@ -3617,11 +3617,17 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
     config: { approvers: [{ type: type as any, value }], behavior: 'first_response' as const },
     record: { id: 'opp1', amount: 100 },
   });
+  /** Open the scene. An empty slate under the default policy still opens a row; an auto-approval is a broken scene. */
+  const open = async (svc: ApprovalService, input: ReturnType<typeof routedTo>) => {
+    const out = await svc.openNodeRequest(input, CTX);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
 
   it('a holder of the position finds the request under EITHER spelling — list, count and the request itself', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
-    const req = await svc.openNodeRequest(routedTo('position'), CTX); // submitter u1
+    const req = await open(svc, routedTo('position')); // submitter u1
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
 
     for (const spelling of SPELLINGS) {
@@ -3638,7 +3644,7 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
     // `role` is the deprecated approver type; its literal keeps the authored spelling.
-    const req = await svc.openNodeRequest(routedTo('role'), CTX);
+    const req = await open(svc, routedTo('role'));
     expect(req.pending_approvers).toEqual(['role:sales_manager']);
 
     for (const spelling of SPELLINGS) {
@@ -3650,7 +3656,7 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
   it('negative control: a user who does not hold the position sees nothing, under either spelling', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
-    const req = await svc.openNodeRequest(routedTo('position'), CTX);
+    const req = await open(svc, routedTo('position'));
 
     for (const spelling of SPELLINGS) {
       const filter = { status: 'pending' as const, approverId: ['u_bystander', spelling] };
@@ -3664,7 +3670,7 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
   it('negative control: a spelling the acting path does not admit folds onto nothing', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
-    const req = await svc.openNodeRequest(routedTo('position'), CTX);
+    const req = await open(svc, routedTo('position'));
 
     // SYS sees every row, so a miss here is the FILTER's verdict alone.
     expect((await svc.listRequests({ approverId: 'role:sales_manager' }, SYS)).map(r => r.id)).toEqual([req.id]);
@@ -3676,7 +3682,7 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
   it('the acting path is unchanged: the holder decides under the stored spelling, the bystander is refused', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
-    const req = await svc.openNodeRequest(routedTo('position'), CTX);
+    const req = await open(svc, routedTo('position'));
 
     await expect(
       svc.decideNode(req.id, { decision: 'approve', actorId: 'position:sales_manager' }, BYSTANDER),
