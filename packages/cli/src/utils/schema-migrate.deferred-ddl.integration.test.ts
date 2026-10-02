@@ -22,6 +22,11 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { bootSchemaStack } from './schema-migrate.js';
 import { composeForDeclarations } from './schema-migration-plugins.js';
 
+// [#10126] Pay the first transform of this dist-resolved workspace dep at
+// MODULE LOAD: the second-datasource cases reach it through a dynamic
+// `import()` inside a clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/service-datasource';
+
 const ARTIFACT = {
   // #8687: manifest fields under `manifest:` — the flat spelling is refused.
   manifest: { id: 'com.example.defer-smoke', name: 'Defer Smoke', version: '0.0.0', type: 'app' },
