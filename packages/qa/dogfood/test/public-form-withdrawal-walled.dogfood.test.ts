@@ -9,11 +9,9 @@
 // and on a walled posture the engine refuses an org-less insert into one, so
 // it could not show the published side accepting intake.
 //
-// An anonymous form request carries no organization, and a walled posture
-// resolves none for it, so the anonymous form doors read the env-wide form
-// definition. An organization-scoped change to a form's anonymous intake
-// would therefore be shown in the editor and never reach a door; the save
-// door refuses it instead, naming the env-wide save as the remedy. Pinned:
+// On a walled posture the anonymous form doors read the env-wide form
+// definition, so an organization-scoped change to a form's anonymous intake is
+// refused at the save door, naming the env-wide save as the remedy. Pinned:
 //
 //   - the organization-scoped withdrawal answers `403 NOT_OVERRIDABLE` and
 //     nothing is saved (the organization still reads the published form, and

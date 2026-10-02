@@ -14529,9 +14529,7 @@ export class ObjectStackProtocolImplementation implements
      * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
      * write's organization (every walled posture, degraded or not, answers
      * `null`; so does a composition with no tenancy service), the doors read
-     * the env-wide definition and never see this overlay. Saving it would show
-     * the author a withdrawn (or published) form while the doors kept serving
-     * the env-wide state, so the write is refused instead and the author is
+     * the env-wide definition, so the write is refused and the author is
      * pointed at the env-wide save, which every door honours.
      *
      * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
