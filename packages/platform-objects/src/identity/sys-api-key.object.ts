@@ -292,7 +292,7 @@ export const SysApiKey = ObjectSchema.create({
     key: Field.text({
       label: 'Hashed Key',
       required: true,
-      // [#11374] Exact producer bound: the only writer is
+      // [commit 3954fb7df] Exact producer bound: the only writer is
       // `packages/core/src/security/api-key.ts` (`hashApiKey` — "sha256(raw)
       // hex — store this in sys_api_key.key"), a fixed 64-hex-char digest.
       // better-auth's apiKey plugin is not loaded, so no other producer exists.

@@ -147,7 +147,6 @@
     "SolutionBlueprintSchema": "src/ai/solution-blueprint.zod.ts#SolutionBlueprintSchema (const)",
     "SolutionBlueprintStrict": "src/ai/solution-blueprint.zod.ts#SolutionBlueprintStrict (type)",
     "SolutionBlueprintStrictSchema": "src/ai/solution-blueprint.zod.ts#SolutionBlueprintStrictSchema (const)",
-    "StateNodeConfig": "src/automation/state-machine.zod.ts#StateNodeConfig (type)",
     "StructuredOutputConfig": "src/ai/agent.zod.ts#StructuredOutputConfig (type)",
     "StructuredOutputConfigParsed": "src/ai/agent.zod.ts#StructuredOutputConfigParsed (type)",
     "StructuredOutputConfigSchema": "src/ai/agent.zod.ts#StructuredOutputConfigSchema (const)",

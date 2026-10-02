@@ -23,6 +23,7 @@
   "scripts/step18-rationale-merge.test.ts",
   "scripts/strictness-ledger-doc.test.ts",
   "scripts/strictness-ledger.test.ts",
+  "src/ai/agent-lifecycle-retirement.test.ts",
   "src/ai/agent-memory-store-retirement.test.ts",
   "src/ai/tool-confirmation-prescription-tense.pin.test.ts",
   "src/api/error-catalog-docs.test.ts",

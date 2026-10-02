@@ -216,7 +216,11 @@ describe('#20116 §1 — the enumeration: the save door refuses exactly what the
     // Every operator the face judges today refuses at least one battery shape —
     // the guard against a battery that silently stopped reaching an arm.
     const faceJudged = OPERATORS.filter((op) => BATTERY.some(([, c]) => faceRefusal({ f: { [op]: c } })));
-    expect(faceJudged.sort()).toEqual(['$between', '$eq', '$gt', '$gte', '$in', '$lt', '$lte', '$ne', '$nin']);
+    // [#21448] Every declared operator: the list operators by their own arms,
+    // and every scalar operator by the one-value arm (a battery list), the text
+    // operators and the flags included. Until then the face judged only the
+    // list operators, the equality pair and the four ordering slots.
+    expect(faceJudged.sort()).toEqual([...OPERATORS].sort());
     // [stage 2] The TYPE face judges every declared operator — its own test
     // reconciles its scalar/list split against this same vocabulary — so every
     // one of them must refuse some battery shape here, as a scalar comparand or
@@ -303,6 +307,11 @@ describe('#20116 §2 — each refusal: issue code, path and the prescription', (
     ['an empty $ne list', { stage: { $ne: [] } }, 'stage.$ne', 'where.stage.$ne'],
     ['an implicit list (#19889, unchanged)', { stage: ['won'] }, 'stage', 'where.stage'],
     ['a $eq list (#19889, unchanged)', { stage: { $eq: ['won'] } }, 'stage.$eq', 'where.stage.$eq'],
+    // [#21448] A list at every other scalar operator: ordering, text and flag.
+    ['a $gt list (#21448)', { amount: { $gt: [10, 99] } }, 'amount.$gt', 'where.amount.$gt'],
+    ['an empty $lte list (#21448)', { amount: { $lte: [] } }, 'amount.$lte', 'where.amount.$lte'],
+    ['a $contains list (#21448)', { stage: { $contains: ['won', 'lost'] } }, 'stage.$contains', 'where.stage.$contains'],
+    ['a $null list — a flag (#21448)', { stage: { $null: [true] } }, 'stage.$null', 'where.stage.$null'],
   ])('%s — the face\'s sentence, less its location', (_label, where, issuePath, facePath) => {
     const issue = issueAt(FilterConditionSchema.safeParse(where), issuePath);
     expect(issue.code).toBe('custom');
@@ -359,7 +368,9 @@ describe('#20116 §2 — each refusal: issue code, path and the prescription', (
     ['$exists: "false" — the string, truthy', { stage: { $exists: 'false' } }, 'stage.$exists', 'a string ("false")'],
     ['$null: null', { stage: { $null: null } }, 'stage.$null', 'null'],
     ['$exists: 1', { stage: { $exists: 1 } }, 'stage.$exists', 'a number (1)'],
-    ['$null: an array', { stage: { $null: [true] } }, 'stage.$null', 'an array ([true])'],
+    // [#21448] `$null: [true]` left this table: a list at a flag is the
+    // comparand-shape face's refusal now (how many values comes before which
+    // value), and it reads in that face's words — the §2 rows above.
   ])('a non-boolean flag, %s — the query faces\' sentence and prescription', (_label, where, issuePath, received) => {
     const op = issuePath.split('.').pop()!;
     const issue = issueAt(FilterConditionSchema.safeParse(where), issuePath);

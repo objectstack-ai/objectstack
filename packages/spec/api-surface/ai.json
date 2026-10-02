@@ -147,7 +147,6 @@
     "SolutionBlueprintSchema (const)",
     "SolutionBlueprintStrict (type)",
     "SolutionBlueprintStrictSchema (const)",
-    "StateNodeConfig (type)",
     "StructuredOutputConfig (type)",
     "StructuredOutputConfigParsed (type)",
     "StructuredOutputConfigSchema (const)",

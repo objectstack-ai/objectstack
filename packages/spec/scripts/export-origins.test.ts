@@ -171,10 +171,10 @@ describe('[#4796] export-origins/ — the baseline the export-surface pins compa
     // Same shape as the real check, against a namespace missing one runtime
     // export. If this passed, the guard above would be decoration.
     const withoutOne = { ...real } as Record<string, unknown>;
-    expect('StateMachineSchema' in withoutOne).toBe(true);
-    delete withoutOne.StateMachineSchema;
+    expect('FlowSchema' in withoutOne).toBe(true);
+    delete withoutOne.FlowSchema;
     expect(runtimeParityOf('./automation', withoutOne).missingAtRuntime).toEqual([
-      'StateMachineSchema',
+      'FlowSchema',
     ]);
 
     // …and against one carrying an export the artifact does not know.
@@ -184,7 +184,7 @@ describe('[#4796] export-origins/ — the baseline the export-surface pins compa
 
   it('the query primitives answer the three questions the pins ask', () => {
     // 1. does an entry export the name? — the retirement pins' question.
-    expect(maybeOriginOf('./automation', 'StateMachineSchema')).toBeDefined();
+    expect(maybeOriginOf('./automation', 'FlowSchema')).toBeDefined();
     expect(maybeOriginOf('./automation', 'NoSuchExportAnywhere')).toBeUndefined();
     expect(holdersOf('NoSuchExportAnywhere')).toEqual([]);
 

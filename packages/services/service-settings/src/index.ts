@@ -27,6 +27,11 @@ export {
   type LocalCryptoProviderOptions,
   type CryptoMode,
   type KeySource,
+  // ADR-0128 §4.2 — the provider's own reading of which AAD derivation sealed a
+  // stored ciphertext, read off its marker without opening it. Published so
+  // `os secret rewrap` classifies rows with this grammar, not a restated one.
+  ciphertextDerivationStatus,
+  type CiphertextDerivationStatus,
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,

@@ -28,7 +28,7 @@ const enSource = { metadataForms: enMetadataForms };
  * preserves existing translations (via `--merge`) and only fills newly
  * added schema keys per `--fill=default`.
  *
- * ## Staleness (#11671)
+ * ## Staleness (commit 09b4f4e4e)
  *
  * "Only fills newly added keys" is exactly the sticky drift the source-hash
  * mechanism exists for: a leaf filled from the source and then left behind when
