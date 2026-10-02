@@ -134,9 +134,9 @@
  *    `INVALID_FIELD` / 400 (`packages/objectql/src/engine.ts`, #7589), and
  *    `assertProjectionFieldsExist` answers the same at the REST ingress
  *    (#7532). So every dotted column is reported, whatever its head's type.
- *  - **Filter** — the view's own `filter`, its `tabs[].filter`, its
- *    `userFilters.tabs[].filter`, and the two positions that DECLARE which
- *    names the end user may filter on (`filterableFields`, spelled by the
+ *  - **Filter** — the view's own `filter`, its `userFilters.tabs[].filter`,
+ *    and the two positions that DECLARE which names the end user may
+ *    filter on (`filterableFields`, spelled by the
  *    spec as "bare field names enabled for end-user filtering", and
  *    `userFilters.fields`; objectui folds the resulting conditions into the
  *    fetched query through `buildEffectiveFilter`). Here the door does NOT
@@ -201,9 +201,10 @@
  *    owned by `validateActionNameRefs`.
  *  - **`conditionalFormatting[].condition`** — a CEL predicate, owned by the
  *    expression rules.
- *  - **`tabs[].view` / `addRecord.formView`** — view names, owned by
- *    `lintViewRefs`. (`pageName` was here too until #17063 retired the
- *    `type: 'page'` view mount; a list view carries no page reference now.)
+ *  - **`addRecord.formView`** — a view name, owned by `lintViewRefs`.
+ *    (`pageName` was here too until #17063 retired the `type: 'page'` view
+ *    mount, and `tabs[].view` until the list view's own `tabs` was retired; a
+ *    list view carries neither reference now.)
  *  - **The `data.object` binding itself** — `validateObjectReferences` owns
  *    object-name reference sites, with the curated cross-package severity
  *    ladder a local "not in this stack ⇒ error" would not have. When the bound
@@ -520,11 +521,11 @@ const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev 
  * It names positions only — no severity, no shape — so reading it can never
  * stand in for reading the tables.
  *
- * The three filter walks further down (`listView.filter`, `tabs[].filter`,
+ * The two filter walks further down (`listView.filter`,
  * `userFilters.tabs[].filter`) are deliberately absent: they are open code, not
  * table rows, so there is nothing HERE to derive them from. ⛔ Absent from this
  * list is not absent from the test's account of itself — the test declares those
- * three as an explicit list and asserts it exactly, because a row of theirs
+ * two as an explicit list and asserts it exactly, because a row of theirs
  * deleted in silence is the one thing the row-counting floor this replaced did
  * cover.
  */
@@ -768,12 +769,16 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
       }
     }
 
-    // ── Filter KEYS: the view's own filter, its tabs' filters, and the tab
-    // presets inside `userFilters`. `walkFilterFieldKeys` handles all three
-    // authored filter shapes (Mongo condition object, `{ field, operator,
-    // value }` rules, `[field, op, value]` triples) so a filter authored one
-    // way is not judged while another is silently skipped (#3574's own
-    // failure mode).
+    // ── Filter KEYS: the view's own filter and the tab presets inside
+    // `userFilters`. `walkFilterFieldKeys` handles all three authored filter
+    // shapes (Mongo condition object, `{ field, operator, value }` rules,
+    // `[field, op, value]` triples) so a filter authored one way is not judged
+    // while another is silently skipped (#3574's own failure mode).
+    //
+    // The list view's OWN `tabs` is not walked: it is a `retiredKey` tombstone
+    // on every list-view shape, and this rule judges the PARSED stack
+    // (`input: 'parsed'` in the authoring-rule registry), where the key can
+    // never arrive — the parse refuses it with its prescription first.
     const checkFilter = (filter: unknown, filterWhere: string, filterPath: string): void => {
       if (filter === undefined || filter === null) return;
       walkFilterFieldKeys(filter, filterPath, ({ field, path: at }) => {
@@ -792,7 +797,6 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
       });
     };
 
-    checkTabs(listView.tabs, `${where} › tabs`, `${path}.tabs`);
     if (isRec(listView.userFilters)) {
       checkTabs(
         listView.userFilters.tabs,

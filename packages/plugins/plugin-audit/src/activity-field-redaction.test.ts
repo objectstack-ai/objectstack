@@ -62,6 +62,7 @@ const V = {
   unserved1: 'AFRUNSERVEDONE93', unserved2: 'AFRUNSERVEDTWO94',
   open1: 'AFROPENONE95', open2: 'AFROPENTWO96', open3: 'AFROPENTHREE97',
   title: 'AFRTITLE98',
+  earlier1: 'AFREARLIERONE89', earlier2: 'AFREARLIERTWO88',
 };
 
 const itemObject = {
@@ -186,7 +187,12 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     for (const row of [
       {
         type: 'updated', summary: 'earlier mirror row', record_label: 'earlier label',
-        metadata: JSON.stringify({ old: { f_unserved: V.unserved1 }, new: { f_unserved: V.unserved2 } }),
+        // A MIXED change, so a restricted reader keeps the row: a change
+        // withheld whole is withheld as a row (#21388, its own file).
+        metadata: JSON.stringify({
+          old: { f_unserved: V.unserved1, f_open: V.earlier1 },
+          new: { f_unserved: V.unserved2, f_open: V.earlier2 },
+        }),
       },
       { type: 'note', summary: 'app row with context', metadata: JSON.stringify({ channel: 'email' }) },
       { type: 'note', summary: 'app row without context' },
@@ -307,7 +313,7 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
   });
 
   it('a row in the mirror’s earlier shape (no provenance) keeps no text for a restricted reader, and keeps it for the control', async () => {
-    const earlier = (rows: Row[]) => rows.find((r) => r.type === 'updated' && typeof r.metadata === 'string' && !('text_sources' in JSON.parse(r.metadata)) && JSON.parse(r.metadata).new && Object.keys(JSON.parse(r.metadata).new).join() === 'f_unserved');
+    const earlier = (rows: Row[]) => rows.find((r) => r.type === 'updated' && typeof r.metadata === 'string' && !('text_sources' in JSON.parse(r.metadata)) && JSON.parse(r.metadata).new && Object.keys(JSON.parse(r.metadata).new).sort().join() === 'f_open,f_unserved');
     const control = earlier(await read(CONTROL));
     expect(control).toHaveProperty('summary');
     expect(control).toHaveProperty('record_label');
@@ -334,7 +340,12 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     const rows = byChange(await read(NO_QUERYABLE_READER));
     const blob = JSON.stringify(rows);
     for (const v of [V.masked1, V.masked2, V.unserved1, V.unserved2, V.open1, V.open2]) expect(blob).not.toContain(v);
-    expect(rows.allTracked).not.toHaveProperty('summary');
+    // Served no field, the reader keeps the create row with no text composed
+    // from one, and is withheld every update row whose change had keys
+    // (#21388: a change withheld whole is withheld as a row).
+    expect(rows.created).toBeTruthy();
+    expect(rows.created).not.toHaveProperty('summary');
+    expect(rows.allTracked).toBeUndefined();
   });
 
   it('a system read is not redacted', async () => {

@@ -197,14 +197,23 @@ Layer 1 (business RLS)       ─┘
 
 ## The fail-closed contract
 
-Four ways a policy denies rather than leaks:
+Five ways a policy denies rather than leaks:
 
 1. A policy exists but **every** applicable expression fails to compile → a
    deny-everything filter.
 2. A referenced context variable is missing, null, or an empty array → that
    policy drops out (it cannot match).
 3. A policy references a column the object doesn't have → deny.
-4. `check` is omitted → `using` stands in as the `check`. The choice is
+4. A policy compares a column with a literal its declared type cannot be
+   compared with → that policy drops out, for `using` and `check` alike: on a
+   `boolean` / `toggle` column, anything but `true` / `false` and the
+   spellings `'true'` / `'false'`, `1` / `0` and `'1'` / `'0'`
+   (`active == 'yes'`, `active != 'TRUE'`, `active == 2`); on a numeric
+   column, a comparand that is not a number (a string with no numeric reading,
+   a boolean). These are the comparisons a caller's `where` is refused for
+   (`INVALID_FILTER`). An accepted spelling is read as the value it names, so
+   `active != 'true'` hides the `true` rows exactly as `active != true` does.
+5. `check` is omitted → `using` stands in as the `check`. The choice is
    made per operation across all the applicable policies, not policy by
    policy: when any of them declares a `check`, only the declared checks
    decide, and a USING-only sibling's `using` is not part of the check.

@@ -24,9 +24,23 @@ import { unresolvedPostureRemedy } from './unresolved-posture.js';
  * positions and permission sets must not travel that way — see the throw site
  * in `security-plugin.ts` and the measurement recorded in
  * `permission-denied-user-copy.test.ts`.
+ *
+ * ## Both `status` and `statusCode`, like every class in this file
+ *
+ * This class used to declare `statusCode` alone — the only class here that
+ * did — so a door that reads `status` alone derived no status from it.
+ * Measured on a showcase boot: a plain member's `POST /api/v1/share-links` on
+ * a record they cannot read answered `500 PERMISSION_DENIED` through
+ * `plugin-sharing`'s share-link route door (`err?.status ?? 500`), and `403`
+ * through the runtime dispatcher's `/share-links` domain, for the same throw.
+ * The class now carries both spellings with equal values, for the reason the
+ * note below gives its siblings, so a door that reads either one answers
+ * `403`. `errors.test.ts` holds every error class this module exports to that
+ * rule.
  */
 export class PermissionDeniedError extends Error {
   readonly code = 'PERMISSION_DENIED';
+  readonly status = 403;
   readonly statusCode = 403;
   readonly details?: Record<string, unknown>;
   /**
@@ -61,12 +75,16 @@ export class PermissionDeniedError extends Error {
  *
  * ### Why each carries BOTH `status` and `statusCode`
  *
- * The two transports read different property names, and this gate throws on the
- * DATA path, which reaches both: `@objectstack/rest`'s `mapDataError` passes a
- * domain error through on `.status` alone, while the runtime dispatcher's
- * `errorFromThrown` reads `.status` then falls back to `.statusCode`. Declaring
- * one spelling would leave the other transport deriving a status from nothing —
- * which is the defect this split exists to remove, reintroduced at the edge.
+ * The doors read different property names, and this gate throws on the DATA
+ * path, which reaches all of them. `status` is the spelling every door reads
+ * first, and some read nothing else: `plugin-sharing`'s share-link route door
+ * (`err?.status ?? 500`), and the sandbox boundary, whose passthrough list
+ * carries `status` and not `statusCode` (`SANDBOX_ERROR_PASSTHROUGH` in
+ * `runtime/src/sandbox/quickjs-runner.ts`). The runtime dispatcher's
+ * `errorFromThrown` and `@objectstack/rest`'s `mapDataError` read `.status`
+ * then fall back to `.statusCode`. Declaring one spelling would leave a door
+ * that reads the other deriving a status from nothing — which is the defect
+ * this split exists to remove, reintroduced at the edge.
  *
  * ### Why none of them starts with `[Security] Access denied`
  *
@@ -412,10 +430,9 @@ export const PERMISSION_SET_NAME_CONFLICT_STATUS = 409;
  *
  * ## Why BOTH `status` and `statusCode`
  *
- * The same reason every class above records: the two transports read different
- * property names (`mapDataError` passes a domain error through on `.status`;
- * the runtime dispatcher's `errorFromThrown` reads `.status` then falls back to
- * `.statusCode`), and this throws on the DATA path, which reaches both.
+ * The same reason every class above records: the doors read different property
+ * names (see "Why each carries BOTH `status` and `statusCode`" above), and this
+ * throws on the DATA path, which reaches them all.
  *
  * The message is byte-identical to the bare `Error`'s — the wording was never
  * the defect, and the flat door's 4xx arm ships it verbatim.
