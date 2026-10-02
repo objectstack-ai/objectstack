@@ -2,10 +2,10 @@
 
 /**
  * Uniqueness for the in-memory driver — the constraint this driver enforced
- * NOWHERE until #13197, on both declaration surfaces since #13239.
+ * NOWHERE until commit 56c093c4d, on both declaration surfaces since #13239.
  *
  * `driver-sql` materializes uniqueness from TWO surfaces and this module
- * reproduces both: **field-level `unique`** (#13197, `uniqueIndexesFromFields`)
+ * reproduces both: **field-level `unique`** (commit 56c093c4d, `uniqueIndexesFromFields`)
  * and **object-level declared `indexes[]` entries carrying `unique`** (#13239,
  * `normalizeDeclaredIndex`). They share one key model, one NULL rule and one
  * refusal envelope, and they DISAGREE about what bare `true` means — see
@@ -157,7 +157,7 @@
  * `@objectstack/types`' `uniqueViolationColumn` reads a dialect's own grammar,
  * and the refusals here are stated in this module's words, so nothing is
  * extractable from them — the answer is `undefined` for a field-level refusal
- * (since #13197) and for a declared-index one alike. That is the SAFE answer
+ * (since commit 56c093c4d) and for a declared-index one alike. That is the SAFE answer
  * under #6544's ruling (maintainer, 2026-08-08): an identifier mistaken for a
  * column is worse than no answer. For a COMPOSITE it is also the answer
  * `driver-sql` gives — measured: SQLite prints
@@ -301,7 +301,7 @@ export function tenantFieldOf(schema: UniqueAwareSchema | null | undefined): str
 }
 
 /**
- * [#16729] One driver's record of the objects whose schema EXPLICITLY declared
+ * [commit 0f38ab084] One driver's record of the objects whose schema EXPLICITLY declared
  * `tenancy.enabled === false` — this package's counterpart of `SqlDriver`'s
  * `tenantOptOutByTable`.
  *
@@ -315,7 +315,7 @@ export function tenantFieldOf(schema: UniqueAwareSchema | null | undefined): str
 export type TenantOptOutRecord = Set<string>;
 
 /**
- * [#16729] {@link tenantFieldOf} + maintenance of the sticky explicit-opt-out
+ * [commit 0f38ab084] {@link tenantFieldOf} + maintenance of the sticky explicit-opt-out
  * record. Mirrors `SqlDriver.computeAndRecordTenantField` arm for arm, and it
  * is the arm this package was missing.
  *
@@ -384,7 +384,7 @@ export function computeAndRecordTenantField(
  * means — the same reason `uniqueIndexesFromFields` is the single place on the
  * SQL side.
  *
- * [#16729] `tenantField` is the RESOLVED tenant column. It defaults to
+ * [commit 0f38ab084] `tenantField` is the RESOLVED tenant column. It defaults to
  * {@link tenantFieldOf} of this very schema, so the published one-argument call
  * answers exactly as before; a caller holding a {@link TenantOptOutRecord}
  * passes {@link computeAndRecordTenantField}'s answer instead, and a partial
@@ -430,7 +430,7 @@ export function uniqueConstraintsFromFields(
  * and pinned here (`memory-declared-index-unique.test.ts`), the way
  * {@link tenantFieldOf} reproduces `SqlDriver.computeTenantField`.
  *
- * [#16729] `tenantField` is the RESOLVED tenant column. It defaults to
+ * [commit 0f38ab084] `tenantField` is the RESOLVED tenant column. It defaults to
  * {@link tenantFieldOf} of this very schema, so the published one-argument call
  * answers exactly as before; a caller holding a {@link TenantOptOutRecord}
  * passes {@link computeAndRecordTenantField}'s answer instead, and a partial

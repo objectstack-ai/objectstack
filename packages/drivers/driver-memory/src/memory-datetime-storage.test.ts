@@ -81,7 +81,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
       expect((row as any).created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     }
     // `find()` now publishes the contract's `Record<string, unknown>[]`
-    // (#14435), so `Array.prototype.find` hands back the `undefined` arm it
+    // (commit 20032594f), so `Array.prototype.find` hands back the `undefined` arm it
     // has always been able to produce. Narrowed rather than cast: the row
     // being present is a real precondition of the assertion below, and while
     // `raw` was `any[]` a missing row raised a TypeError instead of failing here.
@@ -193,7 +193,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     }
     const all = await driver.find('task', {});
     for (const row of all) expect(typeof (row as any).created_on).toBe('string');
-    // Same narrowing as above (#14435): the `undefined` arm of
+    // Same narrowing as above (commit 20032594f): the `undefined` arm of
     // `Array.prototype.find` is now visible, and the row's presence is an
     // assertion in its own right rather than a TypeError waiting to happen.
     const onObj = all.find((r) => r.id === 'on_obj');

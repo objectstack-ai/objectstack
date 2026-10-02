@@ -191,7 +191,8 @@ jobs:
               # scripts/check-ci-filter-parity.mjs DERIVES the required set from
               # turbo.json and the root `build` script, and reds while a declared
               # build input is uncovered here, or while a literal entry beside
-              # them covers none (a leftover). `tsconfig.json` and the
+              # them covers none of them and none of Build Core's guards below
+              # (a leftover). `tsconfig.json` and the
               # `packages/cli/...` input are covered by the entries above;
               # `@objectstack/docs#build` (its input is `content/**`) is the
               # docs filter's, since `pnpm build` excludes that package.
@@ -220,6 +221,34 @@ jobs:
               - 'scripts/ts-parse.mjs'
               - 'scripts/tsup-drop-sources-content.mjs'
               - 'scripts/workspace-enumerator.mjs'
+              # BUILD CORE'S GUARDS (#21341): every repository script the
+              # build-core job's own steps run (named by a `run:` step or
+              # reached through its `pnpm check:*` alias) and each one's
+              # first-party imports. Build Core is the only job that runs
+              # them, so before these rows a diff confined to one started no
+              # Build Core and the changed guard ran nowhere before the merge
+              # queue (PR #17100 changed only check-lean-entry-closure.mjs;
+              # Build Core skipped). A change to the guard runs the guard, as
+              # the `console:` filter below already does for its own.
+              #
+              # Not a hand-kept list: scripts/check-ci-filter-parity.mjs
+              # DERIVES the set from the job's steps and reds while a script a
+              # step runs is uncovered here, or while a literal row covers
+              # neither a build input nor such a script (a leftover of a
+              # deleted step). Scripts that are also build inputs
+              # (check-dts-emitted.mjs and the helpers the guards import) are
+              # covered by the rows above and are not repeated.
+              # population-floor.mjs is here because check-dual-build-cjs-
+              # loads.mjs imports it.
+              #
+              # WIDTH: over the 3287 first-parent commits of `main` in the 30
+              # days to `96b12b589f`, through picomatch 2.3.1 and 4.0.5 (they
+              # agree on every row), `core` matched 2276; these rows add 2.
+              - 'scripts/check-dts-closure.mjs'
+              - 'scripts/check-dual-build-cjs-loads.mjs'
+              - 'scripts/check-lean-entry-closure.mjs'
+              - 'scripts/check-sourcemap-no-sources-content.mjs'
+              - 'scripts/population-floor.mjs'
             # Build inputs of the vendored Console SPA — see the Console Pin Gate
             # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
             # it matches neither filter above: a pin-only diff skipped `core` and

@@ -595,7 +595,7 @@ const OPERATOR_CASES: Array<[name: string, where: FilterCondition, expected: str
   // named and counted instead of hiding behind the millisecond pair above, and
   // so that the day this face is brought onto the declared answer they go RED
   // and point at themselves. ⛔ Do not "fix" them into agreement by editing the
-  // expectations — the repair is in the driver, and it is #17348's, filed
+  // expectations — the repair is in the driver, named as owed in commit 51efbf116 and filed
   // against #5499's investment freeze. Bringing the driver over flips these two
   // to `[]` / `['1','2','3']` and deletes this note.
   ['⚠️ DIVERGES from #15683: $contains MATCHES a declared datetime column, because the write canonicalised it to ISO text', { made_at: { $contains: '2026' } } as FilterCondition, ['1', '2', '3']],

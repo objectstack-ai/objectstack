@@ -21,7 +21,7 @@ os init my-app
 # Generate metadata
 os generate object task
 os generate view task
-os generate flow task
+os generate flow task_changed --object task
 
 # Validate configuration
 os validate

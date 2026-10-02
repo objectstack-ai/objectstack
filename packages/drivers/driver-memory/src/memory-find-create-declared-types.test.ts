@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #14435 — the published return types of `find()` / `findOne()` / `create()`
+// Commit 20032594f — the published return types of `find()` / `findOne()` / `create()`
 // are the contract's, not `any`.
 //
 // `IDataDriver` has always declared `Promise<Record<string, unknown>[]>`,
@@ -15,7 +15,7 @@
 // the `null` arm the contract declares, and every field read off any of the
 // three was unchecked.
 //
-// The repair is route (a) of the card, the shape #14434 landed one door over
+// The repair is route (a) of the card, the shape commit 93940d492 landed one door over
 // on `update` / `upsert`: one explicit contract-typed return annotation per
 // door. ⛔ NOT route (b), re-typing the store — measured to cascade (19 errors)
 // and to make the write doors infer a too-narrow literal, "a second lie, not

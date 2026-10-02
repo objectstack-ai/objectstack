@@ -51,7 +51,10 @@ name: Release
 #   push to main  →  `release-integrity`   audits ONLY the version at
 #                                          `github.sha`, and names the VERSION
 #                                          COMMIT — the landing that brought
-#                                          main to that version. Never publishes,
+#                                          main to that version; when it queues
+#                                          the publish, it also warns of every
+#                                          changeset that commit carries but did
+#                                          not consume. Never publishes,
 #                                          never pushes a tag. May backfill GitHub
 #                                          Releases / the ADR-0087 D4 asset /
 #                                          the runtime image — but only for a
@@ -913,6 +916,30 @@ jobs:
                 echo "${version}, i.e. what the Version Packages PR decided — and nothing that"
                 echo "landed after it, whatever main's head is by then."
               } >> "$GITHUB_STEP_SUMMARY"
+
+              # ── what ${version} ships without a CHANGELOG entry (#21361) ───
+              # The merge queue lands the Version Packages PR on top of the
+              # current main, and the PR cannot be refreshed while queued, so
+              # the version commit's tree can carry landings whose changesets
+              # it never consumed: their code ships in this release and its
+              # CHANGELOG does not name them (17.3.0 through 17.6.0 each did).
+              # This is the run that queues the publish, so the approver reads
+              # the list here, before the release is cut. A warning annotation:
+              # the level this job gives every finding that leaves the release
+              # incomplete without stopping it (the Releases, the D4 asset, the
+              # image, an unreadable range). It REPORTS and never refuses, so
+              # it neither fails this step nor holds the publish job. A report
+              # that cannot be measured says so in an error annotation (a
+              # shallow clone is refused, never answered from a graft
+              # boundary), and the publish stays queued all the same.
+              if ! node scripts/release-pending-publish.mjs unconsumed --version-commit "$version_commit" --version "$version"; then
+                echo "The changesets the version commit ${version_commit} did not consume were NOT MEASURED (reason above). This report never holds a release, so the publish of ${version} stays queued."
+                {
+                  echo
+                  echo "**Changesets: NOT MEASURED.** Whether ${version}'s CHANGELOG leaves out a change that landed in"
+                  echo "the version commit's tree is unknown; the reason is in this step's log."
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
               exit 0
             fi
             echo "publish-pending=false" >> "$GITHUB_OUTPUT"

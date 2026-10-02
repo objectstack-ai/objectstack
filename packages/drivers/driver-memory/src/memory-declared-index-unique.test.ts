@@ -4,7 +4,7 @@
  * [#13239] `driver-memory` enforces OBJECT-LEVEL declared `indexes[]` carrying
  * `unique` — a colliding write is REFUSED, not landed.
  *
- * #13197 closed the FIELD surface. This is the other declaration surface
+ * Commit 56c093c4d closed the FIELD surface. This is the other declaration surface
  * `driver-sql` materializes uniqueness from, and it was
  * declared-and-not-enforced here in exactly the same ADR-0078 /
  * Prime-Directive-#10 shape: an object declaring
@@ -12,7 +12,7 @@
  * real composite UNIQUE on the SQL family and NOTHING at all in memory — the
  * colliding write landed and a read returned both rows.
  *
- * ## ⚠️ This is NOT a smaller copy of #13197 — bare `true` inverts
+ * ## ⚠️ This is NOT a smaller copy of commit 56c093c4d — bare `true` inverts
  *
  * The two surfaces share a vocabulary and disagree about its POSITIONAL member:
  *
@@ -28,7 +28,7 @@
  * so the arms are reproduced and pinned here, and `the two surfaces disagree`
  * below holds both readings side by side on ONE object.
  *
- * ## Two things every refusal test in this package must do (#13197's rule)
+ * ## Two things every refusal test in this package must do (commit 56c093c4d's rule)
  *
  *  1. Assert the ENVELOPE — `code` AND `status` — never merely "it threw"
  *     (#6144).
@@ -418,7 +418,7 @@ describe('[#13239] the refusal names no single column, because a composite has n
   });
 
   it('a SINGLE-column declared index answers `undefined` too — this driver never names a column', async () => {
-    // Not an oversight and not a regression: #13197's field-level refusal
+    // Not an oversight and not a regression: commit 56c093c4d's field-level refusal
     // already answers `undefined` (asserted here as the baseline), because this
     // driver states the conflict in its own words rather than mimicking a
     // dialect's grammar. `undefined` is the safe answer under the #6544 ruling
@@ -474,7 +474,7 @@ describe('[#13239] every write path is checked, not just create', () => {
     );
     expectUniqueViolationEnvelope(err, 'account_id', 'code');
     // [#13340] ⛔ The refusal is NOT what this test is for — the refusal was
-    // already correct, and #13197/#13239 already pin it. What it asserts is
+    // already correct, and commit 56c093c4d and #13239 already pin it. What it asserts is
     // that THE ROW COUNT DOES NOT MOVE: the batch is all-or-nothing.
     //
     // This assertion was INVERTED in place, not re-baselined. It used to read
@@ -482,7 +482,7 @@ describe('[#13239] every write path is checked, not just create', () => {
     // known boundary: `bulkCreate` was `Promise.all(map(create))`, so the row
     // accepted BEFORE the refusal stayed in the store and a refused 2-row
     // batch left a 2-row table holding THREE rows. #13340 gave `bulkCreate`
-    // the check-then-push posture `updateMany` has had since #13197, so
+    // the check-then-push posture `updateMany` has had since commit 56c093c4d, so
     // neither row lands now. The old numbers are kept in this comment
     // deliberately: they are the discriminating reading, and an assertion
     // that only checked "the refusal still happens" would pass in both

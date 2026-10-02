@@ -65,6 +65,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { probeBindings } from './helpers/scaffold-bindings.js';
 import { metadataFileName } from '../src/utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../src/utils/emitted-source-parses.js';
 import { childEnv } from './helpers/serve-process.js';
@@ -132,7 +133,9 @@ function emissionsFor(type: string, name: string) {
   const fileName = metadataFileName(type, toSnakeCase(name));
   if (fileName === null) throw new Error(`no file naming convention for type: ${type}`);
   return [
-    { label: fileName, source: target.generate(name) },
+    // [#21325] A binding scaffold renders against references resolved off the
+    // stack; the probe stack's stand in, since only the name is judged here.
+    { label: fileName, source: target.generate(name, undefined, probeBindings(target)) },
     {
       label: 'index.ts',
       source: `export { default as ${toCamelCase(name)} } from './${fileName.replace(/\.ts$/, '')}';`,

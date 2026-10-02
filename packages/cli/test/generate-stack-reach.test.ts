@@ -21,13 +21,21 @@
  *                   `defineStack` refuses a record-change flow in a stack that
  *                   lacks EITHER one, so that stack is `refused` below.
  *   refused         a config that loaded before the write and does not load
- *                   after it — an action bound to an object nobody declared, a
- *                   flow in a stack without `triggers`, a flow in a stack with
- *                   `triggers` but not `automation`: exit 1, and the project
- *                   tree byte-identical, because the write is taken back out.
+ *                   after it — a flow in a stack without `triggers`, a flow in
+ *                   a stack with `triggers` but not `automation`: exit 1, and
+ *                   the project tree byte-identical, because the write is
+ *                   taken back out.
+ *
+ * Since #21325 a scaffold that BINDS metadata (`view`, `action`, `flow`,
+ * `app`) is refused one step earlier when what it binds is not declared —
+ * before anything is written, so there is nothing to take back out — and
+ * outside a project, where there is no stack to bind in. Every branch of that
+ * resolution is pinned in-process (`generate-binds-from-stack.test.ts`); the
+ * spawned half is here: exit 1 and a byte-identical tree.
  *
  * A control keeps the refusal from being a command that refuses everything:
- * in the same project, once the object exists, the same action generates.
+ * in the same project, once the object and a flow exist, the same action
+ * generates — taking the stack's only flow, said out loud.
  *
  * Prose is not pinned. What is asserted is the exit status, the bytes on
  * disk, the named subject, and the lines an author pastes (the wiring lines
@@ -59,8 +67,8 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold starts, nine of them, sequential. */
-const RUN_TIMEOUT_MS = 300_000;
+/** oclif + tsx cold starts, eleven of them, sequential. */
+const RUN_TIMEOUT_MS = 360_000;
 
 const PROJECT = 'my-app';
 const NS = sanitizeNamespace(PROJECT);
@@ -168,14 +176,17 @@ beforeAll(async () => {
   // Sequential on purpose: cold tsx starts in a container several agents share.
   // Each refusal runs BEFORE its project's control, so the snapshots above are
   // what each refusal was measured against.
-  runs.actionNoObject = await runCli(['g', 'action', 'approve'], dirs.wired);
+  // [#21325] `--object approve`: an object this stack does not declare. The
+  // action used to bind `${NS}_approve` because the ACTION was called that.
+  runs.actionNoObject = await runCli(['g', 'action', 'approve', '--object', 'approve'], dirs.wired);
   wiredAfterRefusal = tree(dirs.wired);
   actionFileAfterRefusal = existsSync(join(dirs.wired, 'src', 'actions', 'approve.action.ts'));
   runs.flowNoRequires = await runCli(['g', 'flow', 'order_line'], dirs.noRequires);
   noRequiresAfterRefusal = tree(dirs.noRequires);
 
   runs.objectControl = await runCli(['g', 'object', 'approve'], dirs.wired);
-  runs.actionControl = await runCli(['g', 'action', 'approve'], dirs.wired);
+  runs.flowControl = await runCli(['g', 'flow', 'approval_changed', '--object', 'approve'], dirs.wired);
+  runs.actionControl = await runCli(['g', 'action', 'approve', '--object', 'approve'], dirs.wired);
 
   // `port` is inside the `export {};` of the empty barrel `os init` writes:
   // the substring test this replaced read it as already exported.
@@ -183,7 +194,12 @@ beforeAll(async () => {
 
   runs.flowTriggersOnly = await runCli(['g', 'flow', 'order_line'], dirs.triggersOnly);
   triggersOnlyAfterRefusal = tree(dirs.triggersOnly);
-  runs.viewPreFix = await runCli(['g', 'view', 'order_line'], dirs.preFix);
+  // `item` names the template's own object, `${NS}_item`: a view is named
+  // after the object it binds, and the stack has to declare it (#21325).
+  runs.viewPreFix = await runCli(['g', 'view', 'item'], dirs.preFix);
+  // No config: a scaffold that binds nothing is still written and reported
+  // not wired; one that binds an object has no stack to bind in (#21325).
+  runs.dashboardBare = await runCli(['g', 'dashboard', 'sales'], dirs.bare);
   runs.viewBare = await runCli(['g', 'view', 'order_line'], dirs.bare);
 }, RUN_TIMEOUT_MS);
 
@@ -193,15 +209,26 @@ afterAll(() => {
 
 const out = (r: Run) => r.stdout + r.stderr;
 
-describe('[#20215] refused: the write would stop a loading config from loading', () => {
+describe('[#21325] refused before writing: what a scaffold binds, the stack does not declare', () => {
   it('an action bound to an object nobody declared: exit 1, the tree byte-identical', () => {
     expect(runs.actionNoObject.code, out(runs.actionNoObject)).toBe(1);
     expect(wiredAfterRefusal).toEqual(before.wired);
     expect(actionFileAfterRefusal).toBe(false);
-    // The subject is named: the object the action binds to.
-    expect(runs.actionNoObject.stdout).toContain(`${NS}_approve`);
+    // The subjects are named: the value passed, and the objects the stack
+    // does declare, for the author to pick from.
+    expect(runs.actionNoObject.stdout).toContain('--object approve');
+    expect(runs.actionNoObject.stdout).toContain(`'${NS}_item'`);
     expect(runs.actionNoObject.stdout).not.toContain('Created');
   });
+
+  it('a view outside any project: exit 1, nothing written', () => {
+    expect(runs.viewBare.code, out(runs.viewBare)).toBe(1);
+    expect(existsSync(join(dirs.bare, 'src', 'views'))).toBe(false);
+    expect(runs.viewBare.stdout).toContain('objectstack.config');
+  });
+});
+
+describe('[#20215] refused: the write would stop a loading config from loading', () => {
 
   it('a flow in a stack whose `requires` lacks `triggers`: exit 1, the tree byte-identical', () => {
     expect(runs.flowNoRequires.code, out(runs.flowNoRequires)).toBe(1);
@@ -223,12 +250,18 @@ describe('[#20215] refused: the write would stop a loading config from loading',
     expect(runs.flowTriggersOnly.stdout).not.toContain('Created');
   });
 
-  it('CONTROL: in the same project, once the object exists, the same action generates and reaches', () => {
+  it('CONTROL: in the same project, once the object and a flow exist, the same action generates and reaches', () => {
     expect(runs.objectControl.code, out(runs.objectControl)).toBe(0);
+    expect(runs.flowControl.code, out(runs.flowControl)).toBe(0);
     expect(runs.actionControl.code, out(runs.actionControl)).toBe(0);
     expect(readFileSync(join(dirs.wired, 'src', 'actions', 'index.ts'), 'utf-8'))
       .toContain("export { default as approve } from './approve.action';");
     expect(runs.actionControl.stdout).toContain("'approve'");
+    // The bindings, named: the object passed, and the stack's only flow.
+    const action = readFileSync(join(dirs.wired, 'src', 'actions', 'approve.action.ts'), 'utf-8');
+    expect(action).toContain(`objectName: '${NS}_approve'`);
+    expect(action).toContain("target: 'approval_changed_flow'");
+    expect(runs.actionControl.stdout).toContain('approval_changed_flow');
     // Reached: no wiring lines to add.
     expect(runs.actionControl.stdout).not.toContain('import * as actions');
   });
@@ -246,17 +279,17 @@ describe('[#20215] the barrel step asks which names the barrel exports, not what
 describe('[#20215] not wired: exit 0, the config untouched, and the lines that wire it', () => {
   it('a config that wires `./src/objects` alone', () => {
     expect(runs.viewPreFix.code, out(runs.viewPreFix)).toBe(0);
-    expect(existsSync(join(dirs.preFix, 'src', 'views', 'order_line.view.ts'))).toBe(true);
+    expect(existsSync(join(dirs.preFix, 'src', 'views', 'item.view.ts'))).toBe(true);
     expect(readFileSync(join(dirs.preFix, CONFIG), 'utf-8')).toBe(before.preFixConfig[CONFIG]);
     expect(runs.viewPreFix.stdout).toContain("import * as views from './src/views';");
     expect(runs.viewPreFix.stdout).toContain('views: Object.values(views),');
-    expect(runs.viewPreFix.stdout).toContain(`'${NS}_order_line'`);
+    expect(runs.viewPreFix.stdout).toContain(`'${NS}_item'`);
   });
 
   it('a directory with no config', () => {
-    expect(runs.viewBare.code, out(runs.viewBare)).toBe(0);
-    expect(existsSync(join(dirs.bare, 'src', 'views', 'order_line.view.ts'))).toBe(true);
-    expect(runs.viewBare.stdout).toContain("import * as views from './src/views';");
+    expect(runs.dashboardBare.code, out(runs.dashboardBare)).toBe(0);
+    expect(existsSync(join(dirs.bare, 'src', 'dashboards', 'sales.dashboard.ts'))).toBe(true);
+    expect(runs.dashboardBare.stdout).toContain("import * as dashboards from './src/dashboards';");
   });
 });
 

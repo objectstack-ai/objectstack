@@ -200,7 +200,7 @@ describe('#9276 an own key holding `undefined` is not a row state this driver em
     // Measured identical on `origin/main` before the repair.
     expect(await ids({ status: { $null: true } })).toEqual(['a1', 'a2', 'a3']);
     expect(await ids({ status: { $null: false } })).toEqual(['a4']);
-    // [#13195] `$exists` was ['a3','a4'] / ['a1','a2'] — it read KEY PRESENCE,
+    // [commit 9dac1ae01] `$exists` was ['a3','a4'] / ['a1','a2'] — it read KEY PRESENCE,
     // so a3 (which stores an explicit `null`) counted as existing. Ruled
     // 2026-08-30: `$exists` means HAS A VALUE (`!= null`), #5298 leg 3 / #5369.
     // ⚠️ The consequence is visible right here and is deliberate, not

@@ -22,7 +22,7 @@
  * (`in-memory-aggregation-compensated-sum.test.ts`) against the same literals.
  *
  * Both faces, and both doors of the data face, are driven: one face aligned
- * alone is how this package's faces come to disagree (#5374, #6814, #11065).
+ * alone is how this package's faces come to disagree (#5374, #6814, commit 20950404c).
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
