@@ -705,7 +705,7 @@ function nullOrderingComparandError(
   return invalidFilterComparandError(
     context,
     `Operator "${op}" on field "${field}" does not accept a null comparand (at ${path}). ` +
-    `null is not ordered; no two evaluation faces agree on what it matches. State absence ` +
+    `null is not ordered; the evaluation faces do not agree on what it matches. State absence ` +
     `with the null predicate: {"$eq": null} is "has no value", {"$ne": null} is "has a value". ` +
     `Authoring spellings: ${spellings.join(', ')}. The filter was NOT applied, and an ` +
     `unapplied filter would have returned the UNFILTERED result set.`,
