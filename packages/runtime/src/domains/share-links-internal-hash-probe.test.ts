@@ -25,6 +25,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ShareLinkService, SysShareLink } from '@objectstack/plugin-sharing';
 import { apiErrorResponse } from '../error-envelope.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -33,6 +34,8 @@ import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { handleShareLinksRequest } from './share-links.js';
 
 const SHARED = 'pin_doc';
+/** The system context, erased once here; the options bags that carry it stay typed. */
+const SYS_CTX = { isSystem: true } as any;
 const RECORD = 'doc_1';
 const PASSWORD = 'open sesame 21197';
 
@@ -112,7 +115,7 @@ describe('[#21197] dispatcher share-link resolve probe: the internal password ha
       { isSystem: true, userId: 'usr_creator' } as any,
     );
 
-    const generic = (await engine.find('sys_share_link', { context: { isSystem: true } } as any)) as Array<Record<string, unknown>>;
+    const generic = (await engine.find('sys_share_link', { context: SYS_CTX } satisfies EngineQueryOptions)) as Array<Record<string, unknown>>;
     expect(generic).toHaveLength(1);
     expect(generic[0], 'the generic read carries no hash').not.toHaveProperty('password_hash');
 

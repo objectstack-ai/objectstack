@@ -21,6 +21,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { readInternalColumn, type InternalColumnSource } from './secret-fields.js';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 const OBJECT = {
   name: 'pin_gate',
@@ -96,7 +97,7 @@ async function boot() {
   engine.registerDriver(makeDriver() as any, true);
   await engine.init();
   engine.registry.registerObject(OBJECT as any, 'com.objectstack.test.read-internal-column');
-  const sys = { context: { isSystem: true } } as any;
+  const sys = { context: { isSystem: true } as any } satisfies EngineQueryOptions;
   await engine.insert('pin_gate', { id: 'g1', label: 'one', gate_hash: 'stored-hash-one' }, sys);
   await engine.insert('pin_gate', { id: 'g2', label: 'two', gate_hash: null }, sys);
   await engine.insert('pin_gate', { id: 'g3', label: 'three', gate_hash: 'stored-hash-three' }, sys);
