@@ -46,7 +46,7 @@ import {
 import { ObjectQL } from './engine.js';
 import { DuplicateRecordError } from './duplicate-record-error.js';
 import { SummaryRecomputeError } from './summary-errors.js';
-import { redactBoundStatement, redactPropagatedDriverFault } from './driver-fault-redaction.js';
+import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
 
 /** The caller's value. Synthetic; asserted ABSENT from every carrier. */
 const S = 'SENTINEL-21274-BOUND-VALUE';

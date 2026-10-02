@@ -478,7 +478,7 @@
     "chartAggregateCategoryKey (function)",
     "chartAggregateResultKeys (function)",
     "chartAggregateValueKey (function)",
-    "checkDashboardWidgetDimensionlessMeasureArity (function)",
+    "checkDashboardWidgetChartMeasureArity (function)",
     "checkDashboardWidgetMetricMeasureArity (function)",
     "checkDashboardWidgetStageOrder (function)",
     "checkGlobalFilterDateDefaultValue (function)",

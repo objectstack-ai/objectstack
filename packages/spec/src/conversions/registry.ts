@@ -9016,6 +9016,191 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
 };
 
 /**
+ * `object-grid`'s legacy column-resize spelling leaves the contract (protocol
+ * 18, #21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A — `resizable`
+ * is canonical — with the startup rule of immediate retirement).
+ *
+ * `resizableColumns` was the second spelling of `resizable`, read only as
+ * `schema.resizable ?? schema.resizableColumns` — measured at the
+ * `.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`. One
+ * switch, two spellings, and a grid authoring both silently ignored this one.
+ *
+ * The conversion follows that precedence exactly, so it preserves what every
+ * grid has been doing. Where `resizable` is absent (or null — the `??` reads
+ * through it) the legacy value WAS the grid's setting, so it moves to
+ * `resizable` unchanged. Where `resizable` holds a value the legacy key was
+ * never read, so it strips as a lossless delete — whatever the two values
+ * were. Zero authored occurrences in either repository's corpora (the card's
+ * measurement, re-run at dispatch), so this entry exists for stored
+ * `sys_metadata` rows and for authors outside the repositories.
+ *
+ * objectui#6152 retires the renderer's `?? schema.resizableColumns` read on
+ * its own schedule, once a released spec carries this.
+ */
+const objectGridResizableColumnsRemoved: MetadataConversion = {
+  id: 'object-grid-resizable-columns-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'page.component.object-grid.resizableColumns',
+  summary:
+    "object-grid component prop 'resizableColumns' removed (#21445 — the legacy second spelling of "
+    + "'resizable', read only when 'resizable' was absent; the value moves to 'resizable' when that "
+    + 'is absent, and is deleted when it is present)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-grid') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('resizableColumns' in properties)) return component;
+      if (properties.resizable != null) {
+        // `resizable` holds a value: the legacy key was never read — a pure
+        // lossless delete, whatever it said.
+        const stripped = stripKeys(properties, ['resizableColumns'], emit, `${path}.properties`);
+        return { ...component, properties: stripped };
+      }
+      // `resizable` absent (or null, which `??` reads through): the legacy key
+      // WAS the setting. It moves, value unchanged.
+      const { resizableColumns, ...rest } = properties;
+      emit({ from: 'resizableColumns', to: 'resizable', path: `${path}.properties.resizable` });
+      return { ...component, properties: { ...rest, resizable: resizableColumns } };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'account_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The legacy key alone: it IS the setting, so it moves.
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_account', resizableColumns: false },
+                },
+                // Both spellings with DIFFERENT values: `resizable` wins (the
+                // renderer's own precedence), so the legacy key strips.
+                {
+                  type: 'object-grid',
+                  id: 'g2',
+                  properties: { objectName: 'crm_account', resizable: true, resizableColumns: false },
+                },
+                // The same key name on a component that is NOT an
+                // `object-grid` — not this entry's key. The strip is scoped
+                // by component type, never by key name.
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_account', resizableColumns: true },
+                },
+                // A grid without the key rides through untouched.
+                {
+                  type: 'object-grid',
+                  id: 'g3',
+                  properties: { objectName: 'crm_account', resizable: false },
+                },
+                // The nested position: a grid inside a card's `children`.
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-grid',
+                        id: 'g4',
+                        properties: { objectName: 'crm_contact', resizableColumns: true },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape: a grid authored into a slotted page.
+        {
+          name: 'account_desk_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-grid',
+              id: 'g5',
+              properties: { objectName: 'crm_account', resizableColumns: false },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'account_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_account', resizable: false },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g2',
+                  properties: { objectName: 'crm_account', resizable: true },
+                },
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_account', resizableColumns: true },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g3',
+                  properties: { objectName: 'crm_account', resizable: false },
+                },
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-grid',
+                        id: 'g4',
+                        properties: { objectName: 'crm_contact', resizable: true },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'account_desk_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-grid',
+              id: 'g5',
+              properties: { objectName: 'crm_account', resizable: false },
+            },
+          },
+        },
+      ],
+    },
+    // Four notices: three renames (g1, the nested g4, the slotted g5) and one
+    // strip (g2, where `resizable` already won). The kanban sibling and the
+    // grid without the key emit none.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * `object-kanban`'s per-column quick-add switch leaves the contract (protocol
  * 18, #17260, ADR-0049 enforce-or-remove; the spec half of the objectui#8285
  * director-seat ruling, decision batch #91, 2026-09-08 — ruled option B,
@@ -10393,6 +10578,115 @@ const actionBlockEndpointToTarget: MetadataConversion = {
     // slotted header. The disagreeing pair and the type-less button are TODOs,
     // which are not notices.
     expectedNotices: 4,
+  },
+};
+
+/**
+ * An agent's long-term memory store — `agent.memory.longTerm.store` — leaves
+ * the spec (protocol 18, #20274; ADR-0049 enforce-or-remove, ruling record
+ * 5950198150, letter A′: the `agent.memory` contract states exactly what the
+ * runtime honours).
+ *
+ * The memory store is platform infrastructure, not agent metadata. Cloud's AI
+ * service, the one runtime that executes agents, keeps long-term memory notes
+ * in its own database store; it refused `vector` — the key's old DEFAULT, so
+ * what an omitted `store` parsed to — and `redis` before an agent's first
+ * turn, and honoured `database` only because that is the store it uses anyway.
+ * Before that reader landed nothing read the block at all. So no authored
+ * value ever chose a backend, and the delete is LOSSLESS: authoring now
+ * refuses the key by name (`retiredKey`, ai/agent.zod.ts).
+ *
+ * One edit: the key is deleted from `memory.longTerm`, whatever it holds — an
+ * explicit `database`, a refused `vector` / `redis`, or the `vector` default a
+ * released toolchain materialized into a parsed agent. Every other key of the
+ * block stays. One notice per agent that carried it.
+ *
+ * ⛔ What it does NOT do: supply `maxEntries` or `reflectionInterval`. The same
+ * ruling made both REQUIRED once `longTerm.enabled` is true, with no default,
+ * so no mechanical rewrite can choose them; the D3 entry
+ * `agent-memory-store-retired-and-limits-required` carries that judgement.
+ *
+ * Idempotent by construction: `stripKeys` skips an absent key and hands the
+ * input back by reference. Retired from the load path: an author is refused at
+ * parse with the prescription; data at rest (`applyConversionsToStoredItem`),
+ * built artifacts and `os migrate meta` replay it.
+ */
+const agentMemoryLongTermStoreRemoved: MetadataConversion = {
+  id: 'agent-memory-long-term-store-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.6.0',
+  surface: 'agent.memory.longTerm.store',
+  summary:
+    "agent memory key 'longTerm.store' removed: the memory store is platform infrastructure, not agent "
+    + "metadata — the AI runtime keeps long-term memory notes in its own database store and refused the "
+    + "'vector' default and 'redis' before the first turn. The key is deleted; every other memory key stays",
+  apply(stack, emit) {
+    return mapCollection(stack, 'agents', (agent, path) => {
+      const memory = agent.memory;
+      if (!isDict(memory)) return agent;
+      const longTerm = memory.longTerm;
+      if (!isDict(longTerm)) return agent;
+      const nextLongTerm = stripKeys(longTerm, ['store'], emit, `${path}.memory.longTerm`);
+      return nextLongTerm === longTerm ? agent : { ...agent, memory: { ...memory, longTerm: nextLongTerm } };
+    });
+  },
+  fixture: {
+    before: {
+      agents: [
+        {
+          // The one value the runtime honoured: deleted all the same — the
+          // store is the platform's, whatever the agent says.
+          name: 'recall_agent',
+          label: 'Recall',
+          memory: { longTerm: { enabled: true, store: 'database', maxEntries: 20 }, reflectionInterval: 5 },
+        },
+        {
+          // The old default, as a released toolchain materialized it into a
+          // parsed agent whose author never wrote `store`.
+          name: 'paused_agent',
+          label: 'Paused',
+          memory: { longTerm: { enabled: false, store: 'vector' } },
+        },
+        {
+          // A refused backend.
+          name: 'cache_agent',
+          label: 'Cache',
+          memory: { longTerm: { enabled: true, store: 'redis', maxEntries: 50 }, reflectionInterval: 10 },
+        },
+        {
+          // Already canonical, and an agent with no memory at all: both ride
+          // through untouched.
+          name: 'notes_agent',
+          label: 'Notes',
+          memory: { longTerm: { enabled: true, maxEntries: 5 }, reflectionInterval: 3 },
+        },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    after: {
+      agents: [
+        {
+          name: 'recall_agent',
+          label: 'Recall',
+          memory: { longTerm: { enabled: true, maxEntries: 20 }, reflectionInterval: 5 },
+        },
+        { name: 'paused_agent', label: 'Paused', memory: { longTerm: { enabled: false } } },
+        {
+          name: 'cache_agent',
+          label: 'Cache',
+          memory: { longTerm: { enabled: true, maxEntries: 50 }, reflectionInterval: 10 },
+        },
+        {
+          name: 'notes_agent',
+          label: 'Notes',
+          memory: { longTerm: { enabled: true, maxEntries: 5 }, reflectionInterval: 3 },
+        },
+        { name: 'plain_agent', label: 'Plain' },
+      ],
+    },
+    // Three: one per agent whose `longTerm` carried the key.
+    expectedNotices: 3,
   },
 };
 
@@ -13954,6 +14248,7 @@ function inApplicationOrder(entries: readonly OrderedConversion[]): readonly Met
 const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: actionAriaRemoved, order: 43 },
   { conversion: actionBlockEndpointToTarget, order: 52 },
+  { conversion: agentMemoryLongTermStoreRemoved, order: 56 },
   { conversion: agentStructuredOutputRefusedMembersRemoved, order: 55 },
   { conversion: apiEndpointCacheTtlToCacheTtlSeconds, order: 23 },
   { conversion: chartConfigAriaRemoved, order: 32 },
@@ -13992,6 +14287,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
   { conversion: metricFiltersRemoved, order: 7 },
   { conversion: objectGridDefaultSortRemoved, order: 14 },
+  { conversion: objectGridResizableColumnsRemoved, order: 57 },
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
   { conversion: pageAssignedProfilesRemoved, order: 31 },

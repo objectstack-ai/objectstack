@@ -354,14 +354,20 @@ export interface ISharingService {
   /**
    * [ADR-0111 D1] May the principal in `context` MANAGE shares (grant / revoke
    * / list) on `(object, recordId)`? True for system context, the record's
-   * owner, and holders of the super-user write bypass (`modifyAllRecords`,
-   * probed via the late-bound security service). **Fails closed**: no security
-   * service → owner-only; unknown record / principal-less context → `false`.
+   * owner, holders of the super-user write bypass (`modifyAllRecords`, probed
+   * via the late-bound security service), and — the ADR-0111 D1 DEPTH
+   * extension — a hierarchy manager whose effective WRITE scope (`unit` /
+   * `unit_and_below` / `own_and_reports`, from
+   * `ISecurityService.resolveWriteScope`) covers the record's owner through the
+   * enterprise hierarchy resolver. **Fails closed**: no security service →
+   * owner-only; no hierarchy resolver → owner + Modify-All; unknown record /
+   * principal-less context → `false`.
    *
    * This is the single gate every manual share-management operation consults —
    * enforcement lives in the SERVICE, so every caller (REST or otherwise) is
-   * covered. The DEPTH extension (hierarchy managers) is a named ADR-0111
-   * direction, not implemented here.
+   * covered. It is NOT mint authority for share links: ADR-0111 D8 rule 1
+   * admits only its owner and Modify-All branches beside visibility, never the
+   * hierarchy branch (see `IShareLinkService.createLink`).
    */
   canManageShares(
     object: string,

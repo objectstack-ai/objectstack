@@ -704,28 +704,28 @@ Sort field and direction pair
 | **showPagination** | `boolean` | optional | Show the pager (read only when `pagination` is absent) |
 | **searchableFields** | `string[]` | optional | Fields the toolbar search queries; a non-empty list enables search |
 | **showSearch** | `boolean` | optional | Show the search box (read only when `searchableFields` is absent) |
-| **rowHeight** | `any` | optional | Row density mode (e.g. compact / comfortable) |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height — one of `compact`, `short`, `medium`, `tall`, `extra_tall`; the same values a list view's `rowHeight` takes |
 | **grouping** | `{ fields: object[] }` | optional | Row grouping config |
-| **aggregations** | `any` | optional | Group aggregation config (sum/avg/… per column) |
-| **conditionalFormatting** | `any` | optional | Conditional row/cell formatting rules |
-| **rowColor** | `any` | optional | Row color rules |
+| **aggregations** | `{ field: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'> }[]` | optional | Per-group aggregations drawn in a grouped grid's group headers — `[{ field, type }]`, `type` one of `count`, `sum`, `avg`, `min`, `max`, `count_distinct` (`count` is the group's row count, whatever `field` names) |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to the row |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Row colour by field value — `{ field, colors }`, the same block a list view's `rowColor` declares |
 | **selection** | `any` | optional | Selection config (`{ type: none \| single \| multiple }`) |
 | **selectable** | `any` | optional | Legacy selection shorthand, read only when `selection` is absent. Prefer `selection` |
 | **rowActions** | `any[]` | optional | Per-row action names |
 | **bulkActions** | `any[]` | optional | Bulk action names shown on selection |
 | **batchActions** | `any[]` | optional | Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`) |
-| **bulkActionDefs** | `any[]` | optional | Inline bulk-action definitions (full defs, not names) |
-| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Inline bulk-action definitions (full defs, not names) — the same `BulkActionDef` entries a list view's `bulkActionDefs` declares |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 | **editable** | `boolean` | optional | Enable inline cell editing |
 | **singleClickEdit** | `boolean` | optional | Enter cell edit on single click (default true when editable) |
 | **keyboardNavigation** | `boolean` | optional | [EXPERIMENTAL — not enforced] Arrow-key cell navigation on the WAI-ARIA grid pattern. Defaults to on when `editable` is set; a read-only grid keeps its Tab behaviour unless this is `true`. No renderer reads it yet: it is declared ahead of the grid's keyboard-navigation build, so authoring it changes nothing today |
-| **resizable** | `boolean` | optional | Allow column resize (read before `resizableColumns`) |
-| **resizableColumns** | `boolean` | optional | Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`) |
+| **resizable** | `boolean` | optional | Allow column resize (the renderer default is on) |
+| **resizableColumns** | `never` | optional | [REMOVED] `object-grid` property `resizableColumns` was removed in @objectstack/spec 17.7.0 (ADR-0049) — it was the legacy second spelling of `resizable`, read only when `resizable` was absent, so one switch had two spellings and a grid authoring both silently ignored this one. Use `resizable`. Rename the key; the value (a boolean) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **reorderableColumns** | `boolean` | optional | Allow column drag-reorder |
 | **frozenColumns** | `number` | optional | How many leading columns stay frozen (default 1) |
 | **showColumnTypeIcons** | `boolean` | optional | Show field-type icons in column headers |
 | **exportOptions** | `{ formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }` |
-| **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
+| **operations** | `{ create?: boolean; update?: boolean; delete?: boolean; export?: boolean }` | optional | Built-in affordance toggles `{ create?, update?, delete?, export? }` (booleans). A declared block replaces the grid's default: `update` / `delete` not named are withheld from the row menu, `create` enables the add-row affordance, and `export: false` hides the export menu |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
 
@@ -770,7 +770,58 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+
+### Nested Shape: `ObjectGridProps.aggregations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field whose values the function aggregates within each group (ignored by `count`) |
+| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | Aggregation function — `count` (the group's row count), `sum`, `avg`, `min`, `max` or `count_distinct` |
+
+### Nested Shape: `ObjectGridProps.conditionalFormatting[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
+| **style** | `Record<string, string>` | ✅ | CSS styles to apply when condition is true |
+
+### Nested Shape: `ObjectGridProps.rowColor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
+| **colors** | `Record<string, string>` | optional | Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve. |
+
+### Nested Shape: `ObjectGridProps.bulkActionDefs[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Stable identifier — the audit-log action key, and (for an aggregate def) the name of the object action to dispatch. |
+| **label** | `string` | optional | Button + dialog-header text. Plain string: an authored def is not i18n-resolved (declare a real action and name it in `bulkActions` to get localization). |
+| **icon** | `string` | optional | Lucide icon name (e.g. "user-check", "trash"). |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>` | optional | Visual treatment of the button. |
+| **operation** | `Enum<'update' \| 'delete' \| 'custom'>` | ✅ | What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`). |
+| **execution** | `Enum<'perRecord' \| 'aggregate'>` | optional | For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds`. Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead. |
+| **patch** | `Record<string, any>` | optional | For `operation: 'update'` — static field values applied to every selected record, merged UNDER the user-supplied params so a fixed value can be declared without exposing it in the dialog. |
+| **params** | `{ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … }[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
+| **confirmText** | `string` | optional | Confirmation text shown above the affected-record summary. |
+| **confirmLabel** | `string` | optional | Custom Confirm button label (default: "Run"). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks. |
+| **maxRecords** | `integer` | optional | Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request. |
+| **batchSize** | `integer` | optional | Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition. |
+
+### Nested Shape: `ObjectGridProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ObjectGridProps.exportOptions`
 
@@ -781,6 +832,15 @@ Sort field and direction pair
 | **includeHeaders** | `boolean` | optional | Include column headers in the exported file (default true) |
 | **fileNamePrefix** | `string` | optional | Download file name prefix — replaces the object label and suppresses the view label in the generated file name |
 | **streaming** | `boolean` | optional | Set false to force the client-side export path (csv/json only) instead of the server stream |
+
+### Nested Shape: `ObjectGridProps.operations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **create** | `boolean` | optional | Show the add-row affordance (also gated by the user's create permission) |
+| **update** | `boolean` | optional | Offer the row menu's generic Edit entry |
+| **delete** | `boolean` | optional | Offer the row menu's generic Delete entry |
+| **export** | `boolean` | optional | `false` hides the export menu that `exportOptions` enables |
 
 ### Nested Shape: `ObjectGridProps.data[provider='object']`
 
@@ -794,8 +854,8 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectGridProps.data[provider='value']`
 

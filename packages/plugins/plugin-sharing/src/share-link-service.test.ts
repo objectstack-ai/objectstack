@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ShareLinkService } from './share-link-service.js';
+import { SharingService } from './sharing-service.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -450,6 +451,170 @@ describe('ShareLinkService', () => {
           { isSystem: true },
         ),
       ).rejects.toMatchObject({ status: 404 });
+    });
+
+    // [#21328] The creator half of revoke authority is the one creator rule
+    // `listLinks` also reads, and that rule names no creator for a context
+    // without a user identity. Compared bare, `undefined === undefined` let an
+    // identity-less (non-system) caller revoke a link whose `created_by` the
+    // driver omitted. Neither HTTP door reaches this — both answer 401 first —
+    // so it is the internal-caller edge of the same rule, pinned fail-closed.
+    it('a caller with no user identity is the creator of nothing', async () => {
+      engine._tables.sys_share_link = [
+        { id: 'shl_omitted', token: 'tok_omitted_0001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null },
+        { id: 'shl_empty', token: 'tok_empty_000001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null, created_by: '' },
+      ];
+      await expect(service.revokeLink('shl_omitted', {})).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      await expect(service.revokeLink('shl_empty', { userId: '' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      expect(engine._tables.sys_share_link.map((r) => r.revoked_at)).toEqual([null, null]);
+    });
+  });
+
+  // ── [#21328] the caller's OWN list is self-scoped (ADR-0111 surface table) ──
+  //
+  // ADR-0111 rules the list "self-scoped", and both doors force `createdBy` to
+  // the caller — but the read ran under the caller's context, so it demanded an
+  // object-level grant on `sys_share_link` the member baseline does not carry,
+  // and every plain member's list was refused. The fix reads the caller's OWN
+  // list under the system context; every other shape keeps the caller's
+  // context. The double below overrides only `find`, to model the one gate
+  // that matters: a non-system context whose sets grant nothing on
+  // `sys_share_link` is refused the way the security middleware refuses it
+  // (`PERMISSION_DENIED`, 403).
+  describe('[#21328] listLinks: the caller\'s own list is self-scoped', () => {
+    const CONVO = { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' } as const;
+    const ON_C1 = { object: 'ai_conversations', recordId: 'c1' } as const;
+
+    /** Every `find` the service issues, with the context it ran under. */
+    let seen: Array<{ object: string; where: any; context: any }>;
+    let svc: ShareLinkService;
+    let mine: string[];
+    let theirs: string[];
+    let admins: string[];
+
+    /** `who` hold an object-level read grant on `sys_share_link`; nobody else does. */
+    const grantedTo = (who: string[]) => ({
+      ...engine,
+      async find(object: string, options?: any) {
+        const ctx = options?.context ?? {};
+        seen.push({ object, where: options?.where, context: ctx });
+        if (object === 'sys_share_link' && ctx.isSystem !== true && !who.includes(ctx.userId)) {
+          throw Object.assign(
+            new Error('You do not have permission to perform this action.'),
+            { code: 'PERMISSION_DENIED', statusCode: 403 },
+          );
+        }
+        return engine.find(object, options);
+      },
+    });
+
+    const listed = (links: Array<{ id: string }>) => links.map((l) => l.id).sort();
+    const shareLinkReads = () => seen.filter((s) => s.object === 'sys_share_link');
+
+    beforeEach(async () => {
+      // Three creators' links on the SAME record, so a record filter cannot
+      // separate them — only the creator rule can.
+      mine = [
+        (await service.createLink(CONVO, { userId: 'alice' })).id,
+        (await service.createLink({ ...CONVO, label: 'second' }, { userId: 'alice' })).id,
+      ].sort();
+      theirs = [(await service.createLink(CONVO, { userId: 'bob' })).id];
+      admins = [(await service.createLink(CONVO, { userId: 'admin' })).id];
+      // Rows no caller's identity can match: one whose `created_by` the driver
+      // omitted, one minted under an empty identity.
+      engine._tables.sys_share_link.push(
+        { id: 'shl_omitted', token: 'tok_omitted_0001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null },
+        { id: 'shl_empty', token: 'tok_empty_000001', object_name: 'ai_conversations', record_id: 'c1', revoked_at: null, created_by: '' },
+      );
+      seen = [];
+      svc = new ShareLinkService({ engine: grantedTo(['admin']) as any });
+    });
+
+    it('a member with no sys_share_link grant lists exactly their own links', async () => {
+      const links = await svc.listLinks({ createdBy: 'alice' }, { userId: 'alice' });
+      expect(listed(links)).toEqual(mine);
+
+      const [read] = shareLinkReads();
+      expect(read.context.isSystem, 'the own list is the one read that runs under the system context').toBe(true);
+      expect(read.where.created_by, 'constrained server-side to the caller').toBe('alice');
+    });
+
+    it('the system read trusts no query predicate alone: a dropped created_by constraint still leaks no foreign row', async () => {
+      // A driver that silently drops a `where` key answers with the WIDER set —
+      // under the system context, every creator's tokens. The rows that leave
+      // must still pass the creator rule.
+      const dropsCreator = {
+        ...engine,
+        async find(object: string, options?: any) {
+          const where = { ...(options?.where ?? {}) };
+          delete where.created_by;
+          return engine.find(object, { ...options, where });
+        },
+      };
+      const leaky = new ShareLinkService({ engine: dropsCreator as any });
+      expect(listed(await leaky.listLinks({ ...ON_C1, createdBy: 'alice' }, { userId: 'alice' }))).toEqual(mine);
+    });
+
+    it('through the record filter, other creators\' links on the same record are absent', async () => {
+      const links = await svc.listLinks({ ...ON_C1, createdBy: 'alice' }, { userId: 'alice' });
+      expect(listed(links)).toEqual(mine);
+      // Each listed row still carries its token — the console builds the URL from it.
+      expect(links.every((l) => typeof l.token === 'string' && l.token.length > 0)).toBe(true);
+    });
+
+    it('a foreign creator filter keeps the caller\'s context, and is refused', async () => {
+      await expect(svc.listLinks({ ...ON_C1, createdBy: 'bob' }, { userId: 'alice' }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(shareLinkReads()).toHaveLength(1);
+      expect(shareLinkReads()[0].context).toMatchObject({ userId: 'alice' });
+      expect(shareLinkReads()[0].context.isSystem).toBeUndefined();
+    });
+
+    it('an unfiltered list keeps the caller\'s context, and is refused', async () => {
+      await expect(svc.listLinks({}, { userId: 'alice' }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(shareLinkReads()).toHaveLength(1);
+      expect(shareLinkReads()[0].context.isSystem).toBeUndefined();
+    });
+
+    it('a caller with no user identity never takes the elevated path', async () => {
+      // Absent identity and absent creator filter: `undefined === undefined`.
+      await expect(svc.listLinks({}, {}))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      await expect(svc.listLinks({ ...ON_C1 }, {}))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      // Empty identity and empty creator filter: `'' === ''`.
+      await expect(svc.listLinks({ createdBy: '' }, { userId: '' }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(shareLinkReads()).toHaveLength(3);
+      expect(shareLinkReads().every((r) => r.context.isSystem !== true)).toBe(true);
+    });
+
+    it('the admin path is unchanged: a granted caller lists anyone\'s links under their own context', async () => {
+      const all = await svc.listLinks({}, { userId: 'admin' });
+      expect(listed(all)).toEqual([...mine, ...theirs, ...admins, 'shl_empty', 'shl_omitted'].sort());
+      const bobs = await svc.listLinks({ createdBy: 'bob' }, { userId: 'admin' });
+      expect(listed(bobs)).toEqual(theirs);
+      expect(shareLinkReads().map((r) => r.context.isSystem)).toEqual([undefined, undefined]);
+      // …and the admin's OWN list answers exactly their own links, as it did.
+      expect(listed(await svc.listLinks({ ...ON_C1, createdBy: 'admin' }, { userId: 'admin' }))).toEqual(admins);
+    });
+
+    it('a system caller keeps its bypass', async () => {
+      const links = await svc.listLinks({ object: 'ai_conversations' }, { isSystem: true });
+      expect(listed(links)).toEqual([...mine, ...theirs, ...admins, 'shl_empty', 'shl_omitted'].sort());
+      expect(shareLinkReads()[0].context.isSystem).toBe(true);
+      // A system caller asking for its own links gets the same rows either way.
+      expect(listed(await svc.listLinks({ createdBy: 'alice' }, { isSystem: true, userId: 'alice' }))).toEqual(mine);
+    });
+
+    it('revoke and list read one creator rule: what you may revoke as creator is what your list shows', async () => {
+      const links = await svc.listLinks({ createdBy: 'alice' }, { userId: 'alice' });
+      for (const link of links) await expect(svc.revokeLink(link.id, { userId: 'alice' })).resolves.toBeUndefined();
+      await expect(svc.revokeLink(theirs[0], { userId: 'alice' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      // Revoked links leave the default list and come back under includeRevoked.
+      expect(await svc.listLinks({ createdBy: 'alice' }, { userId: 'alice' })).toEqual([]);
+      expect(listed(await svc.listLinks({ createdBy: 'alice', includeRevoked: true }, { userId: 'alice' }))).toEqual(mine);
     });
   });
 });
@@ -1004,5 +1169,341 @@ describe('[#12981] a refused usage stamp is reported ONCE as a durability degrad
     const service = new ShareLinkService({ engine: engine as any });
     const link = await mint(service);
     await expect(service.resolveToken(link.token)).resolves.not.toBeNull();
+  });
+});
+
+// ── [ADR-0111 D8 rule 1 — ruling 5950188467, A′] who may mint ────────────────
+//
+// "`createLink` admits `visibility OR owner OR Modify-All bypass`, still behind
+// the `publicSharing` opt-in and before its `eligibility` check. … A hierarchy
+// manager still needs visibility to mint." The owner and bypass halves are
+// `canManageShares`' own first two branches, so the link service here is wired
+// to a REAL `SharingService` exactly as `SharingServicePlugin` wires it; only
+// its probes (the security service, the enterprise hierarchy resolver, the
+// tenancy posture) are doubles.
+//
+// The object is OWNER-PRIVATE: the double below refuses every non-system read
+// of it the way the CRUD gate does on an `access.default: 'private'` object
+// (`PERMISSION_DENIED` with `statusCode` 403), except for `u_reader`, the one
+// principal who can see it. So on the visibility rule alone nobody else —
+// the owner included — could ever mint.
+describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the record owner, or Modify-All', () => {
+  const OWNER = 'u_owner';
+  const STRANGER = 'u_stranger';
+  const ADMIN = 'u_admin';
+  const MANAGER = 'u_manager';
+  const READER = 'u_reader';
+  /** Owns a record on the capability-gated object AND holds the capability. */
+  const CAPABLE_OWNER = 'u_capable_owner';
+
+  const SCHEMAS = {
+    sys_share_link: { name: 'sys_share_link', fields: {} },
+    conversations: {
+      name: 'conversations',
+      access: { default: 'private' },
+      publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+      fields: { id: {}, title: {}, owner_id: {} },
+    },
+    // The same object shape with an eligibility predicate, for the ordering pins.
+    briefs: {
+      name: 'briefs',
+      access: { default: 'private' },
+      publicSharing: { enabled: true, eligibility: "record.status == 'published'" },
+      fields: { id: {}, title: {}, status: {}, owner_id: {} },
+    },
+    // Never opted in.
+    notes: { name: 'notes', access: { default: 'private' }, fields: { id: {}, owner_id: {} } },
+    // Owner-private AND capability-gated (ADR-0066 D3): a read needs `view_vault`.
+    vault: {
+      name: 'vault',
+      access: { default: 'private' },
+      requiredPermissions: ['view_vault'],
+      publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+      fields: { id: {}, owner_id: {} },
+    },
+  };
+  const PRIVATE_OBJECTS = new Set(['conversations', 'briefs', 'notes', 'vault']);
+  /** The capabilities each principal holds; the doubles below read only this. */
+  const HELD_CAPABILITIES: Record<string, string[]> = { [CAPABLE_OWNER]: ['view_vault'] };
+  const requiredOf = (object: string): string[] =>
+    ((SCHEMAS as Record<string, any>)[object]?.requiredPermissions as string[] | undefined) ?? [];
+  const lacksCapability = (object: string, userId: unknown): boolean =>
+    requiredOf(object).some((c) => !(HELD_CAPABILITIES[String(userId)] ?? []).includes(c));
+
+  const denial = () =>
+    Object.assign(new Error('You do not have permission to perform this action.'), {
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+    });
+  /** The capability AND-gate's refusal: the same class, carrying what was missing. */
+  const capabilityDenial = (object: string) =>
+    Object.assign(new Error('You do not have permission to perform this action.'), {
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { object, requiredPermissions: requiredOf(object), missingPermissions: requiredOf(object) },
+    });
+  /**
+   * The explain report's `required_permissions` layer, computed from the same
+   * `HELD_CAPABILITIES` the read double refuses with — so the two agree by
+   * construction, as the real engine and middleware do.
+   */
+  const explainDouble = async (request: { object: string }, ctx: any) => {
+    explainCalls += 1;
+    const verdict = requiredOf(request.object).length === 0
+      ? 'not_applicable'
+      : lacksCapability(request.object, ctx?.userId) ? 'denies' : 'neutral';
+    return { layers: [{ layer: 'required_permissions', verdict, detail: 'double' }] } as any;
+  };
+
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let posture: string | undefined;
+  let writeScopeCalls: number;
+  let explainCalls: number;
+  let sharing: SharingService;
+  let service: ShareLinkService;
+  let mintProbeCalls: Array<[string, string, string | undefined]>;
+
+  const mintIn = (object: string, recordId: string) =>
+    ({ object, recordId, audience: 'link_only', permission: 'view' }) as const;
+  const conversation = () => mintIn('conversations', 'c1');
+  const as = (userId: string) => ({ userId }) as any;
+  const minted = () => (engine._tables.sys_share_link ?? []).map((r) => r.created_by);
+
+  beforeEach(() => {
+    engine = makeFakeEngine(SCHEMAS);
+    engine._tables.conversations = [{ id: 'c1', title: 'My chat', owner_id: OWNER }];
+    engine._tables.briefs = [
+      { id: 'b_draft', title: 'Draft', status: 'draft', owner_id: OWNER },
+      { id: 'b_pub', title: 'Published', status: 'published', owner_id: OWNER },
+    ];
+    engine._tables.notes = [{ id: 'n1', owner_id: OWNER }];
+    engine._tables.vault = [
+      { id: 'v_owner', owner_id: OWNER },
+      { id: 'v_capable', owner_id: CAPABLE_OWNER },
+    ];
+    const plainFind = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      const ctx = options?.context ?? {};
+      if (PRIVATE_OBJECTS.has(object) && ctx.isSystem !== true) {
+        // The capability AND-gate runs BEFORE the CRUD grant (ADR-0066 D3).
+        if (lacksCapability(object, ctx.userId)) throw capabilityDenial(object);
+        if (ctx.userId !== READER) throw denial();
+      }
+      return plainFind(object, options);
+    };
+
+    posture = 'single';
+    writeScopeCalls = 0;
+    explainCalls = 0;
+    mintProbeCalls = [];
+    sharing = new SharingService({
+      engine: engine as any,
+      securityService: () => ({
+        hasWriteBypass: async (_object: string, ctx: any) => ctx?.userId === ADMIN,
+        resolveWriteScope: async (_object: string, ctx: any) => {
+          writeScopeCalls += 1;
+          return ctx?.userId === MANAGER ? 'unit' : 'own';
+        },
+        explain: explainDouble,
+      }),
+      // The enterprise seam: the manager's `unit` covers the owner.
+      hierarchyResolver: () =>
+        ({
+          resolveOwnerIds: async (ctx: any, scope: string) =>
+            ctx?.userId === MANAGER && scope === 'unit' ? [MANAGER, OWNER] : [String(ctx?.userId)],
+        }) as any,
+      tenancy: () => (posture === undefined ? null : { posture }),
+    });
+    // Wired the way `SharingServicePlugin` wires it.
+    service = new ShareLinkService({
+      engine: engine as any,
+      canManageShares: (o, r, c) => sharing.canManageShares(o, r, c),
+      canMintWithoutVisibility: (o, r, c) => {
+        mintProbeCalls.push([o, r, (c as any)?.userId]);
+        return sharing.canMintWithoutVisibility(o, r, c);
+      },
+    });
+  });
+
+  it('[persona] nobody but the reader sees the record: the owner\'s own read is refused', async () => {
+    await expect(engine.find('conversations', { where: { id: 'c1' }, context: as(OWNER) }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(await engine.find('conversations', { where: { id: 'c1' }, context: as(READER) })).toHaveLength(1);
+  });
+
+  it('the owner mints on an owner-private object, and the link resolves', async () => {
+    const link = await service.createLink(conversation(), as(OWNER));
+    expect(link).toMatchObject({ object_name: 'conversations', record_id: 'c1', created_by: OWNER });
+    expect(minted()).toEqual([OWNER]);
+    await expect(service.resolveToken(link.token)).resolves.toMatchObject({ link: { id: link.id } });
+  });
+
+  it('a hierarchy manager without visibility is refused, though they ARE a share-manager of the record', async () => {
+    // The control: ADR-0111 D1 DEPTH admits this principal to manage shares.
+    expect(await sharing.canManageShares('conversations', 'c1', as(MANAGER))).toBe(true);
+    const callsBefore = writeScopeCalls;
+
+    await expect(service.createLink(conversation(), as(MANAGER)))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(minted()).toEqual([]);
+    // Minting never asked for the caller's write scope: the DEPTH branch is not
+    // part of mint authority, rather than a branch that happened to say no.
+    expect(writeScopeCalls, 'the mint consulted the hierarchy-depth probe').toBe(callsBefore);
+  });
+
+  it('a non-owner member is refused with the visibility read\'s own refusal', async () => {
+    await expect(service.createLink(conversation(), as(STRANGER)))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(minted()).toEqual([]);
+  });
+
+  it('Modify-All mints, with the visibility read refused (the bypass branch alone admits)', async () => {
+    await expect(engine.find('conversations', { where: { id: 'c1' }, context: as(ADMIN) }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    const link = await service.createLink(conversation(), as(ADMIN));
+    expect(link).toMatchObject({ record_id: 'c1', created_by: ADMIN });
+  });
+
+  it('a system caller keeps its 404 for a missing record, with the probe wired', async () => {
+    await expect(service.createLink(mintIn('conversations', 'ghost'), { isSystem: true, userId: OWNER } as any))
+      .rejects.toMatchObject({ status: 404, code: 'RECORD_NOT_FOUND' });
+    expect(minted()).toEqual([]);
+  });
+
+  it('visibility still admits on its own, without asking the owner/bypass probe', async () => {
+    const link = await service.createLink(conversation(), as(READER));
+    expect(link.created_by).toBe(READER);
+    expect(mintProbeCalls).toEqual([]);
+  });
+
+  it('an empty visibility read stays 403 FORBIDDEN for a caller no alternative admits', async () => {
+    // A row filter, not a CRUD refusal: the read answers nothing.
+    engine.find = (async (object: string, options?: any) =>
+      options?.context?.isSystem === true ? engine._tables[object] ?? [] : []) as any;
+    await expect(service.createLink(conversation(), as(STRANGER)))
+      .rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    // ...and the owner of the same row mints past it.
+    await expect(service.createLink(conversation(), as(OWNER))).resolves.toMatchObject({ created_by: OWNER });
+  });
+
+  describe('the capability hard stop (ADR-0066 D3): no alternative applies past a missing required capability', () => {
+    it('an owner lacking the capability is refused with the capability refusal itself, and nothing lands', async () => {
+      const refusal = await service.createLink(mintIn('vault', 'v_owner'), as(OWNER)).then(
+        () => { throw new Error('the owner minted past the capability gate'); },
+        (err) => err,
+      );
+      expect(refusal).toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+        details: { missingPermissions: ['view_vault'] },
+      });
+      expect(minted()).toEqual([]);
+      // The owner alternative itself was admitted; the stop is what refused.
+      expect(await sharing.canManageShares('vault', 'v_owner', as(OWNER))).toBe(true);
+    });
+
+    it('a Modify-All holder lacking the capability is refused the same way', async () => {
+      await expect(service.createLink(mintIn('vault', 'v_owner'), as(ADMIN)))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', details: { missingPermissions: ['view_vault'] } });
+      expect(minted()).toEqual([]);
+    });
+
+    it('control: an owner who HOLDS the capability mints on the same object (refused only by the CRUD grant)', async () => {
+      await expect(engine.find('vault', { where: { id: 'v_capable' }, context: as(CAPABLE_OWNER) }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(service.createLink(mintIn('vault', 'v_capable'), as(CAPABLE_OWNER)))
+        .resolves.toMatchObject({ record_id: 'v_capable', created_by: CAPABLE_OWNER });
+    });
+
+    it('control: the owner of an object that requires no capability still mints', async () => {
+      await expect(service.createLink(conversation(), as(OWNER))).resolves.toMatchObject({ created_by: OWNER });
+    });
+
+    it('a refused stranger never pays for the explain walk', async () => {
+      await expect(service.createLink(mintIn('vault', 'v_owner'), as(STRANGER))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(service.createLink(conversation(), as(STRANGER))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(explainCalls).toBe(0);
+    });
+
+    it.each([
+      ['a security service without explain', { hasWriteBypass: async () => false }],
+      ['an explain that throws', { explain: async () => { throw new Error('explain down'); } }],
+      ['a report without the layer', { explain: async () => ({ layers: [] }) }],
+      ['a verdict outside admits', { explain: async () => ({ layers: [{ layer: 'required_permissions', verdict: 'narrows', detail: 'x' }] }) }],
+    ])('fails closed: %s refuses the owner', async (_name, probe) => {
+      const closed = new SharingService({
+        engine: engine as any,
+        securityService: () => probe as any,
+        tenancy: () => ({ posture: 'single' }),
+      });
+      expect(await closed.canMintWithoutVisibility('conversations', 'c1', as(OWNER))).toBe(false);
+    });
+
+    it('a deployment with no security service at all enforces no capability gate, so the owner alternative stands', async () => {
+      const open = new SharingService({ engine: engine as any, tenancy: () => ({ posture: 'single' }) });
+      expect(await open.canMintWithoutVisibility('conversations', 'c1', as(OWNER))).toBe(true);
+    });
+  });
+
+  describe('the order: opt-in, then authority, then eligibility', () => {
+    it('the opt-in comes first — the owner of a record on an object that never opted in is refused 422', async () => {
+      await expect(service.createLink(mintIn('notes', 'n1'), as(OWNER)))
+        .rejects.toMatchObject({ status: 422, code: 'SHARING_NOT_ENABLED' });
+      expect(mintProbeCalls).toEqual([]);
+    });
+
+    it('eligibility is judged after the owner is admitted: an ineligible record is refused 422, an eligible one mints', async () => {
+      await expect(service.createLink(mintIn('briefs', 'b_draft'), as(OWNER)))
+        .rejects.toMatchObject({ status: 422, code: 'RECORD_NOT_ELIGIBLE' });
+      await expect(service.createLink(mintIn('briefs', 'b_pub'), as(OWNER)))
+        .resolves.toMatchObject({ record_id: 'b_pub', created_by: OWNER });
+    });
+
+    it('a caller with no authority is refused BEFORE eligibility, learning nothing about the record', async () => {
+      // The draft would draw RECORD_NOT_ELIGIBLE; the stranger never reaches it.
+      await expect(service.createLink(mintIn('briefs', 'b_draft'), as(STRANGER)))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    });
+  });
+
+  describe('where the alternatives are withheld', () => {
+    it.each(['isolated', 'group'])(
+      'an organization wall (%s): visibility alone admits, so the owner and Modify-All are refused',
+      async (walled) => {
+        posture = walled;
+        for (const who of [OWNER, ADMIN]) {
+          await expect(service.createLink(conversation(), as(who)))
+            .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        }
+        expect(minted()).toEqual([]);
+        // Revoke authority is untouched by the wall: the owner still manages the record.
+        expect(await sharing.canManageShares('conversations', 'c1', as(OWNER))).toBe(true);
+      },
+    );
+
+    it('an unresolvable posture counts as walled (fail closed)', async () => {
+      posture = undefined;
+      await expect(service.createLink(conversation(), as(OWNER)))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    });
+
+    it('a deployment without the probe keeps visibility alone (the pre-A′ rule)', async () => {
+      const probeless = new ShareLinkService({
+        engine: engine as any,
+        canManageShares: (o, r, c) => sharing.canManageShares(o, r, c),
+      });
+      await expect(probeless.createLink(conversation(), as(OWNER)))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    });
+
+    it('a throwing probe is a refusal, answered with the visibility read\'s own envelope', async () => {
+      const broken = new ShareLinkService({
+        engine: engine as any,
+        canMintWithoutVisibility: async () => { throw new Error('probe down'); },
+      });
+      await expect(broken.createLink(conversation(), as(OWNER)))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(minted()).toEqual([]);
+    });
   });
 });

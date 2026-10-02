@@ -529,10 +529,11 @@ function isMultiValueField(def: FieldDef): boolean {
  *
  * ## Why derived and not `key.startsWith('$')`
  *
- * The repo already carries five hand-rolled `keys.some(k => k.startsWith('$'))`
- * shape tests (`having-filter.ts`, `driver-memory`'s matcher and
- * `filter-refusal.ts`, `driver-mongodb`'s `mongodb-filter.ts`, `driver-turso`'s
- * `remote-transport.ts`). None of them is exported, and none is reachable from
+ * The repo already carries hand-rolled `keys.some(k => k.startsWith('$'))`
+ * shape tests: five when this was written (`having-filter.ts`, `driver-memory`'s
+ * matcher and `filter-refusal.ts`, `driver-mongodb`'s `mongodb-filter.ts`,
+ * `driver-turso`'s `remote-transport.ts`), four since commit `8fec76a2b` retired
+ * the matcher. None of them is exported, and none is reachable from
  * this package without inverting the layering — `@objectstack/objectql` depends
  * on no driver. Writing a sixth `startsWith('$')` here is the accident #5659
  * names: one question, N private answers, and the day one of them changes only

@@ -28,7 +28,8 @@
  * choke point all three runtime hydration callers share.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
+import { expandViewContainer, ViewSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
@@ -393,5 +394,382 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
             const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
             expect(list.items).toEqual([]);
         });
+    });
+});
+
+/**
+ * #21334 — a container on ANOTHER package's object must not take any of that
+ * package's names, nor its default.
+ *
+ * The spec names every expanded view `<object>.<key>` (a bare `list` takes
+ * `<object>.default`). A container saved under any other name — in another
+ * package, or in none — for an object a code package ships used to expand
+ * there and REPLACE the packaged views on the object door
+ * (`GET /meta/view?object=`), wearing the shadowed artifact's `_packageId`,
+ * while the by-name read kept the packaged item on an environment-scoped kernel
+ * (and served the shadow too on an unscoped one, through the registry's bare
+ * key). ADR-0005 keys an overlay by its own name and ADR-0126 rules out a silent
+ * override. Triage's ruling takes the arm "expand under the container's own
+ * name"; the seat's answer extends it to every member of the container, and
+ * rules that such a container never declares the object's default.
+ *
+ * The registry double here is the real `SchemaRegistry`'s shape where this card
+ * turns on it: loader entries under `<package>:<name>`, a hydrated row under
+ * the bare name, `getItem`'s bare-slot-first precedence, `getArtifactItem`'s
+ * package-scoped code-artifact lookup, and `getPackagedObjectOwner`. The
+ * packaged views are produced by the spec's own `expandViewContainer`, as the
+ * source registrars produce them. The cold-boot proof over the real showcase
+ * composition, through the REST doors, is
+ * `view-container-cross-package-default.dogfood.test.ts`.
+ */
+describe('#21334 a container on another package\'s object never takes that package\'s names or its default', () => {
+    const SHOWCASE = 'com.example.showcase';
+    const REPAIR = 'com.example.repairassets';
+    const TASK = 'showcase_task';
+    const DEFAULT = `${TASK}.default`;
+    const ORG = 'org_acme';
+    const data = { provider: 'object', object: TASK };
+    const PACKAGED_COLUMNS = ['title', 'project', 'assignee', 'status', 'priority', 'due_date', 'progress']
+        .map((field) => ({ field }));
+    /**
+     * What the showcase ships for `showcase_task`: a `defineView` container with
+     * one member of every kind the expander knows, so every probe below aims at
+     * a name the package really ships.
+     */
+    const packagedTaskViews = {
+        list: { label: 'All Tasks', type: 'grid', data, columns: PACKAGED_COLUMNS },
+        listViews: {
+            in_progress: { label: 'In Progress', type: 'grid', data, columns: PACKAGED_COLUMNS.slice(0, 4) },
+        },
+        form: { type: 'simple', sections: [{ label: 'Main', fields: ['title'] }] },
+        formViews: {
+            edit: { type: 'tabbed', sections: [{ label: 'Edit', fields: ['title', 'status'] }] },
+        },
+    };
+    const PACKAGED = expandViewContainer(TASK, packagedTaskViews).map((vi) => ({ ...(vi as any) }));
+    /** The card's own probe body, verbatim. */
+    const probe = (name: string) => ({ name, object: TASK, list: { type: 'grid', columns: ['title', 'status'] } });
+
+    function faithfulRegistry() {
+        const byType = new Map<string, Map<string, Record<string, unknown>>>();
+        const objects = new Map<string, { packageId: string; ownership: 'own'; definition: Record<string, unknown> }>();
+        const collection = (type: string) => {
+            if (!byType.has(type)) byType.set(type, new Map());
+            return byType.get(type)!;
+        };
+        return {
+            registerItem(type: string, item: Record<string, unknown>, keyField = 'name', packageId?: string) {
+                const name = String(item[keyField]);
+                if (packageId) {
+                    if (item._packageId === undefined) item._packageId = packageId;
+                    if (item._provenance === undefined) item._provenance = 'package';
+                    collection(type).set(`${packageId}:${name}`, item);
+                } else {
+                    collection(type).set(name, item);
+                }
+            },
+            listItems(type: string, packageId?: string) {
+                const all = [...(byType.get(type)?.values() ?? [])];
+                return packageId ? all.filter((it) => it._packageId === packageId) : all;
+            },
+            getItem(type: string, name: string, packageId?: string) {
+                const entries = byType.get(type);
+                if (!entries) return undefined;
+                const direct = entries.get(name);
+                if (direct) return direct;
+                if (packageId) {
+                    const local = entries.get(`${packageId}:${name}`);
+                    if (local) return local;
+                }
+                for (const [key, item] of entries) if (key.endsWith(`:${name}`)) return item;
+                return undefined;
+            },
+            getArtifactItem(type: string, name: string, packageId?: string) {
+                const entries = [...(byType.get(type)?.entries() ?? [])];
+                const scoped = entries.filter(([key, it]) => key.endsWith(`:${name}`) && isCodeArtifactBody(it));
+                const local = packageId ? scoped.find(([, it]) => it._packageId === packageId) : undefined;
+                if (local) return local[1];
+                if (scoped[0]) return scoped[0][1];
+                const bare = byType.get(type)?.get(name);
+                return bare && isCodeArtifactBody(bare) ? bare : undefined;
+            },
+            shipObject(name: string, packageId: string) {
+                objects.set(name, { packageId, ownership: 'own', definition: { name, _packageId: packageId } });
+            },
+            getPackagedObjectOwner: (name: string) => objects.get(name),
+            getObject: (name: string) => objects.get(name)?.definition,
+            registerObject: () => undefined,
+            getPackage: () => undefined,
+            isPackageDisabled: () => false,
+            isObjectPackageDisabled: () => false,
+            applyNavContributions: (app: unknown) => app,
+        };
+    }
+
+    /** The stub engine above, with the showcase's packaged task views in a faithful registry. */
+    function showcaseHarness(environmentId?: string) {
+        const stub = makeStubEngine();
+        const registry = faithfulRegistry();
+        registry.shipObject(TASK, SHOWCASE);
+        registry.registerItem('view', { ...packagedTaskViews, name: TASK }, 'name', SHOWCASE);
+        for (const vi of expandViewContainer(TASK, packagedTaskViews)) {
+            registry.registerItem('view', { ...(vi as any) }, 'name', SHOWCASE);
+        }
+        stub.engine.registry = registry;
+        const protocol = new ObjectStackProtocolImplementation(stub.engine, undefined, environmentId);
+        return { ...stub, registry, protocol };
+    }
+
+    type Protocol = ObjectStackProtocolImplementation;
+    const scoped = (organizationId?: string) => (organizationId ? { organizationId } : {});
+    const objectDoor = async (protocol: Protocol, organizationId?: string) =>
+        switcherMatches(((await protocol.getMetaItems({ type: 'view', ...scoped(organizationId) } as any)) as any).items, TASK);
+    const byNameDoor = async (protocol: Protocol, name: string, organizationId?: string) =>
+        ((await protocol.getMetaItem({ type: 'view', name, ...scoped(organizationId) } as any)) as any).item;
+    const named = (items: any[], name: string) => items.filter((v) => v.name === name);
+    /** The packaged default, as the source registrar registered it. */
+    const expectPackagedDefault = (v: any) => {
+        expect(v?.label).toBe('All Tasks');
+        expect(v?.config?.columns).toEqual(PACKAGED_COLUMNS);
+        expect(v?._packageId).toBe(SHOWCASE);
+        expect(v?.isDefault).toBe(true);
+    };
+    /** (a) Every name the showcase ships answers the packaged view, once, on BOTH doors — the same row. */
+    const expectEveryPackagedNameIntact = async (protocol: Protocol, organizationId?: string) => {
+        const served = await objectDoor(protocol, organizationId);
+        for (const shipped of PACKAGED) {
+            const listed = named(served, shipped.name);
+            expect(listed, `exactly one item answers ${shipped.name} on the object door`).toHaveLength(1);
+            expect({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId })
+                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+            const read = await byNameDoor(protocol, shipped.name, organizationId);
+            expect({ label: read?.label, config: read?.config, _packageId: read?._packageId })
+                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+        }
+    };
+    /** (c) The object's only defaults are the ones its owning package declares. */
+    const expectOnlyPackagedDefaults = (served: any[]) => {
+        for (const viewKind of ['list', 'form']) {
+            expect(
+                served.filter((v) => v.viewKind === viewKind && v.isDefault).map((v) => v.name),
+                `the ${viewKind} default stays the owning package's`,
+            ).toEqual(PACKAGED.filter((v) => v.viewKind === viewKind && v.isDefault).map((v) => v.name));
+        }
+    };
+
+    /**
+     * Every member kind the spec's expander places, derived FROM the expander:
+     * each top-level key of the container schema is offered a single view and a
+     * record of views, and a key that yields an expanded item is a member kind.
+     * A single-view member is enumerated twice — bare, and naming its own key —
+     * when its own schema declares `name` (a `list` does; a `form` does not, so
+     * a named `form` is not authorable). A kind the spec adds later shows up
+     * here, and the enumeration below fails until it is placed.
+     */
+    function memberKindsOfTheExpander(): string[] {
+        const shape = (ViewSchema as unknown as { shape?: Record<string, unknown> }).shape ?? {};
+        const slots = Object.keys(shape);
+        expect(slots.length, 'the container schema\'s own keys are readable').toBeGreaterThan(0);
+        const declaresName = (schema: unknown): boolean => {
+            let s: any = schema;
+            for (let i = 0; i < 6 && s; i++) {
+                if (s.shape) return 'name' in s.shape;
+                s = s._zod?.def?.innerType ?? s._def?.innerType ?? (typeof s.unwrap === 'function' ? s.unwrap() : undefined);
+            }
+            return false;
+        };
+        const view = { type: 'grid', label: 'probe' };
+        const kinds: string[] = [];
+        for (const slot of slots) {
+            if (expandViewContainer('o', { [slot]: { ...view } }).length > 0) {
+                kinds.push(slot);
+                if (declaresName(shape[slot])) kinds.push(`${slot}#named`);
+            } else if (expandViewContainer('o', { [slot]: { k: { ...view } } }).some((vi) => vi.name === 'o.k')) {
+                kinds.push(`${slot}.*`);
+            }
+        }
+        return kinds.sort();
+    }
+
+    const OWN = 'os_qa_probe';
+    const listView = { type: 'grid', columns: ['title', 'status'] };
+    const formView = { type: 'simple', sections: [{ label: 'Probe', fields: ['title'] }] };
+    /**
+     * One case per member kind: a container on `showcase_task` with ONLY that
+     * member, whose key aims at a name the showcase ships, and the one name the
+     * member must be served under instead.
+     */
+    const MEMBER_CASES: Record<string, { member: Record<string, unknown>; authored: unknown; shadows: string; servedAs: string }> = {
+        list: { member: { list: listView }, authored: listView, shadows: DEFAULT, servedAs: `${TASK}.${OWN}` },
+        'list#named': {
+            member: { list: { ...listView, name: 'in_progress' } }, authored: { ...listView, name: 'in_progress' },
+            shadows: `${TASK}.in_progress`, servedAs: `${TASK}.${OWN}.in_progress`,
+        },
+        'listViews.*': {
+            member: { listViews: { in_progress: listView } }, authored: listView,
+            shadows: `${TASK}.in_progress`, servedAs: `${TASK}.${OWN}.in_progress`,
+        },
+        form: { member: { form: formView }, authored: formView, shadows: `${TASK}.form`, servedAs: `${TASK}.${OWN}.form` },
+        'formViews.*': {
+            member: { formViews: { edit: formView } }, authored: formView,
+            shadows: `${TASK}.edit`, servedAs: `${TASK}.${OWN}.edit`,
+        },
+    };
+
+    it('the enumeration covers every member kind the spec\'s expander places, and nothing else', () => {
+        expect(Object.keys(MEMBER_CASES).sort()).toEqual(memberKindsOfTheExpander());
+        // Each probe really aims at a shipped name: without the fix it IS that name.
+        for (const [kind, c] of Object.entries(MEMBER_CASES)) {
+            const names = expandViewContainer(TASK, c.member).map((vi) => vi.name);
+            expect(names, kind).toEqual([c.shadows]);
+            expect(PACKAGED.map((v) => v.name), kind).toContain(c.shadows);
+        }
+    });
+
+    const KERNELS = [
+        ['an environment-scoped kernel (the standalone stack stamps env_local)', 'env_local'],
+        ['an unscoped kernel (write-through hydrates the registry)', undefined],
+    ] as const;
+    const CONTAINERS = [
+        { arm: 'package-scoped (saved into another writable package)', packageId: REPAIR, organizationId: undefined, ownPackage: REPAIR },
+        { arm: 'package-less, environment-wide', packageId: undefined, organizationId: undefined, ownPackage: undefined },
+        { arm: 'package-less, organization-scoped', packageId: undefined, organizationId: ORG, ownPackage: undefined },
+    ] as const;
+    const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) =>
+        protocol.saveMetaItem({
+            type: 'view', name, item,
+            ...(c.packageId ? { packageId: c.packageId } : {}),
+            ...scoped(c.organizationId),
+        } as any);
+
+    for (const [kernel, environmentId] of KERNELS) {
+        describe(`on ${kernel}`, () => {
+            for (const c of CONTAINERS) {
+                for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                    it(`${c.arm}, member ${kind}: no packaged name is replaced on either door, its own name is served with its own package, and it claims no default`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                        // (a)
+                        await expectEveryPackagedNameIntact(protocol, c.organizationId);
+                        // (b)
+                        const served = await objectDoor(protocol, c.organizationId);
+                        const own = served.filter((v) => String(v.name).startsWith(`${TASK}.${OWN}`));
+                        expect(own.map((v) => v.name)).toEqual([m.servedAs]);
+                        expect(own[0].object).toBe(TASK);
+                        expect(own[0]._packageId).toBe(c.ownPackage);
+                        expect(own[0]._provenance, 'never the packaged artifact\'s provenance').not.toBe('package');
+                        expect(own[0]._diagnostics?.valid, 'a qualified ViewItem name the spec accepts').toBe(true);
+                        expect(own[0].config, 'the member as authored, nothing lent left on it').toEqual(m.authored);
+                        // (c)
+                        expect(own[0].isDefault).toBeUndefined();
+                        expectOnlyPackagedDefaults(served);
+                        // The by-name door answers the container's own name with its row.
+                        const row = await byNameDoor(protocol, OWN, c.organizationId);
+                        expect(row?.object).toBe(TASK);
+                    });
+                }
+
+                it(`${c.arm}: the card's probe — the packaged default unchanged on BOTH doors, and the object keeps ONE list default`, async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    await save(protocol, 'os_qa_shadow_probe', probe('os_qa_shadow_probe'), c);
+
+                    const listed = named(await objectDoor(protocol, c.organizationId), DEFAULT);
+                    expect(listed, 'exactly one item answers <object>.default on the object door').toHaveLength(1);
+                    expectPackagedDefault(listed[0]);
+                    const read = await byNameDoor(protocol, DEFAULT, c.organizationId);
+                    expectPackagedDefault(read);
+                    expect({ label: read.label, config: read.config, _packageId: read._packageId })
+                        .toEqual({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId });
+                    const served = await objectDoor(protocol, c.organizationId);
+                    expect(served.filter((v) => v.viewKind === 'list' && v.isDefault).map((v) => v.name)).toEqual([DEFAULT]);
+                    expect(named(served, `${TASK}.os_qa_shadow_probe`)[0]?.config).toEqual(probe('os_qa_shadow_probe').list);
+                });
+            }
+
+            it('CONTROL — a container of the object\'s OWN package still expands to <object>.default, as its default', async () => {
+                const { protocol, rows } = showcaseHarness(environmentId);
+                // A row bound to the package that owns the object (an installed
+                // package's own stored view), written straight to the store.
+                rows.set('own-pkg-row', {
+                    id: 'r_own', type: 'view', name: 'os_qa_same_pkg', organization_id: null,
+                    package_id: SHOWCASE, state: 'active', metadata: JSON.stringify(probe('os_qa_same_pkg')),
+                });
+
+                const listed = named(await objectDoor(protocol), DEFAULT);
+                expect(listed).toHaveLength(1);
+                expect(listed[0].config).toEqual(probe('os_qa_same_pkg').list);
+                expect(listed[0]._packageId).toBe(SHOWCASE);
+                expect(listed[0].isDefault).toBe(true);
+                expect(named(await objectDoor(protocol), `${TASK}.os_qa_same_pkg`)).toEqual([]);
+            });
+
+            it('CONTROL — a package-less overlay OF the package\'s own container keeps expanding to <object>.default', async () => {
+                const { protocol } = showcaseHarness(environmentId);
+                // Name-keyed (ADR-0005): the row IS the overlay of the showcase's
+                // `showcase_task` container, so it stands in that package's slot.
+                const overlay = { name: TASK, list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] } };
+                await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any);
+
+                const listed = named(await objectDoor(protocol), DEFAULT);
+                expect(listed).toHaveLength(1);
+                expect(listed[0].label).toBe('Customized');
+                expect(listed[0]._packageId).toBe(SHOWCASE);
+                expect(listed[0].isDefault).toBe(true);
+                expect((await objectDoor(protocol)).filter((v) => String(v.name).startsWith(`${TASK}.${TASK}`))).toEqual([]);
+            });
+
+            it('CONTROL — the sanctioned override (a write to <object>.default by name) is served on both doors', async () => {
+                const { protocol } = showcaseHarness(environmentId);
+                const override = {
+                    name: DEFAULT, object: TASK, viewKind: 'list', label: 'Overridden',
+                    config: { type: 'grid', data, columns: [{ field: 'title' }] },
+                };
+                await protocol.saveMetaItem({ type: 'view', name: DEFAULT, item: override } as any);
+
+                const listed = named(await objectDoor(protocol), DEFAULT);
+                expect(listed).toHaveLength(1);
+                expect(listed[0].label).toBe('Overridden');
+                expect((await byNameDoor(protocol, DEFAULT)).label).toBe('Overridden');
+            });
+        });
+    }
+
+    it('the bare list keeps the spec\'s in-container de-duplication when a keyed view already takes the container\'s name', async () => {
+        const { protocol } = showcaseHarness('env_local');
+        const container = {
+            name: 'probe_x', object: TASK,
+            list: { type: 'grid', columns: ['title', 'status'] },
+            listViews: { probe_x: { label: 'Keyed', type: 'grid', columns: ['title'] } },
+        };
+        await protocol.saveMetaItem({ type: 'view', name: 'probe_x', item: container, packageId: REPAIR } as any);
+
+        const served = await objectDoor(protocol);
+        expect(named(served, `${TASK}.probe_x.probe_x`)[0]?.label).toBe('Keyed');
+        expect(named(served, `${TASK}.probe_x`)[0]?.config).toEqual(container.list);
+        await expectEveryPackagedNameIntact(protocol);
+    });
+
+    it('a container named after a key the owning package ships keeps its bare list off that name', async () => {
+        const { protocol } = showcaseHarness('env_local');
+        await protocol.saveMetaItem({ type: 'view', name: 'in_progress', item: probe('in_progress'), packageId: REPAIR } as any);
+
+        const served = await objectDoor(protocol);
+        expect(named(served, `${TASK}.in_progress.in_progress`)[0]?.config).toEqual(probe('in_progress').list);
+        expect(named(served, `${TASK}.in_progress.in_progress`)[0]?._packageId).toBe(REPAIR);
+        await expectEveryPackagedNameIntact(protocol);
+    });
+
+    it('a stored container with no name of its own expands nothing on another package\'s object', async () => {
+        const { protocol, rows } = showcaseHarness('env_local');
+        const nameless = { object: TASK, list: { type: 'grid', columns: ['title'] }, listViews: { in_progress: { label: 'Mine', type: 'grid', columns: ['title'] } } };
+        rows.set('nameless-row', {
+            id: 'r_nameless', type: 'view', name: 'os_qa_nameless', organization_id: null,
+            package_id: REPAIR, state: 'active', metadata: JSON.stringify(nameless),
+        });
+
+        const served = await objectDoor(protocol);
+        expect(served.filter((v) => v._packageId === REPAIR)).toEqual([]);
+        await expectEveryPackagedNameIntact(protocol);
     });
 });

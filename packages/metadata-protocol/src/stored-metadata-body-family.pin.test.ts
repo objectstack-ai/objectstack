@@ -38,6 +38,17 @@
  *  - the generic data door reads / groupBy / filter+sort → this package
  *    (`protocol.data-door-stored-metadata-redaction.test.ts`, and the behaviour
  *    asserted below).
+ *
+ * [#21207] Exit two — the same rows' stored CONTENT HASH (`checksum`, and the
+ * history table's `previous_checksum`), a hash over the whole stored body,
+ * withheld credential material included. Every surface that SERVES it serves
+ * a keyed digest (`keyed`: the crypto provider's, or a process-scoped ephemeral
+ * key's while none is registered), every surface that takes a version token
+ * back compares it keyed, every COPY drops it (`withheld`), and
+ * every EVALUATE shape refuses — enumerated as rows below, each with its pin,
+ * plus a third tooth: the hash columns the object definitions declare are
+ * exactly `STORED_METADATA_HASH_COLUMNS`, so a new hash-like column fails here
+ * instead of being served raw.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -49,8 +60,10 @@ import {
 } from '@objectstack/spec/kernel';
 import {
   redactStoredMetadataRow,
+  STORED_METADATA_HASH_COLUMNS,
   storedMetadataBodyGroupingRefusal,
   storedMetadataBodyPredicateRefusal,
+  storedMetadataHashEvaluateRefusal,
 } from './metadata-redaction.js';
 
 /** The generic data-door verbs this family's seam covers, and how. */
@@ -76,6 +89,40 @@ const FAMILY_SURFACES = [
     surface: 'MCP stdio engine-only reader: group / filter / sort / aggregate member on the body column',
     disposition: 'refuses',
     pin: '@objectstack/mcp',
+  },
+  // [#21207] Exit two: the stored content hash of the same rows.
+  {
+    surface: '/meta save, publish, batch-publish and rollback receipts: the version token',
+    disposition: 'keyed',
+    pin: 'this package (protocol.served-content-hash.test.ts)',
+  },
+  { surface: '/meta history read: each event\'s hash and parent hash', disposition: 'keyed', pin: 'this package (protocol.served-content-hash.test.ts)' },
+  { surface: '/meta save and reset doors: the inbound version token', disposition: 'keyed', pin: 'this package (protocol.served-content-hash.test.ts)' },
+  { surface: '409 conflict refusal: its text and attributes', disposition: 'keyed', pin: 'this package (protocol.served-content-hash.test.ts)' },
+  { surface: 'decision-audit note of a conflict refusal', disposition: 'withheld', pin: 'this package (protocol.served-content-hash.test.ts)' },
+  { surface: 'data door get / list: the content-hash columns', disposition: 'keyed', pin: 'this package (protocol.data-door-stored-content-hash.test.ts)' },
+  { surface: 'data door: group / filter / sort on a content-hash column', disposition: 'refuses', pin: 'this package (protocol.data-door-stored-content-hash.test.ts)' },
+  { surface: 'data door: search over the body column or a content-hash column', disposition: 'refuses', pin: 'this package (protocol.data-door-stored-content-hash.test.ts)' },
+  { surface: 'MCP stdio engine-only reader: the content-hash columns on query / get / the record resource', disposition: 'keyed', pin: '@objectstack/mcp' },
+  { surface: 'MCP stdio engine-only reader: group / filter / sort on a content-hash column', disposition: 'refuses', pin: '@objectstack/mcp' },
+  { surface: 'audit / activity copy at write time: the content-hash columns', disposition: 'withheld', pin: '@objectstack/plugin-audit' },
+  { surface: 'analytics members on a content-hash column', disposition: 'refuses', pin: '@objectstack/service-analytics' },
+  {
+    surface: 'copies at rest (ledger snapshot and diff, activity copy, decision-audit note): os migrate audit-metadata-bodies',
+    disposition: 'withheld',
+    pin: '@objectstack/plugin-audit',
+  },
+  // A stored row's change note can QUOTE a stored hash (a draft promotion with
+  // no message of its own recorded one); found by this card's measurement.
+  {
+    surface: 'history change note quoting a stored hash: /meta history message, data door, MCP stdio reader',
+    disposition: 'keyed',
+    pin: 'this package (protocol.served-content-hash.test.ts, protocol.data-door-stored-content-hash.test.ts) + @objectstack/mcp',
+  },
+  {
+    surface: 'history change note: group / filter / sort / search, and as an analytics member',
+    disposition: 'refuses',
+    pin: 'this package (protocol.data-door-stored-content-hash.test.ts) + @objectstack/mcp + @objectstack/service-analytics',
   },
 ] as const;
 
@@ -139,14 +186,16 @@ describe('[#21120] stored-metadata-body family — the data door exposes only co
     }
   });
 
-  it('enumerates every family surface with a disposition (seam | refuses) and an owning pin', () => {
+  it('enumerates every family surface with a disposition (seam | keyed | withheld | refuses) and an owning pin', () => {
     for (const s of FAMILY_SURFACES) {
-      expect(['seam', 'refuses']).toContain(s.disposition);
+      expect(['seam', 'keyed', 'withheld', 'refuses']).toContain(s.disposition);
       expect(s.pin.length).toBeGreaterThan(0);
     }
     // One row per the three local data-door surfaces + five cross-package ones
-    // (audit, analytics, realtime, and the MCP stdio reader's seam and refusal).
-    expect(FAMILY_SURFACES).toHaveLength(8);
+    // (audit, analytics, realtime, and the MCP stdio reader's seam and refusal),
+    // + [#21207] the thirteen surfaces of the stored content hash, and the two
+    // of the history change note that can quote one.
+    expect(FAMILY_SURFACES).toHaveLength(23);
   });
 });
 
@@ -185,5 +234,28 @@ describe('[#21120] stored-metadata-body family — the local surfaces behave', (
     expect(storedMetadataBodyPredicateRefusal('sys_metadata', { filterFields: ['type'], sortFields: ['name'] }))
       .toBeUndefined();
     expect(storedMetadataBodyPredicateRefusal('showcase_task', { filterFields: ['metadata'] })).toBeUndefined();
+  });
+});
+
+describe('[#21207] stored-metadata-body family — the stored content-hash columns', () => {
+  it('the hash columns the two object definitions declare are exactly STORED_METADATA_HASH_COLUMNS', () => {
+    const declared = (def: any) => Object.keys(def.fields ?? {}).filter((f) => /checksum|hash/i.test(f)).sort();
+    expect(declared(SysMetadataObject)).toEqual(['checksum']);
+    expect(declared(SysMetadataHistoryObject)).toEqual(['checksum', 'previous_checksum']);
+    expect([...STORED_METADATA_HASH_COLUMNS].sort()).toEqual(['checksum', 'previous_checksum']);
+  });
+
+  it('data-door group / filter / sort on a hash column refuse (INVALID_FIELD / 400); a scalar column does not', () => {
+    for (const [object, column] of [['sys_metadata', 'checksum'], ['sys_metadata_history', 'previous_checksum']]) {
+      for (const opts of [{ groupBy: [column] }, { filterFields: [column] }, { sortFields: [column] }]) {
+        const err = storedMetadataHashEvaluateRefusal(object!, opts) as any;
+        expect(err?.code).toBe('INVALID_FIELD');
+        expect(err?.status).toBe(400);
+        expect(err?.field).toBe(column);
+      }
+    }
+    expect(storedMetadataHashEvaluateRefusal('sys_metadata', { groupBy: ['type'], filterFields: ['name'], sortFields: ['state'] }))
+      .toBeUndefined();
+    expect(storedMetadataHashEvaluateRefusal('file_blob', { filterFields: ['checksum'] })).toBeUndefined();
   });
 });

@@ -22,10 +22,21 @@
  *
  * Two assertions matter here and they pull in opposite directions on purpose:
  *
- *  - while the engine is LIVE, a CLI-booted stack really does audit (this is
- *    not #4747's rejected option C — "one-shot commands skip the audit" would
- *    make it permanently blind exactly where an operator has no other tool);
+ *  - while the engine is LIVE, the stack really does audit;
  *  - once the stack is torn down, the sweep issues no reads at all.
+ *
+ * ## [#21391] A one-shot boot arms no sweep at all
+ *
+ * The family ruling on #21391 took the sweep off every one-shot boot: it used
+ * to be armed on an unref'd 60-second timer, so "a one-shot never sweeps" was a
+ * timing fact, and a run longer than a minute did reap, rotate and audit in the
+ * middle of a dry run. `bootSchemaStack` now passes `armLifecycleSweep: false`,
+ * and `lifecycle.enabled` is the service's master switch, so the one-shot stack
+ * neither arms the schedule nor answers an explicit `sweep()`. That is the
+ * first case below. The two directions above, which are #4747's fix, are
+ * pinned on the composition that still sweeps: the same standalone stack
+ * booted without the one-shot policy, torn down through the same
+ * `kernel.shutdown()` path.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -34,8 +45,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootSchemaStack } from './schema-migrate.js';
 
+// [#10126] Pay the first transform of this dist-resolved workspace dep at
+// MODULE LOAD: the served composition reaches it through a dynamic `import()`
+// inside a clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/runtime';
+
 interface LifecycleServiceLike {
   stopped: boolean;
+  /** The schedule's two timers. TypeScript-private, read on purpose: they ARE the arming. */
+  initialTimer?: unknown;
+  timer?: unknown;
   sweep(): Promise<{ danglingReferences?: { unreadableObjects: string[]; aborted?: boolean } }>;
 }
 
@@ -77,17 +96,44 @@ describe('[#4747] bootSchemaStack teardown disarms the ADR-0057 sweep', () => {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it('audits while the engine is live, and reads nothing once the stack is down', async () => {
+  it('a one-shot stack arms no sweep, and its teardown still closes the kernel and the pool (#21391)', async () => {
     const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, projectRoot: dir });
+    const lifecycle = stack.kernel.getService('lifecycle') as LifecycleServiceLike;
+    expect(lifecycle).toBeTruthy();
+    expect(lifecycle.initialTimer).toBeUndefined();
+    expect(lifecycle.timer).toBeUndefined();
+    // The master switch is off, so an explicit sweep is inert too.
+    expect((await lifecycle.sweep()).danglingReferences).toBeUndefined();
+
+    await stack.shutdown();
+    expect(stack.kernel.isRunning()).toBe(false);
+    expect(lifecycle.stopped).toBe(true);
+    const engine = stack.kernel.getService('objectql') as {
+      find(object: string, options: Record<string, unknown>): Promise<unknown[]>;
+    };
+    await expect(engine.find('td_note', { limit: 1, context: { isSystem: true } })).rejects.toThrow();
+  }, 120_000);
+
+  it('audits while the engine is live, and reads nothing once the stack is down', async () => {
+    // The standalone stack WITHOUT the one-shot policy — the composition that
+    // still sweeps — torn down through `kernel.shutdown()`, the path
+    // `bootSchemaStack().shutdown()` takes since #4747.
+    const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
+    const served = await createStandaloneStack({ projectRoot: dir, databaseUrl: `file:${dbFile}`, skipSeedData: true });
+    const runtime = new Runtime({ cluster: false });
+    const kernel = runtime.getKernel();
+    for (const plugin of served.plugins) await kernel.use(plugin as any);
+    await runtime.start();
+    const stack = { kernel, shutdown: async () => { await kernel.shutdown(); } };
     // Resolved BEFORE teardown — the point is what this same instance does
     // afterwards, and service resolution post-shutdown is not the subject.
     const lifecycle = stack.kernel.getService('lifecycle') as LifecycleServiceLike;
     expect(lifecycle).toBeTruthy();
 
     // ── While the engine is live: the audit runs for real ─────────────────
-    // Not "the CLI skips the audit" — it reads, and reports a clean, COMPLETE
-    // run. An empty `unreadableObjects` here is a fact about the database,
-    // which is precisely what it stopped being before this fix.
+    // It reads, and reports a clean, COMPLETE run. An empty
+    // `unreadableObjects` here is a fact about the database, which is
+    // precisely what it stopped being before #4747.
     expect(lifecycle.stopped).toBe(false);
     const live = await lifecycle.sweep();
     expect(live.danglingReferences).toBeDefined();

@@ -6,8 +6,10 @@ import { DATE_RANGE_PRESETS } from './date-range-presets';
 import { DateGranularity } from './query.zod';
 
 /**
+ * @module data/analytics
+ *
  * Analytics/Semantic Layer Protocol
- * 
+ *
  * Defines the "Business Logic" for data analysis.
  * Inspired by Cube.dev, LookML, and dbt MetricFlow.
  * 
@@ -15,26 +17,74 @@ import { DateGranularity } from './query.zod';
  * "Business Data" (Metrics/Dimensions).
  */
 
-/**
- * Aggregation Metric Type
- * The mathematical operation to perform on a metric.
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-import { retiredKey } from '../shared/retired-key';
-import { ANALYTICS_COLUMN_REFERENCE } from './analytics-column-reference';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+import {
+  ANALYTICS_COLUMN_PATH,
+  ANALYTICS_COLUMN_REFERENCE,
+  rowWildcardOutsideCount,
+  rowWildcardOutsideCountRefusal,
+} from './analytics-column-reference';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-export const AggregationMetricType = z.enum([
-  'count', 
-  'sum', 
-  'avg', 
-  'min', 
-  'max', 
-  'count_distinct', 
-  'number', // Custom SQL expression returning a number
-  'string', // Custom SQL expression returning a string
-  'boolean' // Custom SQL expression returning a boolean
-]);
+
+// ── Retired metric types (ADR-0049 enforce-or-remove) ───────────────────────
+//
+// #21000. `number`, `string` and `boolean` declared "a custom SQL expression
+// returning a number / string / boolean": the measure's `sql` WAS the whole
+// computation, and the type only named what it returned. Ruling D on #20943
+// made a cube member's `sql` a column reference (`CUBE_MEMBER_SQL` below), so
+// the three were left with nothing to declare. Measured through
+// `AnalyticsService` on both strategies before this retirement, with a column
+// `sql`: the raw-SQL path emitted the column UNAGGREGATED
+// (`SELECT status AS "status", amount AS "m" … GROUP BY status` — a bare
+// column in a grouped statement, by SQL's own rules an error on PostgreSQL and
+// an arbitrary row's value on SQLite), and the ObjectQL path refused the
+// measure.
+//
+// A VALUE-level retirement (`enumWithRetiredValues`, shared/retired-key.ts):
+// the members left the enum, so `tsc` refuses them, and the parse answers each
+// with the prescription below instead of zod's anonymous enum message. No D2
+// conversion — no rewrite can say which aggregate the author meant — so the
+// D3 entry `cube-metric-expression-types-retired` carries that judgement. A
+// stored cube carrying one is REFUSED, never stood down: every door that
+// parses a cube refuses it here, and both analytics strategies refuse a cube
+// that reached them unparsed with this same text, read off this enum.
+//
+// Module-private and written with `//`, never `/** */`: prose an enum's error
+// map consumes, not documented surface — an export with no reader is a
+// published surface the next narrowing must keep.
+const METRIC_TYPE_EXPRESSION_FIX =
+  'Name the aggregate the measure means — `sum`, `avg`, `min` or `max` over the column, `count` '
+  + '(over `\'*\'` for a row count, or over a column for its non-null values), or `count_distinct`. '
+  + 'A value computed per row has no expression form in the cube layer: keep it as a field of the '
+  + 'object (a stored or formula field) and aggregate that field here; a ratio or other value '
+  + 'derived from measures is `derived: { op, of: [...] }` on an ADR-0021 dataset.';
+
+const metricTypeExpressionRetired = (member: 'number' | 'string' | 'boolean') =>
+  `\`${member}\` was removed from \`AggregationMetricType\` (a cube measure's \`measures.<metric>.type\`) `
+  + 'in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — it declared a custom SQL expression '
+  + `returning a ${member}, and a measure's \`sql\` is a column reference, so the type had nothing left `
+  + 'to compute: the raw-SQL path returned the column unaggregated and the ObjectQL path refused the '
+  + `measure. ${METRIC_TYPE_EXPRESSION_FIX}`;
+
+/**
+ * Aggregation Metric Type
+ *
+ * The aggregate a cube measure applies to its column: the six aggregation
+ * functions, the same six an ADR-0021 dataset measure's `aggregate` names.
+ * The custom-SQL-expression members `number`, `string` and `boolean` were
+ * retired (ADR-0049) — a measure's `sql` is a column reference, so they had
+ * nothing left to compute — and are answered at parse with their prescription.
+ */
+export const AggregationMetricType = enumWithRetiredValues(
+  ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'],
+  {
+    number: metricTypeExpressionRetired('number'),
+    string: metricTypeExpressionRetired('string'),
+    boolean: metricTypeExpressionRetired('boolean'),
+  },
+);
 export type AggregationMetricType = z.input<typeof AggregationMetricType>;
 
 /**
@@ -205,7 +255,13 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * - a relationship path of bare identifiers ending in one — `account.amount`,
  *   `account.owner.region` — the chain
  *   `NativeSQLStrategy#qualifyAndRegisterJoin` lowers into its LEFT JOINs;
- * - the row wildcard `'*'`, the form a `count` measure uses.
+ * - the row wildcard `'*'`, the form a `count` measure uses — and, since
+ *   #21409, ONLY there: a dimension's `sql` takes
+ *   {@link ANALYTICS_COLUMN_PATH}, the same path without the wildcard arm
+ *   (no aggregate consumes it on a dimension), and a measure's `sql` admits it
+ *   under `type: 'count'` alone, by the one predicate
+ *   {@link rowWildcardOutsideCount} — see `./analytics-column-reference.ts`,
+ *   which states both halves and their measurements.
  *
  * The identifier half of {@link CUBE_MEMBER_SQL} is the pattern the readers
  * already use to tell a column path from an expression — `IDENTIFIER_PATH` in
@@ -226,10 +282,10 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
  * names no single field, so no platform check could judge which fields it
  * reads, and the two strategies never agreed on it: the raw-SQL path emitted
- * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refuses only
- * the `number` / `string` / `boolean` partition (`EXPRESSION_METRIC_TYPES`)
- * and forwards an expression under an aggregate type as a field name, which
- * fails downstream.
+ * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refused only
+ * the `number` / `string` / `boolean` metric types (retired since, #21000 —
+ * see `AggregationMetricType`) and forwards an expression under an aggregate
+ * type as a field name, which fails downstream.
  * A derived value has a declared home the platform CAN judge — an ADR-0021
  * dataset, where a conditional count or sum is a measure with its own
  * structured `filter`, and a ratio / sum / difference / product of measures is
@@ -267,7 +323,9 @@ const CUBE_METRIC_SQL_EXPRESSION_REFUSED =
 const CUBE_DIMENSION_SQL_EXPRESSION_REFUSED =
   '`dimensions.<dimension>.sql` is a column reference: a field of the cube\'s object (`status`) '
   + `or a relationship path ending in one (\`account.industry\`). ${CUBE_MEMBER_SQL_RETIRED} `
-  + 'Group by the column itself. A bucket computed over a column\'s values (a CASE over them) '
+  + 'Group by the column itself. `\'*\'` is no dimension: it names every column at once, which is '
+  + 'not an axis — to count rows, declare a `count` measure (`type: \'count\'`, `sql: \'*\'`). '
+  + 'A bucket computed over a column\'s values (a CASE over them) '
   + 'has no expression form in the cube layer or the dataset layer: keep the bucket as a field '
   + 'of the object, and name that field here or in an ADR-0021 dataset dimension\'s `field`.';
 
@@ -332,7 +390,8 @@ export const MetricSchema = lazySchema(() => strictObject(
      * The column the measure aggregates — a field of the cube's object, a
      * relationship path ending in one, or `'*'` for a count. A SQL expression
      * is refused at parse (#20943, ruling D; see `CUBE_MEMBER_SQL`): a derived
-     * value is declared on an ADR-0021 dataset instead.
+     * value is declared on an ADR-0021 dataset instead. `'*'` under any `type`
+     * but `count` is refused by the schema's refinement below (#21409).
      */
     sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_METRIC_SQL_EXPRESSION_REFUSED }).describe(
       'Column reference: a field of the cube\'s object ("amount"), a relationship path ending in one '
@@ -359,7 +418,22 @@ export const MetricSchema = lazySchema(() => strictObject(
       + 'Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta.',
     ),
   },
-));
+).superRefine((metric, ctx) => {
+  // [#21409] `'*'` is the row wildcard a `count` aggregates (`COUNT(*)`), and
+  // only a `count` consumes it: under any other `type` it names no column, and
+  // the strategies emitted `SUM(*)` / `AVG(*)` / … verbatim, which the database
+  // refused. Cross-field (the `sql` and the `type` beside it), so a refinement
+  // — declared as a dropped-refinement site, since no JSON-Schema keyword
+  // carries it. The rule is the ONE predicate both measure schemas share
+  // (`./analytics-column-reference.ts`); the dataset measure calls the same one.
+  if (rowWildcardOutsideCount(metric.sql, metric.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sql'],
+      message: rowWildcardOutsideCountRefusal('measures.<metric>.sql', 'type', metric.type),
+    });
+  }
+}));
 
 /**
  * Dimension Schema
@@ -394,11 +468,13 @@ export const DimensionSchema = lazySchema(() => strictObject(
 
     /**
      * The column the dimension groups by — a field of the cube's object, or a
-     * relationship path ending in one (`'*'` is admitted with the measure's
-     * accept set). A SQL expression is refused at parse (#20943, ruling D; see
-     * `CUBE_MEMBER_SQL`).
+     * relationship path ending in one. A SQL expression is refused at parse
+     * (#20943, ruling D; see `CUBE_MEMBER_SQL`), and so is the row wildcard
+     * `'*'` (#21409): no aggregate consumes it on a dimension, so the slot
+     * takes {@link ANALYTICS_COLUMN_PATH} — the measure's path without the
+     * wildcard arm, the pattern a dataset dimension's `field` already takes.
      */
-    sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_DIMENSION_SQL_EXPRESSION_REFUSED }).describe(
+    sql: z.string().regex(ANALYTICS_COLUMN_PATH, { error: () => CUBE_DIMENSION_SQL_EXPRESSION_REFUSED }).describe(
       'Column reference: a field of the cube\'s object ("status") or a relationship path ending in one '
       + '("account.industry"). Never a SQL expression.',
     ),

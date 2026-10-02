@@ -1,61 +1,48 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Commit 017130a09 — a custom-SQL measure is refused loudly on the ObjectQL path, and
- * BOTH strategies are pinned from one fixture so neither can hide the other.
+ * A cube measure whose `type` names no aggregate is refused on BOTH strategies,
+ * from one fixture, so neither can hide the other (commit 017130a09, #21000).
  *
- * #4157 was fixed on one strategy of two: `NativeSQLStrategy` learned to emit
- * a `number`/`string`/`boolean` measure's `sql` verbatim, and its regression
- * pin (`measure-expression-sql.test.ts`) forces `objectqlAggregate: false` —
- * so the pin covered exactly one strategy. `ObjectQLStrategy` never got the
- * matching partition: `resolveMeasureAggregation` forwarded `Metric.type`
- * verbatim as the engine method with the whole SQL expression in `field`, so
- * `driver-sql` threw `INVALID_QUERY` blaming a `function` key the author never
- * wrote, and the in-memory evaluator answered `null` for every bucket through
- * its `switch` default — the #4157 class in its null variant, measured on
- * #12053's probe: an admitted `sum` returned 300 per bucket where the
- * custom-SQL measure returned `null`.
+ * The history this file carries: `AggregationMetricType` declared three
+ * custom-SQL-expression types — `number` / `string` / `boolean` — whose `sql`
+ * WAS the computation. `NativeSQLStrategy` emitted them verbatim (#4157) and
+ * `ObjectQLStrategy` refused them `INVALID_FIELD` / 400 (commit 017130a09),
+ * partitioned by a shared `EXPRESSION_METRIC_TYPES` set, and this file pinned
+ * the two postures side by side. A cube member's `sql` then became a column
+ * reference, so the three had nothing left to compute — measured before
+ * #21000 on this fixture's shape, the raw-SQL path emitted the referenced
+ * column UNAGGREGATED in a grouped statement — and they were retired from the
+ * spec with a prescription. The partition went with them.
  *
- * This file is the pin the defect could not hide from: ONE cube whose measures
- * cover all six aggregates, all three expression types and one enum-invalid
- * drift type, driven through the real `AnalyticsService` routing under BOTH
- * capability profiles. The native profile pins the expression measures still
- * SERVED (emitted verbatim); the ObjectQL profile pins them REFUSED — same
- * fixture, so a change that moves either posture turns a case here red.
+ * What is pinned now, ONE cube (all six aggregates, the three retired types,
+ * one never-declared drift type) driven through the real `AnalyticsService`
+ * routing under BOTH capability profiles:
  *
- * The load-bearing negatives, and why they are here:
- *
+ * - each retired type is REFUSED on both paths, never served, with the SPEC's
+ *   prescription (`aggregateOfMeasure`) — in the undeclared-500 tier, since
+ *   only a cube that never met `CubeSchema`'s parse can carry one — and
+ *   nothing reaches the engine or the driver;
  * - every admitted AGGREGATE measure is still served on the ObjectQL path and
- *   still reaches the engine carrying its OWN method (`sum` stays `sum`). An
- *   implementation that refuses by method membership (e.g. reusing
- *   `RECOMBINABLE_METHODS`, which lacks `avg`/`count_distinct`) passes the
- *   refusal cases and goes red here.
- * - an enum-INVALID metric type (`median` — host drift, not authorable) is NOT
- *   refused with the caller-shaped `INVALID_FIELD` envelope. The drift tier is
- *   the platform's own (`dataset-refusal.ts` header, #5716): an implementation
- *   that refuses "every method that is not one of the six aggregates" passes
- *   the refusal cases too, and goes red here — the arm must key on the
- *   DECLARED expression partition (`EXPRESSION_METRIC_TYPES`), not on a method
- *   allowlist.
+ *   still reaches the engine carrying its OWN method (`sum` stays `sum`);
+ * - an enum-INVALID drift type (`median`) is NOT refused with the caller-shaped
+ *   `INVALID_FIELD` envelope (#5716 / `dataset-refusal.ts`), on either path;
  * - the pre-existing cross-object non-recombinable refusal keeps its EXACT
- *   message — the new arm sits beside it, not over it.
+ *   message, and a retired type beside a cross-object dimension is refused as
+ *   the type refusal (the one resolver both doors call reaches it first).
  *
  * ## Dissolution verification, direction predicted BEFORE running
  *
- * Restoring the accepting behaviour (deleting the arm commit 017130a09 added in
- * `ObjectQLStrategy.resolveMeasureAggregation`) must turn the ObjectQL-profile
- * REFUSAL cases red in the ordinary direction: each asserts the ADR-0112
- * envelope (`code`/`status`), the measure's own name in `member` and message,
- * AND that nothing reached the engine (`calls`/`sqls` empty) — with the arm
- * gone, the query "succeeds", the engine IS reached carrying the expression in
- * `field`, so the cases cannot pass vacuously. Every other case — the six
- * admitted aggregates, the drift tier, the native-profile SERVED block, the
- * cross-object twin — is predicted to stay GREEN in both directions: none of
- * them touches the arm.
+ * Restoring the native path's verbatim emit for the three must turn the
+ * native-profile REFUSAL cases red in the ordinary direction (the query
+ * "succeeds" and a statement is executed); removing the ObjectQL resolver's
+ * verdict must turn the ObjectQL-profile cases red the same way (the engine is
+ * reached carrying the retired type as its method). The aggregate, drift and
+ * cross-object cases are predicted to stay green in both directions.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { Cube } from '@objectstack/spec/data';
+import { AggregationMetricType, type Cube } from '@objectstack/spec/data';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -70,11 +57,12 @@ const silentLogger = {
 const ORDER_FIELDS = ['id', 'amount', 'cost', 'revenue', 'paid', 'buyer', 'status', 'account', 'created_at'];
 
 /**
- * One cube, both strategies: all six aggregate types, all three custom-SQL
- * expression types. The expression `sql`s are deliberately DOT-FREE — an
- * expression containing a dot was already (mis)refused as a cross-object
- * measure, so the dot-free ones are the exact shapes that used to reach
- * `engine.aggregate` and answer `null`.
+ * One cube, both strategies: all six aggregate types, and the three retired
+ * custom-SQL types over a COLUMN — the shape a cube stored after #20943 made
+ * `sql` a column reference and before #21000 retired the types still carries.
+ * Built WITHOUT the parse (`as never`): `CubeSchema` refuses all three, so only
+ * a cube a host registers in-process from a literal can reach the service
+ * with one.
  */
 const CUBE: Cube = {
   name: 'orders',
@@ -87,15 +75,9 @@ const CUBE: Cube = {
     min_amount: { label: 'Min', type: 'min', sql: 'amount' },
     max_amount: { label: 'Max', type: 'max', sql: 'amount' },
     buyers: { label: 'Buyers', type: 'count_distinct', sql: 'buyer' },
-    margin: {
-      label: 'Margin', type: 'number',
-      sql: 'SUM(revenue) / NULLIF(SUM(cost), 0)',
-    },
-    top_status: {
-      label: 'Top status', type: 'string',
-      sql: "MAX(CASE WHEN paid THEN 'paid' ELSE 'open' END)",
-    },
-    any_paid: { label: 'Any paid', type: 'boolean', sql: 'MAX(paid)' },
+    margin: { label: 'Margin', type: 'number', sql: 'revenue' },
+    top_status: { label: 'Top status', type: 'string', sql: 'status' },
+    any_paid: { label: 'Any paid', type: 'boolean', sql: 'paid' },
   },
   dimensions: {
     status: { label: 'Status', type: 'string', sql: 'status' },
@@ -163,49 +145,74 @@ async function run(query: unknown, profile: 'objectql' | 'native') {
   return { rows, error, sqls, calls };
 }
 
-/** The one wire shape every custom-SQL refusal (commit 017130a09) must have (ADR-0112 / #5716). */
-function expectCustomSqlRefusal(
+/** Run one dry-run `generateSql` (the `/analytics/sql` face) on a fresh service under `profile`. */
+async function runSql(query: unknown, profile: 'objectql' | 'native') {
+  const { service, sqls, calls } = makeService(profile);
+  let error: Refusal | undefined;
+  try {
+    await service.generateSql(query as never);
+  } catch (e) {
+    error = e as Refusal;
+  }
+  return { error, sqls, calls };
+}
+
+const RETIRED = [
+  ['margin', 'number'],
+  ['top_status', 'string'],
+  ['any_paid', 'boolean'],
+] as const;
+
+const PROFILES = ['native', 'objectql'] as const;
+
+/**
+ * The one refusal a retired metric type meets (`aggregateOfMeasure`, #21000):
+ * the measure and cube named, the SPEC's prescription for the type verbatim,
+ * the undeclared-500 tier (no ADR-0112 envelope — only a cube that never met
+ * the parse can carry one), and nothing executed.
+ */
+function expectRetiredTypeRefusal(
   r: { error?: Refusal; sqls: string[]; calls: unknown[] },
   member: string,
   type: string,
 ) {
   expect(r.error).toBeInstanceOf(Error);
-  expect(r.error?.code).toBe('INVALID_FIELD');
-  expect(r.error?.status).toBe(400);
-  // The measure AS THE AUTHOR WROTE IT — today's failure blames a `function`
-  // key the author never wrote, or answers null under this very name.
-  expect(r.error?.member).toBe(member);
-  expect(r.error?.param).toBe('measures');
-  expect(r.error?.cube).toBe('orders');
-  expect(r.error?.message).toContain(`("${member}")`);
-  expect(r.error?.message).toContain(`type "${type}"`);
-  // The in-file twin's posture: name the way out, both halves.
-  expect(r.error?.message).toContain('or run on a native-SQL driver');
+  expect(r.error?.message).toContain(`measure "${member}" on cube "orders" cannot be served: its type "${type}"`);
+  // The prescription is the spec's own, read off the enum — so an operator
+  // reads what `os validate` would have printed for this cube.
+  const spec = AggregationMetricType.safeParse(type);
+  expect(spec.success).toBe(false);
+  expect(r.error?.message).toContain(spec.error!.issues[0]!.message);
+  expect(r.error?.message).toContain(`\`${type}\` was removed from \`AggregationMetricType\``);
+  // Undeclared-500 tier: never the caller-blaming INVALID_FIELD / 400.
+  expect(r.error?.code).toBeUndefined();
+  expect(r.error?.status).toBeUndefined();
   // The refusal is a refusal: the engine was never reached, nothing executed.
   expect(r.calls).toEqual([]);
   expect(r.sqls).toEqual([]);
 }
 
-// ── 1. The ObjectQL path REFUSES what it cannot serve ────────────────────────
+// ── 1. Both paths REFUSE a retired type, on both doors ───────────────────────
 
-describe('ObjectQL path: custom-SQL measures are refused loudly', () => {
-  it.each([
-    ['margin', 'number'],
-    ['top_status', 'string'],
-    ['any_paid', 'boolean'],
-  ] as const)('refuses "%s" (type %s) with INVALID_FIELD/400, engine never reached', async (member, type) => {
-    const r = await run({ cube: 'orders', measures: [member], dimensions: ['status'] }, 'objectql');
-    expectCustomSqlRefusal(r, member, type);
+describe.each(PROFILES)('%s path: a retired custom-SQL metric type is refused, never served', (profile) => {
+  it.each(RETIRED)('refuses "%s" (type %s) on /analytics/query, nothing executed', async (member, type) => {
+    const r = await run({ cube: 'orders', measures: [member], dimensions: ['status'] }, profile);
+    expectRetiredTypeRefusal(r, member, type);
   });
 
-  it('an admitted measure beside it does not rescue the query — the custom-SQL member is named', async () => {
-    const r = await run({ cube: 'orders', measures: ['total', 'margin'], dimensions: ['status'] }, 'objectql');
-    expectCustomSqlRefusal(r, 'margin', 'number');
+  it.each(RETIRED)('refuses "%s" (type %s) on the /analytics/sql dry run too', async (member, type) => {
+    const r = await runSql({ cube: 'orders', measures: [member], dimensions: ['status'] }, profile);
+    expectRetiredTypeRefusal(r, member, type);
+  });
+
+  it('an admitted measure beside it does not rescue the query — the retired member is named', async () => {
+    const r = await run({ cube: 'orders', measures: ['total', 'margin'], dimensions: ['status'] }, profile);
+    expectRetiredTypeRefusal(r, 'margin', 'number');
   });
 
   it('refuses on the scalar (no-dimension) shape too', async () => {
-    const r = await run({ cube: 'orders', measures: ['margin'] }, 'objectql');
-    expectCustomSqlRefusal(r, 'margin', 'number');
+    const r = await run({ cube: 'orders', measures: ['margin'] }, profile);
+    expectRetiredTypeRefusal(r, 'margin', 'number');
   });
 });
 
@@ -237,41 +244,46 @@ describe('ObjectQL path: every admitted aggregate is still served, carrying its 
       { field: 'buyer', method: 'count_distinct', alias: 'buyers' },
     ]);
   });
+});
 
-  it('an enum-invalid drift type is NOT refused as the caller\'s mistake', async () => {
-    // `median` is not authorable (`AggregationMetricType` is closed), so an
-    // arrival is OUR drift — the undeclared-500 tier, never the caller-shaped
-    // 400 (#5716). This is the case that reds a "refuse every method that is
-    // not one of the six aggregates" implementation: extensionally identical
-    // to the partition check on every enum-valid cube, it re-blames the
-    // caller exactly here.
-    const r = await run({ cube: 'orders_drift', measures: ['weird'], dimensions: ['status'] }, 'objectql');
-    expect(r.error?.code).not.toBe('INVALID_FIELD');
+describe('native-SQL path: every admitted aggregate is still wrapped', () => {
+  it('the six aggregates lower to their SQL functions in one statement', async () => {
+    const r = await run({
+      cube: 'orders',
+      measures: ['orders_count', 'total', 'avg_amount', 'min_amount', 'max_amount', 'buyers'],
+      dimensions: ['status'],
+    }, 'native');
+    expect(r.error).toBeUndefined();
+    expect(r.sqls).toHaveLength(1);
+    for (const fragment of ['COUNT(*)', 'SUM(amount)', 'AVG(amount)', 'MIN(amount)', 'MAX(amount)', 'COUNT(DISTINCT buyer)']) {
+      expect(r.sqls[0]).toContain(fragment);
+    }
   });
 });
 
-// ── 3. The other strategy on the SAME fixture: still serves the expression ───
+// ── 3. The drift tier: never the caller's mistake, on either path ───────────
 
-describe('native-SQL path: the same custom-SQL measures stay served', () => {
-  it('emits the number expression verbatim, no refusal', async () => {
-    const r = await run({ cube: 'orders', measures: ['margin'], dimensions: ['status'] }, 'native');
-    expect(r.error).toBeUndefined();
-    expect(r.sqls).toHaveLength(1);
-    expect(r.sqls[0]).toContain('SUM(revenue) / NULLIF(SUM(cost), 0) AS "margin"');
+describe.each(PROFILES)('%s path: an enum-invalid drift type', (profile) => {
+  it('is NOT refused as the caller\'s mistake, and never reaches the engine', async () => {
+    // `median` was never authorable (`AggregationMetricType` is closed), so an
+    // arrival is OUR drift — the undeclared-500 tier, never the caller-shaped
+    // 400 (#5716). It is refused in the spec's words — its vocabulary, not a
+    // retirement — and on the ObjectQL path it is no longer forwarded to the
+    // engine as a method no driver declares.
+    const r = await run({ cube: 'orders_drift', measures: ['weird'], dimensions: ['status'] }, profile);
+    expect(r.error).toBeInstanceOf(Error);
+    expect(r.error?.code).not.toBe('INVALID_FIELD');
+    expect(r.error?.code).toBeUndefined();
+    expect(r.error?.message).toContain('cannot be served: its type "median"');
+    expect(r.error?.message).not.toMatch(/was removed/);
     expect(r.calls).toEqual([]);
-  });
-
-  it('emits string and boolean expressions verbatim, no refusal', async () => {
-    const r = await run({ cube: 'orders', measures: ['top_status', 'any_paid'] }, 'native');
-    expect(r.error).toBeUndefined();
-    expect(r.sqls[0]).toContain(`MAX(CASE WHEN paid THEN 'paid' ELSE 'open' END) AS "top_status"`);
-    expect(r.sqls[0]).toContain('MAX(paid) AS "any_paid"');
+    expect(r.sqls).toEqual([]);
   });
 });
 
 // ── 4. The twin keeps its exact message ──────────────────────────────────────
 
-describe('the cross-object non-recombinable refusal is untouched beside the new arm', () => {
+describe('the cross-object non-recombinable refusal is untouched beside the type verdict', () => {
   it('still refuses avg + cross-object dimension with its exact shipped message', async () => {
     const r = await run(
       { cube: 'orders', dimensions: ['account.region'], measures: ['avg_amount'] },
@@ -289,15 +301,15 @@ describe('the cross-object non-recombinable refusal is untouched beside the new 
     expect(r.calls).toEqual([]);
   });
 
-  it('a custom-SQL measure beside a cross-object dimension is refused as custom-SQL', async () => {
-    // Deliberate precedence: the custom-SQL verdict names the real defect (the
-    // measure can never run on this engine, cross-object dimension or not),
-    // and both doors reach it through the one resolver — so the attribution
-    // cannot fork between /analytics/query and /analytics/sql.
+  it('a retired type beside a cross-object dimension is refused as the type refusal', async () => {
+    // Deliberate precedence: the type verdict names the real defect (the
+    // measure can never run, cross-object dimension or not), and both doors
+    // reach it through the one resolver — so the attribution cannot fork
+    // between /analytics/query and /analytics/sql.
     const r = await run(
       { cube: 'orders', dimensions: ['account.region'], measures: ['margin'] },
       'objectql',
     );
-    expectCustomSqlRefusal(r, 'margin', 'number');
+    expectRetiredTypeRefusal(r, 'margin', 'number');
   });
 });

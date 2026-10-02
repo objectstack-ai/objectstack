@@ -1,9 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type {
-  CryptoContext,
-  CryptoHandle,
-  ICryptoProvider,
+import {
+  CRYPTO_CONTEXT_SCOPES,
+  type CryptoContext,
+  type CryptoContextScope,
+  type CryptoHandle,
+  type ICryptoProvider,
 } from '@objectstack/spec/contracts';
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -66,13 +68,57 @@ import { dirname, join } from 'node:path';
  *   id        — `sec_` + 32 hex chars (122 bits of entropy)
  *   kmsKeyId  — `local:v<version>`
  *   alg       — `aes-256-gcm`
- *   version   — bumps on rotateKey()
- *   ciphertext— base64(iv (12) || authTag (16) || cipher)
+ *   version   — bumps on rotateKey() (a rotation counter, not the AAD
+ *               derivation — that is the ciphertext's marker below)
+ *   ciphertext— `v2:` + base64(iv (12) || authTag (16) || cipher) for every
+ *               new seal; a handle sealed before derivations were versioned
+ *               is bare base64(iv || authTag || cipher) — version 1.
  *
- * ## AAD binding
- * The CryptoContext (namespace + key) is folded into AES-GCM AAD so a
- * ciphertext rewrapped from a different (ns, key) tuple fails decryption —
- * guards against operators accidentally copying rows between namespaces.
+ * ## AAD binding (ADR-0128 D1–D3)
+ * The ciphertext's marker records which AAD derivation sealed it, and
+ * `decrypt` dispatches on that record — it never tries a second derivation
+ * after the first fails, and it never guesses a producer (D3).
+ *
+ * **Version 2 — every new seal.** The AAD is
+ *
+ *   0xFF || "objectstack/crypto-context-aad/v2" || lp(scope) || lp(namespace) || lp(key)
+ *
+ * where `lp(x)` is the 4-byte big-endian length of UTF-8(x) followed by those
+ * bytes. Three properties, each load-bearing:
+ *
+ *  - **Producer-discriminated (D1).** `scope` names the producer vocabulary
+ *    (`CRYPTO_CONTEXT_SCOPES`), so a ciphertext sealed by one producer does
+ *    not authenticate under another producer's context, however the two
+ *    `(namespace, key)` pairs are spelled. A scope outside the closed set is
+ *    refused with {@link CryptoContextScopeError} before any key is used.
+ *  - **Delimiter-safe (D2).** Every component is length-prefixed, so distinct
+ *    triples always produce distinct bytes — no separator character exists
+ *    for a component to smuggle. `aadForVersion2` is exported only so that
+ *    property is pinned by a byte vector and by a collision vector.
+ *  - **Disjoint from version 1.** The lead byte 0xFF never occurs in UTF-8,
+ *    and a version-1 AAD is the UTF-8 of a string, so no version-1 AAD equals
+ *    any version-2 AAD: a ciphertext presented under the other version's
+ *    marker never authenticates. The label names the derivation, so a future
+ *    version 3 takes a new label and is disjoint from this one too.
+ *
+ * **Version 1 — read only.** AAD = UTF-8(namespace + `|` + key), the
+ * derivation every pre-versioning ciphertext carries. It opens such a handle
+ * so existing ciphertext stays readable until it is re-wrapped
+ * (`rotateKey` opens with the recorded derivation and seals with version 2);
+ * ⛔ it never seals. It carries the older, weaker guarantee described on
+ * `CryptoContext` until then.
+ *
+ * **Why every pre-versioning handle reads as version 1 without reading a
+ * row.** Both seal paths (node:crypto and the WebContainer one) emitted
+ * `Buffer#toString('base64')`, whose alphabet is `A–Z a–z 0–9 + / =`, so no
+ * such ciphertext contains `:`. A ciphertext without `:` is version 1; `v2:`
+ * is version 2; any other marker is refused with
+ * {@link UnknownCiphertextVersionError} (fail closed).
+ *
+ * Tenant binding is intentionally omitted from both derivations: the handle
+ * is dereferenced from a row its producer has already scoped to its tenant,
+ * and adding the tenant here would force every decrypt path to re-read that
+ * scope.
  *
  * ## Keyed digest
  * `keyedDigest(plain)` is `hmac-sha256:` + hex(HMAC-SHA-256(macKey, plain)),
@@ -152,6 +198,129 @@ export class KeyedDigestKeyUnavailableError extends Error {
     );
     this.name = 'KeyedDigestKeyUnavailableError';
   }
+}
+
+/** The AAD derivations this provider knows (see "AAD binding" above). */
+type AadDerivation = 1 | 2;
+
+/** Separates a ciphertext's derivation marker from its base64 body. */
+const CIPHERTEXT_MARKER_SEPARATOR = ':';
+
+/** Marker of a version-2 seal — the only derivation this provider seals with. */
+const CIPHERTEXT_V2_MARKER = 'v2';
+
+/**
+ * Lead byte of every version-2 AAD. 0xFF never occurs in UTF-8, which is what
+ * keeps version 2 disjoint from every version-1 AAD (the UTF-8 of a string).
+ */
+const AAD_V2_LEAD = Buffer.from([0xff]);
+
+/**
+ * Names the version-2 derivation inside the AAD itself. Versioned: a new
+ * derivation takes a new label (and a new marker), never an edit of this one —
+ * editing it would orphan every version-2 ciphertext ever sealed.
+ */
+const AAD_V2_LABEL = Buffer.from('objectstack/crypto-context-aad/v2', 'utf8');
+
+/**
+ * Refusal of a {@link CryptoContext} whose `scope` is not a member of the
+ * closed producer set. The type already requires it; this is the same rule for
+ * a caller the compiler never saw (plain JavaScript, a cast, a stale build). A
+ * missing scope is never defaulted: defaulting would put the caller's
+ * ciphertext into another producer's AAD space.
+ */
+export class CryptoContextScopeError extends Error {
+  constructor(readonly received: unknown) {
+    super(
+      `[LocalCryptoProvider] Refusing to use a CryptoContext without a valid scope ` +
+        `(received ${describeScope(received)}). The scope names which producer's vocabulary ` +
+        `(namespace, key) is drawn from, and it is bound into the ciphertext, so it is never ` +
+        `defaulted. Fix: pass the calling producer's own member of CRYPTO_CONTEXT_SCOPES ` +
+        `(${CRYPTO_CONTEXT_SCOPES.join(', ')}) on encrypt, decrypt and rotateKey alike.`,
+    );
+    this.name = 'CryptoContextScopeError';
+  }
+}
+
+/**
+ * Refusal to open a ciphertext whose marker records an AAD derivation this
+ * provider does not know. Fail closed: the recorded derivation is the only one
+ * ever tried, so an unknown one is a refusal, never a cue to guess.
+ */
+export class UnknownCiphertextVersionError extends Error {
+  constructor(readonly marker: string) {
+    super(
+      `[LocalCryptoProvider] Refusing to decrypt: the ciphertext records AAD derivation ` +
+        `${describeMarker(marker)}, which this provider does not know. A ciphertext is opened only ` +
+        `with the derivation it records, never by trying another. Fix: open it with the release ` +
+        `that sealed it, or set the value again so it is sealed under a derivation this release knows.`,
+    );
+    this.name = 'UnknownCiphertextVersionError';
+  }
+}
+
+/** A refusal message names a received scope only when it is short and printable. */
+function describeScope(received: unknown): string {
+  if (received === undefined) return 'no scope';
+  if (typeof received === 'string' && /^[a-z0-9_]{1,40}$/.test(received)) return `'${received}'`;
+  return `a ${typeof received} that is not a member`;
+}
+
+/** A refusal message echoes a marker only when it is short and printable. */
+function describeMarker(marker: string): string {
+  return /^[A-Za-z0-9_-]{1,16}$/.test(marker) ? `'${marker}'` : 'an unrecognised marker';
+}
+
+/** The scope, proven a member of the closed set — or a refusal. */
+function requireScope(ctx: CryptoContext): CryptoContextScope {
+  const scope = (ctx as { scope?: unknown } | undefined)?.scope;
+  if (typeof scope === 'string' && (CRYPTO_CONTEXT_SCOPES as readonly string[]).includes(scope)) {
+    return scope as CryptoContextScope;
+  }
+  throw new CryptoContextScopeError(scope);
+}
+
+/** `lp(x)`: the 4-byte big-endian length of UTF-8(x), then those bytes. */
+function lengthPrefixed(value: string): Buffer {
+  const bytes = Buffer.from(value, 'utf8');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length, 0);
+  return Buffer.concat([length, bytes]);
+}
+
+/**
+ * The version-2 AAD of `ctx` (see "AAD binding" above): producer-discriminated
+ * and length-prefixed. Exported for its pins only; callers never build AAD.
+ */
+export function aadForVersion2(ctx: CryptoContext): Buffer {
+  return Buffer.concat([
+    AAD_V2_LEAD,
+    AAD_V2_LABEL,
+    lengthPrefixed(requireScope(ctx)),
+    lengthPrefixed(ctx.namespace),
+    lengthPrefixed(ctx.key),
+  ]);
+}
+
+/**
+ * The version-1 AAD: the derivation every pre-versioning ciphertext was sealed
+ * with. Read-only — it opens such a ciphertext and is never used to seal.
+ */
+function aadForVersion1(ctx: CryptoContext): Buffer {
+  return Buffer.from([ctx.namespace, ctx.key].join('|'), 'utf8');
+}
+
+/**
+ * Split a stored ciphertext into the derivation it records and its base64 body.
+ * No `:` ⇒ version 1 (standard base64 has none); `v2:` ⇒ version 2; anything
+ * else is refused.
+ */
+function readCiphertext(ciphertext: string): { derivation: AadDerivation; body: string } {
+  const at = ciphertext.indexOf(CIPHERTEXT_MARKER_SEPARATOR);
+  if (at === -1) return { derivation: 1, body: ciphertext };
+  const marker = ciphertext.slice(0, at);
+  if (marker === CIPHERTEXT_V2_MARKER) return { derivation: 2, body: ciphertext.slice(at + 1) };
+  throw new UnknownCiphertextVersionError(marker);
 }
 
 type EnvMap = Record<string, string | undefined>;
@@ -505,8 +674,9 @@ export class LocalCryptoProvider implements ICryptoProvider {
   }
 
   async encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle> {
+    // Every seal is version 2 — the only derivation this provider seals with.
+    const aad = aadForVersion2(ctx);
     const iv = randomBytes(12);
-    const aad = Buffer.from(this.aadOf(ctx), 'utf8');
     const plainBytes = Buffer.from(plain, 'utf8');
 
     let blob: string;
@@ -530,16 +700,21 @@ export class LocalCryptoProvider implements ICryptoProvider {
       kmsKeyId: 'local:v1',
       alg: 'aes-256-gcm',
       version: 1,
-      ciphertext: blob,
+      ciphertext: CIPHERTEXT_V2_MARKER + CIPHERTEXT_MARKER_SEPARATOR + blob,
     };
   }
 
   async decrypt(handle: CryptoHandle, ctx: CryptoContext): Promise<string> {
-    const buf = Buffer.from(handle.ciphertext, 'base64');
+    // The scope is required on every call, including a version-1 open that
+    // does not bind it: the contract does not loosen by derivation.
+    requireScope(ctx);
+    // Dispatch on the derivation the ciphertext RECORDS — exactly one is tried.
+    const { derivation, body } = readCiphertext(handle.ciphertext);
+    const aad = derivation === 2 ? aadForVersion2(ctx) : aadForVersion1(ctx);
+    const buf = Buffer.from(body, 'base64');
     const iv = buf.subarray(0, 12);
     const tag = buf.subarray(12, 28);
     const data = buf.subarray(28);
-    const aad = Buffer.from(this.aadOf(ctx), 'utf8');
 
     if (this.useNoble) {
       const gcm = await loadNobleGcm();
@@ -556,6 +731,11 @@ export class LocalCryptoProvider implements ICryptoProvider {
     return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
   }
 
+  /**
+   * Opens `handle` with the derivation it records and seals the plaintext
+   * again with version 2 — so a version-1 handle comes back version 2. This is
+   * the seam the at-rest re-wrap of pre-versioning ciphertext uses.
+   */
   async rotateKey(handle: CryptoHandle, ctx: CryptoContext): Promise<CryptoHandle> {
     const plain = await this.decrypt(handle, ctx);
     const next = await this.encrypt(plain, ctx);
@@ -582,15 +762,6 @@ export class LocalCryptoProvider implements ICryptoProvider {
     const enc = Buffer.concat([cipher.update(plainBytes), cipher.final()]);
     const tag = cipher.getAuthTag();
     return Buffer.concat([iv, tag, enc]).toString('base64');
-  }
-
-  private aadOf(ctx: CryptoContext): string {
-    // Bind ciphertext to (namespace,key) so a row cannot be moved across
-    // specifiers. Tenant binding is intentionally omitted because the
-    // handle is dereferenced from a `sys_setting` row already scoped to
-    // its tenant — adding tenant here would force the decrypt path to
-    // re-read that scope.
-    return [ctx.namespace, ctx.key].join('|');
   }
 }
 

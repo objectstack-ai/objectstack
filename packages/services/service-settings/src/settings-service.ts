@@ -1679,7 +1679,9 @@ export class SettingsService {
           // handle id in sys_setting.value_enc. Otherwise fall back to
           // the legacy inline crypto adapter path for back-compat.
           if (this.cryptoProvider && this.secretStore) {
+            // ADR-0128 D1: the settings producer's own scope.
             const handle = await this.cryptoProvider.encrypt(plain, {
+              scope: 'settings',
               namespace,
               key,
               tenantId: ctx.tenantId,
@@ -2592,7 +2594,7 @@ export class SettingsService {
               version: secret.version,
               ciphertext: secret.ciphertext,
             },
-            { namespace: row.namespace, key: row.key },
+            { scope: 'settings', namespace: row.namespace, key: row.key },
           );
         } else {
           plain = await this.crypto.decrypt(row.value_enc, {

@@ -19,6 +19,7 @@ import {
     type ScreenFieldVisibility,
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
+import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
 // shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
@@ -544,6 +545,16 @@ export interface FlowTriggerBinding {
     readonly organization?: string;
     /** The raw start-node `config`, for trigger-specific fields not modeled above. */
     readonly config?: Record<string, unknown>;
+    /**
+     * [#20790] api: the inbound hook's secret, read at VERIFICATION time —
+     * present whenever the flow has one, whether its definition carries it as
+     * a literal (a packaged flow) or the write-only credential channel holds it
+     * (every flow stored through the metadata save door; `config` then carries
+     * none). The channel's row wins where one exists. Never cached: a rotation
+     * applies to the next post. Rejects when a held secret does not come back —
+     * the trigger answers that post as unavailable, never as verified.
+     */
+    readonly resolveSecret?: () => Promise<string | undefined>;
 }
 
 /**
@@ -2253,6 +2264,40 @@ export interface FlowContender {
 export type PackagedFlowSource = (name: string) => string | undefined;
 
 /**
+ * [#20790] Where a flow's credentials live once they are out of its
+ * definition: the write-only flow credential channel (the automation plugin's
+ * `FlowCredentialChannel`, on the #7799 secret seam). Positions are
+ * `(flow name, node id, config key)` and refer to the LIVE (active) flow.
+ *
+ * `holds` / `held` answer synchronously from what the channel knows is stored
+ * — the registration check and the binding are synchronous. `resolve` reads
+ * the value at the moment of use and never caches it: `undefined` means the
+ * channel holds nothing there; a held credential that does not come back
+ * THROWS, and is never read as "no credential". With no reachable store
+ * `resolve` cannot tell held from not, so it throws too — which is why every
+ * caller with a fallback (a packaged literal) asks `resolve` only for a
+ * position `holds` reports.
+ */
+export interface FlowCredentialSource {
+    holds(flowName: string, nodeId: string, key: string): boolean;
+    held(flowName: string): Array<{ nodeId: string; key: string }>;
+    resolve(flowName: string, nodeId: string, key: string): Promise<string | undefined>;
+}
+
+/**
+ * [#20790] One credential a registered flow holds, by class: a literal in its
+ * definition (a packaged flow's source), or held by the credential channel.
+ * What the clone door refuses on — never the value.
+ */
+export interface FlowCredentialHolding {
+    readonly nodeId: string;
+    readonly key: string;
+    /** The class an administrator is told (`flowCredentialClassLabel`). */
+    readonly label: string;
+    readonly held: 'literal' | 'channel';
+}
+
+/**
  * [#11997] What the ADR-0005 overlay precedence decided for one bare flow name.
  *
  * Emitted only when a name had more than one contender at pull time. `armed` is
@@ -2367,6 +2412,8 @@ export class AutomationEngine implements IAutomationService {
      * no flow a managed package loaded.
      */
     private packagedFlowSource?: PackagedFlowSource;
+    /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
+    private flowCredentialSource?: FlowCredentialSource;
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
      * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
@@ -3617,12 +3664,16 @@ export class AutomationEngine implements IAutomationService {
             // Inbound HTTP (ADR-0041 Tier 1): an `api` flow waits for an external
             // POST. The concrete trigger (`@objectstack/trigger-api`) mounts the
             // endpoint and enqueues; the binding's `config` carries the hook
-            // details (`hookId`, `secret`) from the start node.
-            case 'api':
+            // details (`hookId`, and a packaged flow's literal `secret`) from
+            // the start node. [#20790] A secret the credential channel holds is
+            // not in `config`: `resolveSecret` reads it at verification time.
+            case 'api': {
+                const resolveSecret = this.hookSecretResolver(flowName, startNode?.id, config);
                 return {
                     triggerType: kind,
-                    binding: { flowName, condition, config },
+                    binding: { flowName, condition, config, ...(resolveSecret ? { resolveSecret } : {}) },
                 };
+            }
 
             default: {
                 // [#14328] Exhaustive over `FlowTriggerKind`, and that is the point:
@@ -4689,6 +4740,98 @@ export class AutomationEngine implements IAutomationService {
     /** [#20761] Is `name` a packaged flow — {@link packagedFlowOwner}, as a verdict. */
     private isPackagedFlow(name: string): boolean {
         return this.packagedFlowOwner(name) !== undefined;
+    }
+
+    /**
+     * [#20790] Attach the write-only flow credential channel. The automation
+     * plugin calls this at `init()`, before any flow is registered. With none
+     * attached (a bare engine) every credential is the literal its definition
+     * carries, as before.
+     */
+    setFlowCredentialSource(source: FlowCredentialSource | undefined): void {
+        this.flowCredentialSource = source;
+    }
+
+    /** [#20790] Does the credential channel hold the LIVE credential at this position? */
+    holdsFlowCredential(flowName: string, nodeId: string, key: string): boolean {
+        return this.flowCredentialSource?.holds(flowName, nodeId, key) ?? false;
+    }
+
+    /**
+     * [#20790] The credential the channel holds at this position, read now.
+     * `undefined` when it holds none; throws when it holds one that does not
+     * come back (see {@link FlowCredentialSource.resolve}).
+     */
+    async resolveFlowCredential(flowName: string, nodeId: string, key: string): Promise<string | undefined> {
+        if (!this.flowCredentialSource) return undefined;
+        return this.flowCredentialSource.resolve(flowName, nodeId, key);
+    }
+
+    /**
+     * [#20790] Every credential the registered flow `name` holds, by class —
+     * a literal in its definition, or one the channel holds for one of its
+     * credential positions. `[]` for an unknown name. The clone door's input:
+     * a flow that holds any credential is never cloned in one step, because a
+     * copy would share it.
+     */
+    flowCredentialHoldings(name: string): FlowCredentialHolding[] {
+        const flow = this.flows.get(name);
+        if (!flow) return [];
+        const out: FlowCredentialHolding[] = [];
+        const seen = new Set<string>();
+        for (const position of flowCredentialPositions(flow)) {
+            const id = JSON.stringify([position.nodeId, position.key]);
+            if (position.form === 'value') {
+                seen.add(id);
+                out.push({ nodeId: position.nodeId, key: position.key, label: flowCredentialClassLabel(position.key), held: 'literal' });
+            }
+        }
+        for (const { nodeId, key } of this.flowCredentialSource?.held(name) ?? []) {
+            const id = JSON.stringify([nodeId, key]);
+            if (seen.has(id)) continue;
+            out.push({ nodeId, key, label: flowCredentialClassLabel(key), held: 'channel' });
+        }
+        return out;
+    }
+
+    /**
+     * [#20790] The verification-time reader for an `api` flow's hook secret, or
+     * `undefined` when the flow has none to verify with — the binding then
+     * carries no resolver and both registration doors refuse it, exactly as
+     * before.
+     *
+     * Q3 A, as ruled: a packaged flow's literal stays its author's source of
+     * truth, and at verification the channel's row wins where one exists. So
+     * a LITERAL start-node secret yields a reader that asks the channel only
+     * when the channel's index says it holds that position (the `http` node's
+     * shape — both doors read one rule), and otherwise answers the literal
+     * without touching the channel; a WITHHELD one (the key absent — every
+     * flow stored through the metadata save door) yields one only when the
+     * channel holds it; a cleared or unusable one yields none.
+     *
+     * A HELD secret that does not come back still rejects — it is never
+     * verified against the literal. The index is per process: a row written
+     * after its last refresh (boot, `kernel:ready`, `metadata:reloaded`, every
+     * channel write in this process) loses to the literal until the next
+     * refresh, exactly as at the `http` node.
+     */
+    private hookSecretResolver(
+        flowName: string,
+        startNodeId: string | undefined,
+        config: Record<string, unknown>,
+    ): (() => Promise<string | undefined>) | undefined {
+        const source = this.flowCredentialSource;
+        const written = Object.prototype.hasOwnProperty.call(config, FLOW_HOOK_SECRET_KEY);
+        const literal = typeof config.secret === 'string' && config.secret.trim() !== '' ? config.secret : undefined;
+        if (written && literal === undefined) return undefined;
+        if (!source || startNodeId === undefined) {
+            return literal === undefined ? undefined : async () => literal;
+        }
+        if (literal === undefined && !source.holds(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) return undefined;
+        return async () => {
+            if (literal !== undefined && !source.holds(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) return literal;
+            return (await source.resolve(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) ?? literal;
+        };
     }
 
     /**
@@ -10211,6 +10354,13 @@ export class AutomationEngine implements IAutomationService {
         if (resolved?.triggerType !== 'api') return;
         const config = (resolved.binding.config ?? {}) as Record<string, unknown>;
         if (typeof config.secret === 'string' && config.secret.trim() !== '') return;
+        // [#20790] …or the write-only credential channel holds it: a flow stored
+        // through the metadata save door keeps no secret in its definition, and
+        // its binding carries the reader instead. Only for the WITHHELD form —
+        // `hookSecretResolver` yields no reader for a start node that writes
+        // `secret: ''` (cleared), so that one is refused below whatever the
+        // channel still holds.
+        if (resolved.binding.resolveSecret) return;
         const asks = [
             flow.type === 'api' ? "`type: 'api'`" : undefined,
             config.triggerType === 'api' ? "start-node `config.triggerType: 'api'`" : undefined,

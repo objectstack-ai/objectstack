@@ -11,18 +11,30 @@
  *      `AggregationMetricType` — whose expression was discarded;
  *   3. an unrecognised `type`.
  *
+ * #4157 answered (2) by emitting the expression verbatim. A cube member's
+ * `sql` has since become a column reference and the three types were retired
+ * from the spec (#21000), so (2) and (3) are now ONE question with one answer:
+ * a type no aggregate lowers is refused, in the spec's words
+ * (`aggregateOfMeasure`) — never `COUNT(*)`, and never the column emitted
+ * unaggregated, which is what a retired type over a column got here.
+ *
  * And `qualifyAndRegisterJoin` treated any dot as a relationship hop, so an
  * expression like `SUM(account.amount)` was split into `"SUM(account"."amount)"`
  * plus a `LEFT JOIN "SUM(account"` — invalid SQL naming a table that does not
  * exist. That damage was invisible while the result was thrown away for
- * `COUNT(*)`; emitting the expression makes it matter.
+ * `COUNT(*)`; emitting the expression made it matter, and an aggregate over an
+ * expression `sql` (a cube registered without the parse) still reaches it.
  */
 import { describe, it, expect } from 'vitest';
-import type { Cube } from '@objectstack/spec/data';
+import { AggregationMetricType, type Cube } from '@objectstack/spec/data';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 
-/** A cube whose measures cover both aggregate and custom-expression types. */
+/**
+ * A cube whose measures cover aggregate types and the three RETIRED
+ * custom-SQL types, the latter over a column — the shape a cube stored before
+ * the retirement carries. Unparsed (`as never`): `CubeSchema` refuses them.
+ */
 const cube: Cube = {
   name: 'orders',
   title: 'Orders',
@@ -30,16 +42,9 @@ const cube: Cube = {
   measures: {
     count: { label: 'Count', type: 'count', sql: '*' },
     total: { label: 'Total', type: 'sum', sql: 'amount' },
-    // The three custom-expression types. `sql` IS the computation.
-    margin: {
-      label: 'Margin', type: 'number',
-      sql: 'SUM(revenue) / NULLIF(SUM(cost), 0)',
-    },
-    top_status: {
-      label: 'Top status', type: 'string',
-      sql: "MAX(CASE WHEN paid THEN 'paid' ELSE 'open' END)",
-    },
-    any_paid: { label: 'Any paid', type: 'boolean', sql: 'MAX(paid)' },
+    margin: { label: 'Margin', type: 'number', sql: 'revenue' },
+    top_status: { label: 'Top status', type: 'string', sql: 'status' },
+    any_paid: { label: 'Any paid', type: 'boolean', sql: 'paid' },
   },
   dimensions: {
     status: { label: 'Status', type: 'string', sql: 'status' },
@@ -55,26 +60,19 @@ const ctx = {
 const sqlFor = async (query: AnalyticsQuery) =>
   (await new NativeSQLStrategy().generateSql(query, ctx)).sql;
 
-describe('custom-expression measures emit their expression', () => {
-  it('emits a number expression verbatim, ungrouped', async () => {
-    const sql = await sqlFor({ cube: 'orders', measures: ['margin'] });
-    expect(sql).toContain('SUM(revenue) / NULLIF(SUM(cost), 0) AS "margin"');
-    expect(sql).not.toContain('COUNT(*)');
-  });
-
-  it('emits a number expression verbatim in a grouped query', async () => {
-    const sql = await sqlFor({ cube: 'orders', measures: ['margin'], dimensions: ['status'] });
-    expect(sql).toContain('SUM(revenue) / NULLIF(SUM(cost), 0) AS "margin"');
-    expect(sql).toContain('GROUP BY');
-    // Measures never join GROUP BY — only dimensions do. The expression must
-    // therefore be aggregate-shaped, which is the author's contract.
-    expect(sql.slice(sql.indexOf('GROUP BY'))).not.toContain('NULLIF');
-  });
-
-  it('emits string and boolean expressions verbatim', async () => {
-    const sql = await sqlFor({ cube: 'orders', measures: ['top_status', 'any_paid'] });
-    expect(sql).toContain(`MAX(CASE WHEN paid THEN 'paid' ELSE 'open' END) AS "top_status"`);
-    expect(sql).toContain('MAX(paid) AS "any_paid"');
+describe('a retired custom-SQL metric type is refused, never emitted', () => {
+  it.each([
+    ['margin', 'number'],
+    ['top_status', 'string'],
+    ['any_paid', 'boolean'],
+  ] as const)('refuses "%s" (type %s), ungrouped and grouped, in the spec\'s words', async (member, type) => {
+    const prescription = AggregationMetricType.safeParse(type).error!.issues[0]!.message;
+    for (const query of [{ cube: 'orders', measures: [member] }, { cube: 'orders', measures: [member], dimensions: ['status'] }]) {
+      const err = await sqlFor(query as AnalyticsQuery).then(() => undefined, (e: Error) => e);
+      expect(err, JSON.stringify(query)).toBeInstanceOf(Error);
+      expect(err!.message).toContain(`measure "${member}" on cube "orders" cannot be served`);
+      expect(err!.message).toContain(prescription);
+    }
   });
 
   it('still wraps the aggregate types', async () => {
@@ -91,9 +89,11 @@ describe('an expression containing a dot is not mistaken for a join path', () =>
     measures: {
       ...cube.measures,
       // A dot inside a function call — an expression, not `relation.column`.
+      // Aggregated by a live type: the retired custom-SQL types are refused
+      // before `sql` is lowered, so they can no longer reach this hazard.
       acct_total: {
-        label: 'Account total', type: 'number',
-        sql: 'SUM(account.amount) / 2',
+        label: 'Account total', type: 'sum',
+        sql: 'COALESCE(account.amount, 0) / 2',
       },
       // A genuine relationship path, which MUST still be qualified and joined.
       acct_amount: { label: 'Account amount', type: 'sum', sql: 'account.amount' },
@@ -105,9 +105,9 @@ describe('an expression containing a dot is not mistaken for a join path', () =>
 
   it('emits the expression intact and registers no phantom join', async () => {
     const sql = await dottedSql({ cube: 'orders', measures: ['acct_total'] });
-    expect(sql).toContain('SUM(account.amount) / 2 AS "acct_total"');
-    expect(sql).not.toContain('"SUM(account"');
-    expect(sql).not.toContain('LEFT JOIN "SUM(account"');
+    expect(sql).toContain('SUM(COALESCE(account.amount, 0) / 2) AS "acct_total"');
+    expect(sql).not.toContain('"COALESCE(account"');
+    expect(sql).not.toContain('LEFT JOIN "COALESCE(account"');
   });
 
   it('still lowers a real relationship path into a qualified column and a join', async () => {
@@ -135,10 +135,10 @@ describe('the questions COUNT(*) used to answer now fail loudly', () => {
     } as never;
     const badCtx = { ...(ctx as object), getCube: () => bad } as never;
     await expect(new NativeSQLStrategy().generateSql({ cube: 'orders', measures: ['weird'] }, badCtx))
-      .rejects.toThrow(/unrecognised type "median"/);
+      .rejects.toThrow(/cannot be served: its type "median"/);
   });
 
-  it('the unrecognised-type error lists both vocabularies', async () => {
+  it('the unrecognised-type error lists the one vocabulary — the six aggregates, no custom-expression types', async () => {
     const bad = {
       ...cube,
       measures: { weird: { label: 'Weird', type: 'median', sql: 'amount' } },
@@ -147,7 +147,7 @@ describe('the questions COUNT(*) used to answer now fail loudly', () => {
     const err = await new NativeSQLStrategy()
       .generateSql({ cube: 'orders', measures: ['weird'] }, badCtx)
       .catch((e: Error) => e.message);
-    expect(err).toContain('count_distinct');
-    expect(err).toContain('number');
+    for (const aggregate of AggregationMetricType.options) expect(err).toContain(aggregate);
+    expect(err).not.toMatch(/custom-expression|"number"|"boolean"/);
   });
 });

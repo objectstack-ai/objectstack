@@ -44,16 +44,26 @@ async function confirm(question: string): Promise<boolean> {
  * NEW writes; rows copied before the fix keep their cleartext. This command
  * rewrites them, projecting each copied body through the SAME redactor.
  *
+ * [#21207] The same copies also carried the copied row's stored CONTENT HASH
+ * (`checksum`, and the history row's `previous_checksum`) — a hash over the whole
+ * stored body, withheld credential material included — and the decision-audit
+ * note of a refused optimistic-lock write (`sys_metadata_audit`, and its ledger
+ * and activity copies) named both hashes. The writers no longer copy either;
+ * this command drops the hash columns from the copies already written and
+ * withholds the hashes in those notes, in the same pass. Operators run it once
+ * after upgrading, dry run first.
+ *
  * Dry run by default (writes nothing), `--apply` to rewrite. Idempotent: a
- * second run finds nothing — a redacted copy has no credential left — so
- * re-running and reading a clean report is the verification. No `sys_migration`
- * flag is recorded: nothing gates irreversible behaviour on this rewrite (the
- * posture `os migrate summary-nulls` takes).
+ * second run finds nothing — a redacted copy has no credential and no hash
+ * left — so re-running and reading a clean report is the verification. No
+ * `sys_migration` flag is recorded: nothing gates irreversible behaviour on this
+ * rewrite (the posture `os migrate summary-nulls` takes).
  */
 export default class MigrateAuditMetadataBodies extends Command {
   static override description =
-    'Rewrite at-rest cleartext metadata-body copies the audit writer left in sys_audit_log / sys_activity, ' +
-    'projecting each copied body through the shared credential redactor. Dry run by default; --apply writes.';
+    'Rewrite the at-rest copies the audit writer left in sys_audit_log / sys_activity: project each copied ' +
+    'metadata body through the shared credential redactor and drop its stored content hash; withhold the hashes ' +
+    'a conflict note in sys_metadata_audit (and its copies) names. Dry run by default; --apply writes.';
 
   static override examples = [
     '$ os migrate audit-metadata-bodies',
@@ -117,12 +127,12 @@ export default class MigrateAuditMetadataBodies extends Command {
           this.exit(1);
           return;
         }
-        printWarning('Apply mode rewrites audit/activity rows. Re-run with --yes to confirm, or run without --apply to preview.');
+        printWarning('Apply mode rewrites audit/activity/decision rows. Re-run with --yes to confirm, or run without --apply to preview.');
         this.exit(1);
         return;
       }
       const ok = await confirm(
-        chalk.bold('\nRewrite every audit/activity row carrying a stored metadata body on this database? [y/N] '),
+        chalk.bold('\nRewrite every audit/activity/decision row carrying a stored metadata body or content hash on this database? [y/N] '),
       );
       if (!ok) {
         printInfo('Aborted — no changes made.');
@@ -188,14 +198,14 @@ export default class MigrateAuditMetadataBodies extends Command {
         printError(`${report.failures} row(s) could not be rewritten — re-run to finish them.`);
       } else if (apply && report.rewritten > 0) {
         printSuccess(
-          `Rewrote ${report.rewritten} audit/activity row(s). Re-run any time — it only revisits rows still carrying a body.`,
+          `Rewrote ${report.rewritten} audit/activity/decision row(s). Re-run any time — it only revisits rows still carrying a body or a hash.`,
         );
       } else if (apply) {
-        printSuccess('Nothing to rewrite — no audit/activity row carries a stored metadata body.');
+        printSuccess('Nothing to rewrite — no audit/activity/decision row carries a stored metadata body or content hash.');
       } else if (report.rewritten > 0) {
         printInfo(`Dry run only — ${report.rewritten} row(s) would be rewritten. Re-run with --apply.`);
       } else {
-        printSuccess('Nothing to rewrite — no audit/activity row carries a stored metadata body.');
+        printSuccess('Nothing to rewrite — no audit/activity/decision row carries a stored metadata body or content hash.');
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');

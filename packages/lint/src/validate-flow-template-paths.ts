@@ -653,7 +653,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                   (inFilter
                     ? `the token resolves to nothing on every run, which DROPS the condition from ` +
                       `the query instead of narrowing it; the node then refuses to run at execution ` +
-                      `time (#3810).`
+                      `time.`
                     : `the token resolves to an empty string on every run (silently).`),
                 hint: unprovisionedAnchorHint(objectName, head),
               });
@@ -671,7 +671,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
               message: inFilter
                 ? `${nodeType} filter references '{${token}}', but '${head}' is not a field on ` +
                   `object '${objectName}' — the token resolves to nothing, which DROPS the condition from the ` +
-                  `query instead of narrowing it. The node refuses to run at execution time (#3810).`
+                  `query instead of narrowing it. The node refuses to run at execution time.`
                 : `template references '{${token}}', but '${head}' is not a field on ` +
                   `object '${objectName}' — it resolves to an empty string at runtime (silently).`,
               hint: root.isTrigger
@@ -709,18 +709,18 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                     `${headType} field '${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} ` +
                     `carries '${head}' as a scalar id, not an ` +
                     `expanded object, so the token resolves to nothing and the condition is DROPPED from the ` +
-                    `query instead of narrowing it. The node refuses to run at execution time (#3810).`
+                    `query instead of narrowing it. The node refuses to run at execution time.`
                   : `template references '{${token}}', a cross-object hop through the ${headType} field ` +
                     `'${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} carries ` +
                     `'${head}' as a scalar id, not an expanded object, so ` +
                     `this resolves to an empty string at runtime (silently).`,
                 hint: root.isTrigger
                   ? inFilter
-                    ? `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                    ? `Opt in to resolve it: add '${head}' to the start node's config.expand and the ` +
                       `engine re-reads it as the run's identity. Otherwise filter on the foreign-key id directly ` +
                       `('{record.${head}}'), or project the value via a formula field on '${objectName}'. This ` +
                       `gates the build rather than warning: an absent condition WIDENS the query.`
-                    : `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                    : `Opt in to resolve it: add '${head}' to the start node's config.expand and the ` +
                       `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
                       `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`
                   : inFilter

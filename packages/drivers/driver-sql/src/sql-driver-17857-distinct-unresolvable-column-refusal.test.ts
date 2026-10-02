@@ -251,12 +251,19 @@ describe(`[#17857] driver-sql — distinct() attributes an unresolvable column (
     expect(err.code).not.toBe('DATABASE_ERROR');
   });
 
-  it('arm 1: writes the full dialect text to the SERVER LOG, statement included', async () => {
+  it('arm 1: writes the dialect diagnostic to the SERVER LOG, the statement cut', async () => {
     const { err, logged } = await withLog(driver, () => driver.distinct(TABLE, MISSING_COLUMN));
     expect(err.code).toBe('INVALID_FIELD');
     const line = logged.find((l) => l.includes(MISSING_COLUMN));
     expect(line, 'an operator must still be able to read what the backend said').toBeDefined();
-    expect(String(line), 'the withheld statement is in the log').toMatch(/\bselect\b/i);
+    // [#21385, maintainer ruling 2026-10-02] A redaction, not a deletion, and
+    // since this ruling a cut one: the dialect's diagnostic still reaches the
+    // log for an operator, the statement and its bound values do not (a server
+    // log leaves the data's trust boundary). The cut's marker says one stood
+    // there. The sentinel pins for this line live in
+    // `sql-driver-21385-refusal-log-line-redaction.test.ts`.
+    expect(String(line), 'the withheld statement is cut from the log').not.toMatch(/\bselect\b/i);
+    expect(String(line), 'the cut says a statement stood there').toContain('[statement and bound values redacted]');
     expect(String(line), 'the log line names the envelope it produced').toContain('INVALID_FIELD');
   });
 

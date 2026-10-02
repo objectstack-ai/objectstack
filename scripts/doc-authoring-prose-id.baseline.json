@@ -11,35 +11,8 @@
   "#5030": 1,
   "#5082": 1
  },
- "packages/lint/src/lint-flow-patterns.ts": {
-  "#1315": 2,
-  "#1870": 1,
-  "#1874": 2,
-  "#1888": 1,
-  "#3760": 1,
-  "#3801": 1,
-  "#3810": 1,
-  "#3823": 1,
-  "#3863": 1,
-  "#4414": 6,
-  "#5393": 1,
-  "#5482": 1
- },
  "packages/lint/src/lint-liveness-properties.ts": {
   "#11384": 1
- },
- "packages/lint/src/lint-startup-registry-verdict.ts": {
-  "#4769": 1,
-  "#4771": 7,
-  "#4772": 3
- },
- "packages/lint/src/validate-action-body-writes.ts": {
-  "#4271": 1,
-  "#4345": 1
- },
- "packages/lint/src/validate-approval-approvers.ts": {
-  "#3424": 1,
-  "#3508": 1
  },
  "packages/lint/src/validate-component-props.ts": {
   "#5068": 1
@@ -52,23 +25,6 @@
   "#5297": 1,
   "#5322": 3,
   "#5330": 1
- },
- "packages/lint/src/validate-expressions.ts": {
-  "#4343": 1,
-  "#4889": 1,
-  "#6010": 2,
-  "#6146": 1
- },
- "packages/lint/src/validate-flow-template-paths.ts": {
-  "#3475": 2,
-  "#3810": 3
- },
- "packages/lint/src/validate-flow-trigger-readiness.ts": {
-  "#3427": 3,
-  "#3457": 1
- },
- "packages/lint/src/validate-hook-body-writes.ts": {
-  "#4271": 3
  },
  "packages/lint/src/validate-nav-object-servability.ts": {
   "#7912": 1
@@ -86,10 +42,6 @@
  },
  "packages/lint/src/validate-react-page-props.ts": {
   "#5583": 1
- },
- "packages/lint/src/validate-readonly-flow-writes.ts": {
-  "#2948": 1,
-  "#3042": 1
  },
  "packages/lint/src/validate-rule-schema-formats.ts": {
   "#5029": 1

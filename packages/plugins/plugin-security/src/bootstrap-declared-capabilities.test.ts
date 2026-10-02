@@ -36,8 +36,10 @@ function makeQl(declared: any[] = []) {
       if (object !== 'sys_capability') return [];
       const where = q?.where ?? {};
       // [#8470] A `null` comparand is IS NULL, not `=== null`: `driver-sql`
-      // compiles `{ field: null }` to `IS NULL`, `driver-memory`'s matcher uses
-      // `value == condition`, and MongoDB matches null-or-missing — none of them
+      // compiles `{ field: null }` to `IS NULL`, `driver-memory`'s query path
+      // matches null-or-missing through mingo (its reference matcher, retired by
+      // commit `8fec76a2b`, used `value == condition`), and MongoDB matches
+      // null-or-missing — none of them
       // is strict equality against an ABSENT key. `bootstrapSystemCapabilities`
       // (called by several cases below) scopes its curated lookup with
       // `organization_id: null`, which strict `===` would make unsatisfiable

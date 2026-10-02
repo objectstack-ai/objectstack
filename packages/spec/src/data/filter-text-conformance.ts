@@ -339,8 +339,9 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
   // `$regex` and that driver answers them too. #6682\'s second half then took
   // the same flag off driver-memory\'s query path and off the rule its analytics
   // face borrows, which was the last folding face on the platform. (`formula`
-  // and driver-memory\'s reference matcher measured case-exact both then and
-  // now — they are what the other faces were moved onto.)
+  // measured case-exact both then and now, and driver-memory\'s reference
+  // matcher did until commit `8fec76a2b` retired it — they are what the other
+  // faces were moved onto.)
   {
     name: '$contains is case-SENSITIVE — a lower-case comparand misses the upper-case row',
     filter: { name: { $contains: 'acme' } },

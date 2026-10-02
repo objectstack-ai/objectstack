@@ -322,7 +322,7 @@ const attributableTo = collectEncryptedSpecifierRefs([smsManifest]);
 describe('#8103 reachability fact 1 — handle ids are minted per encrypt() call', () => {
   it('mints a fresh sec_ id per encrypt, and rotateKey keeps the id STABLE', async () => {
     const provider = new LocalCryptoProvider();
-    const ctx = { namespace: 'sms', key: 'twilio_auth_token' };
+    const ctx = { scope: 'settings', namespace: 'sms', key: 'twilio_auth_token' } as const;
 
     const a = await provider.encrypt('token-a', ctx);
     const b = await provider.encrypt('token-a', ctx); // same plaintext, same ctx

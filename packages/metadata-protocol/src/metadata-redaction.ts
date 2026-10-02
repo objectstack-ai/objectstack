@@ -66,6 +66,7 @@
  * belongs on that list first; that file is `packages/spec`'s to change.
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import type { MetadataTypeRedactor } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body primitives — the object set,
@@ -773,4 +774,280 @@ export function storedMetadataBodyPredicateRefusal(
     if (namesBody(opts.filterFields)) return make('filter', 'filter');
     if (namesBody(opts.sortFields)) return make('sort', 'sort');
     return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// The stored CONTENT HASH of the same rows: served keyed, never evaluated (#21207)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#21207] The columns of a {@link isStoredMetadataBodyObject} table that hold
+ * a stored CONTENT HASH of the body: `checksum` (both tables) and the history
+ * table's `previous_checksum` (the parent's hash).
+ *
+ * The hash is the canonical SHA-256 of the WHOLE stored body — withheld
+ * credential material included — and it stays that at rest: the repository's
+ * canonical-hashing invariant, the optimistic lock and the parent links are
+ * untouched (maintainer ruling B on #21207). What changes is what a caller is
+ * given. Served raw beside the projected body, it is an OFFLINE VERIFIER: a
+ * guess at the withheld material, hashed together with the served rest of the
+ * body, reproduces it exactly when the guess is right. Evaluated as a
+ * predicate, it is an online one. So every door that serves it serves the
+ * crypto provider's KEYED digest of the stored value ({@link servedContentHash}),
+ * every door that takes a version token back compares it in that same form, and
+ * a filter, sort, grouping or search on it is refused
+ * ({@link storedMetadataHashEvaluateRefusal}, {@link storedMetadataSearchRefusal}).
+ *
+ * Kept beside the body column's family primitives' consumer rather than in
+ * `@objectstack/spec/kernel` with them: that is the family's natural home, but
+ * outside the surface this card claimed. The surfaces that cannot import this
+ * package (`@objectstack/mcp`, `@objectstack/plugin-audit`,
+ * `@objectstack/service-analytics`) each name the same two columns, and
+ * `stored-metadata-body-family.pin.test.ts` pins this list to the columns the
+ * two object definitions declare.
+ */
+export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
+
+/**
+ * [#21207] The history table's free-text change note — which can QUOTE a stored
+ * content hash: with no message of its own, a draft's promotion recorded
+ * `publish draft (hash <the draft's stored hash>)`. The protocol now always
+ * states a hash-free message, so no new row carries one; rows already written
+ * do, so the column is served with each quoted hash in its served form
+ * ({@link serveStoredHashTokens}) and is never evaluated, exactly as the hash
+ * columns are.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
+
+/** Every column of a stored-metadata table that holds or can quote a stored content hash. */
+export const STORED_METADATA_HASH_BEARING_COLUMNS: readonly string[] = Object.freeze([
+    ...STORED_METADATA_HASH_COLUMNS,
+    STORED_METADATA_HASH_NOTE_COLUMN,
+]);
+
+/** An unkeyed content hash quoted in free text (the keyed form's `hmac-sha256:` prefix is not one). */
+const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
+
+/**
+ * Free text with every quoted stored content hash replaced by its served form:
+ * the keyed digest, or `(withheld)` when the caller holds no digest. Text that
+ * quotes none is returned as is.
+ */
+export async function serveStoredHashTokens(text: string, digest: StoredHashDigest | undefined): Promise<string> {
+    const quoted = text.match(QUOTED_STORED_HASH);
+    if (!quoted) return text;
+    const served = new Map<string, string>();
+    for (const stored of new Set(quoted)) served.set(stored, digest ? await digest(stored) : '(withheld)');
+    return text.replace(QUOTED_STORED_HASH, (stored) => served.get(stored) as string);
+}
+
+/** The keyed-digest primitive of the registered crypto provider (`ICryptoProvider.keyedDigest`). */
+export type StoredHashDigest = (plain: string) => Promise<string>;
+
+/**
+ * [#21207] The process key {@link ephemeralStoredHashDigest} keys under: 32
+ * random bytes, drawn on first use, held only in this module, never written,
+ * logged or served.
+ */
+let ephemeralDigestKey: Buffer | undefined;
+
+/**
+ * [#21207] The keyed digest the `/meta` doors serve and compare metadata
+ * version tokens under while NO crypto provider is registered: `hmac-sha256:`
+ * plus hex, the provider contract's own output shape, under a process-scoped
+ * ephemeral key.
+ *
+ * Why a key and not "serve nothing": a version token is an optimistic lock.
+ * Serving none hands every caller the same empty token, and a client that
+ * (rightly) sends no pin for an empty token turns every pinned write into an
+ * unpinned one, so the lock fails OPEN without a word. A token keyed under a
+ * secret nobody outside this process holds keeps the three properties the lock
+ * needs: it differs when the content differs; it is never the unkeyed stored
+ * hash, so it confirms no guess at withheld material offline; and no empty or
+ * withheld value ever equals it.
+ *
+ * What it costs: the key dies with the process. A token held across a restart,
+ * or across the moment a host registers a real provider (the doors read the
+ * provider per use), names no current version and is refused once with
+ * `409 METADATA_CONFLICT`; the next read or receipt serves the current one.
+ * Every protocol in one process shares this key, so per-environment protocols
+ * answer one another's tokens.
+ */
+export const ephemeralStoredHashDigest: StoredHashDigest = async (plain: string): Promise<string> => {
+    ephemeralDigestKey ??= randomBytes(32);
+    return `hmac-sha256:${createHmac('sha256', ephemeralDigestKey).update(plain, 'utf8').digest('hex')}`;
+};
+
+/**
+ * The form a stored content hash is SERVED in: the keyed digest of the stored
+ * value under a server-held key; `null` when nothing is stored (a delete
+ * event, a first version's parent); `undefined` (WITHHELD) when the caller
+ * holds no digest, or when the stored value is not a string this function can
+ * judge. ⛔ Never the stored value itself.
+ *
+ * A failing digest is not caught: a provider that cannot compute it fails the
+ * read rather than serving what it exists to replace.
+ */
+export async function servedContentHash(
+    stored: unknown,
+    digest: StoredHashDigest | undefined,
+): Promise<string | null | undefined> {
+    if (stored === null || stored === undefined) return null;
+    if (typeof stored !== 'string' || !digest) return undefined;
+    return digest(stored);
+}
+
+/**
+ * Serve one row of a stored-metadata table with its content-hash columns in
+ * their served form ({@link servedContentHash}): keyed, `null` kept `null`, and
+ * the column OMITTED when the value is withheld — and, when the caller holds no
+ * digest, both columns omitted outright. A row of any other object, and a row
+ * carrying neither column, is returned by reference.
+ */
+export async function serveStoredMetadataHashColumns<T>(
+    object: string,
+    row: T,
+    digest: StoredHashDigest | undefined,
+): Promise<T> {
+    if (!isStoredMetadataBodyObject(object) || !isPlainRecord(row)) return row;
+    if (!STORED_METADATA_HASH_BEARING_COLUMNS.some((column) => column in row)) return row;
+    const out: Record<string, unknown> = { ...row };
+    for (const column of STORED_METADATA_HASH_COLUMNS) {
+        if (!(column in out)) continue;
+        // No digest: the column is not served at all — a `null` included, so
+        // a reader cannot tell a withheld hash from an absent one either.
+        const served = digest ? await servedContentHash(out[column], digest) : undefined;
+        if (served === undefined) delete out[column];
+        else out[column] = served;
+    }
+    const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+    if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = await serveStoredHashTokens(note, digest);
+    return out as T;
+}
+
+/** {@link serveStoredMetadataHashColumns} over the rows of one read. Non-array input passes through. */
+export async function serveStoredMetadataHashColumnRows<T>(
+    object: string,
+    rows: T[],
+    digest: StoredHashDigest | undefined,
+): Promise<T[]> {
+    if (!Array.isArray(rows) || !isStoredMetadataBodyObject(object)) return rows;
+    return Promise.all(rows.map((row) => serveStoredMetadataHashColumns(object, row, digest)));
+}
+
+/** The content-hash column a field reference reaches — the column, or a dotted path headed by it. */
+function hashColumnOf(field: unknown): string | undefined {
+    if (typeof field !== 'string') return undefined;
+    const head = field.split('.')[0] as string;
+    return STORED_METADATA_HASH_BEARING_COLUMNS.includes(head) ? head : undefined;
+}
+
+/** The columns a refusal on these tables points the caller at instead. */
+const USABLE_COLUMNS = `'${STORED_TYPE_COLUMN}', 'name', 'state' or another scalar column`;
+
+/**
+ * [#21207] The data door's refusal to EVALUATE a content-hash column of a
+ * stored-metadata table — or the history table's change note, which can quote
+ * one ({@link STORED_METADATA_HASH_BEARING_COLUMNS}) — a grouping (whose keys would serve the stored
+ * values), a filter (an online verifier: a guessed hash matches exactly one
+ * row) or a sort (an order over the same values) — or `undefined` when none is
+ * named. Maintainer ruling A on #21207's second execution fork.
+ *
+ * The family's existing body-column refusals' shape, extended to these columns
+ * rather than a second dialect: `INVALID_FIELD` / 400 naming the field, the
+ * object and the offending `param`, judged in the data door's order — grouping,
+ * then filter, then sort — and naming the columns that remain usable. A dotted
+ * path headed by a hash column is caught too.
+ */
+export function storedMetadataHashEvaluateRefusal(
+    object: string,
+    opts: { groupBy?: unknown; filterFields?: readonly unknown[]; sortFields?: readonly unknown[] },
+): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const make = (param: 'groupBy' | 'filter' | 'sort', column: string, position?: string): Error => {
+        const doing = param === 'groupBy' ? 'group' : param;
+        const why = param === 'filter'
+            ? 'a filter on it compares a guess against the stored hash row by row, which confirms the guess'
+            : param === 'groupBy'
+                ? 'a group key would serve the stored value itself'
+                : 'a sort on it orders by the stored values';
+        const err: any = new Error(
+            `Cannot ${doing} '${object}' by '${column}' (${position ?? param}): the query was not run. The `
+            + `'${column}' column ${column === STORED_METADATA_HASH_NOTE_COLUMN
+                ? 'can quote the stored content hash of a metadata body'
+                : 'holds the stored content hash of a metadata body'}, computed over withheld `
+            + `credential material too, so this door serves it only in keyed form; ${why}. `
+            + `${doing === 'group' ? 'Group' : doing === 'filter' ? 'Filter' : 'Sort'} by ${USABLE_COLUMNS} instead.`,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = column;
+        err.fields = [column];
+        err.object = object;
+        err.param = param;
+        return err;
+    };
+    if (Array.isArray(opts.groupBy)) {
+        for (let i = 0; i < opts.groupBy.length; i += 1) {
+            const entry = opts.groupBy[i];
+            const objectForm = isPlainRecord(entry);
+            const column = hashColumnOf(objectForm ? entry.field : entry);
+            if (column) return make('groupBy', column, objectForm ? `groupBy[${i}].field` : `groupBy[${i}]`);
+        }
+    }
+    for (const field of opts.filterFields ?? []) {
+        const column = hashColumnOf(field);
+        if (column) return make('filter', column);
+    }
+    for (const field of opts.sortFields ?? []) {
+        const column = hashColumnOf(field);
+        if (column) return make('sort', column);
+    }
+    return undefined;
+}
+
+/**
+ * [#21207] The columns of a stored-metadata table a `search` never scans: the
+ * body column, the content-hash columns and the change note that can quote one. A search is a substring filter
+ * evaluated server-side over every scanned column, so over these columns it is
+ * the same verifier a filter is — over the stored hash, and over the stored
+ * body (a withheld credential rebuilt by prefix probing) — and the engine's
+ * auto-default search set includes every one of them, since all three are
+ * text columns.
+ */
+export const STORED_METADATA_UNSEARCHABLE_COLUMNS: readonly string[] = Object.freeze([
+    STORED_BODY_COLUMN,
+    ...STORED_METADATA_HASH_BEARING_COLUMNS,
+]);
+
+/**
+ * The refusal for an EXPLICIT search field list (`searchFields`, or the
+ * object-form `search.fields`) on a stored-metadata table that names a column
+ * of {@link STORED_METADATA_UNSEARCHABLE_COLUMNS}, or `undefined`. Same
+ * envelope as the evaluate refusals: `INVALID_FIELD` / 400.
+ */
+export function storedMetadataSearchRefusal(
+    object: string,
+    requested: readonly string[],
+    param: string,
+): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const column = requested.find((name) => STORED_METADATA_UNSEARCHABLE_COLUMNS.includes(name));
+    if (column === undefined) return undefined;
+    const err: any = new Error(
+        `Cannot search '${object}' in '${column}' (${param}): the query was not run. A search evaluates `
+        + `every column it scans row by row, and the '${column}' column holds ${column === STORED_BODY_COLUMN
+            ? 'a stored metadata body with credential material this door withholds'
+            : column === STORED_METADATA_HASH_NOTE_COLUMN
+                ? 'a change note that can quote a stored content hash, which this door serves only in keyed form'
+                : 'the stored content hash of a metadata body, which this door serves only in keyed form'}, so a `
+        + `search over it would answer guesses about withheld values. Search ${USABLE_COLUMNS} instead.`,
+    );
+    err.code = 'INVALID_FIELD';
+    err.status = 400;
+    err.field = column;
+    err.fields = [column];
+    err.object = object;
+    err.param = param;
+    return err;
 }

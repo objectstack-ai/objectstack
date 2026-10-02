@@ -25,6 +25,8 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, sta
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The parser the hook-budget block at the bottom of this file reads THIS file with.
+import ts from 'typescript';
 // The registry itself, so the denominator block at the bottom of this file can
 // hold the gate's output answerable to it rather than to a copied list (#18133).
 import {
@@ -43,6 +45,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '../..');
 const GATE = path.join(HERE, 'check-liveness.mts');
 const LEDGERS = path.join(SPEC, 'liveness');
+
+// The budget the gate-spawning CASES run under: `testTimeout` in vitest.config.ts
+// (60_000 in both projects). A HOOK runs under `hookTimeout` instead, vitest's
+// 10_000 ms default, which that config does not set — so a hook that spawns the
+// whole gate names the case budget itself (#21421). A literal, not an import: the
+// config cannot be imported from a test (its top level runs the filter preflights
+// against process.argv) and exports no constant. The last block of this file holds
+// this value at or above the config's, so the two cannot drift apart unseen.
+const GATE_BUDGET_MS = 60_000;
 
 // A repo-rooted path shaped exactly like a real pointer (so `evidence.mts`
 // extracts it) that this repo has never contained.
@@ -1398,6 +1409,8 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
   let tmp: string;
   let carrier: Carrier;
 
+  // The one hook in this file that spawns the gate: it runs under the case budget
+  // (GATE_BUDGET_MS, last argument), not vitest's 10 s `hookTimeout` default (#21421).
   beforeAll(() => {
     tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-tombstone-'));
 
@@ -1428,7 +1441,7 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
       enumerated: enumerated.length,
       eligible: eligible.length,
     };
-  });
+  }, GATE_BUDGET_MS);
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
   /**
@@ -1669,5 +1682,96 @@ describe('check:liveness — a `live` row may not opt into `authorWarn` (#21127)
     expect(status, output).toBe(1);
     expect(output).toContain(`    ${carrier.type}/${carrier.path}\n`);
     expect(output.split('\n').filter((l) => l.startsWith('✗')), output).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A hook that spawns the gate runs under the case budget (#21421)
+//
+// The cases above spawn the whole gate under `testTimeout`; a hook spawning the
+// same gate defaults to `hookTimeout` (10 s), so a 5 to 9 s run had 1 to 5 s of
+// margin and a loaded CI shard spent it — the `beforeAll` of the #19062 block
+// timed out and its cases were skipped behind it. This reads THIS file's own
+// source for every lifecycle hook whose callback reaches `spawnSync`, directly
+// or through another function here, and holds each to `GATE_BUDGET_MS` as its
+// timeout argument. Parsed rather than matched as text, so a hook is judged by
+// its call, never by what a comment or this block's own prose happens to spell.
+// ---------------------------------------------------------------------------
+describe('check:liveness — a hook that spawns the gate carries the case budget (#21421)', () => {
+  const HOOKS = new Set(['beforeAll', 'beforeEach', 'afterAll', 'afterEach']);
+  const self = fileURLToPath(import.meta.url);
+  const sf = ts.createSourceFile(self, readFileSync(self, 'utf8'), ts.ScriptTarget.Latest, true);
+
+  const calleeOf = (n: ts.Node): string => (ts.isCallExpression(n) && ts.isIdentifier(n.expression) ? n.expression.text : '');
+  const callsAny = (root: ts.Node, names: ReadonlySet<string>): boolean => {
+    let hit = false;
+    const walk = (n: ts.Node): void => {
+      if (hit) return;
+      if (names.has(calleeOf(n))) hit = true;
+      else ts.forEachChild(n, walk);
+    };
+    walk(root);
+    return hit;
+  };
+
+  // Every function in this file that reaches `spawnSync`, to a fixpoint.
+  const bodies = new Map<string, ts.Node>();
+  const collect = (n: ts.Node): void => {
+    if (ts.isFunctionDeclaration(n) && n.name && n.body) bodies.set(n.name.text, n.body);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer
+      && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))) {
+      bodies.set(n.name.text, n.initializer.body);
+    }
+    ts.forEachChild(n, collect);
+  };
+  collect(sf);
+  const spawners = new Set(['spawnSync']);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, body] of bodies) {
+      if (!spawners.has(name) && callsAny(body, spawners)) {
+        spawners.add(name);
+        grew = true;
+      }
+    }
+  }
+
+  const hooks: { hook: string; line: number; spawns: boolean; timeout: string | null }[] = [];
+  const visit = (n: ts.Node): void => {
+    if (HOOKS.has(calleeOf(n))) {
+      const [fn, timeout] = (n as ts.CallExpression).arguments;
+      hooks.push({
+        hook: calleeOf(n),
+        line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1,
+        spawns: fn !== undefined && callsAny(fn, spawners),
+        timeout: timeout === undefined ? null : timeout.getText(sf),
+      });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  // The scan must be capable of finding something: a refactor that renames
+  // `runGate` or the hooks would otherwise leave the next case green over nothing.
+  it('sees the gate runner and this file\'s hooks', () => {
+    expect(spawners.has('runGate'), 'the scan no longer recognises runGate as reaching spawnSync').toBe(true);
+    expect(hooks.length, 'the scan found no lifecycle hook in this file').toBeGreaterThan(0);
+  });
+
+  it('every hook whose callback reaches the gate passes GATE_BUDGET_MS as its timeout', () => {
+    const unbudgeted = hooks
+      .filter((h) => h.spawns && h.timeout !== 'GATE_BUDGET_MS')
+      .map((h) => `${h.hook} at line ${h.line}: timeout argument ${h.timeout ?? 'absent (vitest hookTimeout default, 10 s)'}`);
+    expect(
+      unbudgeted,
+      'a hook that spawns the gate must run under the case budget — pass GATE_BUDGET_MS as its second argument',
+    ).toEqual([]);
+  });
+
+  it('GATE_BUDGET_MS is not below the testTimeout vitest.config.ts gives the cases', () => {
+    const config = readFileSync(path.join(SPEC, 'vitest.config.ts'), 'utf8');
+    const budgets = [...config.matchAll(/\btestTimeout:\s*([\d_]+)/g)].map((m) => Number((m[1] ?? '').replaceAll('_', '')));
+    expect(budgets.length, 'no testTimeout found in vitest.config.ts').toBeGreaterThan(0);
+    expect(GATE_BUDGET_MS, `vitest.config.ts testTimeout values: ${budgets.join(', ')}`).toBeGreaterThanOrEqual(Math.max(...budgets));
   });
 });

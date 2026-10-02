@@ -52,9 +52,10 @@ export interface DatasourceSecretBinderDeps {
    * Namespace recorded on the secret row and used as the `CryptoContext`
    * namespace (default `'datasource'`). This is the datasource producer's
    * own vocabulary, **not** a settings namespace — the three producers of
-   * `sys_secret` rows share one flat `(namespace, key)` space and the pair
-   * does not attribute a row to a producer. See `CryptoContext` in
-   * `@objectstack/spec`.
+   * `sys_secret` rows draw `(namespace, key)` from uncoordinated
+   * vocabularies and the pair does not attribute a row to a producer. The
+   * binder's `CryptoContext.scope` (`'datasource_credential'`, on bind and
+   * resolve alike) is what does. See `CryptoContext` in `@objectstack/spec`.
    */
   namespace?: string;
 }
@@ -96,7 +97,11 @@ export function createDatasourceSecretBinder(deps: DatasourceSecretBinderDeps): 
     async bind(input, hint) {
       const namespace = input.namespace ?? defaultNamespace;
       const key = input.key ?? hint.name;
-      const handle: CryptoHandle = await cryptoProvider.encrypt(input.value, { namespace, key });
+      const handle: CryptoHandle = await cryptoProvider.encrypt(input.value, {
+        scope: 'datasource_credential',
+        namespace,
+        key,
+      });
       await engine.insert('sys_secret', {
         id: handle.id,
         namespace,
@@ -129,8 +134,9 @@ export function createDatasourceSecretBinder(deps: DatasourceSecretBinderDeps): 
         const rows = (Array.isArray(result) ? result : (result as { data?: unknown[] })?.data) ?? [];
         const row = rows[0] as SecretRow | undefined;
         if (!row?.ciphertext) return undefined;
-        // Reconstruct the handle and decrypt under the same (namespace,key)
-        // AAD the row was sealed with — a mismatch fails authentication.
+        // Reconstruct the handle and decrypt under the same
+        // (scope, namespace, key) AAD the row was sealed with — a mismatch,
+        // including a row another producer sealed, fails authentication.
         return await cryptoProvider.decrypt(
           {
             id: row.id,
@@ -139,7 +145,7 @@ export function createDatasourceSecretBinder(deps: DatasourceSecretBinderDeps): 
             version: row.version,
             ciphertext: row.ciphertext,
           },
-          { namespace: row.namespace, key: row.key },
+          { scope: 'datasource_credential', namespace: row.namespace, key: row.key },
         );
       } catch {
         // Missing row / unreadable engine / decrypt failure (e.g. rotated dev

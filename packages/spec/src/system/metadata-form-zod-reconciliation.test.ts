@@ -325,6 +325,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'requires',
+    why: "platform-written, never authored — the schema's own words: `derived from the source at save — omit it`. On an `html` / `jsx` page, on a server with the deployment's SDUI manifest, the save door stamps the compiled list and refuses a written list that disagrees (`page-requires-disagrees-with-source`); on `react`, `full` and `slotted` pages nothing derives it, and its one reader is the load report (a warning; the page is still served); and the Studio page editor drops the key on every save. A control would invite the list the describe tells every author to omit",
+  },
+  {
+    kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
     key: 'columnState',
@@ -397,13 +404,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'picklist',
     why: 'declared, not enforced yet — liveness verdict `planned` (the server-side resolution that serves a picklist-bound field its options is not landed). No offer until it is enforced; the field designer offering a picklist is a later Studio phase',
-  },
-  {
-    kind: 'omit',
-    type: 'page',
-    path: ROOT_PATH,
-    key: 'requires',
-    why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0080: inferred at compile time; save/load enforcement of plugin presence is deferred). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
   },
   {
     kind: 'omit',

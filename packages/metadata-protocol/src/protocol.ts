@@ -193,6 +193,18 @@ import {
     storedMetadataBodyGroupingRefusal,
     storedMetadataBodyPredicateRefusal,
     storedMetadataBodyProjection,
+    // [#21207] The stored content hash of the same rows: served keyed, never
+    // evaluated — see `STORED_METADATA_HASH_COLUMNS`.
+    ephemeralStoredHashDigest,
+    isStoredMetadataBodyObject,
+    servedContentHash,
+    serveStoredHashTokens,
+    serveStoredMetadataHashColumnRows,
+    serveStoredMetadataHashColumns,
+    STORED_METADATA_UNSEARCHABLE_COLUMNS,
+    storedMetadataHashEvaluateRefusal,
+    storedMetadataSearchRefusal,
+    type StoredHashDigest,
 } from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
@@ -2604,6 +2616,28 @@ function declaresClientRefusal(err: unknown): boolean {
 }
 
 /**
+ * [#21207] A caller's version token that names no current stored head, found by
+ * the protocol's own KEYED comparison before the repository is asked (see
+ * {@link ObjectStackProtocolImplementation.storedParentForToken}).
+ *
+ * A `ConflictError`, so each door's existing conflict branch — the 409
+ * `METADATA_CONFLICT` and its decision-audit row — handles it unchanged; told
+ * apart from the repository's own race conflict because its `expectedParent`
+ * is the CALLER's token rather than a stored hash. The message is replaced:
+ * the base class prints both values, and one of them is the stored hash.
+ */
+class InboundVersionConflictError extends ConflictError {
+    constructor(
+        ref: { org: string; type: string; name: string },
+        token: string,
+        currentStored: string | null,
+    ) {
+        super(ref as ConstructorParameters<typeof ConflictError>[0], token, currentStored);
+        this.message = `Conflict on ${ref.type}/${ref.name}: the version token sent is not the current version`;
+    }
+}
+
+/**
  * [#8136] The client-facing sentence for a failed overlay delete: the caller's
  * own refusal when they declared one, and otherwise a stable line that names
  * the operation and quotes nothing.
@@ -4649,6 +4683,48 @@ export interface MetadataAuthoringGateContext {
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
 
 /**
+ * [#20790] A metadata type's WRITE-ONLY credential channel — where the
+ * credentials its bodies carry are stored instead of in the body, on the
+ * platform's one secret seam (#7799: a `secret`-typed field the engine
+ * encrypts, masks on every read and dereferences only through
+ * `resolveSecretField`). Registered per type by the domain plugin that owns
+ * the type's credential-location table (the automation plugin holds `flow`'s),
+ * beside its authoring gate.
+ *
+ * Every write that lands a body at rest consults it:
+ *  - `saveMetaItem` calls {@link store} immediately before the put, after the
+ *    carry-forward, and persists what it returns;
+ *  - the runtime authoring gate reads {@link heldPaths} as restored positions,
+ *    on an active save and on the draft → active promotion;
+ *  - a restore (rollback, revert) stores {@link strip}'s body.
+ *
+ * ⛔ Not a second secret mechanism and not a per-door redaction: the read
+ * projection stays the type's redactor; this only decides where a credential
+ * is STORED.
+ */
+export interface MetadataCredentialChannel {
+    /**
+     * Move every explicit credential in `body` into the channel for
+     * `(name, state)` and return the body without any — what is stored. An
+     * absent credential means "unchanged". THROWS (with an ADR-0112
+     * `code`/`status`) to refuse the save; nothing may have been put then.
+     */
+    store(args: { name: string; state: 'draft' | 'active'; body: unknown }): Promise<unknown>;
+    /**
+     * The positions in `item` (dotted, item-relative — `redactedKeys`'
+     * spelling) whose credential is withheld from the body and held by the
+     * channel, so the gate reads them as present. `state: 'draft'` for a draft
+     * being promoted.
+     */
+    heldPaths(args: { name: string; state: 'draft' | 'active'; item: unknown }): Promise<readonly string[]>;
+    /**
+     * The body a restore stores: every credential removed, and nothing written
+     * to the channel — it keeps its current credential.
+     */
+    strip(body: unknown): unknown;
+}
+
+/**
  * Which authoring channel a kernel's metadata writes arrive on (#6710).
  *
  * ADR-0005 carves out "the package author's own bootstrap channel" from the
@@ -4908,6 +4984,9 @@ export class ObjectStackProtocolImplementation implements
      */
     private authoringGates = new Map<string, MetadataAuthoringGate>();
 
+    /** [#20790] Per-type write-only credential channels — see {@link registerCredentialChannel}. */
+    private credentialChannels = new Map<string, MetadataCredentialChannel>();
+
     /**
      * Once-per-process dedupe for stored-row conversion notices
      * (`conversionId|type|name`). `getMetaItems`/`getMetaItem` re-read
@@ -5156,6 +5235,35 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20790] Register the write-only credential channel for a metadata type
+     * (see {@link MetadataCredentialChannel}). Called by the domain plugin that
+     * owns the type's credentials — the automation plugin registers `flow`'s.
+     * Singular or plural type names both resolve; one channel per type, a
+     * second registration replaces the first (idempotent re-init).
+     */
+    registerCredentialChannel(type: string, channel: MetadataCredentialChannel): void {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        this.credentialChannels.set(singular, channel);
+    }
+
+    /** [#20790] The registered credential channel of `type`, if any. */
+    private credentialChannelFor(type: string): MetadataCredentialChannel | undefined {
+        return this.credentialChannels.get(PLURAL_TO_SINGULAR[type] ?? type);
+    }
+
+    /**
+     * [#20790] R2 — the body-derivation a restore passes to
+     * `repo.restoreVersion`: the type's channel strip, so a restored version
+     * that still holds a credential (one written before the move) never puts
+     * it back at rest, and the channel keeps its current one. `undefined` for a
+     * type with no channel — the history body is restored byte for byte.
+     */
+    private restoredBodyDerivation(type: string): ((body: unknown) => unknown) | undefined {
+        const channel = this.credentialChannelFor(type);
+        return channel ? (body) => channel.strip(body) : undefined;
+    }
+
+    /**
      * Run the registered authoring gate for an about-to-persist body (#3050).
      * No-op when no gate is registered for the type. A gate throw PROPAGATES
      * (with its status/code) — that is the contract: the write is rejected
@@ -5259,9 +5367,10 @@ export class ObjectStackProtocolImplementation implements
          * [#20611] How to learn the positions in `body` that this write's
          * carry-forward will fill from the stored row — the credentials the read
          * path withheld, which a body saved back after a read arrives without.
-         * Stated by `saveMetaItem`, the one door whose body can arrive that way;
-         * the draft→active promotion judges the stored draft row, which already
-         * holds what that draft's own save carried forward, so it states nothing.
+         * Stated by `saveMetaItem`, the one door whose body can arrive that way,
+         * and [#20790] by the draft→active promotion for a type with a
+         * write-only credential channel: the stored draft row holds what its own
+         * save carried forward, but not what that save moved into the channel.
          *
          * A function, called only once the gate is known to run (after the
          * early returns below): a draft save, the package-author channel and
@@ -7777,8 +7886,16 @@ export class ObjectStackProtocolImplementation implements
             state: 'active',
             packageId: args.packageId,
         });
-        if (!body) return [];
-        return redactedPathsCarriedForward(args.type, args.item, body);
+        const carried = body ? redactedPathsCarriedForward(args.type, args.item, body) : [];
+        // [#20790] A credential the write-only channel holds is withheld from
+        // the stored body too, so the carry-forward restores nothing there —
+        // and it is still present: the channel keeps it across this save.
+        const held = await this.credentialChannelFor(args.type)?.heldPaths({
+            name: args.name,
+            state: 'active',
+            item: args.item,
+        });
+        return held && held.length > 0 ? [...new Set([...carried, ...held])] : carried;
     }
 
     /**
@@ -8281,6 +8398,13 @@ export class ObjectStackProtocolImplementation implements
                 // through), and re-deriving here from the row this call just
                 // read is a byte-identical, never-stale restatement of the
                 // same items — not a duplicate.
+                //
+                // [#21334] An upsert by name replaces whatever the merge seated
+                // under that name, so the name has to be one the container may
+                // write. {@link expandRuntimeViewContainer} decides it: on
+                // another package's object every name a container expands
+                // derives from the container's own name, never one of that
+                // package's `<object>.<key>` names.
                 if (isView) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
@@ -11058,6 +11182,62 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21207] A `search` on a stored-metadata table never scans its body or
+     * content-hash columns ({@link STORED_METADATA_UNSEARCHABLE_COLUMNS}).
+     *
+     * A search is a substring filter the engine evaluates over every column it
+     * scans, and with no `searchableFields` declared it scans every text-like
+     * column — the stored body and both stored hashes among them. Over those
+     * it is the verifier the filter refusals close: a guessed hash, or a guessed
+     * prefix of withheld credential material, returns the row exactly when it
+     * is right. So an explicit field list naming one is refused
+     * (`INVALID_FIELD` / 400, the evaluate refusals' envelope), and a search
+     * that names none is handed to the engine with the object's searchable set
+     * minus those columns — the engine intersects an override with that set and
+     * never widens it. Runs after {@link assertSearchFieldsAreSearchable}, so a
+     * name that is not searchable at all keeps its own answer.
+     */
+    private narrowStoredMetadataSearch(
+        object: string,
+        options: Record<string, any>,
+        wireSpelling: Record<string, string>,
+    ): void {
+        if (!isStoredMetadataBodyObject(object)) return;
+        const objectForm = options.search !== null && typeof options.search === 'object';
+        const [explicit, param] = options.searchFields != null
+            ? [options.searchFields, wireSpelling.searchFields ?? 'searchFields']
+            : objectForm && options.search.fields != null
+                ? [options.search.fields, wireSpelling.search ?? 'search']
+                : [undefined, ''];
+        const names: string[] = typeof explicit === 'string'
+            ? explicit.split(',').map((s: string) => s.trim()).filter(Boolean)
+            : Array.isArray(explicit) ? explicit.filter((f: unknown): f is string => typeof f === 'string') : [];
+        if (names.length > 0) {
+            const refusal = storedMetadataSearchRefusal(object, names, param);
+            if (refusal) throw refusal;
+            return;
+        }
+        if (options.search == null) return;
+        const gate = this.resolveQueryFields(object);
+        // No field map: the engine has none to expand a search over either.
+        if (!gate) return;
+        const { allowed } = resolveSearchFieldResolution({
+            fields: gate.fields,
+            searchableFields: gate.schema?.searchableFields,
+            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
+        });
+        const narrowed = allowed.filter((field) => !STORED_METADATA_UNSEARCHABLE_COLUMNS.includes(field));
+        if (narrowed.length === 0) {
+            // An empty override is ABSENT to the engine, which would then scan
+            // the whole default set — these columns included. Refuse instead.
+            const refusal = storedMetadataSearchRefusal(object, allowed, wireSpelling.search ?? 'search');
+            if (refusal) throw refusal;
+            return;
+        }
+        options.searchFields = narrowed;
+    }
+
+    /**
      * [#4254] GROUP-BY axis. A grouping target the object does not have is
      * refused (`400 INVALID_FIELD`); a grouping target the spec cannot read is
      * refused as a shape (`400 INVALID_QUERY`).
@@ -11585,6 +11765,9 @@ export class ObjectStackProtocolImplementation implements
                 request.object, (options.search as any).fields, wireSpelling.search ?? 'search',
             );
         }
+        // [#21207] …and on a stored-metadata table a search never scans the body
+        // or content-hash columns: refused when named, narrowed away otherwise.
+        this.narrowStoredMetadataSearch(request.object, options, wireSpelling);
 
         // Boolean fields
         for (const key of ['distinct', 'count']) {
@@ -11710,13 +11893,22 @@ export class ObjectStackProtocolImplementation implements
             ? (options.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) =>
                   collectFilterFieldKeys(a?.filter))
             : [];
-        const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, {
-            filterFields: [...collectFilterFieldKeys(options.where), ...aggregationFilterFields],
-            sortFields: Array.isArray(options.orderBy)
-                ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
-                : [],
-        });
+        const filterFields = [...collectFilterFieldKeys(options.where), ...aggregationFilterFields];
+        const sortFields = Array.isArray(options.orderBy)
+            ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
+            : [];
+        const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, { filterFields, sortFields });
         if (bodyPredicateRefusal) throw bodyPredicateRefusal;
+        // [#21207] The same three shapes on the stored CONTENT-HASH columns
+        // (maintainer ruling A on the second execution fork): a group key would
+        // serve the stored hash, a filter on it is an online verifier, a sort
+        // orders by it. Refused in the body column's envelope, before the engine.
+        const hashEvaluateRefusal = storedMetadataHashEvaluateRefusal(request.object, {
+            groupBy: options.groupBy,
+            filterFields,
+            sortFields,
+        });
+        if (hashEvaluateRefusal) throw hashEvaluateRefusal;
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
@@ -11814,10 +12006,18 @@ export class ObjectStackProtocolImplementation implements
         // projection named only the body, and taken back off before serving.
         const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
         if (bodyProjection.addedType) options.fields = bodyProjection.fields;
-        const records = redactStoredMetadataRows(
+        // [#21207] …and its stored CONTENT HASH (`checksum`, `previous_checksum`)
+        // is served in keyed form — never the stored value, which beside the
+        // projected body confirms a guess at the withheld material offline —
+        // under the provider's key, or the process-scoped ephemeral one.
+        const records = await serveStoredMetadataHashColumnRows(
             request.object,
-            await this.engine.find(request.object, options),
-            { dropType: bodyProjection.addedType },
+            redactStoredMetadataRows(
+                request.object,
+                await this.engine.find(request.object, options),
+                { dropType: bodyProjection.addedType },
+            ),
+            this.storedHashDigest(),
         );
         // Pagination metadata. When a `limit` is present the response is a single
         // page, so `records.length` is the page size — NOT the match total. Run a
@@ -11942,7 +12142,13 @@ export class ObjectStackProtocolImplementation implements
             return {
                 object: request.object,
                 id: request.id,
-                record: redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
+                // [#21207] Same served form as the list path: the content-hash
+                // columns keyed.
+                record: await serveStoredMetadataHashColumns(
+                    request.object,
+                    redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
+                    this.storedHashDigest(),
+                ),
             };
         }
         throw recordNotFoundError(request.object, request.id);
@@ -15640,6 +15846,101 @@ export class ObjectStackProtocolImplementation implements
         await this.recordMetadataAudit(ObjectStackProtocolImplementation.optimisticConflictAuditEntry(args));
     }
 
+    // -----------------------------------------------------------------------
+    // [#21207] The stored content hash, as the `/meta` doors serve and take it
+    // -----------------------------------------------------------------------
+    //
+    // Maintainer ruling B on #21207: the stored content hash of a metadata body
+    // stays the canonical SHA-256 at rest — the repository contract, its
+    // producers and the parent links are untouched — but no door hands it out.
+    // It is a hash over the WHOLE stored body, withheld credential material
+    // included, so beside the projected body it confirms a guess at that
+    // material offline. Every door that serves it serves a keyed digest of it
+    // (the crypto provider's, or with none registered a process-scoped
+    // ephemeral key's); every door that takes a version token back compares the
+    // token in that same form and hands the STORED value to the repository.
+
+    /**
+     * The keyed digest the doors serve and compare under: the registered crypto
+     * provider's, read from the engine at the moment of use — a host registers
+     * the provider AFTER the kernel starts, so a value read once at
+     * construction would answer "none" for good — and, while none is registered
+     * (or the host engine has no such accessor), {@link ephemeralStoredHashDigest}.
+     *
+     * ⛔ Never `undefined`: a door with no key would serve no token, every
+     * caller would then hold the same empty one, and a client that sends no pin
+     * for an empty token would turn every pinned write into an unpinned one —
+     * the optimistic lock failing OPEN.
+     */
+    private storedHashDigest(): StoredHashDigest {
+        const accessor = this.engine?.getKeyedDigest;
+        const provider: StoredHashDigest | undefined =
+            typeof accessor === 'function' ? accessor.call(this.engine) : undefined;
+        return provider ?? ephemeralStoredHashDigest;
+    }
+
+    /**
+     * A write receipt's `version` — the version token a caller sends back as
+     * `If-Match` — for a write whose stored content hash is `stored`: its keyed
+     * digest ({@link storedHashDigest}). Never empty, never the stored value.
+     */
+    private async receiptVersion(stored: string): Promise<string> {
+        return this.storedHashDigest()(stored);
+    }
+
+    /**
+     * Resolve a caller's version token to the STORED head it names, for a write
+     * whose current stored head is `currentStored`: the token must equal the
+     * keyed digest of that head, and the stored value is what the repository's
+     * own optimistic lock then compares. `null` keeps its meaning ("expect no
+     * row") and carries no hash. Anything else — the raw stored hash a pre-keying
+     * client still holds, a stale token, an empty or withheld token, a token
+     * keyed before a restart or before a provider was registered — is an
+     * {@link InboundVersionConflictError}, which the door's conflict branch
+     * answers 409. ⛔ A sent token is never read as "no pin".
+     */
+    private async storedParentForToken(
+        ref: { org: string; type: string; name: string },
+        token: string | null,
+        currentStored: string | null,
+    ): Promise<string | null> {
+        if (token === null) return null;
+        if (currentStored !== null && token !== '' && (await this.storedHashDigest()(currentStored)) === token) {
+            return currentStored;
+        }
+        throw new InboundVersionConflictError(ref, token, currentStored);
+    }
+
+    /**
+     * The 409 `METADATA_CONFLICT` a door answers for a `ConflictError`, whose
+     * text and attributes carry the SERVED (keyed) form of a stored hash or
+     * none at all — never a stored hash. `subject` names the item, `prefix` is
+     * the door's own first sentence.
+     *
+     *  - a repository race (the stored head moved between the door's read and
+     *    its write): `Expected parent X but current is Y`, both keyed;
+     *  - a caller's token naming no current head: the keyed current head.
+     *
+     * A side with no served form is `(withheld)`; an absent side is `null`.
+     */
+    private async metadataConflictRefusal(err: ConflictError, subject: string, prefix: string): Promise<Error> {
+        const conflict: any = new Error(subject);
+        conflict.code = 'METADATA_CONFLICT';
+        conflict.status = 409;
+        const digest = this.storedHashDigest();
+        const show = (served: string | null | undefined) => (served === undefined ? '(withheld)' : served ?? 'null');
+        const current = await servedContentHash(err.actualHead, digest);
+        if (current !== undefined) conflict.actualHead = current;
+        if (err instanceof InboundVersionConflictError) {
+            conflict.message = `${prefix} The version token sent is not the current version (current is ${show(current)}).`;
+            return conflict;
+        }
+        const expected = await servedContentHash(err.expectedParent, digest);
+        if (expected !== undefined) conflict.expectedParent = expected;
+        conflict.message = `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
+        return conflict;
+    }
+
     /**
      * [#8594] The same row as a VALUE, for the site that must not write it
      * where the conflict is caught — see {@link lockWriteRefusal} for the full
@@ -15669,7 +15970,15 @@ export class ObjectStackProtocolImplementation implements
             ...(args.actor ? { actor: args.actor } : {}),
             source: args.source,
             ...(args.requestId ? { requestId: args.requestId } : {}),
-            note: `expected parent ${args.expectedParent ?? 'null'} but current is ${args.actualHead ?? 'null'}`,
+            // [#21207] Fork three, ruling A: a COPY never carries the stored
+            // content hash — not raw (an offline verifier, at rest and served to
+            // every audit reader), and not keyed either (a copy has no use for a
+            // version token, and a keyed value would die with the key). The
+            // note keeps its sentence and says which side was absent; a value
+            // is `(withheld)`. `os migrate audit-metadata-bodies` rewrites the
+            // notes written before this to exactly this text.
+            note: `expected parent ${args.expectedParent == null ? 'null' : '(withheld)'} `
+                + `but current is ${args.actualHead == null ? 'null' : '(withheld)'}`,
         };
     }
 
@@ -16109,6 +16418,45 @@ export class ObjectStackProtocolImplementation implements
      * expanded under the WRONG key or not at all. The three-deep fallback is
      * kept, unchanged, for every container written before this field was
      * consulted here.
+     *
+     * ## A container on ANOTHER package's object (#21334)
+     *
+     * The spec names every expanded view `<object>.<key>`: a bare `list` (one
+     * that names no key) takes `<object>.default`, a `form` `<object>.form`,
+     * and each named member its own key. For a container of the object's own
+     * package those are that package's names, and it still expands there. For
+     * a container saved under any other name, in another package or in none,
+     * on an object a code package owns, they are the OTHER package's names:
+     * ADR-0005 keys an overlay by its own name, and ADR-0126 rules out a silent
+     * override, so a row named `x` may not replace an item named
+     * `<object>.<key>`. Both callers set each expansion by name — the list's
+     * inline pass over the merged items, the registry's bare key — so the
+     * expansion used to replace the packaged view on the object door (and, on
+     * an unscoped kernel, on the by-name read too), wearing the shadowed
+     * artifact's `_packageId` and protection.
+     *
+     * So, on another package's object, every name the container expands
+     * derives from its own name (triage's ruling, and the seat's answer that
+     * extends it to the keyed members): the bare `list` is
+     * `<object>.<container name>`, and every other member is
+     * `<object>.<container name>.<key>` — the spec's own key rule and its
+     * in-container de-duplication, run under the container's name (see
+     * {@link expandUnderOwnName}). The qualified forms are the ones the spec
+     * accepts for a ViewItem (`ViewItemNameSchema`); the flat container name on
+     * an expanded item is refused there, so the list door would serve it
+     * badged invalid. The view container contract (`view.zod.ts`, ADR-0017
+     * §3.2) names the container after its object and states no arm for a name
+     * another package owns, which is why the arm taken is the container's own
+     * name rather than a refusal at save.
+     *
+     * Such a container adds views to the object; it never declares the
+     * object's default, so none of its views carries `isDefault` — the
+     * switcher's default stays the owning package's (the by-name override and
+     * a user's own saved default are the routes that change it).
+     *
+     * Every expanded item carries the container's OWN package and, where that
+     * package ships an artifact of the same name, that artifact's envelope —
+     * never the envelope of an artifact another package ships.
      */
     private expandRuntimeViewContainer(
         type: string,
@@ -16124,23 +16472,136 @@ export class ObjectStackProtocolImplementation implements
             ?? container?.form?.data?.object
             ?? (typeof container.name === 'string' ? container.name : undefined);
         if (!viewObject) return [];
+        const ownPackageId = this.runtimeViewContainerPackage(type, container, options);
+        const crossPackage = this.isAnotherPackagesObject(viewObject, ownPackageId);
+        const expanded: ReadonlyArray<Record<string, unknown>> = crossPackage
+            ? this.expandUnderOwnName(type, viewObject, container, ownPackageId)
+            : (expandViewContainer(viewObject, container) as unknown as Record<string, unknown>[]);
         const out: Record<string, unknown>[] = [];
-        for (const vi of expandViewContainer(viewObject, container)) {
+        for (const vi of expanded) {
             // Carry the container's package provenance onto each expanded item
             // so the package-disable filter and ADR-0048 artifact scoping judge
             // them by the same owner the container has.
-            const item: Record<string, unknown> = { ...(vi as any) };
-            if (container._packageId !== undefined && item._packageId === undefined) {
-                item._packageId = container._packageId;
-            }
-            const viArtifact = this.lookupArtifactItem(
-                type,
-                vi.name,
-                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
-            );
-            out.push(mergeArtifactProtection(item, viArtifact) as Record<string, unknown>);
+            const item: Record<string, unknown> = { ...vi };
+            // [#21334] Not the object's default: its owning package's is.
+            if (crossPackage) delete item.isDefault;
+            if (ownPackageId !== undefined) item._packageId = ownPackageId;
+            // [#21334] Only the container's own package's artifact lends its
+            // envelope; another package's artifact of this name is not this
+            // item's to wear.
+            const viArtifact = ownPackageId === undefined
+                ? undefined
+                : this.lookupArtifactItem(type, String(item.name), ownPackageId);
+            const ownArtifact = (viArtifact as { _packageId?: unknown } | undefined)?._packageId === ownPackageId
+                ? viArtifact
+                : undefined;
+            out.push(mergeArtifactProtection(item, ownArtifact) as Record<string, unknown>);
         }
         return out;
+    }
+
+    /**
+     * [#21334] The package a runtime view container row belongs to: the
+     * package its row is bound to, else — for a package-less row that is the
+     * name-keyed overlay of a packaged item (ADR-0005), such as a tenant's
+     * overlay of a package's `<object>` container — the package of the
+     * artifact it overlays, which is the slot the package-aware merge seats
+     * it in. `undefined` for a package-less row that overlays nothing.
+     */
+    private runtimeViewContainerPackage(
+        type: string,
+        container: Record<string, any>,
+        options: { packageId?: string | null },
+    ): string | undefined {
+        for (const bound of [container._packageId, options.packageId]) {
+            if (typeof bound === 'string' && bound !== '' && bound !== 'sys_metadata') return bound;
+        }
+        if (typeof container.name !== 'string' || container.name === '') return undefined;
+        const overlaid = (this.lookupArtifactItem(type, container.name) as { _packageId?: unknown } | undefined)
+            ?._packageId;
+        return typeof overlaid === 'string' && overlaid !== '' ? overlaid : undefined;
+    }
+
+    /**
+     * [#21334] True when a code package owns `object` and it is not
+     * `ownPackageId`. The discriminator is `getPackagedObjectOwner`, the same
+     * "does a code package ship this?" test {@link classifyObjectContribution}
+     * asks. A runtime-authored object has no packaged owner, so a container on
+     * one keeps today's `<object>.<key>` names; so does a registry that cannot
+     * answer.
+     */
+    private isAnotherPackagesObject(object: string, ownPackageId: string | undefined): boolean {
+        const registry: any = (this.engine as any)?.registry;
+        const owner = typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(object)
+            : undefined;
+        const ownerPackageId: unknown = owner?.packageId;
+        return typeof ownerPackageId === 'string' && ownerPackageId !== '' && ownerPackageId !== ownPackageId;
+    }
+
+    /**
+     * [#21334] Expand a container on another package's object under its own
+     * name. The spec's expander runs with `<object>.<container name>` as its
+     * base, so every member it knows — today a named `list`, `listViews`,
+     * `formViews`, `form` — comes out as `<object>.<container name>.<key>`,
+     * de-duplicated by the spec's own rule, and a member kind the spec adds
+     * later is placed the same way. Each item's `object` is set back to the
+     * object it binds.
+     *
+     * The bare `list` is lent the container's name as its key, then served as
+     * `<object>.<container name>` itself, its `config` the list as authored.
+     * Where the owning package ships that very name (a container named after
+     * one of that package's keys), it stays at the spelling the spec gave it,
+     * `<object>.<container name>.<container name>`, so it never takes the
+     * packaged view's name.
+     *
+     * A container with no name of its own has nothing to expand under, and
+     * expands nothing.
+     */
+    private expandUnderOwnName(
+        type: string,
+        object: string,
+        container: Record<string, any>,
+        ownPackageId: string | undefined,
+    ): Record<string, unknown>[] {
+        const ownName = typeof container.name === 'string' && container.name !== '' ? container.name : undefined;
+        if (ownName === undefined) return [];
+        const under = `${object}.${ownName}`;
+        const expandAt = under;
+        const list = container.list;
+        const bare = !!list && typeof list === 'object' && !(typeof list.name === 'string' && list.name !== '');
+        const source = bare ? { ...container, list: { ...list, name: ownName } } : container;
+        const bareSpelled = `${expandAt}.${ownName}`;
+        const underIsShipped = this.isShippedByAnotherPackage(type, under, ownPackageId);
+        return expandViewContainer(expandAt, source).map((vi) => {
+            const item: Record<string, any> = { ...vi, object };
+            const name = String(item.name);
+            const fromBare = bare
+                && item.viewKind === 'list'
+                && item.config?.name === ownName
+                && name.startsWith(bareSpelled)
+                && /^(_\d+)?$/.test(name.slice(bareSpelled.length));
+            if (fromBare) {
+                const authored = { ...item.config };
+                delete authored.name;
+                item.config = authored;
+                if (!underIsShipped) {
+                    item.name = under;
+                    delete item._diagnostics;
+                }
+            }
+            return item;
+        });
+    }
+
+    /**
+     * [#21334] True when a code package other than `ownPackageId` ships an
+     * artifact named `name` — the one case where the bare list's own name is
+     * not free to take.
+     */
+    private isShippedByAnotherPackage(type: string, name: string, ownPackageId: string | undefined): boolean {
+        const shipped = (this.lookupArtifactItem(type, name) as { _packageId?: unknown } | undefined)?._packageId;
+        return typeof shipped === 'string' && shipped !== '' && shipped !== ownPackageId;
     }
 
     /**
@@ -16861,7 +17322,13 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
+    // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
+    // receipt served — and is compared in that form (`storedParentForToken`).
+    // `storedParentVersion` is the in-process twin for a caller that read the
+    // STORED content hash itself (`migrateStoredMetadata`): it reaches the
+    // repository as given. ⛔ No transport sets it — every door builds its
+    // request field by field from named inputs, never by spreading a body.
+    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
         // [commit fd6bdf89f] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
         // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
@@ -17745,8 +18212,9 @@ export class ObjectStackProtocolImplementation implements
             org: orgId ?? 'env',
         } as Parameters<typeof repo.put>[0];
         let parentVersion: string | null;
-        if (request.parentVersion !== undefined) {
-            parentVersion = request.parentVersion;
+        if (request.storedParentVersion !== undefined) {
+            // [#21207] An in-process caller that read the stored hash itself.
+            parentVersion = request.storedParentVersion;
         } else {
             // Parent is scoped to the lifecycle we're about to write:
             // a draft's parent is the current draft hash (or null
@@ -17758,7 +18226,22 @@ export class ObjectStackProtocolImplementation implements
                 state: mode === 'draft' ? 'draft' : 'active',
                 packageId: request.packageId ?? null,
             });
-            parentVersion = current?.hash ?? null;
+            const currentStored = current?.hash ?? null;
+            if (request.parentVersion === undefined) {
+                parentVersion = currentStored;
+            } else {
+                // [#21207] A caller's version token names the stored head only
+                // in keyed form; the repository's own lock then runs on the
+                // stored value. A token naming no current head — the raw
+                // stored hash included — is answered here, in this door's own
+                // conflict envelope and with its own audit row.
+                try {
+                    parentVersion = await this.storedParentForToken(ref, request.parentVersion, currentStored);
+                } catch (err: unknown) {
+                    if (err instanceof ConflictError) throw await this.saveConflict(err, request, orgId, writeSource);
+                    throw err;
+                }
+            }
         }
         // [#8154] THE WRITE-PATH INVERSE of the read exits' credential
         // redaction — the half without which this card's fix is a DATA-LOSS
@@ -17805,6 +18288,25 @@ export class ObjectStackProtocolImplementation implements
             packageId: request.packageId ?? null,
             item: request.item,
         });
+        // [#20790] …and then OUT of the body: a type with a write-only
+        // credential channel (`flow`, registered by the automation plugin)
+        // stores every explicit credential there and persists the body without
+        // it — the bytes a read serves. Last, after the carry-forward, so a
+        // credential the stored row still held (one written before the channel
+        // existed) moves with this save instead of being dropped. A refusal
+        // (no crypto provider) throws before the put: nothing is written.
+        // ⚠️ The channel write precedes the put, so a put that then fails (a
+        // version conflict) leaves the new credential in the channel.
+        {
+            const channel = this.credentialChannelFor(singularTypeForRepo);
+            if (channel) {
+                request.item = await channel.store({
+                    name: request.name,
+                    state: mode === 'draft' ? 'draft' : 'active',
+                    body: request.item,
+                });
+            }
+        }
         try {
             const result = await repo.put(ref, request.item, {
                 parentVersion,
@@ -17868,7 +18370,9 @@ export class ObjectStackProtocolImplementation implements
             });
             return {
                 success: true,
-                version: result.version,
+                // [#21207] The version token: the keyed form of the stored
+                // content hash, never the stored value (see `receiptVersion`).
+                version: await this.receiptVersion(result.version),
                 seq: result.seq,
                 ...(projectionApplied ? { projectionApplied } : {}),
                 // [#4717] #4463 D3's advisory half, finally on the response.
@@ -17928,29 +18432,40 @@ export class ObjectStackProtocolImplementation implements
                         : `Saved ${singularTypeForRepo} '${request.name}' (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`),
             };
         } catch (err: any) {
-            if (err instanceof ConflictError) {
-                const conflict = new Error(
-                    `${request.type}/${request.name} has been modified since you loaded it. `
-                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
-                );
-                (conflict as any).code = 'METADATA_CONFLICT';
-                (conflict as any).status = 409;
-                (conflict as any).expectedParent = err.expectedParent;
-                (conflict as any).actualHead = err.actualHead;
-                await this.recordOptimisticConflictAudit({
-                    type: request.type,
-                    name: request.name,
-                    organizationId: orgId,
-                    operation: 'save',
-                    ...(request.actor ? { actor: request.actor } : {}),
-                    source: writeSource,
-                    expectedParent: err.expectedParent,
-                    actualHead: err.actualHead,
-                });
-                throw conflict;
-            }
+            if (err instanceof ConflictError) throw await this.saveConflict(err, request, orgId, writeSource);
             throw err;
         }
+    }
+
+    /**
+     * The save door's 409 for a `ConflictError` — the repository's race, or a
+     * caller's token the keyed comparison refused — plus its decision-audit row.
+     * One builder for both, so the two cannot answer in different words.
+     * [#21207] The text and attributes carry keyed values or none
+     * ({@link metadataConflictRefusal}); the audit row carries no hash at all.
+     */
+    private async saveConflict(
+        err: ConflictError,
+        request: { type: string; name: string; actor?: string },
+        orgId: string | null,
+        writeSource: string,
+    ): Promise<Error> {
+        const conflict = await this.metadataConflictRefusal(
+            err,
+            `${request.type}/${request.name}`,
+            `${request.type}/${request.name} has been modified since you loaded it.`,
+        );
+        await this.recordOptimisticConflictAudit({
+            type: request.type,
+            name: request.name,
+            organizationId: orgId,
+            operation: 'save',
+            ...(request.actor ? { actor: request.actor } : {}),
+            source: writeSource,
+            expectedParent: err.expectedParent,
+            actualHead: err.actualHead,
+        });
+        return conflict;
     }
 
     /**
@@ -18389,7 +18904,10 @@ export class ObjectStackProtocolImplementation implements
                     name: base.name,
                     item,
                     mode: state === 'draft' ? 'draft' : 'publish',
-                    parentVersion: row.checksum ?? null,
+                    // [#21207] The STORED hash this pass read itself — the
+                    // in-process spelling, never compared in keyed form (the
+                    // pass already holds the stored value; nothing to key).
+                    storedParentVersion: row.checksum ?? null,
                     packageId,
                     force: true,
                     source: 'migrate-stored',
@@ -18505,7 +19023,21 @@ export class ObjectStackProtocolImplementation implements
         const opts: { sinceSeq?: number; limit?: number } = {};
         if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
         if (request.limit !== undefined) opts.limit = request.limit;
-        for await (const ev of repo.history(ref, opts)) events.push(ev);
+        // [#21207] Each event's hash and parent hash are served in keyed form —
+        // the same value the write receipts hand out, so an event still names
+        // the token a caller holds; a delete event's own `null` is kept.
+        // The event's message is the row's change note, which can QUOTE a stored
+        // hash (`publish draft (hash …)` on rows written before the publish door
+        // stated its own message) — each quote is served the same way.
+        const digest = this.storedHashDigest();
+        for await (const ev of repo.history(ref, opts)) {
+            events.push({
+                ...ev,
+                hash: (await servedContentHash(ev.hash, digest)) ?? null,
+                parentHash: (await servedContentHash(ev.parentHash, digest)) ?? null,
+                ...(typeof ev.message === 'string' ? { message: await serveStoredHashTokens(ev.message, digest) } : {}),
+            });
+        }
         return { events };
     }
 
@@ -18777,7 +19309,8 @@ export class ObjectStackProtocolImplementation implements
             advisories?: RuntimeAuthoringIssue[];
         } = {
             success: true,
-            version: result.version,
+            // [#21207] Keyed, never the stored content hash (`receiptVersion`).
+            version: await this.receiptVersion(result.version),
             seq: result.seq,
             message: `Published draft — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
             // [#9176] Omitted-when-empty, never `advisories: []` — a clean
@@ -19005,6 +19538,20 @@ export class ObjectStackProtocolImplementation implements
                 // different narrowings, both needed for a package to be
                 // judged as a self-consistent unit.
                 ...(request.pending !== undefined ? { pending: request.pending } : {}),
+                // [#20790] The publish gate's restored-credential read. The
+                // stored draft holds no credential the write-only channel
+                // holds — the draft's own save moved it there — so the gate is
+                // told where one is held (the draft's row, or the live one the
+                // promotion keeps) and reads it as present.
+                ...(this.credentialChannelFor(singularType)
+                    ? {
+                        restoredCredentialPaths: () => this.credentialChannelFor(singularType)!.heldPaths({
+                            name: request.name,
+                            state: 'draft',
+                            item: draftForGate.body,
+                        }),
+                    }
+                    : {}),
             })
             : [];
 
@@ -19035,7 +19582,12 @@ export class ObjectStackProtocolImplementation implements
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
                 source: 'protocol.publishMetaItem',
-                ...(request.message ? { message: request.message } : {}),
+                // [#21207] Always a message of the caller's or this door's own:
+                // left unstated, the repository records `publish draft (hash …)`,
+                // quoting the draft's stored content hash into the history row's
+                // change note — served to every history reader and copied by the
+                // audit writer. This door's default says what happened without it.
+                message: request.message || 'publish draft',
                 intent,
                 // [#8907] Spread, not `packageId: request.packageId`: `null` is
                 // a meaningful scope (the unbound row) and `undefined` means
@@ -19046,14 +19598,12 @@ export class ObjectStackProtocolImplementation implements
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
             if (err instanceof ConflictError) {
-                const conflict: any = new Error(
-                    `${request.type}/${request.name} published row advanced while you held the draft. `
-                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                // [#21207] Keyed values or none in the text and attributes.
+                const conflict = await this.metadataConflictRefusal(
+                    err,
+                    `${request.type}/${request.name}`,
+                    `${request.type}/${request.name} published row advanced while you held the draft.`,
                 );
-                conflict.code = 'METADATA_CONFLICT';
-                conflict.status = 409;
-                conflict.expectedParent = err.expectedParent;
-                conflict.actualHead = err.actualHead;
                 // [#8594] Attached, not written — same reason as the lock gate
                 // above. The repository's own transaction has already unwound by
                 // the time this `catch` runs, but the BATCH caller's has not.
@@ -20316,7 +20866,10 @@ export class ObjectStackProtocolImplementation implements
             // element's bytes are unchanged, and absence means "nothing to
             // report", never "the gate did not run".
             published.push({
-                type: p.d.type, name: p.d.name, version: p.version,
+                // [#21207] Each element's version token is keyed, like the
+                // single-item doors' (`receiptVersion`); `p.version` stays the
+                // stored hash for everything internal.
+                type: p.d.type, name: p.d.name, version: await this.receiptVersion(p.version),
                 ...(p.advisories.length > 0 ? { advisories: p.advisories } : {}),
             });
             try {
@@ -20528,6 +21081,23 @@ export class ObjectStackProtocolImplementation implements
      * platform storage is never dropped. Drafts are removed before active rows
      * so each object's table is torn down once. Per-item failures are collected
      * without aborting the rest.
+     *
+     * [#21276] The steps, in order. Nothing durable happens before step 4, so
+     * a refusal at any of steps 1–4 leaves everything as it was:
+     *  1. the tenant-scope refusals (`TENANT_SCOPE_REQUIRED`) — pure;
+     *  2. the `sys_metadata` read — a read; a failure is thrown;
+     *  3. the registry's uninstall refusal (another package extends an object
+     *     this one owns, ADR-0029), asked through
+     *     `SchemaRegistry.assertPackageUninstallable` — pure; thrown as is;
+     *  4. the `sys_packages` delete through the `package` service — the FIRST
+     *     durable step; a refusal, returned or thrown, is thrown as this verb's
+     *     failure (see {@link packagePersistFailureError});
+     *  5. the per-item `sys_metadata` deletes and table teardown — each refusal
+     *     is collected in `failed[]`;
+     *  6. the registry withdrawal — step 3 already asked its refusal; anything
+     *     it still throws is logged, and the package leaves at the next
+     *     restart, since its stored row is already gone;
+     *  7. the uninstall cleanups — each refusal is reported in `cleanups[]`.
      */
     async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
         // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
@@ -20677,6 +21247,71 @@ export class ObjectStackProtocolImplementation implements
             throw metadataReadFailureError(e);
         }
 
+        // [#21276] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE THE STORE
+        // DELETE. `SchemaRegistry` refuses an uninstall when another package
+        // `extend`s an object this one owns (ADR-0029), and it decides that
+        // before it mutates (#7970). Here that refusal used to be met only at
+        // the registry withdrawal below, after the stored row, the metadata rows
+        // and the tables were already gone. `assertPackageUninstallable` asks
+        // the same predicate (the one copy `unregisterObjectsByPackage` itself
+        // calls) without performing the uninstall, so the refusal is thrown
+        // here, as is, with nothing removed. The HTTP door answers it through
+        // its `catch` around this verb: `500`, nothing changed.
+        //
+        // The registry is reached the way the withdrawal below reaches it. A
+        // registry that does not carry the method (an engine double, a host on
+        // a registry without it) is not asked, and this verb behaves as it did
+        // before the method existed: the refusal surfaces at the withdrawal.
+        const packageRegistry = (this.engine as any)?.registry;
+        if (typeof packageRegistry?.assertPackageUninstallable === 'function') {
+            packageRegistry.assertPackageUninstallable(request.packageId);
+        }
+
+        // [#21276] THE STORE DELETE COMES FIRST, and its refusal is this verb's
+        // refusal. Triage's ruling: refuse before withdrawing, not undo. Every
+        // step above this one only reads; every step below it — the per-item
+        // `sys_metadata` deletes and table teardown, the registry withdrawal,
+        // the uninstall cleanups — runs only after the store has deleted the
+        // package's row.
+        //
+        // #2532's reason for deleting the row at all still holds:
+        // `PackageServicePlugin.start()` hydrates `sys_packages` back into the
+        // registry at boot, so a row left behind brings the package back on the
+        // next restart. This delete used to run AFTER the metadata deletes and
+        // inside a `catch` that turned both of the service's failure channels
+        // into a `console.warn` ("sys_packages cleanup skipped"): a returned
+        // `{ success: false }` was never read, and a thrown failure was only
+        // logged. So a refused delete answered success over a package whose
+        // metadata, tables and grants were already gone, and the next boot
+        // brought it back. Measured at `DELETE /api/v1/packages/:id` on SQLite,
+        // with a trigger refusing the delete: 200, then 404 in the same process,
+        // then 200 after a restart.
+        //
+        // Both channels (`PackageDeleteResult`, `service-package`) answer
+        // through {@link packagePersistFailureError}, the error install and
+        // edit throw for a refused store write (#21243): a declared 4xx leaves
+        // as the producer answered it; anything else is a 500 that quotes
+        // nothing, with the original on `cause`.
+        //
+        // ⛔ No undo: nothing durable has happened yet, so there is nothing to
+        // put back. Without a `package` service there is no stored row to
+        // delete (the install's in-memory-only path), and this step is skipped.
+        const packageStore = this.getServicesRegistry?.()?.get('package') as
+            | { delete?: (id: string) => Promise<unknown> }
+            | undefined;
+        if (typeof packageStore?.delete === 'function') {
+            let refusal: { cause: unknown } | undefined;
+            try {
+                const out = await packageStore.delete(request.packageId);
+                if (typeof out === 'object' && out !== null && (out as { success?: unknown }).success === false) {
+                    refusal = { cause: out };
+                }
+            } catch (cause) {
+                refusal = { cause };
+            }
+            if (refusal) throw packagePersistFailureError(refusal.cause, request.packageId, 'delete');
+        }
+
         const dropStorage = request.keepData !== true;
         // Delete drafts before active so an object's table is dropped once (on
         // the active delete), not pre-empted by a draft delete.
@@ -20739,28 +21374,18 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // #2532 counterpart: also drop the durable `sys_packages` record —
-        // service-package hydrates that table back into the registry at boot,
-        // so leaving the row behind would RESURRECT an uninstalled package on
-        // the next restart. Best-effort, same posture as install persistence.
-        try {
-            const pkgSvc = this.getServicesRegistry?.()?.get('package') as
-                | { delete?: (id: string) => Promise<unknown> }
-                | undefined;
-            if (pkgSvc?.delete) await pkgSvc.delete(request.packageId);
-        } catch (e) {
-            console.warn(
-                `[protocol.deletePackage] sys_packages cleanup skipped for '${request.packageId}': ${(e as Error)?.message}`,
-            );
-        }
-
         // [#2747] Unregister from the in-memory SchemaRegistry too, so the
         // running kernel stops serving the package without waiting for a
-        // restart. Best-effort: the HTTP dispatcher already unregisters
-        // before calling us (second call is a no-op warn), and a package
-        // with live extenders refuses unregistration — that failure is
-        // logged, not fatal (the durable row is gone, so the next boot is
-        // clean either way).
+        // restart. [#21276] The HTTP door no longer unregisters before calling
+        // this verb; it withdraws only after this verb has answered, and skips
+        // that when this step already did it.
+        //
+        // [#21276] The registry's own refusal (ADR-0029 extenders) was asked
+        // before the store delete, through `assertPackageUninstallable`, so it
+        // does not arrive here. The `catch` stays as a safety net for a
+        // registry that lacks that method, or a throw nothing asked ahead of
+        // time: it is logged, not fatal, because the durable row is already
+        // gone and the next boot is clean either way.
         try {
             (this.engine as any)?.registry?.uninstallPackage?.(request.packageId);
         } catch (e) {
@@ -22122,11 +22747,14 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
+                    const restoreDerivation = this.restoredBodyDerivation(it.type);
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
+                        // [#20790] R2 — the type's credential-channel strip.
+                        ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
@@ -22512,12 +23140,16 @@ export class ObjectStackProtocolImplementation implements
         // real outage (#4867).
         const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
         try {
+            const restoreDerivation = this.restoredBodyDerivation(singularType);
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
                 actor: request.actor ?? null,
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
+                // [#20790] R2 — a rollback past the credential move keeps the
+                // write-only channel's current credential and stores none.
+                ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
@@ -22586,21 +23218,20 @@ export class ObjectStackProtocolImplementation implements
             });
             return {
                 success: true,
-                version: result.version,
+                // [#21207] Keyed, never the stored content hash (`receiptVersion`).
+                version: await this.receiptVersion(result.version),
                 seq: result.seq,
                 restoredFromVersion: request.toVersion,
                 message: `Reverted to version ${request.toVersion} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
             };
         } catch (err: any) {
             if (err instanceof ConflictError) {
-                const conflict: any = new Error(
-                    `${request.type}/${request.name} advanced during rollback. `
-                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                // [#21207] Keyed values or none in the text and attributes.
+                const conflict = await this.metadataConflictRefusal(
+                    err,
+                    `${request.type}/${request.name}`,
+                    `${request.type}/${request.name} advanced during rollback.`,
                 );
-                conflict.code = 'METADATA_CONFLICT';
-                conflict.status = 409;
-                conflict.expectedParent = err.expectedParent;
-                conflict.actualHead = err.actualHead;
                 await this.recordOptimisticConflictAudit({
                     type: request.type,
                     name: request.name,
@@ -23113,8 +23744,13 @@ export class ObjectStackProtocolImplementation implements
                 // Last-write-wins parent resolution unless the caller pinned
                 // an explicit version (Studio's "Reset" button is unpinned;
                 // a future "delete vN" flow can pass parentVersion).
-                const parentVersion: string = request.parentVersion !== undefined
-                    ? (request.parentVersion ?? current.hash)
+                // [#21207] A pinned version is a caller's token, compared in
+                // keyed form against the current stored head
+                // (`storedParentForToken`); the repository's lock then runs on
+                // the stored value. A token naming no current head throws a
+                // `ConflictError`, answered by the conflict branch below.
+                const parentVersion: string = typeof request.parentVersion === 'string'
+                    ? ((await this.storedParentForToken(ref, request.parentVersion, current.hash)) ?? current.hash)
                     : current.hash;
 
                 const result = await repo.delete(ref, {
@@ -23215,14 +23851,12 @@ export class ObjectStackProtocolImplementation implements
                 };
             } catch (err: any) {
                 if (err instanceof ConflictError) {
-                    const conflict = new Error(
-                        `${request.type}/${request.name} has been modified since you loaded it. `
-                        + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                    // [#21207] Keyed values or none in the text and attributes.
+                    const conflict = await this.metadataConflictRefusal(
+                        err,
+                        `${request.type}/${request.name}`,
+                        `${request.type}/${request.name} has been modified since you loaded it.`,
                     );
-                    (conflict as any).code = 'METADATA_CONFLICT';
-                    (conflict as any).status = 409;
-                    (conflict as any).expectedParent = err.expectedParent;
-                    (conflict as any).actualHead = err.actualHead;
                     await this.recordOptimisticConflictAudit({
                         type: request.type,
                         name: request.name,
@@ -24639,10 +25273,16 @@ async function persistPackageManifest(
 
 /**
  * [#21243] The sentence a caller reads when a package write was refused by the
- * store and undone. It quotes nothing but the caller's own package id — the
- * driver's words stay on `cause` and in the server log.
+ * store and undone — or [#21276], for an uninstall, refused by the store before
+ * anything else was removed. It quotes nothing but the caller's own package
+ * id — the driver's words stay on `cause` and in the server log.
  */
-function packagePersistFailureMessage(packageId: string, verb: 'install' | 'update'): string {
+function packagePersistFailureMessage(packageId: string, verb: 'install' | 'update' | 'delete'): string {
+    if (verb === 'delete') {
+        return `Package '${packageId}' was not uninstalled: the package registry could not delete its stored record, `
+            + 'and a package whose record is kept comes back on the next restart, so its metadata, data and grants '
+            + 'were left in place. The reason is in the server log.';
+    }
     return verb === 'install'
         ? `Package '${packageId}' was not installed: the package registry could not store it, so it would `
             + 'not survive a restart, and nothing was registered. The reason is in the server log.'
@@ -24652,7 +25292,8 @@ function packagePersistFailureMessage(packageId: string, verb: 'install' | 'upda
 
 /**
  * [#21243] The error a package install or edit answers when its
- * `sys_packages` write failed. The vocabulary is this file's own, reused:
+ * `sys_packages` write failed — and [#21276] an uninstall, when its
+ * `sys_packages` delete did. The vocabulary is this file's own, reused:
  *
  *  - **A declared 4xx is a refusal** and leaves untouched — the producer's own
  *    status, code and sentence (the #8016 rule every package door applies,
@@ -24667,7 +25308,7 @@ function packagePersistFailureMessage(packageId: string, verb: 'install' | 'upda
  *    `500 DATABASE_ERROR`; a returned `driverFault` declares nothing, so the
  *    door derives `INTERNAL_ERROR` from the 500. No code is minted.
  */
-function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update'): Error {
+function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update' | 'delete'): Error {
     const { declaredStatus } = resolveThrownHttpError(cause);
     if (declaredStatus !== undefined && declaredStatus >= 400 && declaredStatus < 500) return cause as Error;
     const err = new Error(packagePersistFailureMessage(packageId, verb)) as Error & {
