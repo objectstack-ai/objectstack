@@ -942,17 +942,54 @@ describe('[#20127] having — a { $field, addDays } pair is judged by each aggre
       });
     }
 
-    it('a registry-less host is not judged — the pair is answered as before, as an addDays pair is', async () => {
+    it('a registry-less host is not judged — the pair is answered, as written, as an addDays pair is', async () => {
       // No declaration, so no column has a type or a class: the fail-open
       // direction #20127 took for an `addDays` pair, kept for a plain one.
+      //
+      // [#21242] What answers it is `@objectstack/formula`'s matcher, which no
+      // longer keeps a whole-day copy of the bare-day upper bound: a pair that
+      // reaches it without a seam is compared as written (ADR-0053 D-D1 item
+      // 5). No group of DT_ROWS closes on its first due day, so they keep
+      // `c1` either way. `c4` does, at 15:00: the deleted copy read the day as
+      // "through that day" and kept `c4` beside `c1`; as written, the
+      // instant's text sorts above the bare day, and `c4` is dropped.
+      const ON_THE_DUE_DAY = {
+        customer_id: 'c4', amount: 10, cap: 1, placed_on: '2026-01-05', due_on: '2026-01-05', grace: 0,
+        opened_at: '2026-01-05T08:00:00.000Z', closed_at: '2026-01-05T15:00:00.000Z',
+      };
       for (const [door, native] of DOORS) {
-        const { driver } = makeDriver(DT_ROWS, native);
-        const engine = new ObjectQL();
-        engine.registerDriver(driver, true);
-        await engine.init();
-        const rows = await engine.aggregate(OBJECT, { ...DT_QUERY, having: { last_closed: { $lte: { $field: 'first_due' } } } });
-        expect(groups(rows), door).toEqual(['c1']);
+        for (const rows of [DT_ROWS, [...DT_ROWS, ON_THE_DUE_DAY]]) {
+          const { driver } = makeDriver(rows, native);
+          const engine = new ObjectQL();
+          engine.registerDriver(driver, true);
+          await engine.init();
+          const out = await engine.aggregate(OBJECT, { ...DT_QUERY, having: { last_closed: { $lte: { $field: 'first_due' } } } });
+          expect(groups(out), door).toEqual(['c1']);
+        }
       }
+    });
+
+    it('[#21242] two text group columns (one class): "2026-01-05 noon" is not <= "2026-01-05" — the group is dropped, as where compares them', async () => {
+      // `having` compares two groupBy projections with the matcher. A bare-day
+      // label was read as "through that day" by its deleted whole-day copy,
+      // which kept the `2026-01-05 noon` group; compared as written, as
+      // `driver-sql` compares two text columns in a `where`, it is dropped.
+      const LABEL_ROWS = [
+        { customer_id: 'c1', code: '2026-01-05 noon', label: '2026-01-05' },
+        { customer_id: 'c2', code: '2026-01-04', label: '2026-01-05' },
+        { customer_id: 'c3', code: '2026-01-06', label: '2026-01-05' },
+      ];
+      const { driver } = makeDriver(LABEL_ROWS, false);
+      const engine = new ObjectQL();
+      engine.registerDriver(driver, true);
+      await engine.init();
+      engine.registry.registerObject({ name: OBJECT, fields: { customer_id: { type: 'text' }, code: { type: 'text' }, label: { type: 'text' } } } as any);
+      const out = await engine.aggregate(OBJECT, {
+        groupBy: ['code', 'label'],
+        aggregations: [{ function: 'count', alias: 'n' }],
+        having: { code: { $lte: { $field: 'label' } } },
+      });
+      expect(out.map((r: any) => r.code)).toEqual(['2026-01-04']);
     });
   });
 });

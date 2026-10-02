@@ -17,9 +17,15 @@
  * app) binds to something declared.
  *
  *   os init my-app -t app --no-install
- *   os g object|view|action|flow|dashboard|app|skill order_line
+ *   os g object|view|flow|action|dashboard|app|skill order_line [--object order_line]
  *   os validate          → exit 0, every generated item counted
  *   os compile           → the artifact carries every generated item
+ *
+ * A scaffold that binds metadata (#21325) is generated after what it binds —
+ * the object before the flow, the flow before the action — and is handed the
+ * object with `--object`: the template declares an object of its own, so with
+ * two in the stack which one is bound is the author's to say. Both are read
+ * off each generator's `binds`, never written down here.
  *
  * `os validate`'s summary has no row for skills, so the skill is held by the
  * compiled artifact instead: it is the same stack, emitted.
@@ -41,6 +47,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { registeredItemName } from '../src/utils/scaffold-wiring.js';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -87,15 +94,36 @@ const generated: Record<string, Run> = {};
 let validate: Run;
 let compile: Run;
 
-/** Object first: the view, action, flow and app scaffolds bind to it. */
-const ORDER = ['object', ...GENERATOR_SCAFFOLD_TARGETS.map((t) => t.type).filter((t) => t !== 'object')];
+/**
+ * Every type after the ones it binds (#21325): a generator's `binds` keys are
+ * the types it needs declared first. Derived, so a generator added later is
+ * placed by what it declares.
+ */
+const ORDER: string[] = (() => {
+  const placed: string[] = [];
+  const pending = GENERATOR_SCAFFOLD_TARGETS.map((t) => t.type);
+  while (pending.length > 0) {
+    const next = pending.findIndex((type) =>
+      Object.keys(GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === type)!.binds)
+        .every((key) => key === type || placed.includes(key)));
+    if (next < 0) throw new Error(`no generator order satisfies the binds of: ${pending.join(', ')}`);
+    placed.push(...pending.splice(next, 1));
+  }
+  return placed;
+})();
+
+/** `os g <type> STEM`, with `--object STEM` for a generator that takes one. */
+const argsFor = (type: string): string[] => {
+  const target = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === type)!;
+  return ['g', type, STEM, ...(target.binds.object === 'flag' ? ['--object', STEM] : [])];
+};
 
 beforeAll(async () => {
   root = mkdtempSync(join(HERE, '..', 'node_modules', '.generate-reach-e2e-'));
   init = await runCli(['init', 'my-app', '-t', 'app', '--no-install'], root);
   project = join(root, 'my-app');
   for (const type of ORDER) {
-    generated[type] = await runCli(['g', type, STEM], project);
+    generated[type] = await runCli(argsFor(type), project);
   }
   validate = await runCli(['validate'], project);
   compile = await runCli(['compile'], project);
@@ -132,7 +160,9 @@ describe('[#20215] `os init -t app` → `os g` every type → `os validate`', ()
     expect(compile.code, compile.stdout + compile.stderr).toBe(0);
     const artifact = JSON.parse(readFileSync(join(project, 'dist', 'objectstack.json'), 'utf-8')) as Record<string, unknown>;
     for (const target of GENERATOR_SCAFFOLD_TARGETS) {
-      const names = ((artifact[target.stackKey] ?? []) as { name?: unknown }[]).map((i) => i.name);
+      // The key each item is registered under: its `name`, or a views
+      // container's object (it writes no `name`, #21325).
+      const names = ((artifact[target.stackKey] ?? []) as unknown[]).map((i) => registeredItemName(target.stackKey, i));
       expect(names, target.stackKey).toContain(target.itemName(STEM, NS));
     }
   });

@@ -169,7 +169,9 @@
  * rule as above), and the reverse direction where the declarations alone can
  * decide it: a literal `core` entry in a directory that holds a declared
  * literal build input, covering none of them, is a leftover from an input
- * turbo.json dropped, and it starts the core pipeline on a diff no build reads.
+ * turbo.json dropped, and it starts the core pipeline on a diff no build reads
+ * (since #21341 a row covering one of Build Core's guards, the population the
+ * next section adds, is not a leftover either).
  * Root-level files and pattern entries are not judged that way -- nothing here
  * says why `package.json` or `packages/**` is in `core`. Refusals: no `build-core` job, its `if:` no longer naming
  * `core`, no `run: pnpm build` step, turbo.json or the root manifest unreadable
@@ -178,8 +180,50 @@
  *
  * Known bounds: a package-level turbo.json (none is tracked today) would add
  * build inputs this subject does not read; and a leftover in a directory where
- * turbo.json no longer declares ANY build input is not reported (the cheap
- * direction: it over-schedules, it never under-schedules).
+ * turbo.json no longer declares ANY build input, and no Build Core step runs
+ * any script, is not reported (the cheap direction: it over-schedules, it
+ * never under-schedules).
+ *
+ * ## The same subject's second population: the scripts Build Core's steps run (#21341)
+ *
+ * Build Core does more than build. Its own steps run guards that need a real
+ * `dist/` (`pnpm check:dts-closure`, `check:dual-build-cjs-loads`,
+ * `check:sourcemap-no-sources-content`, `check:lean-entry-closure`, each a
+ * `--self-test` and a real leg), and Build Core is the only job that runs
+ * them. A diff confined to one of those scripts moved no build hash and
+ * matched no `core` entry, so Build Core skipped and the changed guard ran
+ * nowhere before the merge queue: PR #17100 changed only
+ * `scripts/check-lean-entry-closure.mjs`, and its Build Core concluded
+ * `skipped`. `console:` already applies "a change to the guard runs the guard"
+ * to its job (`CONSOLE_GUARDS` above); `core:` had no such rows.
+ *
+ * This population is DERIVED from the job, the way the build inputs are
+ * derived from turbo.json, so no list of guards is kept here: every `run:`
+ * step of the `build-core` job is read through `collectInvocations`, the
+ * recognizer `check-self-test-wired.mjs` uses for "which repository scripts
+ * does this CI command run" (a `scripts/...` path named directly, or reached
+ * through a root `package.json` alias chain), and each script it names brings
+ * its first-party import closure from `first-party-closure.mjs`, the one
+ * answer to which modules a script executes. Each resulting path must be
+ * covered by `core`, and it widens the leftover rule above: a literal entry
+ * beside the build inputs and the guards that covers neither is reported. So a
+ * guard step added to Build Core without a filter row reds, and a filter row
+ * left behind by a deleted guard step reds too. The ONE list is the rows in
+ * ci.yml; there is no second copy here to fall out of step with it.
+ *
+ * Known bounds, each the recognizer's and stated rather than guessed at: a
+ * script a PACKAGE's own manifest runs (`pnpm --filter <pkg> <script>`) is
+ * not followed (today's one such step, the spec's `analyze`, runs a file
+ * inside `packages/spec`, which `packages/**` covers); a local composite
+ * action a step `uses:` is not followed (today's one, setup-pnpm, names no
+ * repository script, and every job in every workflow runs it); `pnpm
+ * install`'s lifecycle (`prepare` -> `scripts/setup-git-hooks.mjs`) is not a
+ * guard (every job installs, the unfiltered lint.yml jobs included, so a
+ * change to it already runs at PR time); a script spelled in an extension
+ * the recognizer does not read (`.cjs`, `.ts`) is not seen, exactly as
+ * `check:self-test-wired` does not see it; and a DATA file a guard reads (a
+ * baseline) is not a script and is not derived. The self-test pins the first
+ * two against the real tree.
  *
  * ## Wiring
  *
@@ -195,14 +239,16 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { requireDependency } from './import-prerequisite.mjs';
 const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
+import { collectInvocations } from './check-self-test-wired.mjs';
 import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
+import { firstPartyModuleClosure } from './first-party-closure.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -231,11 +277,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(7) WIRING: the gate and its self-test really run in CI': 2,
   '(8) the `console` selection and the dist key it must move': 20,
   '(9) Build Core and the build inputs turbo.json declares': 33,
+  '(10) Build Core and the scripts its own steps run': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -681,14 +728,54 @@ export function buildInputsOf(turbo, excluded) {
   return { rows: [...byPath].map(([path, from]) => ({ path, from })), excludedTasks };
 }
 
+/** The first-party closure of a script in the checked-in tree. */
+const closureIn = (root) => (rel) => firstPartyModuleClosure(rel, { root });
+
+/**
+ * Every repository script Build Core's own steps run (#21341): each script a
+ * `run:` step names, directly or through a root `package.json` alias chain
+ * (`collectInvocations`, the recognizer `check:self-test-wired` reads CI
+ * with), plus each one's first-party import closure (`closureOf`). Returns the
+ * rows, each with where it came from: the step that runs it, or the script
+ * that imports it. `{ refusal }` when a closure cannot be computed -- a step
+ * naming a script that does not resolve is a subject this gate did not read.
+ */
+export function buildGuardsOf(steps, pkgScripts, closureOf) {
+  const byPath = new Map();
+  const add = (path, from) => byPath.set(path, [...new Set([...(byPath.get(path) ?? []), from])]);
+  for (const [index, step] of (Array.isArray(steps) ? steps : []).entries()) {
+    if (typeof step?.run !== 'string') continue;
+    const label = typeof step.name === 'string' ? step.name : `step ${index + 1}`;
+    const { named } = collectInvocations([{ name: label, text: step.run }], pkgScripts ?? {});
+    for (const [script, where] of named) {
+      let closure;
+      try {
+        closure = closureOf(script);
+      } catch (err) {
+        return {
+          refusal:
+            `${CI_WORKFLOW}'s \`${BUILD_JOB}\` step "${label}" runs ${script}, whose first-party closure could not be ` +
+            `computed: ${String(err?.message ?? err).split('\n')[0]}`,
+        };
+      }
+      for (const member of closure) {
+        if (member === script) for (const w of where) add(member, w);
+        else add(member, `imported by ${script}`);
+      }
+    }
+  }
+  return { rows: [...byPath].map(([path, from]) => ({ path, from })) };
+}
+
 /**
  * The verdict on Build Core's scheduling against the build inputs turbo.json
- * declares. Takes the three SOURCE STRINGS (null for one that could not be
- * read), so the self-test can drive every failure. `{ refusal }` for every
- * state in which the subject was not read; otherwise the findings, each list
- * empty on a clean tree.
+ * declares and the scripts the job's own steps run. Takes the three SOURCE
+ * STRINGS (null for one that could not be read) and the closure reader, so
+ * the self-test can drive every failure. `{ refusal }` for every state in
+ * which the subject was not read; otherwise the findings, each list empty on a
+ * clean tree.
  */
-export function judgeBuildInputs(source, turboSource, manifestSource) {
+export function judgeBuildInputs(source, turboSource, manifestSource, closureOf = closureIn(REPO_ROOT)) {
   const read = readFilterLists(source);
   if (read.refusal) return read;
   const { jobs, filters } = read;
@@ -735,26 +822,48 @@ export function judgeBuildInputs(source, turboSource, manifestSource) {
   const declared = buildInputsOf(turbo, exclusions.excluded);
   if (declared.refusal) return declared;
 
-  const covered = [];
-  const uncovered = [];
-  for (const row of declared.rows) {
-    const verdict = coverageVerdict(row.path, entries);
-    (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
-  }
+  const guards = buildGuardsOf(steps, manifest?.scripts, closureOf);
+  if (guards.refusal) return guards;
+
+  const split = (rows) => {
+    const covered = [];
+    const uncovered = [];
+    for (const row of rows) {
+      const verdict = coverageVerdict(row.path, entries);
+      (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+    }
+    return { covered, uncovered };
+  };
+  const { covered, uncovered } = split(declared.rows);
+  const { covered: guardsCovered, uncovered: guardsUncovered } = split(guards.rows);
   // The reverse direction, judged only where it is decidable from the
-  // declarations alone: a LITERAL entry in a directory that holds a declared
-  // literal build input is there for the same reason those are, so one that
-  // covers none of them is a leftover. Root-level files and pattern entries are
-  // not this subject's to judge -- nothing here says why they are in `core`.
-  const inputDirs = new Set(declared.rows.filter(({ path }) => !WILDCARD.test(path)).map(({ path }) => dirOf(path)).filter(Boolean));
+  // populations alone: a LITERAL entry in a directory that holds a declared
+  // literal build input or a guard is there for the same reason those are, so
+  // one that covers none of them is a leftover -- of an input turbo.json
+  // dropped, or of a guard step Build Core dropped. Root-level files and
+  // pattern entries are not this subject's to judge -- nothing here says why
+  // they are in `core`.
+  const reasons = [...declared.rows, ...guards.rows];
+  const reasonDirs = new Set(reasons.filter(({ path }) => !WILDCARD.test(path)).map(({ path }) => dirOf(path)).filter(Boolean));
   const stale = entries.filter(
     (entry) =>
       !WILDCARD.test(entry) &&
-      inputDirs.has(dirOf(entry)) &&
-      !declared.rows.some(({ path }) => coverageVerdict(path, [entry]).covered),
+      reasonDirs.has(dirOf(entry)) &&
+      !reasons.some(({ path }) => coverageVerdict(path, [entry]).covered),
   );
 
-  return { entries, condition, inputs: declared.rows, covered, uncovered, stale, excludedTasks: declared.excludedTasks };
+  return {
+    entries,
+    condition,
+    inputs: declared.rows,
+    covered,
+    uncovered,
+    guards: guards.rows,
+    guardsCovered,
+    guardsUncovered,
+    stale,
+    excludedTasks: declared.excludedTasks,
+  };
 }
 
 function reportBuildInputs(verdict) {
@@ -774,25 +883,42 @@ function reportBuildInputs(verdict) {
         '    narrower list.',
     );
   }
+  if (verdict.guardsUncovered.length > 0) {
+    problems.push(
+      `${verdict.guardsUncovered.length} script(s) the \`${BUILD_JOB}\` job's own steps run are covered by no ` +
+        `\`${BUILD_FILTER}:\` entry in ${CI_WORKFLOW}. Build Core is the only job that runs them, so a diff confined to one\n` +
+        `    starts no Build Core and the changed script runs nowhere before the merge queue:\n` +
+        verdict.guardsUncovered.map((r) => `      ${r.path}   (${r.from.join('; ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the guard rows of the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW} -- a change to\n` +
+        '    the guard runs the guard. Not the subtree it sits in, for the reason the build inputs give.',
+    );
+  }
   if (verdict.stale.length > 0) {
     problems.push(
-      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries literal entr(ies) beside declared build inputs that cover none of them -- ` +
-        `left over from an input ${TURBO_CONFIG} no longer declares:\n` +
+      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries literal entr(ies) beside the build inputs and Build Core's ` +
+        `guards that cover none of them -- left over from an input ${TURBO_CONFIG} no longer declares, or from a ` +
+        `script no \`${BUILD_JOB}\` step runs any more:\n` +
         verdict.stale.map((e) => `      ${e}`).join('\n') +
-        `\n    Delete them. Each one starts the whole core pipeline on a diff no build reads.`,
+        `\n    Delete them. Each one starts the whole core pipeline on a diff that neither a build nor Build Core reads.`,
     );
   }
   if (problems.length > 0) {
-    console.error(`FAIL: ci.yml's \`${BUILD_FILTER}\` filter and the build inputs ${TURBO_CONFIG} declares are out of step.\n`);
+    console.error(
+      `FAIL: ci.yml's \`${BUILD_FILTER}\` filter is out of step with the build inputs ${TURBO_CONFIG} declares and ` +
+        `the scripts Build Core's steps run.\n`,
+    );
     for (const p of problems) console.error(`  - ${p}\n`);
     return 1;
   }
   const fromGlobal = verdict.inputs.filter((r) => r.from.includes('globalDependencies')).length;
+  const imported = verdict.guards.filter((r) => r.from.every((f) => f.startsWith('imported by '))).length;
   console.log(
     `OK: all ${verdict.inputs.length} build input(s) ${TURBO_CONFIG} declares outside the packages (itself, ` +
-      `${fromGlobal} globalDependencies, and every \`$TURBO_ROOT$\` input of a build Build Core runs) are covered by ` +
-      `\`${BUILD_FILTER}\`, which the \`${BUILD_JOB}\` job's \`if:\` reads; no literal \`${BUILD_FILTER}\` entry beside ` +
-      `them is a leftover. Left out because \`${BUILD_COMMAND}\` excludes their package: ` +
+      `${fromGlobal} globalDependencies, and every \`$TURBO_ROOT$\` input of a build Build Core runs) and all ` +
+      `${verdict.guards.length} script(s) the \`${BUILD_JOB}\` job's own steps run (${verdict.guards.length - imported} ` +
+      `named by a step, ${imported} only imported by one) are covered by \`${BUILD_FILTER}\`, which the ` +
+      `\`${BUILD_JOB}\` job's \`if:\` reads; no literal \`${BUILD_FILTER}\` entry beside them is a leftover. Left out ` +
+      `because \`${BUILD_COMMAND}\` excludes their package: ` +
       `${verdict.excludedTasks.length > 0 ? verdict.excludedTasks.join(', ') : 'none'}.`,
   );
   return 0;
@@ -863,7 +989,9 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
   // Every subject is judged and every one reports, so one red never hides another.
   const crosspkg = report(judge(source, table));
   const consoleCode = reportConsole(judgeConsole(source));
-  const buildCode = reportBuildInputs(judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST)));
+  const buildCode = reportBuildInputs(
+    judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST), closureIn(root)),
+  );
   return crosspkg === 0 && consoleCode === 0 && buildCode === 0 ? 0 : 1;
 }
 
@@ -903,7 +1031,12 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.log(`${kind === 'UNCLASSIFIED' ? 'FAIL' : 'ok  '} ${entry}   ${kind}`);
   }
 
-  const build = judgeBuildInputs(readFileSync(join(root, CI_WORKFLOW), 'utf8'), readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST));
+  const build = judgeBuildInputs(
+    readFileSync(join(root, CI_WORKFLOW), 'utf8'),
+    readOrNull(root, TURBO_CONFIG),
+    readOrNull(root, ROOT_MANIFEST),
+    closureIn(root),
+  );
   if (build.refusal) {
     console.error(`FAIL: ${build.refusal}`);
     return 1;
@@ -912,9 +1045,19 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
   for (const row of [...build.covered, ...build.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
     console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
   }
-  for (const entry of build.stale) console.log(`FAIL ${entry}   stale: covers no declared build input`);
+  console.log(`\nscripts the ${BUILD_JOB} job's own steps run, against ${BUILD_FILTER}:`);
+  for (const row of [...build.guardsCovered, ...build.guardsUncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join('; ')})`);
+  }
+  for (const entry of build.stale) console.log(`FAIL ${entry}   stale: covers no declared build input and no script a ${BUILD_JOB} step runs`);
   console.log(`left out (excluded by \`${BUILD_COMMAND}\`): ${build.excludedTasks.join(', ') || 'none'}`);
-  return verdict.uncovered.length > 0 || con.unclassified.length > 0 || build.uncovered.length > 0 || build.stale.length > 0 ? 1 : 0;
+  return verdict.uncovered.length > 0 ||
+    con.unclassified.length > 0 ||
+    build.uncovered.length > 0 ||
+    build.guardsUncovered.length > 0 ||
+    build.stale.length > 0
+    ? 1
+    : 0;
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
@@ -1374,13 +1517,21 @@ export async function selfTest() {
   // A scratch root carrying the given ci.yml beside the REAL turbo.json and
   // root manifest, so the only drift `main()` can see is the one injected: a
   // root missing either file would red the build-input subject on its own and
-  // satisfy a "returns 1" assertion for the wrong reason.
+  // satisfy a "returns 1" assertion for the wrong reason. The same holds for
+  // every script the real Build Core's steps run (#21341): their closures are
+  // read from the root being judged, so they are staged too.
+  const realGuardPaths = (
+    judgeBuildInputs(realSource, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8')).guards ?? []
+  ).map((r) => r.path);
   const inScratchTree = (ciSource, fn) => {
     const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
     try {
       mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
       writeFileSync(join(scratch, CI_WORKFLOW), ciSource);
-      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST]) writeFileSync(join(scratch, rel), readFileSync(join(REPO_ROOT, rel), 'utf8'));
+      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST, ...realGuardPaths]) {
+        mkdirSync(dirname(join(scratch, rel)), { recursive: true });
+        writeFileSync(join(scratch, rel), readFileSync(join(REPO_ROOT, rel), 'utf8'));
+      }
       return fn(scratch);
     } finally {
       rmSync(scratch, { recursive: true, force: true });
@@ -1528,6 +1679,195 @@ export async function selfTest() {
   assert(inScratchTree(realSource, (root) => quietly(() => main(root))) === 0, 'main() returns 0 over the scratch copy of the real tree -- the scratch root is complete');
   assert(inScratchTree(droppedReal, (root) => quietly(() => main(root))) === 1, '-- and 1 with that one build input dropped: the report path, not only `judgeBuildInputs`');
 
+  // ── (10) Build Core and the scripts its own steps run (#21341) ──────────
+  battery('(10) Build Core and the scripts its own steps run');
+  // A Build Core whose steps reach scripts every way the recognizer reads, and
+  // two ways it deliberately does not: `pnpm build` (the other population),
+  // `pnpm install` (a builtin; the root `prepare` it triggers runs in every
+  // job) and a package-scoped `pnpm --filter` script (the stated bound).
+  const GUARD_CORE = ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/check-foo.mjs', 'scripts/check-bar.mjs', 'scripts/helper.mjs'];
+  const GUARD_STEPS = [
+    { name: 'Install', run: 'pnpm install --frozen-lockfile' },
+    { name: 'Bar self-test', run: 'node scripts/check-bar.mjs --self-test' },
+    { name: 'Build', run: 'pnpm build' },
+    { name: 'Foo guard', run: 'pnpm check:foo' },
+    { name: 'Analyze', run: 'pnpm --filter @objectstack/spec analyze' },
+  ];
+  const guardWorkflow = ({ core = GUARD_CORE, steps = GUARD_STEPS } = {}) => {
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(core),
+      '  build-core:',
+      `    if: ${JSON.stringify(BUILD_IF)}`,
+      '    steps:',
+      ...steps.flatMap((s) => [`      - name: ${JSON.stringify(s.name)}`, '        run: |', ...s.run.split('\n').map((l) => `          ${l}`)]),
+    ].join('\n');
+  };
+  const guardManifest = (extra = {}) =>
+    JSON.stringify({
+      scripts: {
+        build: 'turbo run build --filter=!@objectstack/docs',
+        prepare: 'node scripts/setup.mjs',
+        'check:foo': 'node scripts/check-foo.mjs --self-test && node scripts/check-foo.mjs',
+        ...extra,
+      },
+    });
+  const GUARD_CLOSURES = {
+    'scripts/a.mjs': ['scripts/a.mjs'],
+    'scripts/check-foo.mjs': ['scripts/check-foo.mjs', 'scripts/helper.mjs'],
+    'scripts/check-bar.mjs': ['scripts/check-bar.mjs'],
+    'scripts/check-baz.mjs': ['scripts/check-baz.mjs'],
+    'scripts/check-qux.mjs': ['scripts/check-qux.mjs'],
+    'ops/scripts/check-z.mjs': ['ops/scripts/check-z.mjs'],
+  };
+  const fixtureClosure = (rel) => {
+    if (!Object.hasOwn(GUARD_CLOSURES, rel)) throw new Error(`firstPartyModuleClosure: ${rel} does not exist under the fixture root.`);
+    return GUARD_CLOSURES[rel];
+  };
+  const judgeGuards = ({ workflow, manifest } = {}) =>
+    judgeBuildInputs(workflow ?? guardWorkflow(), turboFixture(), manifest ?? guardManifest(), fixtureClosure);
+  const guardPaths = (v) => (v.guards ?? []).map((r) => r.path).sort().join(',');
+  const uncoveredGuards = (v) => (v.guardsUncovered ?? ['(no verdict)']).map((r) => r.path ?? r).join(',');
+  const guardFrom = (v, path) => (v.guards ?? []).find((r) => r.path === path)?.from ?? [];
+
+  const guardClean = judgeGuards();
+  assert(
+    !guardClean.refusal && findingsOfBuild(guardClean).length === 0 && uncoveredGuards(guardClean) === '',
+    `positive control: the default guard fixture is clean -- ${guardClean.refusal ?? [...findingsOfBuild(guardClean), uncoveredGuards(guardClean)].join(', ')}`,
+  );
+  assert(
+    guardPaths(guardClean) === 'scripts/check-bar.mjs,scripts/check-foo.mjs,scripts/helper.mjs',
+    `the population is exactly the scripts the steps run and what they import -- nothing from \`pnpm build\`, \`pnpm install\`'s \`prepare\` or the package-scoped step: ${guardPaths(guardClean)}`,
+  );
+  assert(guardFrom(guardClean, 'scripts/check-foo.mjs').join(';') === 'Foo guard (pnpm check:foo)', '-- a script reached through a root alias is attributed to its step and the alias');
+  assert(guardFrom(guardClean, 'scripts/check-bar.mjs').join(';') === 'Bar self-test', '-- a script a step names directly is attributed to that step');
+  assert(guardFrom(guardClean, 'scripts/helper.mjs').join(';') === 'imported by scripts/check-foo.mjs', '-- a closure member is attributed to the script that imports it');
+
+  // THE HOLE, both ways the card reads it.
+  const droppedGuard = judgeGuards({ workflow: guardWorkflow({ core: GUARD_CORE.filter((e) => e !== 'scripts/check-foo.mjs') }) });
+  assert(uncoveredGuards(droppedGuard) === 'scripts/check-foo.mjs', 'THE HOLE: a guard row dropped from `core:` is reported uncovered, by path');
+  assert(
+    guardFrom(droppedGuard, 'scripts/check-foo.mjs').join(';') === 'Foo guard (pnpm check:foo)' && (droppedGuard.uncovered ?? ['x']).length === 0,
+    '-- naming the step that runs it, and not as a build input',
+  );
+  const newGuardStep = judgeGuards({
+    workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'Baz guard', run: 'pnpm check:baz' }] }),
+    manifest: guardManifest({ 'check:baz': 'node scripts/check-baz.mjs --self-test && node scripts/check-baz.mjs' }),
+  });
+  assert(uncoveredGuards(newGuardStep) === 'scripts/check-baz.mjs', 'THE HOLE, other side: a guard STEP added to Build Core with no filter row reds, by path');
+  const newDirectStep = judgeGuards({ workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'Qux self-test', run: 'node scripts/check-qux.mjs --self-test' }] }) });
+  assert(uncoveredGuards(newDirectStep) === 'scripts/check-qux.mjs', '-- and so does one that names its script directly rather than through an alias');
+  const droppedHelper = judgeGuards({ workflow: guardWorkflow({ core: GUARD_CORE.filter((e) => e !== 'scripts/helper.mjs') }) });
+  assert(uncoveredGuards(droppedHelper) === 'scripts/helper.mjs', 'a module a guard IMPORTS, dropped from `core:`, reds too -- the guard executes it');
+  const chained = judgeGuards({
+    workflow: guardWorkflow({ steps: [{ name: 'Build', run: 'pnpm build' }, { name: 'Chain', run: 'pnpm check:chain' }] }),
+    manifest: guardManifest({ 'check:chain': 'pnpm check:foo' }),
+  });
+  assert(guardPaths(chained) === 'scripts/check-foo.mjs,scripts/helper.mjs', 'an alias that calls another alias is followed to the script at the end of the chain');
+  const commented = judgeGuards({
+    workflow: guardWorkflow({ steps: [{ name: 'Build', run: 'pnpm build' }, { name: 'Foo guard', run: '# pnpm check:baz\npnpm check:foo' }] }),
+    manifest: guardManifest({ 'check:baz': 'node scripts/check-baz.mjs' }),
+  });
+  assert(guardPaths(commented) === 'scripts/check-foo.mjs,scripts/helper.mjs', 'a commented-out line inside a step runs nothing and requires nothing');
+  const sharedRow = judgeGuards({ workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'A self-test', run: 'node scripts/a.mjs --self-test' }] }) });
+  assert(
+    !sharedRow.refusal && uncoveredGuards(sharedRow) === '' && (sharedRow.uncovered ?? ['x']).length === 0,
+    'a guard that is also a declared build input is satisfied by its one literal row -- no duplicate is demanded',
+  );
+
+  // The reverse direction: the rows are held to the steps, not only the steps to the rows.
+  const leftoverGuard = judgeGuards({ workflow: guardWorkflow({ core: [...GUARD_CORE, 'scripts/check-old.mjs'] }) });
+  assert((leftoverGuard.stale ?? []).join(',') === 'scripts/check-old.mjs', 'a guard row whose step is gone is reported as a leftover');
+  assert(
+    (judgeGuards({ workflow: guardWorkflow({ steps: GUARD_STEPS.filter((s) => s.name !== 'Bar self-test') }) }).stale ?? []).join(',') === 'scripts/check-bar.mjs',
+    '-- the same row reds the moment the step that ran it is deleted',
+  );
+  const guardOnlyDir = judgeGuards({
+    workflow: guardWorkflow({
+      core: [...GUARD_CORE, 'ops/scripts/check-z.mjs', 'ops/scripts/old.mjs'],
+      steps: [...GUARD_STEPS, { name: 'Z guard', run: 'node ops/scripts/check-z.mjs' }],
+    }),
+  });
+  assert(
+    (guardOnlyDir.stale ?? []).join(',') === 'ops/scripts/old.mjs',
+    '-- and a directory holding only a guard is judged for leftovers too, while the guard row itself is not one',
+  );
+  assert(
+    /step "Ghost" runs scripts\/check-ghost\.mjs/.test(
+      judgeGuards({ workflow: guardWorkflow({ steps: [...GUARD_STEPS, { name: 'Ghost', run: 'node scripts/check-ghost.mjs' }] }) }).refusal ?? '',
+    ),
+    'a step running a script whose closure cannot be computed => REFUSAL naming the step and the script',
+  );
+
+  // The real tree. The four guards the card names, and the self-test step
+  // #21338 added, each reached from its own step and covered by a literal row.
+  assert(
+    !realBuild.refusal && uncoveredGuards(realBuild) === '' && (realBuild.guards ?? []).length > 0,
+    `the checked-in core filter covers every script Build Core's steps run -- ${realBuild.refusal ?? uncoveredGuards(realBuild)}`,
+  );
+  for (const guard of [
+    'scripts/check-dts-emitted.mjs',
+    'scripts/check-dts-closure.mjs',
+    'scripts/check-dual-build-cjs-loads.mjs',
+    'scripts/check-sourcemap-no-sources-content.mjs',
+    'scripts/check-lean-entry-closure.mjs',
+  ]) {
+    const row = (realBuild.guardsCovered ?? []).find((r) => r.path === guard);
+    assert(
+      row?.kind === 'literal' && row.from.some((f) => !f.startsWith('imported by ')),
+      `a head touching only ${guard} schedules Build Core: a step runs it, and its own literal \`core\` row covers it`,
+    );
+  }
+  assert(
+    guardFrom(realBuild, 'scripts/population-floor.mjs').join(';') === 'imported by scripts/check-dual-build-cjs-loads.mjs' &&
+      (realBuild.guardsCovered ?? []).some((r) => r.path === 'scripts/population-floor.mjs' && r.kind === 'literal'),
+    'the module a guard imports and no build declares is required through the closure, and covered',
+  );
+  assert(
+    !(realBuild.guards ?? []).some((r) => r.path === notABuildInput),
+    `the control: ${notABuildInput} is no script a Build Core step runs either -- \`core\` stays a list of files`,
+  );
+  // The card's own instance (PR #17100): the lean-entry guard's row dropped.
+  const droppedGuardReal = realSource.replace("              - 'scripts/check-lean-entry-closure.mjs'\n", '');
+  assert(droppedGuardReal !== realSource, 'the real-tree guard drop found its anchor in the checked-in ci.yml');
+  const droppedGuardVerdict = judgeBuildInputs(droppedGuardReal, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'));
+  assert(
+    uncoveredGuards(droppedGuardVerdict) === 'scripts/check-lean-entry-closure.mjs' && findingsOfBuild(droppedGuardVerdict).length === 0,
+    'the checked-in ci.yml with the lean-entry guard row dropped reports exactly that guard, and nothing else',
+  );
+  assert(inScratchTree(droppedGuardReal, (root) => quietly(() => main(root))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeBuildInputs`');
+
+  // The two recognizer bounds the header states, pinned against the real job
+  // so a change that makes either one bite reds here rather than going quiet.
+  const realBuildJob = parse(realSource)?.jobs?.[BUILD_JOB] ?? {};
+  const scopedRuns = (realBuildJob.steps ?? []).filter((s) => typeof s?.run === 'string' && /\bpnpm\s+(--filter|-F)\b/.test(s.run)).map((s) => s.run.trim());
+  const specAnalyze = JSON.parse(readFileSync(join(REPO_ROOT, 'packages/spec/package.json'), 'utf8')).scripts?.analyze ?? '';
+  assert(
+    scopedRuns.join('|') === 'pnpm --filter @objectstack/spec analyze' && specAnalyze !== '' && !specAnalyze.includes('..'),
+    `bound 1: Build Core's only package-scoped step is the spec's \`analyze\`, and that script stays inside packages/spec -- got ${JSON.stringify(scopedRuns)} running ${JSON.stringify(specAnalyze)}`,
+  );
+  const localActions = (realBuildJob.steps ?? []).map((s) => String(s?.uses ?? '')).filter((u) => u.startsWith('./'));
+  // Its `run:` steps only, read the way `buildGuardsOf` reads the job's: the
+  // action's description prose says "pnpm version", which is a root alias.
+  const rootScripts = JSON.parse(readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8')).scripts ?? {};
+  const actionScripts = localActions.flatMap((u) => {
+    const runs = (parse(readFileSync(join(REPO_ROOT, u, 'action.yml'), 'utf8'))?.runs?.steps ?? []).filter((s) => typeof s?.run === 'string');
+    return runs.length === 0 ? ['(no run: step read)'] : runs.flatMap((s) => [...collectInvocations([{ name: u, text: s.run }], rootScripts).named.keys()]);
+  });
+  assert(
+    localActions.length > 0 && actionScripts.length === 0,
+    `bound 2: the local composite action(s) Build Core uses (${localActions.join(', ') || 'none found'}) run no repository script -- got ${actionScripts.join(', ') || 'none'}`,
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1591,7 +1931,12 @@ export async function selfTest() {
       `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
       `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +
       `and the excluded docs build left out until the build script stops excluding it, a leftover literal entry, ` +
-      `ten refusals, and the checked-in tree green with one input dropped observed red through the report path.`,
+      `ten refusals, and the checked-in tree green with one input dropped observed red through the report path; ` +
+      `and the scripts Build Core's own steps run: a guard row dropped from \`core\` and a guard step added with no ` +
+      `row each observed red by path and step, through an alias, an alias chain, a direct path and an import, a ` +
+      `commented-out line requiring nothing, a row whose step is gone reported as a leftover, an unresolvable ` +
+      `script refused, the five real guards and the imported population-floor covered by their own rows, the ` +
+      `lean-entry row dropped observed red through the report path, and both recognizer bounds pinned to the real job.`,
   );
   selfTestReachedVerdict = true;
   return 0;

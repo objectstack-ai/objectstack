@@ -3,24 +3,6 @@ title: 17.6.0
 description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
 ---
 
-{/*
-  RELEASE-TIME TODO — this page was compiled BEFORE 17.6.0 was cut.
-  It reads the 338 changesets pending on `main` at 748b2407. Before this page
-  merges, after the version commit lands:
-    1. fill the publish date in "What's new in 17.6.0";
-    2. fold in any changeset that landed on `main` after 748b2407;
-    3. replace the changeset count with the per-package CHANGELOG entry count;
-    4. if the console pin moved past 31971ff1e28f, add the range to "New in
-       Console" and drop each "Known console issues" line the new pin fixes
-       (objectui 0858267e, 8001068b, 3ae91930); if it did not, record the
-       accepted-for-GA waiver the release-readiness rule asks for;
-    5. if #21158 (the guest anchor's bindings for anonymous callers) lands
-       before the cut, replace the "no supported channel" lines in Highlights,
-       the deny-baseline Migration and the checklist with its grant channel;
-    6. update v17/index.mdx (status blockquote, per-release list, checklist links).
-  Delete this comment when done.
-*/}
-
 ## Highlights — 17.6.0
 
 - **A caller that resolves no permission set gets the deny baseline**
@@ -84,22 +66,31 @@ description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
   `dd3f7e1be356 → db11afd4967c → e420df310f5b → 31971ff1e28f` (`a3d7588`,
   `b8191f7`, `0d42104`) — carrying 232 releasing objectui changesets, 23 of
   them declared breaking upstream. The last restores Studio's spec-derived
-  forms. ⚠️ Three Studio saves are refused by 17.6.0 server changes at this pin;
-  see [Known console issues](#new-in-console-studio--objectui-pins-in-1760).
+  forms. ⚠️ At this pin, three Studio saves are refused by 17.6.0 server
+  changes and zh-CN falls back to English on a full page load; see [Known
+  console issues](#new-in-console-studio--objectui-pins-in-1760).
 
 ---
 
 
 ## What's new in 17.6.0
 
-{/* TODO(release): publish date and day count, e.g. "17.6.0 was published to the `latest` tag on **2026-MM-DD**, N days after 17.5.0." */}
-17.6.0 moves the whole version-locked train and no major; the runtime still
-implements protocol 17. It is compiled from the **338 changesets** pending on
-`main` at `748b2407`. Sixteen of them describe code that 17.5.0 already
-shipped — see [Shipped in
-17.5.0](#shipped-in-1750--listed-again-in-1760s-changelog) — so 322 are new in
-this release. The bundled Console advances three pins,
-`dd3f7e1be356 → db11afd4967c → e420df310f5b → 31971ff1e28f`.
+17.6.0 was published to the `latest` tag on **2026-10-02**, 3 days after
+17.5.0, moving the whole version-locked train and no major; the runtime still
+implements protocol 17. The version commit `617f25f8` consumed **337
+changesets**, and that is the count this page uses. The 69 package
+`CHANGELOG.md` files that carry a 17.6.0 section list them as 496 per-package
+entries (198 minor, 298 patch) in 48 of those files, because a changeset that
+bumps several packages is listed in each; the entries de-duplicate to the same
+337. Sixteen of them describe code that 17.5.0 already shipped — see [Shipped
+in 17.5.0](#shipped-in-1750--listed-again-in-1760s-changelog) — so 321 are new
+in this release. The npm packages also carry one commit that no 17.6.0
+`CHANGELOG.md` entry names — see [Also shipped in
+17.6.0](#also-shipped-in-1760--not-in-its-changelog). The bundled Console
+advances three pins,
+`dd3f7e1be356 → db11afd4967c → e420df310f5b → 31971ff1e28f`. Issues the
+release verification found after publish are listed under [Known issues found
+after publish](#known-issues-found-after-publish).
 
 ⚠️ **Read this before treating the version number as a safety guarantee.** As
 with every minor of this line, entries that landed after the 17.0.0 cut ship as
@@ -1155,7 +1146,9 @@ warning — flow definitions are served as authored to every member who can read
 flows (`ed54768`, #20698). A host that turns scheduled work off for one kernel
 can say why with `ScheduledWorkPolicy.hostDisabledReason`, which the bind log,
 `getTriggerBindingAudit()` and `GET /automation/_status` then report instead of
-the deployment sentence (`748b240`, #21270).
+the deployment sentence (`748b240`, #21270 — in the 17.6.0 packages but not in
+their CHANGELOG; see [Also shipped in
+17.6.0](#also-shipped-in-1760--not-in-its-changelog)).
 
 **Objects, pages and views.**
 
@@ -1390,8 +1383,10 @@ Four of them mirror ObjectStack keys already retired in 17.5.0
   「Platform event」.
 
 ⚠️ **Known console issues at this pin.** Three 17.6.0 server changes refuse a
-body the pinned Studio still sends; objectui has fixed each one after
-`31971ff1e28f`:
+body the pinned Studio still sends, and one locale defect remains; objectui has
+fixed each one after `31971ff1e28f`. The release verification reproduced the
+dataset, datasource and locale defects on 17.6.0 (objectstack-ai/hotcrm#1982,
+#21330):
 
 - Studio's dataset designer seeds new measure and dimension rows with `field:
   ''`, which a dataset save now refuses ([Cube and dataset
@@ -1405,10 +1400,14 @@ body the pinned Studio still sends; objectui has fixed each one after
   a plugin component saves as a draft but its publish is refused `422`
   (`page-requires-disagrees-with-source`). Fixed in objectui `3ae91930`
   (objectui#11357).
+- With the locale set to 中文（中国）, the console's own strings render in English
+  (the Approvals Inbox heading and tabs, for one), on a full page load and on
+  client-side navigation alike; server-translated labels such as navigation
+  entries are not affected. Fixed in objectui `d0fba91aa` (objectui#11326).
 
 Until the pin carries those fixes, author the count measure, the federated
 datasource and the html page through the metadata API or in source, where the
-shapes above are accepted.
+shapes above are accepted. A later pin bump picks the four fixes up.
 
 ### Shipped in 17.5.0 — listed again in 17.6.0's CHANGELOG
 
@@ -1457,6 +1456,62 @@ consume their changesets:
   `f11b5f2` (#20568) restructure and reword the protocol-18 migration guidance;
   `2123fcc` (#20576) changes source comments only.
 
+### Also shipped in 17.6.0 — not in its CHANGELOG
+
+The version commit `617f25f8` has `748b240` (#21270) in its tree — the commit
+landed on `main` after the Version Packages PR's last refresh and before it
+merged — but did not consume its changeset, so the 17.6.0 npm packages carry
+the change and no 17.6.0 `CHANGELOG.md` entry names it. It will be listed in
+the next release's `CHANGELOG.md`. The same window produced the seven commits
+under [Shipped in 17.5.0](#shipped-in-1750--listed-again-in-1760s-changelog);
+it is tracked in #21361.
+
+- `748b240` (#21270) — `ScheduledWorkPolicy` (`@objectstack/types`) gains an
+  optional `hostDisabledReason`, and `scheduledWorkDisabledReason(policy)`
+  gives the one answer for why scheduled work is not armed under a policy. A
+  host that turns one kernel off for its own reason sets it on the `enabled:
+  false` policy it hands to `AutomationServicePlugin`,
+  `ScheduleTriggerPlugin` and `TimeRelativeTriggerPlugin`; the bind log,
+  `getTriggerBindingAudit()`, `GET /automation/_status` and the triggers'
+  refusals then report it instead of the deployment sentence. Nothing changes
+  without the field.
+
+### Known issues found after publish
+
+The 17.6.0 release verification found these: an upgrade of HotCRM on a
+17.5.0-created database (objectstack-ai/hotcrm#1982), a walk of the [North
+Star](/docs/concepts/north-star) path on the published packages (#21318), and a
+checklist run of the P0 smoke and the 17.6-risk items on `617f25f8` (#21330).
+Each was open when this page was written.
+
+- **Two previews in the upgrade checklist write to the database** (#21349).
+  `os migrate meta --stored` and `os migrate audit-metadata-bodies`, both
+  without `--apply`, boot the app's seed loader against the target database:
+  seeded rows get a new `updated_at`, an `organization_id` and re-resolved
+  relative dates. The 17.5.0 CLI's `--stored` preview wrote nothing. Run both
+  previews against a copy of the database.
+- **A locally installed package's script actions do not run** (#21321).
+  `os package install <artifact>` reports success, but the installed app's
+  `script` actions answer `404` over REST and "No handler registered" over MCP
+  while `list_actions` still advertises them. A hot install also leaves
+  record-change flows unbound and the package's permission sets unprojected
+  until a restart (#21322). Booting the artifact directly
+  (`os start --artifact`) is not affected.
+- **`objectstack verify` passes a stack that `os validate`, `os build` and
+  `os lint` refuse** (#21323), and `verify --json` writes log lines ahead of
+  its JSON (#21324). Gate CI on `os validate` and `os build` as well.
+- **Approvals Inbox → My Pending does not list a request routed to a position**
+  (#21350); *Submitted by me* and *All* do, and the approver can act on it.
+  This predates 17.6.0.
+- **A cloned packaged flow reaches no Studio surface** (#21332): the clone runs
+  and survives a restart, but it belongs to no package and every Studio
+  Automations rail lists only package flows.
+- **Anonymous endpoints** stay unable to read or write objects until #21158
+  lands — see [the deny
+  baseline](#a-caller-that-resolves-no-permission-set-gets-the-deny-baseline-21217-21134-21051).
+- The [known console issues](#new-in-console-studio--objectui-pins-in-1760) at
+  the bundled pin.
+
 ---
 
 
@@ -1468,11 +1523,13 @@ walked](/docs/releases/v17#upgrade-checklists).
 
 ### 17.6.0
 
-⛔ **Nobody has walked 17.5.0 → 17.6.0.** Every line below is derived from a
-**Migration** note in [Breaking changes & migration in
-17.6.0](#breaking-changes--migration-in-1760) or from a changeset of this
-release, and is marked **not exercised**:
-accurate about what changed, unproven about what it costs to cross. A step
+⛔ **17.5.0 → 17.6.0 has been exercised only in part.** 19 lines below were
+run in an upgrade of HotCRM — a 17.5.0 app with a 17.5.0-created SQLite
+database — on 2026-10-02 (objectstack-ai/hotcrm#1982), and each says what was
+observed. Every other line is derived from a **Migration** note in [Breaking
+changes & migration in 17.6.0](#breaking-changes--migration-in-1760) or from a
+changeset of this release, and is marked **not exercised**: accurate about what
+changed, unproven about what it costs to cross. A step
 nobody has run, presented beside steps that were, is how a reader finishes a
 checklist and believes they are done — so this list claims nothing it has not
 been given.
@@ -1482,7 +1539,9 @@ been given.
 - **Find every app-declared anonymous endpoint (`authRequired: false`) that
   reads or writes objects.** After the upgrade it is refused every object, and
   no supported channel can grant anonymous callers a permission set until
-  #21158 lands; hold the upgrade if you depend on one. *Not exercised.*
+  #21158 lands; hold the upgrade if you depend on one. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* HotCRM declares
+  none, and its two anonymous public forms still create their records (`201`)
+  on 17.6.0.
 - **Grant a permission set to signed-in users on an embedder that sets
   `fallbackPermissionSet: null`;** without one they are refused every object.
   *Not exercised.*
@@ -1493,10 +1552,13 @@ been given.
   exercised.*
 - **List stored flows that share a packaged flow's name** — startup warnings or
   `getShadowedFlows()` — and clone each one you still need under a new name;
-  after the upgrade they no longer run. *Not exercised.*
+  after the upgrade they no longer run. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* no shadowed-flow warning at boot,
+  and `GET /api/v1/automation/_status` listed 31 flows with no subflow
+  refusal.
 - **Find stored `datetime` values before year 1000** with `$lt
   '1000-01-01T00:00:00.000Z'` and rewrite them, or set them to `null`; any
-  write that carries one is refused after the upgrade. *Not exercised.*
+  write that carries one is refused after the upgrade. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* 0 rows across all
+  18 `datetime` columns.
 - **Fix Turso datasource configs, authored and stored,** that force `mode:
   'local'` beside a non-empty `syncUrl`; a bound or boot-critical one fails
   the boot. *Not exercised.*
@@ -1507,54 +1569,77 @@ been given.
   lockfile** — [Moving the dependency
   pins](/docs/upgrading#moving-the-dependency-pins). If a scanner then flags an
   older `hono` under `@modelcontextprotocol/sdk`, run `pnpm update hono`;
-  objectstack never loads that copy (`bae3859`, #20667). *Not exercised.*
+  objectstack never loads that copy (`bae3859`, #20667). *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* 21 pins moved as
+  one set; the older `hono` left the lockfile, so `pnpm update hono` was not
+  needed.
 - **Leave the protocol declarations on 17:** `engines.protocol: '^17'` and a
-  `^17.0.0` `specVersion`. 17.6.0 still implements protocol 17. *Not
-  exercised.*
+  `^17.0.0` `specVersion`. 17.6.0 still implements protocol 17. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:*
+  `^17.6.0` in both declarations loads.
 - **Run `os migrate meta --from 17`, then `os migrate meta --stored --apply`**
   for the new conversions — `publicPicker`, `breadcrumb`, action `endpoint`,
   subform `columns`, cube `refreshKey`, the empty count-measure `field`,
   connector `triggers` / `syncConfig` / `fieldMappings`, `time` defaults ending
   in `Z` — and for page filters on inline-row blocks, which `--stored` now
-  lists as pending until applied. *Not exercised.*
+  lists as pending until applied. ⚠️ The `--stored` preview writes to the
+  database on 17.6.0 (#21349): run it against a copy. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* `--from 17` listed
+  19 mechanical edits — 6 `page-header-breadcrumb-removed`, applied, and the
+  same 13 `flow-decision-mode-inclusive-explicit` offers 17.5.0 made, left
+  unapplied because every one of those decisions partitions; `--stored`
+  examined 1 row and rewrote none.
 - **Run `os migrate audit-metadata-bodies`, then
   `os migrate audit-metadata-bodies --apply`**, to rewrite metadata-body copies
-  already at rest in `sys_audit_log` and `sys_activity`. *Not exercised.*
+  already at rest in `sys_audit_log` and `sys_activity`. ⚠️ The dry run writes
+  to the database too (#21349): run it against a copy. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* 2 rows scanned in
+  each table and nothing to rewrite; a second `--apply` gave the same
+  answer.
 
 **Metadata and build — run `os validate` before you ship**
 
 - **Rewrite every cube member `sql` and dataset member `field` that is not a
   column reference** — `CASE WHEN`, aggregates, ratios — as a dataset measure
   with its own `filter`, or a `derived` measure; `tsc` does not catch these.
-  Delete cube `refreshKey`. *Not exercised.*
+  Delete cube `refreshKey`. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* `os validate` passed, so no member needed
+  rewriting.
 - **Delete connector `triggers`, `syncConfig` and `fieldMappings`**, and move a
   sync you still want to a `mapping` with `connectorSource`. *Not exercised.*
 - **Rewrite the page and view shapes:** `div` → `box` in `kind: 'html'` pages,
   no hand-written `requires`, `endpoint` → `target` on `action:button` /
   `action:icon`, subform / line-items / master-detail columns keyed by `name`,
   `grouping` as `{ fields: [{ field }] }`, and delete `publicPicker` and
-  `page:header` `breadcrumb`. *Not exercised.*
+  `page:header` `breadcrumb`. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* only `breadcrumb` applied, on six
+  `page:header` blocks; the shell's own breadcrumb trail still draws.
 - **Fix the new author-time refusals:** a `picklist` or `picklistExtensions`
   entry naming no declared list, an `api` flow with no `config.secret`, action
   translation keys for undeclared outcomes or result fields, dimensions over
   JSON-stored or multi-value fields, and dimensionless `pie` / `donut` /
   `funnel` / `scatter` / `radar` / `treemap` / `sankey` widgets with two or
-  more `values`. *Not
-  exercised.*
+  more `values`. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* `os validate` and `os build` exit 0; none fired.
+- **Expect `os validate --strict` to fail on dead keys it used to pass:**
+  `liveness-dead-property` and `unconsumed-widget-option` now fire. Delete the
+  keys, or keep `--strict` out of the gate until you do. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* 88 new warnings —
+  84 `unconsumed-widget-option` on dashboard widget `options`, 4
+  `liveness-dead-property` on `rowLevelSecurity[]` labels and descriptions —
+  beside the 23 that already failed `--strict` on 17.5.0.
 - **Write `time` defaults and values as a bare wall clock** (`"10:00"`); rewrite
   by hand the stored `time` defaults with a non-zero offset that
-  `os migrate meta --stored` lists. *Not exercised.*
+  `os migrate meta --stored` lists. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* one `time` action param, submitted as
+  `14:30`, ran and stored as expected; HotCRM has no `time` field default.
 
 **Data and database**
 
 - **Review sharing rules and views that use 「is empty」 on text or
-  multi-value fields;** they now also match `''` and `[]`. *Not exercised.*
+  multi-value fields;** they now also match `''` and `[]`. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* a view stored
+  on 17.5.0 with 「is empty」 on a text field loads and re-saves; the data held
+  no `''` value, so no result changed.
 - **Review saved filters, list views, dashboard widgets and reports** for the
   newly refused filter and aggregate shapes; there is no mechanical rewrite.
-  *Not exercised.*
+  *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* 20 list views, 5 dashboards and 7 record pages refused no query, and
+  the dashboards drew the same chart elements as on 17.5.0.
 - **Send import files with ISO 8601 dates** (or the export's own `YYYY-MM-DD
   HH:mm:ss`); month-first, day-first and Excel-serial cells now fail their row.
-  *Not exercised.*
+  *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* through the REST import and the console wizard, `07/15/2026`, an Excel
+  serial and `2026-02-30` each failed their row with `invalid_date`, and the
+  rest of the batch imported.
 - **Remote Turso:** if the driver reports a `_objectstack_sequences` table
   without `key_hash`, open the database once through the local or
   embedded-replica transport. *Not exercised.*
@@ -1563,13 +1648,18 @@ been given.
 
 - **Grant auditors and reviewers what they need to read:** a permission set
   that unmasks the snapshot fields they must see, and system context for a
-  server-side job that must read every ledger row. *Not exercised.*
+  server-side job that must read every ledger row. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* a record deleted by the
+  platform admin left its `delete` row stored, and neither Setup audit-log
+  screen showed it to the admin.
 - **Pass `--visibility private`** on a first `os plugin publish` that must stay
   private. *Not exercised.*
 - **Know the console issues at this pin:** count measures with a blank field,
   External / Validate-only datasources without a credential, and republishing
-  an html page that gained a plugin component are refused from Studio; use the
-  metadata API or source for them. *Not exercised.*
+  an html page that gained a plugin component are refused from Studio, and
+  zh-CN renders the console's own strings in English; use the metadata API or
+  source for the three saves. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* the count measure answered `422
+  measures.0.field` and the External datasource `400`; the html-page case was
+  not reached.
 - **If you override `validation.field.invalid_date` or `invalid_datetime`,**
   also define `invalid_date_range` / `invalid_datetime_range` (`f6ccca4`,
   #20952). *Not exercised.*
@@ -1581,7 +1671,9 @@ been given.
   Enable packaged subflows before their callers. Rename flows whose name starts
   with `_`. *Not exercised.*
 - **Make sure every `http` node's `signingSecret` renders to a value**, or
-  write `signingSecret: ''` to send unsigned on purpose. *Not exercised.*
+  write `signingSecret: ''` to send unsigned on purpose. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* its two `http`
+  nodes read the secret from an environment variable and omit the key when it
+  is unset, so neither renders to nothing.
 - **Stop sending `formula` values when you pass `strictReadonlyWrites`**
   (otherwise they are stripped), read a submitted formula value from
   `ctx.submitted`, and handle `reason: 'computed'` in `DroppedFieldsEvent`
@@ -1596,6 +1688,7 @@ been given.
   `findOne` on stand-ins for `MigrationFlagEngine` / `SeedTenancyLedger`; lower
   filters with `lowerFilterCondition` before a direct driver call; answer
   `false` and the deny filter from an `ISecurityService` for a caller with no
-  permission set. *Not exercised.*
+  permission set. *Exercised on HotCRM (a 17.5.0 app with a 17.5.0-created SQLite DB), 2026-10-02:* nine tests that build `AnalyticsService` by hand pass
+  unchanged, with all 3,725 tests.
 - **Publish `data.record.*` events, not bare `record.*`**, from a plugin that
   feeds the knowledge index. *Not exercised.*

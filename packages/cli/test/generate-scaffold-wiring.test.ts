@@ -44,7 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { bundleRequire } from 'bundle-require';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { ts } from 'ts-morph';
-import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { GENERATOR_SCAFFOLD_TARGETS, stackBindingCandidates, type ScaffoldBindings } from '../src/commands/generate.js';
 import {
   TEMPLATES,
   SCAFFOLD_WIRED_BARRELS,
@@ -60,9 +60,11 @@ import {
   declaredCapabilities,
   measureStackReach,
   missingCapabilities,
+  registeredItemName,
   stackCarries,
   wiringLines,
 } from '../src/utils/scaffold-wiring.js';
+import { probeBindings } from './helpers/scaffold-bindings.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TMP_ROOT = fs.mkdtempSync(path.join(HERE, '..', 'node_modules', '.scaffold-wiring-'));
@@ -94,6 +96,21 @@ function emitTemplate(key: string): string {
   return root;
 }
 
+/**
+ * [#21325] What `target` is rendered against. A view is named after the object
+ * it binds, so its binding is the object its own `itemName` names, resolved
+ * the command's way off a stack declaring it; every other binding scaffold
+ * takes the probe stack's (`helpers/scaffold-bindings.ts`) — this file reads
+ * the item's own name, not what it binds.
+ */
+function bindingsFor(target: (typeof GENERATOR_SCAFFOLD_TARGETS)[number], namespace?: string): ScaffoldBindings | undefined {
+  if (target.binds.object !== 'name') return probeBindings(target);
+  const { objects } = stackBindingCandidates({
+    objects: [{ name: target.itemName(STEM, namespace), fields: { name: { type: 'text', label: 'Name' } } }],
+  });
+  return { object: objects[0] };
+}
+
 // ── 1. The roster ─────────────────────────────────────────────────────────
 
 describe('[#20215] every generator names where its items land', () => {
@@ -114,8 +131,10 @@ describe('[#20215] every generator names where its items land', () => {
     '`%s`: itemName is the name the scaffold writes, with and without a namespace',
     async (_type, target) => {
       for (const namespace of [NS, undefined]) {
-        const artifact = await materialize(target.generate(STEM, namespace));
-        expect(artifact.name).toBe(target.itemName(STEM, namespace));
+        const artifact = await materialize(target.generate(STEM, namespace, bindingsFor(target, namespace)));
+        // [#21325] The key the item is REGISTERED under: its `name`, or for a
+        // views container the object it binds (it writes no `name`).
+        expect(registeredItemName(target.stackKey, artifact)).toBe(target.itemName(STEM, namespace));
         // …and the reach reader finds it by exactly that name under that key.
         expect(stackCarries({ [target.stackKey]: [artifact] }, target.stackKey, target.itemName(STEM, namespace)))
           .toBe(true);
@@ -123,17 +142,23 @@ describe('[#20215] every generator names where its items land', () => {
     },
   );
 
-  it('the view container is named by its object key, which the runtime registers it under', async () => {
+  // [#21325] It used to write `name` equal to its object key, which the boot
+  // registrar only ever compares against that key (a disagreeing `name` is
+  // refused; an absent one is not), and a `label` no reader reaches. Both were
+  // `liveness-dead-property` warnings on every scaffold.
+  it('the view container writes no name or label, and is registered under the object it binds', async () => {
     const view = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === 'view')!;
-    const artifact = await materialize(view.generate(STEM, NS));
-    expect(artifact.name).toBe(artifact.object);
+    const artifact = await materialize(view.generate(STEM, NS, bindingsFor(view, NS)));
+    expect(artifact.name).toBeUndefined();
+    expect(artifact.label).toBeUndefined();
     expect(artifact.object).toBe(`${NS}_${STEM}`);
+    expect(registeredItemName('views', artifact)).toBe(`${NS}_${STEM}`);
   });
 
   it('the flow scaffold declares the capabilities it runs on, in its own header too', () => {
     const flow = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === 'flow')!;
     expect([...flow.requires].sort()).toEqual(['automation', 'triggers']);
-    const source = flow.generate(STEM, NS);
+    const source = flow.generate(STEM, NS, bindingsFor(flow, NS));
     for (const token of flow.requires) expect(source).toContain(`'${token}'`);
   });
 });

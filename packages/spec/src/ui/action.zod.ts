@@ -1357,9 +1357,10 @@ const actionObject = () => strictObject({
    * `operation: 'update'` (no handler, so no outcome). Each would parse clean
    * and never be read — the ADR-0078 shape this file refuses at authoring time.
    *
-   * **Translation** rides beside `successMessage`:
-   * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, then
-   * `globalActions.<action>.outcomeMessages.<outcome>` (`translateAction`).
+   * **Translation** rides beside `successMessage`, at the action's one
+   * address (`translateAction`): a bound action reads
+   * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, and an
+   * object-less action reads `globalActions.<action>.outcomeMessages.<outcome>`.
    *
    * Liveness `planned` until the console reader lands — the ledger row names
    * its carrier.
