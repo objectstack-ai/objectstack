@@ -76,8 +76,9 @@
  * `@objectstack/types` refuses to read a column out of it for exactly that
  * reason), and an operator debugging a duplicate needs that index name.
  *
- * ⛔ This is a server LOG. The rethrown error is untouched and every HTTP
- * boundary is unaffected.
+ * ⛔ This is a server LOG. [#21274] The rethrown error is cut too, at the
+ * engine boundary, by the same templates; every HTTP answer is unaffected (see
+ * "The thrown error is redacted too" below).
  *
  * ## [#9160] The list is now MEASURED, and there is a way to notice a gap
  *

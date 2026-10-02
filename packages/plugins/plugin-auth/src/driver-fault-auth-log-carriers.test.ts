@@ -147,7 +147,7 @@ const CELLS: readonly Cell[] = [
     env: 'OS_TEST_MYSQL_URL',
     url: MYSQL_URL,
     uniqueCode: 'ER_DUP_ENTRY',
-    diagnostic: "Duplicate entry '[value redacted]' for key",
+    diagnostic: 'Duplicate entry [value redacted] for key',
     provision: async () => {
       const admin = adminDriver({ client: 'mysql2', connection: MYSQL_URL });
       try {

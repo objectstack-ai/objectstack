@@ -164,7 +164,7 @@ const SHAPES: readonly Shape[] = [
     make: () => mysqlError(MYSQL_INSERT, `Duplicate entry '${S}' for key 'doc.doc_title_unique'`, {
       code: 'ER_DUP_ENTRY', errno: 1062, sqlState: '23000',
     }),
-    diagnostic: "Duplicate entry '[value redacted]' for key 'doc.doc_title_unique'",
+    diagnostic: "Duplicate entry [value redacted] for key 'doc.doc_title_unique'",
   },
   {
     id: 'mysql 1054 unknown column',
@@ -178,7 +178,7 @@ const SHAPES: readonly Shape[] = [
     make: () => mysqlError(MYSQL_INSERT, `Incorrect integer value: '${S}' for column 'age' at row 1`, {
       code: 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD', errno: 1366, sqlState: 'HY000',
     }),
-    diagnostic: "Incorrect integer value: '[value redacted]' for column 'age' at row 1",
+    diagnostic: "Incorrect integer value: [value redacted] for column 'age' at row 1",
   },
   {
     id: 'mysql 1406 data too long',
@@ -205,9 +205,9 @@ const BRANCHED_ON = [
 
 // ── Instruments ──────────────────────────────────────────────────────────────
 
-/** Every path, from `root`, at which the sentinel is reachable through OWN properties. */
-function sentinelCarriers(value: unknown, path = 'error', seen = new Set<unknown>()): string[] {
-  if (typeof value === 'string') return value.includes(S) ? [path] : [];
+/** Every path, from `root`, at which `needle` is reachable through OWN properties. */
+function textCarriers(value: unknown, needle: string, path = 'error', seen = new Set<unknown>()): string[] {
+  if (typeof value === 'string') return value.includes(needle) ? [path] : [];
   if (value === null || typeof value !== 'object') return [];
   if (seen.has(value)) return [];
   seen.add(value);
@@ -220,9 +220,25 @@ function sentinelCarriers(value: unknown, path = 'error', seen = new Set<unknown
     } catch {
       continue;
     }
-    hits.push(...sentinelCarriers(v, `${path}.${String(key)}`, seen));
+    hits.push(...textCarriers(v, needle, `${path}.${String(key)}`, seen));
   }
   return hits;
+}
+
+/** Every path at which the caller's value is reachable. */
+function sentinelCarriers(value: unknown): string[] {
+  return textCarriers(value, S);
+}
+
+/**
+ * The bound statement a raw fixture leads with, minus its leading kind — the
+ * part that must never survive. Every fixture's diagnostic is free of ` - `,
+ * so the last separator is where the statement ends.
+ */
+function statementBody(raw: Error): string {
+  return raw.message
+    .slice(0, raw.message.lastIndexOf(' - '))
+    .replace(/^(insert into|update|select|delete from) /i, '');
 }
 
 /** What a logger can print of an error: the inspected form (hidden fields too), `String()` and JSON. */
@@ -258,16 +274,21 @@ function restAnswer(error: unknown): { status: number; code: unknown; field: unk
 describe('[#21274] redactPropagatedDriverFault — per measured driver shape', () => {
   for (const shape of SHAPES) {
     describe(shape.id, () => {
-      it('the raw fixture carries the caller value (non-vacuity) and is not mutated by the cut', () => {
+      it('the raw fixture carries the bound statement (non-vacuity), and the cut does not mutate it', () => {
         const raw = shape.make();
-        const before = sentinelCarriers(raw);
-        expect(before.length).toBeGreaterThan(0);
+        const before = { value: sentinelCarriers(raw), statement: textCarriers(raw, statementBody(raw)) };
+        expect(before.statement.length).toBeGreaterThan(0);
         redactPropagatedDriverFault(raw);
-        expect(sentinelCarriers(raw)).toEqual(before);
+        expect({ value: sentinelCarriers(raw), statement: textCarriers(raw, statementBody(raw)) }).toEqual(before);
       });
 
       it('no carrier of the propagated error holds the caller value', () => {
         expectNoSentinel(redactPropagatedDriverFault(shape.make()));
+      });
+
+      it('no carrier holds the bound statement: only its kind survives', () => {
+        const raw = shape.make();
+        expect(textCarriers(redactPropagatedDriverFault(raw), statementBody(raw))).toEqual([]);
       });
 
       it('keeps the class, the codes and the database diagnostic', () => {
