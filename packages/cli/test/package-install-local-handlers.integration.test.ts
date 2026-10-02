@@ -38,33 +38,34 @@
  *
  * ## Spawn shape
  *
- * `bin/run.js` with `NODE_ENV` unset (hence `requireBuiltCli`) — the operator's
- * entrypoint, and the one whose bind is deterministic (no development
- * auto-shift). Every workspace package the child loads, `@objectstack/runtime`
- * and `@objectstack/cloud-connection` included, resolves through its `exports`
- * to `dist/`: an ablation of either package's source reaches this file only
- * after that package is rebuilt. Each `os start` gets its own process group and
- * is stopped by signalling the group (`os start` supervises a `serve`
- * grandchild).
+ * The tsx source entry (`bin/run-dev.js`), as every `runServe()` caller spawns
+ * it, for `os start` and for `os package install` alike. It pins
+ * `NODE_ENV=development`, which lets `serve` auto-shift off a port taken
+ * between the probe and the bind, so the ready banner is read back
+ * (`portDriftError`) before any request is addressed to the port. The CLI runs
+ * from `src/`, but every workspace package it loads — `@objectstack/runtime`
+ * and `@objectstack/cloud-connection` included — resolves through its
+ * `exports` to `dist/`: an ablation of either package's source reaches this
+ * file only after that package is rebuilt. Each `os start` gets its own
+ * process group and is stopped by signalling the group (`os start` supervises
+ * a `serve` grandchild).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import {
+  CLI,
   childEnv,
   E2E_SECRET_KEY,
   portContentionError,
+  portDriftError,
+  probeThroughChild,
   randomPort,
-  requireBuiltCli,
-  RUN_JS_RESOLVES_FROM_DIST,
+  TSX,
 } from './helpers/serve-process.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const RUN_JS = resolve(HERE, '../bin/run.js');
 
 /** The banner's tail — every row above it has printed. */
 const READY = /Press Ctrl\+C to stop/;
@@ -72,8 +73,15 @@ const BOOT_TIMEOUT_MS = 180_000;
 
 const APP_ID = 'com.example.tasksapp';
 const OBJECT = 'tasks_app_task';
-const EMAIL = 'owner@example.com';
-const PASSWORD = 'Passw0rd!Passw0rd';
+/**
+ * The development dev-admin seed (`objectstack dev`'s documented, loginable
+ * admin — `admin@objectos.ai` / `admin123`, promoted to platform admin): the
+ * tsx entry runs `os start` in development, which seeds it on every boot that
+ * finds no login, so it is the operator on all three boots and holds the
+ * `manage_metadata` capability the install route demands.
+ */
+const EMAIL = 'admin@objectos.ai';
+const PASSWORD = 'admin123';
 
 const COMPLETE_TASK = {
   name: 'complete_task',
@@ -136,11 +144,10 @@ interface LiveStart {
 
 function bootStart(cwd: string, home: string, port: string, extra: string[] = []): Promise<LiveStart> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(process.execPath, [RUN_JS, 'start', '-p', port, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
+    const child = spawn(TSX, [CLI, 'start', '-p', port, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
       cwd,
-      // `childEnv`, never a bare `...process.env` — see its header. `NODE_ENV`
-      // unset: the built entrypoint resolves commands from dist/ (#11464).
-      env: childEnv({ NODE_ENV: undefined, NO_COLOR: '1', OS_CLOUD_URL: 'off', OS_LOG_LEVEL: 'warn', OS_SECRET_KEY: E2E_SECRET_KEY }),
+      // `childEnv`, never a bare `...process.env` — see its header.
+      env: childEnv({ NO_COLOR: '1', OS_CLOUD_URL: 'off', OS_LOG_LEVEL: 'warn', OS_SECRET_KEY: E2E_SECRET_KEY }),
       stdio: ['ignore', 'pipe', 'pipe'],
       // Own process group: `os start` supervises a `serve` grandchild.
       detached: true,
@@ -161,7 +168,8 @@ function bootStart(cwd: string, home: string, port: string, extra: string[] = []
     );
     const onData = (d: unknown) => {
       out += String(d);
-      if (READY.test(out)) settle(null);
+      // The child is the authority on the port it bound.
+      if (READY.test(out)) settle(portDriftError(out, 'os start', port));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
@@ -186,27 +194,45 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 
 interface Answer { status: number; body: any }
 
-async function http(live: LiveStart, method: string, path: string, token: string, body?: unknown): Promise<Answer> {
-  const r = await fetch(`${live.base}${path}`, {
-    method,
-    headers: {
-      origin: live.base,
-      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+/**
+ * One exchange against the running `os start`, attributed to the child if the
+ * transport fails (`probeThroughChild`: a dead child is named with its
+ * transcript; a socket the live server dropped — the keep-alive connection an
+ * idle stretch outlives — is absorbed and retried, loudly, a bounded number of
+ * times). ⛔ No assertion inside it.
+ */
+function exchange<T>(live: LiveStart, what: string, run: () => Promise<T>): Promise<T> {
+  return probeThroughChild(
+    {
+      child: live.child,
+      transcript: () => `\n--- child output ---\n${live.output().slice(-4000)}`,
+      label: 'package-install-local-handlers',
+      what,
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
-  const text = await r.text();
-  let parsed: any = text;
-  try { parsed = JSON.parse(text); } catch { /* keep the text */ }
-  return { status: r.status, body: parsed };
+    run,
+  );
 }
 
-async function authenticate(live: LiveStart, firstUser: boolean): Promise<string> {
-  const res = await http(
-    live, 'POST', firstUser ? '/api/v1/auth/sign-up/email' : '/api/v1/auth/sign-in/email', '',
-    firstUser ? { email: EMAIL, password: PASSWORD, name: 'Owner' } : { email: EMAIL, password: PASSWORD },
-  );
+function http(live: LiveStart, method: string, path: string, token: string, body?: unknown): Promise<Answer> {
+  return exchange(live, `${method} ${path}`, async () => {
+    const r = await fetch(`${live.base}${path}`, {
+      method,
+      headers: {
+        origin: live.base,
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    const text = await r.text();
+    let parsed: any = text;
+    try { parsed = JSON.parse(text); } catch { /* keep the text */ }
+    return { status: r.status, body: parsed };
+  });
+}
+
+async function authenticate(live: LiveStart): Promise<string> {
+  const res = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password: PASSWORD });
   const token = res.body?.token;
   if (res.status !== 200 || typeof token !== 'string') {
     throw new Error(`auth answered ${res.status}: ${JSON.stringify(res.body)}\n--- output ---\n${live.output().slice(-3000)}`);
@@ -214,24 +240,37 @@ async function authenticate(live: LiveStart, firstUser: boolean): Promise<string
   return token;
 }
 
-function packageInstall(appDir: string, live: LiveStart): { exit: number | null; output: string } {
-  const r = spawnSync(process.execPath, [RUN_JS, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
-    cwd: appDir,
-    encoding: 'utf8',
-    env: childEnv({ NODE_ENV: undefined, NO_COLOR: '1' }),
-    timeout: 120_000,
+/**
+ * `os package install ./dist/objectstack.json` against the running runtime.
+ * ⛔ Asynchronous on purpose: a `spawnSync` would stop this process draining
+ * the server's stdout/stderr pipes for the whole install, and a server that
+ * fills its pipe while the install waits on it blocks until the timeout.
+ */
+function packageInstall(appDir: string, live: LiveStart): Promise<{ exit: number | null; output: string }> {
+  return new Promise((done) => {
+    const child = spawn(TSX, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+      cwd: appDir,
+      env: childEnv({ NO_COLOR: '1' }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout?.on('data', (d) => { output += String(d); });
+    child.stderr?.on('data', (d) => { output += String(d); });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 120_000);
+    child.on('close', (code) => { clearTimeout(timer); done({ exit: code, output }); });
   });
-  return { exit: r.status, output: `${r.stdout}\n${r.stderr}` };
 }
 
 /** One MCP JSON-RPC call over Streamable HTTP; the tool's JSON text, parsed. */
 async function mcpTool(live: LiveStart, apiKey: string, name: string, args: Record<string, unknown>) {
-  const r = await fetch(`${live.base}/api/v1/mcp`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-api-key': apiKey },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+  const text = await exchange(live, `MCP tools/call ${name}`, async () => {
+    const r = await fetch(`${live.base}/api/v1/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-api-key': apiKey },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return r.text();
   });
-  const text = await r.text();
   const data = text.split('\n').find((l) => l.startsWith('data:'));
   const envelope = JSON.parse(data ? data.slice(5) : text);
   const content = envelope?.result?.content?.[0]?.text;
@@ -279,7 +318,6 @@ const phases: Record<'install' | 'reinstall' | 'restart' | 'control', Phase | un
 const installs: Array<{ exit: number | null; output: string }> = [];
 
 beforeAll(async () => {
-  requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
   const root = mkdtempSync(join(tmpdir(), 'install-local-handlers-'));
   dirs.push(root);
   const appDir = join(root, 'app');
@@ -293,23 +331,23 @@ beforeAll(async () => {
 
   // ── boot 1: empty `os start`, install, probe, reinstall, probe ─────────
   const first = await bootStart(runtimeDir, home, port);
-  const token = await authenticate(first, true);
-  installs.push(packageInstall(appDir, first));
+  const token = await authenticate(first);
+  installs.push(await packageInstall(appDir, first));
   phases.install = await probe(first, token);
-  installs.push(packageInstall(appDir, first));
+  installs.push(await packageInstall(appDir, first));
   phases.reinstall = await probe(first, token);
   await stopGroup(first.child);
 
   // ── boot 2: same home and cwd — the ledger rehydrates on kernel:ready ──
   const second = await bootStart(runtimeDir, home, port);
-  phases.restart = await probe(second, await authenticate(second, false));
+  phases.restart = await probe(second, await authenticate(second));
   await stopGroup(second.child);
 
   // ── boot 3: the CONTROL — the same file as the boot artifact ───────────
   const controlDir = join(root, 'control');
   mkdirSync(controlDir, { recursive: true });
   const third = await bootStart(controlDir, join(controlDir, 'home'), port, ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
-  phases.control = await probe(third, await authenticate(third, true));
+  phases.control = await probe(third, await authenticate(third));
   await stopGroup(third.child);
 }, 4 * BOOT_TIMEOUT_MS);
 
