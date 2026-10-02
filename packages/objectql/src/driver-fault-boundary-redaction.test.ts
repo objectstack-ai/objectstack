@@ -33,6 +33,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { inspect, types as utilTypes } from 'node:util';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import {
   DRIVER_TARGETED_TABLE,
   declareTargetedTable,
@@ -479,7 +480,7 @@ const DOORS: ReadonlyArray<readonly [string, Failing, (e: ObjectQL) => Promise<u
   ['find', 'read', (e) => e.find(OBJECT, { where: { title: S } })],
   ['findOne', 'read', (e) => e.findOne(OBJECT, { where: { title: S } })],
   ['count', 'read', (e) => e.count(OBJECT, { where: { title: S } })],
-  ['aggregate', 'read', (e) => e.aggregate(OBJECT, { groupBy: ['title'], aggregations: [{ function: 'count', alias: 'n' }] } as any)],
+  ['aggregate', 'read', (e) => e.aggregate(OBJECT, { groupBy: ['title'], aggregations: [{ function: 'count', alias: 'n' }] } satisfies EngineAggregateOptions)],
   ['execute', 'execute', (e) => e.execute('select 1', { object: OBJECT, args: [S] })],
   ['resolveInternalField', 'read', (e) => e.resolveInternalField(OBJECT, ['r1'], 'token')],
   ['transaction (commit refused)', 'commit', (e) => e.transaction(async () => 'done')],
