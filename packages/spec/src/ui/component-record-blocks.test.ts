@@ -280,6 +280,66 @@ describe('ComponentPropsMap["record:history"] (#8744)', () => {
   });
 });
 
+describe('ComponentPropsMap["record:activity"] — the host feed slot is named, not declared', () => {
+  // `record:history`'s `entries` / `loading` pair, on the activity block: the
+  // renderer takes `items` and `loading` as a host-supplied feed. Both keys
+  // stay REFUSED (the accept set is unchanged); only the refusal names them.
+  const row = ComponentPropsMap['record:activity'];
+  const refusalOf = (bag: Record<string, unknown>) => {
+    const result = row.safeParse(bag);
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+    expect(issues).toHaveLength(1);
+    return issues[0]!;
+  };
+
+  it('refuses `items` and `loading` at the bag, for every value — the key, not a value domain', () => {
+    for (const [key, values] of [
+      ['items', [[{ id: 'a1', type: 'comment' }], []]],
+      ['loading', [true, false]],
+    ] as const) {
+      for (const value of values) {
+        const issue = refusalOf({ [key]: value });
+        expect(issue.code).toBe('unrecognized_keys');
+        expect(issue.path).toEqual([]);
+        expect((issue as { keys?: string[] }).keys).toEqual([key]);
+      }
+    }
+  });
+
+  it('names `items` as the host\'s data channel, with the omit remedy', () => {
+    const { message } = refusalOf({ items: [{ id: 'a1', type: 'comment' }] });
+    expect(message).toContain('`items` is the HOST\'s data channel, not authorable surface');
+    expect(message).toContain('Omit it');
+    expect(message).toContain('sys_activity');
+  });
+
+  it('names `loading` as the host\'s fetch state, with the omit remedy', () => {
+    const { message } = refusalOf({ loading: true });
+    expect(message).toContain('`loading` is the host\'s fetch state for its `items` feed, not authorable surface');
+    expect(message).toContain('Omit it with `items`');
+  });
+
+  it('CONTROL: an unrelated unknown key keeps the generic refusal, with no host-channel line', () => {
+    const issue = refusalOf({ inventedFeedKey: [] });
+    expect((issue as { keys?: string[] }).keys).toEqual(['inventedFeedKey']);
+    expect(issue.message).toContain('Unrecognized key(s) on this `record:activity`');
+    expect(issue.message).not.toContain('data channel');
+    expect(issue.message).not.toContain('fetch state');
+  });
+
+  it('the nested `record:chatter` `feed` (the same object) still refuses both keys at `feed`', () => {
+    for (const key of ['items', 'loading'] as const) {
+      const result = ComponentPropsMap['record:chatter'].safeParse({ feed: { [key]: key === 'items' ? [] : true } });
+      expect(result.success).toBe(false);
+      const [issue] = result.error!.issues;
+      expect(issue!.code).toBe('unrecognized_keys');
+      expect(issue!.path).toEqual(['feed']);
+      expect((issue as { keys?: string[] }).keys).toEqual([key]);
+    }
+  });
+});
+
 describe('the `record:discussion` / `record:chatter` pair (#8744)', () => {
   it('judges both names with one accept face', () => {
     const authored = { position: 'bottom', collapsible: false } as const;
