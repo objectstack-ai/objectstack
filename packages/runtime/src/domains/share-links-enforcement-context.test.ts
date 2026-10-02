@@ -52,8 +52,9 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { PermissionDeniedError, SecurityPlugin } from '@objectstack/plugin-security';
-import { ShareLinkService } from '@objectstack/plugin-sharing';
+import { ShareLinkService, registerShareLinkRoutes } from '@objectstack/plugin-sharing';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { apiErrorResponse } from '../error-envelope.js';
@@ -133,8 +134,8 @@ const EAST_VIEWER: PermissionSet = PermissionSetSchema.parse({
  * withholds read. This set is therefore wired as BOTH the caller's explicit set
  * and the fallback in the #6649 cases below: `allowCreate` alone, so
  * `checkObjectPermission('find', 'crm_account', …)` is false and the security
- * middleware throws `PermissionDeniedError` — the `statusCode`-only shape whose
- * status the domain used to drop.
+ * middleware throws `PermissionDeniedError` — the shape whose status the domain
+ * used to drop, because it declared `statusCode` alone until #21405.
  */
 const ACCT_NO_READ: PermissionSet = PermissionSetSchema.parse({
     name: 'acct_no_read',
@@ -550,6 +551,11 @@ describe('[#6551] the dispatcher seam itself', () => {
  * which reads `status` OR `statusCode`. These cases assert `status` AND `code`
  * together on purpose: a denial arriving as 403 under the wrong code would be
  * just as wrong as the 500, and only the pair separates them.
+ *
+ * [#21405] The paragraphs above describe the class as #6649 found it. It now
+ * carries `status` beside `statusCode`, which is what fixed the OTHER door, and
+ * the shared-catch case below keeps a `statusCode`-only throw so this catch's
+ * second channel stays pinned.
  */
 
 /** The ADR-0112 envelope checks every case below shares. */
@@ -635,17 +641,26 @@ describe('[#6649] a security-middleware refusal keeps its own status through the
         expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
     }, 30_000);
 
-    it('the catch is shared, so list and revoke answer the statusCode-only refusal identically', async () => {
-        // Driven with a service double raising the REAL `PermissionDeniedError`
-        // (the production class, `statusCode` and no `status`), because what is
-        // under test here is the CATCH, not a second trip through the middleware.
-        for (const verb of ['GET', 'DELETE'] as const) {
-            const res = await refusalFromService(
-                new PermissionDeniedError(`[Security] Access denied: operation on object '${OBJECT}'`),
-                verb,
-            );
-            expect(res.status, `${verb} status`).toBe(403);
-            expect(expectDeclaredEnvelope(res).code, `${verb} code`).toBe('PERMISSION_DENIED');
+    it('the catch is shared, so list and revoke answer the refusal identically — the production class and a statusCode-only throw', async () => {
+        // Driven with a service double, because what is under test here is the
+        // CATCH, not a second trip through the middleware. Two throws: the REAL
+        // `PermissionDeniedError`, and a `statusCode`-only twin of the shape that
+        // class had until #21405. The class now carries `status` beside
+        // `statusCode`, so it no longer reaches the catch's `statusCode` channel
+        // by itself; the twin keeps that channel pinned.
+        const throws = {
+            production: () => new PermissionDeniedError(`[Security] Access denied: operation on object '${OBJECT}'`),
+            statusCodeOnly: () => Object.assign(
+                new Error(`[Security] Access denied: operation on object '${OBJECT}'`),
+                { code: 'PERMISSION_DENIED', statusCode: 403 },
+            ),
+        };
+        for (const [shape, thrown] of Object.entries(throws)) {
+            for (const verb of ['GET', 'DELETE'] as const) {
+                const res = await refusalFromService(thrown(), verb);
+                expect(res.status, `${shape} ${verb} status`).toBe(403);
+                expect(expectDeclaredEnvelope(res).code, `${shape} ${verb} code`).toBe('PERMISSION_DENIED');
+            }
         }
     });
 
@@ -916,4 +931,118 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
 
         expectIndistinguishable(await h.resolve(token, { password: 'hunter2' }), await h.resolve(UNKNOWN_TOKEN));
     });
+});
+
+/**
+ * [#21405] The SAME refusal through the OTHER door.
+ *
+ * `/share-links` has two doors. This file's subject is the dispatcher domain;
+ * `plugin-sharing`'s `registerShareLinkRoutes` is the other, and it is the one
+ * that serves `/api/v1/share-links` on the standalone server (the dispatcher
+ * plugin mounts no route for the path there). Both hand the caller's envelope
+ * to `ShareLinkService`, so one caller and one request reach one refusal, and
+ * the only thing left to differ is how each door's catch reads the throw's
+ * status.
+ *
+ * They differed. The plugin door's catch reads `err?.status ?? 500`, and
+ * `PermissionDeniedError` declared `statusCode = 403` with no `status`, so the
+ * #6649 refusal below — the CRUD gate's denial on `createLink`'s visibility
+ * read — answered 403 here and 500 there. Measured on a showcase boot as a
+ * plain member, `POST /api/v1/share-links` on a record they cannot read: 500
+ * `PERMISSION_DENIED` through the plugin door, 403 through this domain. The
+ * ruled fix is in the class: `PermissionDeniedError` carries `status` beside
+ * `statusCode`, as every sibling in `plugin-security/src/errors.ts` does, so
+ * no door's catch changes.
+ *
+ * ## What is real here
+ *
+ * Both doors, their production entries: `registerShareLinkRoutes` mounted on a
+ * route recorder, and `handleShareLinksRequest` over the dispatcher's own
+ * `errorFromThrown`. ONE engine double with the WHOLE `SecurityPlugin`
+ * middleware booted on it, ONE `ShareLinkService` over that engine, ONE
+ * envelope — so the throw each door catches is the middleware's own
+ * `PermissionDeniedError` from the same read, not a double's.
+ *
+ * ## Why create only
+ *
+ * The list's refusal (the member's read of `sys_share_link`) no longer
+ * reaches either door: the member's own list became a self-scoped read
+ * (#21328), and both doors force the creator filter to the caller. Measured on
+ * the showcase boot after that change: `GET /share-links` answers 200 through
+ * both doors.
+ */
+
+/** The smallest `IHttpServer` that keeps the handlers a registrar mounts. */
+class RouteRecorder implements IHttpServer {
+    readonly routes = new Map<string, RouteHandler>();
+    get(path: string, handler: RouteHandler) { this.routes.set(`GET ${path}`, handler); }
+    post(path: string, handler: RouteHandler) { this.routes.set(`POST ${path}`, handler); }
+    put(path: string, handler: RouteHandler) { this.routes.set(`PUT ${path}`, handler); }
+    delete(path: string, handler: RouteHandler) { this.routes.set(`DELETE ${path}`, handler); }
+    patch(path: string, handler: RouteHandler) { this.routes.set(`PATCH ${path}`, handler); }
+    use() { /* no middleware is mounted by the registrar under test */ }
+    async listen() { /* never listens: handlers are driven in-process */ }
+}
+
+/** `POST /share-links` through the plugin door, with `envelope` as the resolved caller. */
+async function mintOnPluginDoor(
+    engine: any,
+    svc: ShareLinkService,
+    envelope: ExecutionContext,
+): Promise<{ status: number; body: any }> {
+    const http = new RouteRecorder();
+    registerShareLinkRoutes(http, svc, engine, { contextFromRequest: () => envelope });
+    const handler = http.routes.get('POST /api/v1/share-links');
+    if (!handler) throw new Error('registerShareLinkRoutes mounted no POST /api/v1/share-links');
+    const captured: { status: number; body: any } = { status: 200, body: undefined };
+    const res: IHttpResponse = {
+        json: (data: any) => { captured.body = data; },
+        send: () => { /* the share-link routes answer JSON only */ },
+        status: (code: number) => { captured.status = code; return res; },
+        header: () => res,
+    };
+    const req: IHttpRequest = {
+        params: {},
+        query: {},
+        body: { object: OBJECT, recordId: RECORD },
+        headers: {},
+        method: 'POST',
+        path: '/api/v1/share-links',
+    };
+    await handler(req, res);
+    return captured;
+}
+
+describe('[#21405] the plugin route door answers the same refusal with the same status', () => {
+    for (const posture of ['single', 'group'] as const) {
+        it(`${posture} posture: no allowRead on the object answers 403 PERMISSION_DENIED through BOTH doors`, async () => {
+            const caller = noReadCaller(posture);
+            const tables: Record<string, any[]> = {
+                [OBJECT]: caller.records,
+                sys_share_link: [],
+                sys_permission_set: [],
+            };
+            const engine = makeEngine(tables);
+            await bootSecurity(engine, posture, caller.permissionSets, caller.fallbackPermissionSet);
+            const svc = new ShareLinkService({ engine: engine as any });
+
+            const plugin = await mintOnPluginDoor(engine, svc, caller.envelope);
+            const dispatched = await handleShareLinksRequest(
+                makeDeps(engine, svc),
+                '',
+                'POST',
+                { object: OBJECT, recordId: RECORD },
+                {},
+                httpContext(caller.envelope),
+            );
+            const dispatcher = dispatched.response as { status: number; body: any };
+
+            expect(plugin.status, `plugin door: ${JSON.stringify(plugin.body)}`).toBe(403);
+            expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+            expect(dispatcher.status, `dispatcher door: ${JSON.stringify(dispatcher.body)}`).toBe(403);
+            expect(expectDeclaredEnvelope(dispatcher).code).toBe('PERMISSION_DENIED');
+            // Neither refused mint wrote a link.
+            expect(tables.sys_share_link).toEqual([]);
+        }, 30_000);
+    }
 });

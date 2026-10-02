@@ -10,7 +10,8 @@
  * nothing at the doors that read the other. `PermissionDeniedError` was that
  * class — `statusCode` alone — and `plugin-sharing`'s share-link route door,
  * which reads `status`, answered its 403 refusal as a 500. Its two-door pin is
- * `packages/qa/dogfood/test/share-links-permission-denied-status.dogfood.test.ts`.
+ * the `[#21405]` block of
+ * `packages/runtime/src/domains/share-links-enforcement-context.test.ts`.
  *
  * The population is ENUMERATED from the module's exports, never listed by
  * hand, so a class added later is held to the rule the day it lands. The floor
