@@ -40,7 +40,7 @@ export const SysApprovalDelegation = ObjectSchema.create({
   // needed — RLS/permission sets are the authz.
   managedBy: 'system-data',
   description:
-    'Self-service out-of-office rule: route this user\'s approver slots to a delegate within a time window (#1322 M1).',
+    'Self-service out-of-office rule: route this user\'s approver slots to a delegate within a time window.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
