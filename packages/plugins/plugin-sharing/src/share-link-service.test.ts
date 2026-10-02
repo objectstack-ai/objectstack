@@ -1193,6 +1193,8 @@ describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the 
   const ADMIN = 'u_admin';
   const MANAGER = 'u_manager';
   const READER = 'u_reader';
+  /** Owns a record on the capability-gated object AND holds the capability. */
+  const CAPABLE_OWNER = 'u_capable_owner';
 
   const SCHEMAS = {
     sys_share_link: { name: 'sys_share_link', fields: {} },
@@ -1211,18 +1213,52 @@ describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the 
     },
     // Never opted in.
     notes: { name: 'notes', access: { default: 'private' }, fields: { id: {}, owner_id: {} } },
+    // Owner-private AND capability-gated (ADR-0066 D3): a read needs `view_vault`.
+    vault: {
+      name: 'vault',
+      access: { default: 'private' },
+      requiredPermissions: ['view_vault'],
+      publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+      fields: { id: {}, owner_id: {} },
+    },
   };
-  const PRIVATE_OBJECTS = new Set(['conversations', 'briefs', 'notes']);
+  const PRIVATE_OBJECTS = new Set(['conversations', 'briefs', 'notes', 'vault']);
+  /** The capabilities each principal holds; the doubles below read only this. */
+  const HELD_CAPABILITIES: Record<string, string[]> = { [CAPABLE_OWNER]: ['view_vault'] };
+  const requiredOf = (object: string): string[] =>
+    ((SCHEMAS as Record<string, any>)[object]?.requiredPermissions as string[] | undefined) ?? [];
+  const lacksCapability = (object: string, userId: unknown): boolean =>
+    requiredOf(object).some((c) => !(HELD_CAPABILITIES[String(userId)] ?? []).includes(c));
 
   const denial = () =>
     Object.assign(new Error('You do not have permission to perform this action.'), {
       code: 'PERMISSION_DENIED',
       statusCode: 403,
     });
+  /** The capability AND-gate's refusal: the same class, carrying what was missing. */
+  const capabilityDenial = (object: string) =>
+    Object.assign(new Error('You do not have permission to perform this action.'), {
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { object, requiredPermissions: requiredOf(object), missingPermissions: requiredOf(object) },
+    });
+  /**
+   * The explain report's `required_permissions` layer, computed from the same
+   * `HELD_CAPABILITIES` the read double refuses with — so the two agree by
+   * construction, as the real engine and middleware do.
+   */
+  const explainDouble = async (request: { object: string }, ctx: any) => {
+    explainCalls += 1;
+    const verdict = requiredOf(request.object).length === 0
+      ? 'not_applicable'
+      : lacksCapability(request.object, ctx?.userId) ? 'denies' : 'neutral';
+    return { layers: [{ layer: 'required_permissions', verdict, detail: 'double' }] } as any;
+  };
 
   let engine: ReturnType<typeof makeFakeEngine>;
   let posture: string | undefined;
   let writeScopeCalls: number;
+  let explainCalls: number;
   let sharing: SharingService;
   let service: ShareLinkService;
   let mintProbeCalls: Array<[string, string, string | undefined]>;
@@ -1241,15 +1277,24 @@ describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the 
       { id: 'b_pub', title: 'Published', status: 'published', owner_id: OWNER },
     ];
     engine._tables.notes = [{ id: 'n1', owner_id: OWNER }];
+    engine._tables.vault = [
+      { id: 'v_owner', owner_id: OWNER },
+      { id: 'v_capable', owner_id: CAPABLE_OWNER },
+    ];
     const plainFind = engine.find.bind(engine);
     engine.find = async (object: string, options?: any) => {
       const ctx = options?.context ?? {};
-      if (PRIVATE_OBJECTS.has(object) && ctx.isSystem !== true && ctx.userId !== READER) throw denial();
+      if (PRIVATE_OBJECTS.has(object) && ctx.isSystem !== true) {
+        // The capability AND-gate runs BEFORE the CRUD grant (ADR-0066 D3).
+        if (lacksCapability(object, ctx.userId)) throw capabilityDenial(object);
+        if (ctx.userId !== READER) throw denial();
+      }
       return plainFind(object, options);
     };
 
     posture = 'single';
     writeScopeCalls = 0;
+    explainCalls = 0;
     mintProbeCalls = [];
     sharing = new SharingService({
       engine: engine as any,
@@ -1259,6 +1304,7 @@ describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the 
           writeScopeCalls += 1;
           return ctx?.userId === MANAGER ? 'unit' : 'own';
         },
+        explain: explainDouble,
       }),
       // The enterprise seam: the manager's `unit` covers the owner.
       hierarchyResolver: () =>
@@ -1338,6 +1384,65 @@ describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the 
       .rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
     // ...and the owner of the same row mints past it.
     await expect(service.createLink(conversation(), as(OWNER))).resolves.toMatchObject({ created_by: OWNER });
+  });
+
+  describe('the capability hard stop (ADR-0066 D3): no alternative applies past a missing required capability', () => {
+    it('an owner lacking the capability is refused with the capability refusal itself, and nothing lands', async () => {
+      const refusal = await service.createLink(mintIn('vault', 'v_owner'), as(OWNER)).then(
+        () => { throw new Error('the owner minted past the capability gate'); },
+        (err) => err,
+      );
+      expect(refusal).toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+        details: { missingPermissions: ['view_vault'] },
+      });
+      expect(minted()).toEqual([]);
+      // The owner alternative itself was admitted; the stop is what refused.
+      expect(await sharing.canManageShares('vault', 'v_owner', as(OWNER))).toBe(true);
+    });
+
+    it('a Modify-All holder lacking the capability is refused the same way', async () => {
+      await expect(service.createLink(mintIn('vault', 'v_owner'), as(ADMIN)))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', details: { missingPermissions: ['view_vault'] } });
+      expect(minted()).toEqual([]);
+    });
+
+    it('control: an owner who HOLDS the capability mints on the same object (refused only by the CRUD grant)', async () => {
+      await expect(engine.find('vault', { where: { id: 'v_capable' }, context: as(CAPABLE_OWNER) }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(service.createLink(mintIn('vault', 'v_capable'), as(CAPABLE_OWNER)))
+        .resolves.toMatchObject({ record_id: 'v_capable', created_by: CAPABLE_OWNER });
+    });
+
+    it('control: the owner of an object that requires no capability still mints', async () => {
+      await expect(service.createLink(conversation(), as(OWNER))).resolves.toMatchObject({ created_by: OWNER });
+    });
+
+    it('a refused stranger never pays for the explain walk', async () => {
+      await expect(service.createLink(mintIn('vault', 'v_owner'), as(STRANGER))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(service.createLink(conversation(), as(STRANGER))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(explainCalls).toBe(0);
+    });
+
+    it.each([
+      ['a security service without explain', { hasWriteBypass: async () => false }],
+      ['an explain that throws', { explain: async () => { throw new Error('explain down'); } }],
+      ['a report without the layer', { explain: async () => ({ layers: [] }) }],
+      ['a verdict outside admits', { explain: async () => ({ layers: [{ layer: 'required_permissions', verdict: 'narrows', detail: 'x' }] }) }],
+    ])('fails closed: %s refuses the owner', async (_name, probe) => {
+      const closed = new SharingService({
+        engine: engine as any,
+        securityService: () => probe as any,
+        tenancy: () => ({ posture: 'single' }),
+      });
+      expect(await closed.canMintWithoutVisibility('conversations', 'c1', as(OWNER))).toBe(false);
+    });
+
+    it('a deployment with no security service at all enforces no capability gate, so the owner alternative stands', async () => {
+      const open = new SharingService({ engine: engine as any, tenancy: () => ({ posture: 'single' }) });
+      expect(await open.canMintWithoutVisibility('conversations', 'c1', as(OWNER))).toBe(true);
+    });
   });
 
   describe('the order: opt-in, then authority, then eligibility', () => {

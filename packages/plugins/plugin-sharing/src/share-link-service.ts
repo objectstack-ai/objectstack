@@ -437,8 +437,10 @@ export interface ShareLinkServiceOptions {
    * mint on a record their visibility read refused, because they are its
    * OWNER or hold the explicit Modify-All bypass? `createLink` asks it only
    * after that read refused. It answers with `canManageShares`' own owner and
-   * bypass branches and never with its hierarchy-depth branch, and it is
-   * withheld where an organization wall is in force.
+   * bypass branches and never with its hierarchy-depth branch. It is withheld
+   * where an organization wall is in force, and it answers `false` when the
+   * refusal was the object's capability AND-gate (`requiredPermissions`,
+   * ADR-0066 D3), which is a hard stop the alternatives do not pass.
    *
    * Absent → visibility alone admits (the pre-A′ rule), so a deployment
    * without the sharing service never widens who may mint. A throwing probe
@@ -606,10 +608,13 @@ export class ShareLinkService implements IShareLinkService {
     // once visibility has refused. The probe is the sharing service's
     // `canMintWithoutVisibility`: `canManageShares`' owner and bypass branches
     // WITHOUT its hierarchy-depth branch — a hierarchy manager still needs
-    // visibility to mint — and withheld under an organization wall. Admitted,
-    // the record is read under the system context: the caller's authority is
-    // established, and the eligibility gate below must judge the row the
-    // anonymous holder will be served (`resolveToken` reads it the same way).
+    // visibility to mint — withheld under an organization wall, and never past
+    // a capability the object requires (ADR-0066 D3): when the read was refused
+    // for a missing `requiredPermissions` capability, the probe answers `false`
+    // and that refusal is re-thrown as it came. Admitted, the record is read
+    // under the system context: the caller's authority is established, and the
+    // eligibility gate below must judge the row the anonymous holder will be
+    // served (`resolveToken` reads it the same way).
     //
     // A system caller reaches the probe only when its own system-context read
     // found nothing or failed, and the probe grants it nothing it lacks: it

@@ -3,6 +3,7 @@
 import type {
   AuthoredRowWriteOperation,
   AuthoredRowWriteVerdict,
+  ExplainAccessRequest,
   ISharingService,
   IHierarchyScopeResolver,
   RecordShare,
@@ -13,6 +14,7 @@ import type {
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
+  type ExplainDecision,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 // [#7136] Every enforcement method below takes the FULL `resolveAuthzContext`
@@ -287,6 +289,20 @@ export interface SharingSecurityProbe {
     object: string,
     context: unknown,
   ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
+  /**
+   * [ADR-0111 D8 rule 1 — the capability hard stop] `ISecurityService.explain`,
+   * a declared (not optional) contract method, read here for ONE layer of its
+   * declared report: `required_permissions`, the ADR-0066 D3 capability
+   * AND-gate. The explain engine computes that layer with the middleware's own
+   * capability fold, so its `denies` is the refusal the read gate throws.
+   * Used by {@link SharingService.canMintWithoutVisibility} only. Absent while
+   * the service is present, a throw, or a report that does not carry the layer
+   * answers as a refusal.
+   */
+  explain?(
+    request: ExplainAccessRequest,
+    callerContext?: unknown,
+  ): Promise<Pick<ExplainDecision, 'layers'>>;
 }
 
 /** [#5103] The table whose orphans this service owns. */
@@ -1026,6 +1042,16 @@ export class SharingService implements ISharingService {
    * {@link organizationScopeRequired} reads, fail-closed: an unresolvable
    * posture counts as walled.
    *
+   * **A capability the object requires.** When the caller lacks a capability
+   * the object's `requiredPermissions` demands for a read (ADR-0066 D3), the
+   * visibility read was refused by that AND-gate, and the gate is a hard stop:
+   * neither alternative applies past it. The owner exception is about the
+   * record ROW (the owner's own record is the thing shared), not about a
+   * capability an administrator withheld from the caller for the whole object;
+   * and a Modify-All holder who lacks it does not "already read everything".
+   * The verdict is the declared `required_permissions` layer of
+   * `ISecurityService.explain` (`capabilityGateRefusesRead`).
+   *
    * Everything else fails CLOSED to `false`: a missing record, a
    * principal-less context, a failed read or probe.
    */
@@ -1035,7 +1061,53 @@ export class SharingService implements ISharingService {
     context: ExecutionContext,
   ): Promise<boolean> {
     if (this.organizationScopeRequired()) return false;
-    return (await this.ownerOrBypass(object, recordId, context)).kind === 'admit';
+    if ((await this.ownerOrBypass(object, recordId, context)).kind !== 'admit') return false;
+    // Asked last, and only of a principal an alternative admitted, so a
+    // refused stranger never pays for the explain walk.
+    return !(await this.capabilityGateRefusesRead(object, context));
+  }
+
+  /**
+   * [ADR-0111 D8 rule 1 — the capability hard stop] Does the ADR-0066 D3
+   * capability AND-gate refuse `context` a READ of `object`?
+   *
+   * Answered by `ISecurityService.explain`, a declared contract method, from
+   * the one layer of its declared report that IS that gate:
+   * `required_permissions`. The explain engine computes the layer with the
+   * read middleware's own capability fold (the same `requiredPermissions`
+   * normalisation, the same held-capability union, the same ADR-0090 D10
+   * delegator intersection), so `denies` there is the refusal the visibility
+   * read threw. It is NOT the owner-private CRUD refusal, which the same report
+   * attributes to `object_crud` with this layer `not_applicable` — which is
+   * what lets the hard stop leave the owner alternative standing on an object
+   * that requires no capability.
+   *
+   * `false` (the gate admits) needs POSITIVE evidence: the layer present with
+   * `neutral` (capabilities held) or `not_applicable` (none required). A
+   * security service without `explain`, a throw, a report missing the layer or
+   * carrying any other verdict answers `true` — a stop. The one exception is a
+   * deployment with NO security service at all: nothing there enforces a
+   * capability gate, so no read was refused by one.
+   */
+  private async capabilityGateRefusesRead(
+    object: string,
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    let probe: SharingSecurityProbe | null | undefined;
+    try {
+      probe = this.securityService?.();
+    } catch {
+      return true;
+    }
+    if (!probe) return false;
+    if (typeof probe.explain !== 'function') return true;
+    try {
+      const decision = await probe.explain({ object, operation: 'read' }, context);
+      const gate = decision?.layers?.find((layer) => layer?.layer === 'required_permissions');
+      return !(gate && (gate.verdict === 'neutral' || gate.verdict === 'not_applicable'));
+    } catch {
+      return true;
+    }
   }
 
   /**
