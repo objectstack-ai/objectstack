@@ -46,17 +46,15 @@ function fakeContext(engine: unknown) {
   return { ctx, fire, logged };
 }
 
-/** Enough engine for `start()` to construct the service and bind its hooks. */
+/**
+ * Enough engine for `start()` with `disableAutoHooks`: the service only needs
+ * an object to hold, and the one boot-time read that reaches it (the
+ * approver-index rebuild) finds nothing. The repair itself is the spy above,
+ * so nothing here writes — and a double with no write verbs makes no claim
+ * about how writes dispatch.
+ */
 function fakeEngine() {
-  return {
-    find: async () => [],
-    insert: async (_o: string, d: any) => d,
-    update: async () => ({}),
-    delete: async () => ({}),
-    registerHook: () => {},
-    unregisterHooksByPackage: () => {},
-    registerMiddleware: () => {},
-  };
+  return { find: async () => [] };
 }
 
 describe('the action-slot backfill is wired on kernel:ready (#21411)', () => {
