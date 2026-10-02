@@ -639,7 +639,9 @@ function scanFilterForDateEquality(
           `time component, so exact equality against \`${hit.src}\` (re-computed each run) silently matches nothing.`,
         hint:
           `Use a one-day window instead: \`${key}: { $gte: daysFromNow(N), $lt: daysFromNow(N+1) }\` ` +
-          `(wrap multiple tiers in \`$or\`). The abutting windows tile the timeline so each row matches exactly once. (#1874)`,
+          `(wrap multiple tiers in \`$or\`). The abutting windows tile the timeline so each row matches exactly once. ` +
+          `A T-minus rule can declare the sweep instead: a \`schedule\` flow whose start node carries a ` +
+          `\`config.timeRelative\` descriptor with \`offsetDays\` runs once per record on each offset day.`,
         rule: FLOW_DATE_EQUALITY_FILTER,
       });
     }
@@ -724,7 +726,7 @@ function scanErrorLabelledEdges(
       hint:
         `Add \`type: 'fault'\` to this edge. Only runtime failures route — a guard refusal (a filter token ` +
         `that resolved to nothing, a missing required config key, an unscoped run) stays fatal by design and ` +
-        `must be fixed in the metadata, not handled. (#3863)`,
+        `must be fixed in the metadata, not handled.`,
       rule: FLOW_ERROR_LABEL_NOT_FAULT,
     });
   }
@@ -827,7 +829,7 @@ function scanBranchRouting(
             `guarded branch. The condition wins and the default marker routes nothing.`,
           hint:
             `Drop one: keep \`condition\` for a guarded branch, or drop it and keep \`isDefault: true\` ` +
-            `for the "otherwise" path. (#4414)`,
+            `for the "otherwise" path.`,
           rule: FLOW_DEFAULT_EDGE_WITH_CONDITION,
           // Gating: the two keys contradict, the condition always wins, and the
           // marker never routes. No reading makes it do what it says.
@@ -846,7 +848,7 @@ function scanBranchRouting(
           `when no condition matches, which is a parallel fan-out, not an "otherwise".`,
         hint:
           `Keep \`isDefault: true\` on the single fallback edge and give the others a \`condition\` ` +
-          `(or leave them unconditional if the fan-out really is intended). (#4414)`,
+          `(or leave them unconditional if the fan-out really is intended).`,
         rule: FLOW_MULTIPLE_DEFAULT_EDGES,
       });
     }
@@ -881,9 +883,9 @@ function scanBranchRouting(
       hint:
         nodeType === 'decision'
           ? `Branching lives on the OUT-EDGES: give each branch its own \`condition\` and mark the ` +
-            `fallback \`isDefault: true\`. If the edges already carry the predicate, delete this copy. (#4414)`
+            `fallback \`isDefault: true\`. If the edges already carry the predicate, delete this copy.`
           : `Delete it, or move the predicate to the incoming edge's \`condition\` if this step was ` +
-            `meant to be conditional. (#4414)`,
+            `meant to be conditional.`,
       rule: FLOW_INERT_NODE_CONDITION,
     });
   }
@@ -972,7 +974,7 @@ function scanBranchRouting(
         hint:
           `Make an out-edge's \`label\` match the declared branch exactly, or drop \`config.conditions\` ` +
           `and branch on the edges instead (\`condition\` per branch + \`isDefault: true\` on the ` +
-          `fallback) — one mechanism per decision, never both. (#4414)`,
+          `fallback) — one mechanism per decision, never both.`,
         rule: FLOW_BRANCH_LABEL_UNMATCHED,
         // Gating: a label nothing claims cannot route under ANY reading, on
         // every run. See the severity policy at the top of this file.
@@ -1029,7 +1031,7 @@ function scanBranchRouting(
           `decision declares a matching \`conditions[].label\`.`,
         hint:
           `Mark the fallback \`isDefault: true\` so it is taken only when no sibling condition matched ` +
-          `(BPMN default flow), or give it its own \`condition\`. (#4414)`,
+          `(BPMN default flow), or give it its own \`condition\`.`,
         rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
       });
     }
@@ -1195,11 +1197,13 @@ function scanUnboundedBulkWrites(
       hint:
         `Write the constraint you mean into \`filter\` (e.g. \`{ status: 'closed' }\` — see ` +
         `examples/app-showcase \`showcase_inquiry_purge\`, bulk intent bounded by a predicate). If emptying ` +
-        `'${objectName}' really is the intent, keep it: this is a warning, not a gate, and the run-time path ` +
-        `stays open. Distinct from the #3810 erased-condition guard, which REFUSES this node at run time when ` +
+        `'${objectName}' really is the intent, keep it: \`multi: true\` is how a flow declares bulk intent, and ` +
+        `the engine admits a whole-object write declared that way, so this is a warning, not a gate, and the ` +
+        `run-time path stays open. Distinct from the run-time erased-condition guard, which REFUSES this node ` +
+        `at run time when ` +
         `a condition you WROTE interpolated to nothing — that guard is keyed on "a written condition is gone" ` +
         `and deliberately not on "the filter is empty", which is the fact this rule judges at authoring ` +
-        `time. (#5482, #5393)`,
+        `time.`,
       // Warning, not `error`: see the severity policy at the top of this file.
       // The shape has a legitimate reading the engine grants on purpose, so it is
       // not provably wrong — unlike the gating members of this family.
@@ -1263,7 +1267,8 @@ function scanApprovalReviseLoops(
           `Set node '${target}' to \`type: '${APPROVAL_REVISE_NODE_TYPE}'\` (drop any \`waitEventConfig\` \u2014 the ` +
           `window is ended by POST /api/v1/approvals/requests/:id/resubmit, not by a signal). ADR-0044 D3 ` +
           `originally said 'wait' here; its 2026-07-28 amendment reversed that, because a 'wait' is ` +
-          `resumable by anyone with the run id (#3823, #3801).`,
+          `resumable by anyone with the run id, while the run-resume route continues a pause on a ` +
+          `service-owned node type only through the service that owns it.`,
         rule: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
       });
     }
@@ -1552,7 +1557,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             `record happens to be written on that exact day, so unattended "N days before" rules never run.`,
           hint:
             `Use a SCHEDULE trigger (daily cron) + a range query instead — e.g. a scheduled flow whose ` +
-            `get_record filters \`end_date\` BETWEEN {TODAY()} and {TODAY()+N}. (#1874)`,
+            `get_record filters \`end_date\` BETWEEN {TODAY()} and {TODAY()+N}. Or declare the sweep ` +
+            `instead: a \`schedule\` flow whose start node carries a \`config.timeRelative\` descriptor (the ` +
+            `object, the date field, and \`withinDays\` or \`offsetDays\`) is swept daily and runs once per ` +
+            `record whose date falls in the window.`,
           rule: FLOW_TIME_RELATIVE_ANTIPATTERN,
         });
       }
@@ -1605,8 +1613,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             `will be REFUSED at run time.`,
           hint:
             `Declare \`runAs:'system'\` to make the elevation explicit and intended (the run reads/writes ` +
-            `every record). A ${userLessKind} flow cannot scope to a user — there is none. ` +
-            `(ADR-0049, ADR-0073 D5, #1888, #3760)`,
+            `every record). A ${userLessKind} flow cannot scope to a user — there is none, and \`runAs\` is ` +
+            `enforced: \`'user'\` scopes each data operation to the triggering user's grants, and with no ` +
+            `trigger user the runtime refuses the operation rather than run it unscoped. ` +
+            `(ADR-0049, ADR-0073 D5)`,
           rule: FLOW_RUNAS_UNSCOPED,
           severity: 'error',
         });
@@ -1671,7 +1681,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
                 `silently ignored and this node computes nothing at runtime.`,
               hint:
                 `Aggregation belongs in the data layer: use \`Field.summary\` for a cross-object rollup ` +
-                `(sum/count of children), or \`Field.formula\` for a per-record computed value. (#1870)`,
+                `(sum/count of children), or \`Field.formula\` for a per-record computed value.`,
               rule: FLOW_PHANTOM_AGGREGATION,
             });
           }
@@ -1703,7 +1713,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             findings.push({
               where: nodeWhere,
               message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — flow node values use SINGLE braces.`,
-              hint: `Use \`{var}\` (e.g. \`{record.title}\`). Double-brace \`{{ }}\` is the formula/template-field dialect, not flow node values. (#1315)`,
+              hint:
+                `Use \`{var}\` (e.g. \`{record.title}\`): a flow node value is a string template in which only ` +
+                `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
+                `the formula/template-field dialect, not flow node values.`,
               rule: FLOW_DOUBLE_BRACE_INTERP,
             });
           }
@@ -1711,7 +1724,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             findings.push({
               where: nodeWhere,
               message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` is NOT interpolated.`,
-              hint: `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user). (#1315)`,
+              hint:
+                `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user) — a flow ` +
+                `node value is a string template in which only single-brace \`{…}\` tokens resolve and all ` +
+                `other text is literal.`,
               rule: FLOW_BARE_DOLLAR_REF,
             });
           }

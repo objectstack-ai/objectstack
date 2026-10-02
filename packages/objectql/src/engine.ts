@@ -8563,6 +8563,26 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#21207] Read accessor for the registered provider's keyed digest
+   * (`ICryptoProvider.keyedDigest`), or `undefined` while no provider is
+   * registered.
+   *
+   * The ONE way a consumer outside this engine reaches the server-held key:
+   * the doors that serve a stored metadata content hash serve
+   * `keyedDigest(stored)` instead, and compare a caller's version token in that
+   * same form. Deliberately narrower than the provider itself — a consumer
+   * that needs a keyed digest gets that one primitive, never `decrypt`.
+   *
+   * Read at the moment of use, never cached by the caller: a host injects the
+   * provider AFTER the kernel starts (see {@link setCryptoProvider}), so a
+   * value captured at boot would still say "none" once one is registered.
+   */
+  getKeyedDigest(): ((plain: string) => Promise<string>) | undefined {
+    const provider = this.cryptoProvider;
+    return provider ? (plain: string) => provider.keyedDigest(plain) : undefined;
+  }
+
+  /**
    * [#8022] Observe crypto-provider registration.
    *
    * Exists for consumers that must dereference a `secret` field on a schedule

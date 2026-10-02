@@ -56,7 +56,7 @@ const AUTHORED: Cube = {
   measures: {
     count: { type: 'count', sql: '*', label: 'Count' },
     alias_total: { type: 'sum', sql: 'hidden_number', label: 'Total' },
-    expression_total: { type: 'number', sql: 'SUM(hidden_number) / 2', label: 'Expression total' },
+    expression_total: { type: 'sum', sql: 'SUM(hidden_number) / 2', label: 'Expression total' },
   },
   dimensions: {
     title: { type: 'string', sql: 'title', label: 'Title' },

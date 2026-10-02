@@ -735,7 +735,9 @@ describe('validateFlowTriggerReadiness', () => {
     expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
     // The hint steers to the supported alternatives.
     expect(findings[0].hint).toMatch(/record-after-write/);
-    expect(findings[0].hint).toMatch(/#3457/);
+    expect(findings[0].hint).toMatch(
+      /multi-event arrays are deferred until two independent projects need a combination other than created-or-updated/,
+    );
   });
 
   it('flags an array even when its elements are individually valid tokens', () => {

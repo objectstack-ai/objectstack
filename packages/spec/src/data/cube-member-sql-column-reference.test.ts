@@ -132,7 +132,7 @@ describe('cube member sql — the accept set is unchanged for every column refer
 describe('cube member sql — an expression is refused at parse, with the prescription', () => {
   it('a measure refuses every non-column value at `sql`, naming the contract first and the dataset form after', () => {
     for (const sql of EXPRESSIONS) {
-      const issues = refusalOf(MetricSchema, { label: 'M', type: 'number', sql });
+      const issues = refusalOf(MetricSchema, { label: 'M', type: 'sum', sql });
       expect(issues, sql).toHaveLength(1);
       expect(issues[0]!.code).toBe('invalid_format');
       expect(issues[0]!.path).toEqual(['sql']);
@@ -195,7 +195,7 @@ describe('cube member sql — the rule reaches the published JSON Schema as a pa
 describe('cube member sql — every door that carries a cube refuses an expression member', () => {
   const withExpression = {
     ...CUBE,
-    measures: { ...CUBE.measures, done_rate: { label: 'Done Rate (%)', type: 'number', sql: DONE_RATE_EXPRESSION } },
+    measures: { ...CUBE.measures, done_rate: { label: 'Done Rate (%)', type: 'sum', sql: DONE_RATE_EXPRESSION } },
   };
 
   it('the cube schema refuses it at measures.<key>.sql and dimensions.<key>.sql — one issue per member', () => {
@@ -258,7 +258,7 @@ describe('cube member sql — every door that carries a cube refuses an expressi
 
 describe('cube member sql — the dataset form the prescription names is the structural equivalent', () => {
   it('the retired done-rate expression is refused, and its dataset form — a filtered count over a count — parses', () => {
-    expect(MetricSchema.safeParse({ label: 'Done Rate (%)', type: 'number', sql: DONE_RATE_EXPRESSION }).success).toBe(false);
+    expect(MetricSchema.safeParse({ label: 'Done Rate (%)', type: 'sum', sql: DONE_RATE_EXPRESSION }).success).toBe(false);
     const dataset = {
       name: 'task_metrics',
       label: 'Task Metrics',

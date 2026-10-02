@@ -1751,7 +1751,7 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
     const [f] = lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: true }));
     // Cross-naming, not duplication: the run-time guard refuses "a condition you
     // WROTE is gone"; this rule warns "no condition was ever written".
-    expect(f.hint).toContain('#3810');
+    expect(f.hint).toContain('the run-time erased-condition guard');
     expect(f.hint).toMatch(/REFUSES this node at run time/);
     expect(f.hint).toMatch(/a written condition is gone/);
     expect(f.hint).toMatch(/the filter is empty/);

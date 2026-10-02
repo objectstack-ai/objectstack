@@ -45,7 +45,7 @@ const REGISTERED: Cube = {
   public: true,
   measures: {
     count: { type: 'count', sql: '*', label: 'Count' },
-    author_expr_measure: { type: 'number', sql: 'amount + 1', label: 'Author expression measure' },
+    author_expr_measure: { type: 'sum', sql: 'amount + 1', label: 'Author expression measure' },
   },
   dimensions: {
     status: { type: 'string', sql: 'status', label: 'Status' },
@@ -195,11 +195,12 @@ describe('[#21156] analytics — a caller-named non-column member is refused at 
     });
   });
 
-  // An author-declared expression MEASURE is a native-SQL-only feature (the
-  // ObjectQL aggregate AST cannot carry a raw SQL expression — a pre-existing
-  // strategy refusal, not this gate's). The non-regression claim is that THIS
-  // gate does not refuse it: on NativeSQL it still reaches the strategy with no
-  // security service.
+  // An author-declared expression MEASURE — an aggregate over an expression
+  // `sql`, written around the parse like the dimension above (the custom-SQL
+  // metric types it used to be typed as were retired from the spec, #21000,
+  // and both strategies refuse them by type, not this gate). The
+  // non-regression claim is that THIS gate does not refuse it: on NativeSQL it
+  // still reaches the strategy with no security service.
   it('an author-declared expression measure is not refused by this gate (served on NativeSQL, no security service)', async () => {
     const { service, executed } = makeService({ capabilities: nativeSqlOnly });
     await service.query({ cube: 'cm_cube', measures: ['author_expr_measure'] } as never, CALLER);

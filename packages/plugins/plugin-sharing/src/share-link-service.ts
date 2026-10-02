@@ -431,6 +431,27 @@ export interface ShareLinkServiceOptions {
     recordId: string,
     context: ExecutionContext,
   ) => Promise<boolean>;
+  /**
+   * [ADR-0111 D8 rule 1 — ruling 5950188467, A′] Late-bound mint-authority
+   * probe (the sharing service's `canMintWithoutVisibility`): may the caller
+   * mint on a record their visibility read refused, because they are its
+   * OWNER or hold the explicit Modify-All bypass? `createLink` asks it only
+   * after that read refused. It answers with `canManageShares`' own owner and
+   * bypass branches and never with its hierarchy-depth branch. It is withheld
+   * where an organization wall is in force, and it answers `false` when the
+   * refusal was the object's capability AND-gate (`requiredPermissions`,
+   * ADR-0066 D3), which is a hard stop the alternatives do not pass.
+   *
+   * Absent → visibility alone admits (the pre-A′ rule), so a deployment
+   * without the sharing service never widens who may mint. A throwing probe
+   * is a refusal. It receives the caller's COMPLETE envelope, like every
+   * enforcement probe here.
+   */
+  canMintWithoutVisibility?: (
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ) => Promise<boolean>;
   /** [#5190] Optional logger for the record-delete cascade / orphan sweep. */
   logger?: {
     info?: (msg: any, ...rest: any[]) => void;
@@ -474,6 +495,7 @@ export class ShareLinkService implements IShareLinkService {
     recordId: string,
     context: ExecutionContext,
   ) => Promise<boolean>;
+  private readonly canMintWithoutVisibility?: ShareLinkServiceOptions['canMintWithoutVisibility'];
   private readonly logger?: ShareLinkServiceOptions['logger'];
   /**
    * [#12981] Latched by the FIRST refused usage stamp on this instance and
@@ -488,6 +510,7 @@ export class ShareLinkService implements IShareLinkService {
     this.hashPassword = opts.hashPassword ?? defaultHashPassword;
     this.verifyPassword = opts.verifyPassword ?? defaultVerifyPassword;
     this.canManageShares = opts.canManageShares;
+    this.canMintWithoutVisibility = opts.canMintWithoutVisibility;
     this.logger = opts.logger;
   }
 
@@ -501,11 +524,13 @@ export class ShareLinkService implements IShareLinkService {
     const schema = this.engine.getSchema?.(input.object);
     const policy = getPolicy(schema);
 
-    // [ADR-0111 D8] Mint authority = the object's `publicSharing` opt-in (this
-    // check) AND the caller's visibility of the record (the RLS-scoped read
-    // below). An object that opts into publicSharing deliberately delegates
-    // re-share power to anyone who can SEE the record — a stated decision, not
-    // an accident. Objects that do not opt in cannot be link-shared at all.
+    // [ADR-0111 D8 rule 1] Mint authority = the object's `publicSharing` opt-in
+    // (this check, FIRST) AND — after the request-shape checks below — the
+    // caller's authority over the record: visibility (the RLS-scoped read), or
+    // the record owner, or an explicit Modify-All bypass (ruling 5950188467,
+    // A′). An object that opts into publicSharing deliberately delegates
+    // re-share power to anyone who can SEE the record. Objects that do not opt
+    // in cannot be link-shared at all, by their owner included.
     if (!policy.enabled && !this.permissive && !context.isSystem) {
       throw makeError(
         422,
@@ -537,10 +562,11 @@ export class ShareLinkService implements IShareLinkService {
     }
 
     // Confirm the target record exists AND — for an HTTP caller — that the
-    // caller may actually SEE it. [Finding-2] Reading under the caller's own
-    // context (positions/permissions/RLS) means you can only mint a link for a
-    // record you can access; a client can no longer share arbitrary rows of a
-    // publicSharing-enabled object it cannot see. Internal (isSystem) callers
+    // caller holds authority over it. [Finding-2] Reading under the caller's
+    // own context (positions/permissions/RLS) means a client can no longer
+    // share arbitrary rows of a publicSharing-enabled object it cannot see;
+    // the only callers who mint past a refused read are the record's owner and
+    // an explicit Modify-All holder (A′, below). Internal (isSystem) callers
     // read under the system context as before.
     //
     // [commit 8e13ca876] `context` is passed through UNCHANGED — it is the caller's whole
@@ -556,32 +582,67 @@ export class ShareLinkService implements IShareLinkService {
     // a second query being issued, and it widens ONLY then, so an object
     // without the key keeps the exact `id`-only read it always had.
     const eligibility = policy.enabled ? policy.eligibility : undefined;
-    const exists = await this.engine.find(input.object, {
-      where: { id: input.recordId },
-      ...(eligibility ? {} : { fields: ['id'] }),
-      limit: 1,
-      context: context.isSystem ? SYSTEM_CTX : context,
-    } as any);
-    if (!Array.isArray(exists) || exists.length === 0) {
+    const readRecord = async (readContext: ExecutionContext | typeof SYSTEM_CTX) => {
+      const rows = await this.engine.find(input.object, {
+        where: { id: input.recordId },
+        ...(eligibility ? {} : { fields: ['id'] }),
+        limit: 1,
+        context: readContext,
+      } as any);
+      return Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+    };
+
+    // Visibility first. A refusal the read THROWS (the CRUD gate's, on an
+    // object the caller holds no read grant on) is kept, not swallowed: it is
+    // re-thrown below unless an alternative admits, so a caller refused before
+    // A′ is refused with the same envelope after it.
+    let record: Record<string, unknown> | undefined;
+    let visibilityRefusal: unknown;
+    try {
+      record = await readRecord(context.isSystem ? SYSTEM_CTX : context);
+    } catch (err) {
+      visibilityRefusal = err;
+    }
+
+    // [ruling 5950188467, A′] The owner and Modify-All alternatives, asked only
+    // once visibility has refused. The probe is the sharing service's
+    // `canMintWithoutVisibility`: `canManageShares`' owner and bypass branches
+    // WITHOUT its hierarchy-depth branch — a hierarchy manager still needs
+    // visibility to mint — withheld under an organization wall, and never past
+    // a capability the object requires (ADR-0066 D3): when the read was refused
+    // for a missing `requiredPermissions` capability, the probe answers `false`
+    // and that refusal is re-thrown as it came. Admitted, the record is read
+    // under the system context: the caller's authority is established, and the
+    // eligibility gate below must judge the row the anonymous holder will be
+    // served (`resolveToken` reads it the same way).
+    //
+    // A system caller reaches the probe only when its own system-context read
+    // found nothing or failed, and the probe grants it nothing it lacks: it
+    // admits only on a row it re-reads under that same system context. So a
+    // missing record still answers a system caller 404, and a failing read
+    // still fails.
+    if (!record && this.canMintWithoutVisibility) {
+      const admitted = await this.canMintWithoutVisibility(input.object, input.recordId, context)
+        .catch(() => false);
+      if (admitted) record = await readRecord(SYSTEM_CTX);
+    }
+
+    if (!record) {
+      if (visibilityRefusal !== undefined) throw visibilityRefusal;
       // Don't distinguish "missing" from "not visible" for an untrusted caller.
       throw context.isSystem
         ? makeError(404, 'RECORD_NOT_FOUND', `${input.object}/${input.recordId} does not exist`)
         : makeError(403, 'FORBIDDEN', `Not permitted to share ${input.object}/${input.recordId}`);
     }
 
-    // [#7861] The declared eligibility gate. Placed AFTER the visibility read
-    // (it needs the record, and a caller who cannot see the row must not learn
-    // anything about its contents from the refusal) and BEFORE the insert, so
-    // an ineligible link is never MINTED — which is the only placement that
-    // helps, since `resolveToken` serves an existing row anonymously under
-    // `SYSTEM_CTX` with no auth check to fall back on.
+    // [#7861] The declared eligibility gate. Placed AFTER the authority check
+    // (it needs the record, and a caller with no authority over the row must
+    // not learn anything about its contents from the refusal) and BEFORE the
+    // insert, so an ineligible link is never MINTED — which is the only
+    // placement that helps, since `resolveToken` serves an existing row
+    // anonymously under `SYSTEM_CTX` with no auth check to fall back on.
     if (eligibility) {
-      assertEligible(
-        eligibility,
-        (exists[0] ?? {}) as Record<string, unknown>,
-        schema,
-        input.object,
-      );
+      assertEligible(eligibility, record, schema, input.object);
     }
 
     const maxDays = policy.maxExpiryDays ?? DEFAULT_MAX_EXPIRY_DAYS;

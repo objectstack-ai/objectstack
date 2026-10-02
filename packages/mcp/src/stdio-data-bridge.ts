@@ -128,7 +128,18 @@ export interface StdioDataBridgeDeps {
    * live session, and a bridge built once at boot would outlive it.
    */
   resolvePrincipal: () => Promise<ExecutionContext>;
+  /**
+   * [#21207] The registered crypto provider's keyed digest
+   * (`ICryptoProvider.keyedDigest`, reached through the engine's
+   * `getKeyedDigest` accessor), read per call — a host registers the provider
+   * after the kernel starts. `undefined`, or a resolver answering `undefined`,
+   * means none: the stored content-hash columns are then not served at all.
+   */
+  keyedDigest?: () => StoredHashDigest | undefined;
 }
+
+/** The keyed-digest primitive the stored content-hash columns are served through. */
+export type StoredHashDigest = (plain: string) => Promise<string>;
 
 /** An object definition as `IMetadataService.getObject` hands it back. */
 interface ObjectDef {
@@ -423,6 +434,140 @@ export function storedMetadataBodyRefusal(
 }
 
 /**
+ * [#21207] The stored CONTENT-HASH columns of the same two tables: `checksum`
+ * (both) and the history table's `previous_checksum` (the parent's hash).
+ *
+ * Each is the canonical SHA-256 of the WHOLE stored body — withheld credential
+ * material included — kept as-is at rest. The engine returns it as stored, so
+ * this engine-only reader served it raw beside the projected body: an offline
+ * verifier for a guess at the withheld material, and an online one when
+ * filtered on. Per the maintainer's ruling on #21207 this transport serves the
+ * crypto provider's KEYED digest of it ({@link serveStoredMetadataHashes}) and
+ * refuses to evaluate it ({@link storedMetadataHashRefusal}) — the protocol
+ * data door's answer for the same columns
+ * (`@objectstack/metadata-protocol`'s `STORED_METADATA_HASH_COLUMNS`, which this
+ * package cannot import; `stored-metadata-body-family.pin.test.ts` pins the
+ * list to the object definitions).
+ */
+export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
+
+/**
+ * [#21207] The history table's change note, which can QUOTE a stored content
+ * hash (`publish draft (hash …)` on rows written before the publish door stated
+ * its own message): served with each quote in its served form, never evaluated.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
+
+/** Every column that holds or can quote a stored content hash. */
+const HASH_BEARING_COLUMNS: readonly string[] = [...STORED_METADATA_HASH_COLUMNS, STORED_METADATA_HASH_NOTE_COLUMN];
+
+/** An unkeyed content hash quoted in free text (the keyed form's `hmac-sha256:` prefix is not one). */
+const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
+
+/** Free text with each quoted stored hash keyed, or `(withheld)` with no provider. */
+async function serveStoredHashTokens(text: string, digest: StoredHashDigest | undefined): Promise<string> {
+  const quoted = text.match(QUOTED_STORED_HASH);
+  if (!quoted) return text;
+  const served = new Map<string, string>();
+  for (const stored of new Set(quoted)) served.set(stored, digest ? await digest(stored) : '(withheld)');
+  return text.replace(QUOTED_STORED_HASH, (stored) => served.get(stored) as string);
+}
+
+/** The hash-bearing column a field reference reaches — the column, or a dotted path headed by it. */
+function hashColumnOf(field: unknown): string | undefined {
+  if (typeof field !== 'string') return undefined;
+  const head = field.split('.')[0] as string;
+  return HASH_BEARING_COLUMNS.includes(head) ? head : undefined;
+}
+
+/**
+ * [#21207] The refusal for a read of a stored-metadata table whose call would
+ * EVALUATE a content-hash column — a grouping (whose keys would serve the
+ * stored values), a filter (a guessed hash matches its row) or a sort — or
+ * `undefined` when none is named. Same envelope as
+ * {@link storedMetadataBodyRefusal} (`INVALID_FIELD` / 400, naming the field,
+ * the object and the part), judged in the same order, and naming the columns
+ * that remain usable.
+ */
+export function storedMetadataHashRefusal(
+  object: string,
+  opts: {
+    where?: unknown;
+    orderBy?: ReadonlyArray<{ field?: unknown }>;
+    groupBy?: ReadonlyArray<unknown>;
+    aggregations?: ReadonlyArray<{ field?: unknown; filter?: unknown }>;
+  },
+): McpStoredMetadataBodyRefusal | undefined {
+  if (!isStoredMetadataBodyObject(object)) return undefined;
+  const make = (param: 'groupBy' | 'filter' | 'sort', column: string): McpStoredMetadataBodyRefusal => {
+    const doing = param === 'groupBy' ? 'group' : param;
+    const err = new Error(
+      `Cannot ${doing} '${object}' by '${column}' (${param}): the query was not run. The '${column}' column `
+        + `${column === STORED_METADATA_HASH_NOTE_COLUMN ? 'can quote' : 'holds'} `
+        + `the stored content hash of a metadata body, computed over withheld credential material too, so this door `
+        + `serves it only in keyed form; ${param === 'filter'
+          ? 'a filter on it compares a guess against the stored hash row by row, which confirms the guess'
+          : param === 'groupBy' ? 'a group key would serve the stored value itself' : 'a sort on it orders by the stored values'}. `
+        + `Use '${STORED_METADATA_TYPE_COLUMN}', 'name', 'state' or another scalar column instead.`,
+    ) as McpStoredMetadataBodyRefusal;
+    err.code = 'INVALID_FIELD';
+    err.status = 400;
+    err.field = column;
+    err.fields = [column];
+    err.object = object;
+    err.param = param;
+    return err;
+  };
+  for (const entry of opts.groupBy ?? []) {
+    const column = hashColumnOf(
+      entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as { field?: unknown }).field : entry,
+    );
+    if (column) return make('groupBy', column);
+  }
+  const aggregations = Array.isArray(opts.aggregations) ? opts.aggregations : [];
+  for (const field of [...filterFieldKeys(opts.where), ...aggregations.flatMap((a) => filterFieldKeys(a?.filter))]) {
+    const column = hashColumnOf(field);
+    if (column) return make('filter', column);
+  }
+  for (const entry of Array.isArray(opts.orderBy) ? opts.orderBy : []) {
+    const column = hashColumnOf(entry?.field);
+    if (column) return make('sort', column);
+  }
+  return undefined;
+}
+
+/**
+ * [#21207] Serve one row of `object` with its stored content-hash columns in
+ * their served form: each the keyed digest of the stored value, a `null` kept
+ * `null` — and both columns OMITTED when no crypto provider is registered. ⛔
+ * Never the stored value. Rows of every other object, and rows carrying
+ * neither column, are returned by reference. A failing digest is not caught:
+ * the read fails rather than serving what it exists to replace.
+ *
+ * Exported within the package for the ADR-0101 record resource (`plugin.ts`),
+ * which serves through the same helpers as `bridge.get`.
+ */
+export async function serveStoredMetadataHashes<T>(
+  object: string,
+  row: T,
+  digest: StoredHashDigest | undefined,
+): Promise<T> {
+  if (!isStoredMetadataBodyObject(object) || !row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const record = row as Record<string, unknown>;
+  if (!HASH_BEARING_COLUMNS.some((column) => column in record)) return row;
+  const out: Record<string, unknown> = { ...record };
+  for (const column of STORED_METADATA_HASH_COLUMNS) {
+    if (!(column in out)) continue;
+    const stored = out[column];
+    if (!digest || (stored !== null && typeof stored !== 'string')) delete out[column];
+    else out[column] = stored === null ? null : await digest(stored);
+  }
+  const note = out[STORED_METADATA_HASH_NOTE_COLUMN];
+  if (typeof note === 'string') out[STORED_METADATA_HASH_NOTE_COLUMN] = await serveStoredHashTokens(note, digest);
+  return out as T;
+}
+
+/**
  * The field projection to hand the engine for a read of `object`, given the
  * caller's own.
  *
@@ -486,7 +631,7 @@ export function serveStoredMetadataRows(
  * honoured rather than re-decided.
  */
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
-  const { engine, metadataService, resolvePrincipal } = deps;
+  const { engine, metadataService, resolvePrincipal, keyedDigest } = deps;
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
@@ -542,6 +687,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // on a stored metadata body is refused rather than evaluated.
       const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
       if (bodyRefusal) throw bodyRefusal;
+      // [#21207] …and the same for a stored content-hash column.
+      const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
+      if (hashRefusal) throw hashRefusal;
       const read = storedMetadataBodyReadFields(object, opts?.fields);
       const query: Record<string, unknown> = {};
       if (opts?.where) query.where = opts.where;
@@ -549,10 +697,12 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       if (opts?.orderBy) query.orderBy = opts.orderBy;
       if (typeof opts?.limit === 'number') query.limit = opts.limit;
       if (typeof opts?.offset === 'number') query.offset = opts.offset;
-      const records = serveStoredMetadataRows(
-        object,
-        unwrapRows(await engine.find(object, query, { context })),
-        { dropType: read.addedType },
+      // [#21207] The content-hash columns are served keyed, or not at all.
+      const digest = keyedDigest?.();
+      const records = await Promise.all(
+        serveStoredMetadataRows(object, unwrapRows(await engine.find(object, query, { context })), {
+          dropType: read.addedType,
+        }).map((row) => serveStoredMetadataHashes(object, row, digest)),
       );
       return { object, records, total: records.length };
     },
@@ -562,8 +712,13 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.get, context);
       // `null` rather than a throw: `get_record` owns the not-found wording on
       // this path and already branches on a nullish record.
-      // [#21207] A stored metadata body is served as its type's projection.
-      return serveStoredMetadataRow(object, await findById(engine, object, id, context));
+      // [#21207] A stored metadata body is served as its type's projection,
+      // and its stored content hash keyed (or not at all).
+      return serveStoredMetadataHashes(
+        object,
+        serveStoredMetadataRow(object, await findById(engine, object, id, context)),
+        keyedDigest?.(),
+      );
     },
 
     async create(object, data) {
@@ -643,6 +798,13 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         aggregations: opts?.aggregations,
       });
       if (bodyRefusal) throw bodyRefusal;
+      // [#21207] …and a grouping or filter on a stored content-hash column.
+      const hashRefusal = storedMetadataHashRefusal(object, {
+        where: opts?.where,
+        groupBy: opts?.groupBy,
+        aggregations: opts?.aggregations,
+      });
+      if (hashRefusal) throw hashRefusal;
       // No casts: `McpDataBridge.aggregate` declares the engine's own
       // `EngineAggregateOptions` slices since #8032, so the honest call
       // compiles — the two `as unknown as` casts this line used to carry

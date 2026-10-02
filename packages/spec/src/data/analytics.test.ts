@@ -16,10 +16,13 @@ import { applyConversions, collectConversionNotices } from '../conversions/apply
 
 describe('AggregationMetricType', () => {
   it('should accept all valid metric types', () => {
-    const types = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'number', 'string', 'boolean'];
+    const types = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
     for (const t of types) {
       expect(() => AggregationMetricType.parse(t)).not.toThrow();
     }
+    // The custom-SQL-expression members were retired (#21000); their refusal
+    // is pinned in `cube-metric-expression-types-retirement.test.ts`.
+    expect([...AggregationMetricType.options]).toEqual(types);
   });
 
   it('should reject invalid metric type', () => {

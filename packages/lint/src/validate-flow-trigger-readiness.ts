@@ -527,7 +527,7 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           `record-change trigger but never fires (the runtime stays silent about it).`,
         hint:
           `Use record-{before,after}-{create,update,delete,write}. 'write' fires on create OR update in one ` +
-          `flow (#3427); create/insert are synonyms. There is no "any change" token — pick the specific event(s).`,
+          `flow; create/insert are synonyms. There is no "any change" token — pick the specific event(s).`,
       });
     }
 
@@ -553,8 +553,9 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           `triggerType is an array (${JSON.stringify(config.triggerType)}), which is not supported — a start ` +
           `node takes a single trigger event, so the flow binds to nothing and never fires (the runtime stays silent about it).`,
         hint:
-          `Use one triggerType string. For "created or updated" use record-after-write (one flow, both events, #3427). ` +
-          `For any other combination, author one flow per event — multi-event arrays are deferred (#3457).`,
+          `Use one triggerType string. For "created or updated" use record-after-write (one flow, both events). ` +
+          `For any other combination, author one flow per event — multi-event arrays are deferred until ` +
+          `two independent projects need a combination other than created-or-updated.`,
       });
     }
 
@@ -739,8 +740,8 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           `and skips the flow as "manual — nothing to bind", so neither the boot warning nor the startup ` +
           `summary lists it; the only trace is the banner's flow count being one higher than its bound count.`,
         hint:
-          `Use record-{before,after}-{create,update,delete,write} ('write' is create OR update in one flow, ` +
-          `#3427; create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +
+          `Use record-{before,after}-{create,update,delete,write} ('write' is create OR update in one flow; ` +
+          `create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +
           `declare type: 'autolaunched' or 'screen' instead of 'record_change' — those types have no trigger ` +
           `to be missing.`,
       });

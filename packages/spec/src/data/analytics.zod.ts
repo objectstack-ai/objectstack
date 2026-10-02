@@ -6,8 +6,10 @@ import { DATE_RANGE_PRESETS } from './date-range-presets';
 import { DateGranularity } from './query.zod';
 
 /**
+ * @module data/analytics
+ *
  * Analytics/Semantic Layer Protocol
- * 
+ *
  * Defines the "Business Logic" for data analysis.
  * Inspired by Cube.dev, LookML, and dbt MetricFlow.
  * 
@@ -15,13 +17,9 @@ import { DateGranularity } from './query.zod';
  * "Business Data" (Metrics/Dimensions).
  */
 
-/**
- * Aggregation Metric Type
- * The mathematical operation to perform on a metric.
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import {
   ANALYTICS_COLUMN_PATH,
   ANALYTICS_COLUMN_REFERENCE,
@@ -29,17 +27,64 @@ import {
   rowWildcardOutsideCountRefusal,
 } from './analytics-column-reference';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-export const AggregationMetricType = z.enum([
-  'count', 
-  'sum', 
-  'avg', 
-  'min', 
-  'max', 
-  'count_distinct', 
-  'number', // Custom SQL expression returning a number
-  'string', // Custom SQL expression returning a string
-  'boolean' // Custom SQL expression returning a boolean
-]);
+
+// ── Retired metric types (ADR-0049 enforce-or-remove) ───────────────────────
+//
+// #21000. `number`, `string` and `boolean` declared "a custom SQL expression
+// returning a number / string / boolean": the measure's `sql` WAS the whole
+// computation, and the type only named what it returned. Ruling D on #20943
+// made a cube member's `sql` a column reference (`CUBE_MEMBER_SQL` below), so
+// the three were left with nothing to declare. Measured through
+// `AnalyticsService` on both strategies before this retirement, with a column
+// `sql`: the raw-SQL path emitted the column UNAGGREGATED
+// (`SELECT status AS "status", amount AS "m" … GROUP BY status` — a bare
+// column in a grouped statement, by SQL's own rules an error on PostgreSQL and
+// an arbitrary row's value on SQLite), and the ObjectQL path refused the
+// measure.
+//
+// A VALUE-level retirement (`enumWithRetiredValues`, shared/retired-key.ts):
+// the members left the enum, so `tsc` refuses them, and the parse answers each
+// with the prescription below instead of zod's anonymous enum message. No D2
+// conversion — no rewrite can say which aggregate the author meant — so the
+// D3 entry `cube-metric-expression-types-retired` carries that judgement. A
+// stored cube carrying one is REFUSED, never stood down: every door that
+// parses a cube refuses it here, and both analytics strategies refuse a cube
+// that reached them unparsed with this same text, read off this enum.
+//
+// Module-private and written with `//`, never `/** */`: prose an enum's error
+// map consumes, not documented surface — an export with no reader is a
+// published surface the next narrowing must keep.
+const METRIC_TYPE_EXPRESSION_FIX =
+  'Name the aggregate the measure means — `sum`, `avg`, `min` or `max` over the column, `count` '
+  + '(over `\'*\'` for a row count, or over a column for its non-null values), or `count_distinct`. '
+  + 'A value computed per row has no expression form in the cube layer: keep it as a field of the '
+  + 'object (a stored or formula field) and aggregate that field here; a ratio or other value '
+  + 'derived from measures is `derived: { op, of: [...] }` on an ADR-0021 dataset.';
+
+const metricTypeExpressionRetired = (member: 'number' | 'string' | 'boolean') =>
+  `\`${member}\` was removed from \`AggregationMetricType\` (a cube measure's \`measures.<metric>.type\`) `
+  + 'in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — it declared a custom SQL expression '
+  + `returning a ${member}, and a measure's \`sql\` is a column reference, so the type had nothing left `
+  + 'to compute: the raw-SQL path returned the column unaggregated and the ObjectQL path refused the '
+  + `measure. ${METRIC_TYPE_EXPRESSION_FIX}`;
+
+/**
+ * Aggregation Metric Type
+ *
+ * The aggregate a cube measure applies to its column: the six aggregation
+ * functions, the same six an ADR-0021 dataset measure's `aggregate` names.
+ * The custom-SQL-expression members `number`, `string` and `boolean` were
+ * retired (ADR-0049) — a measure's `sql` is a column reference, so they had
+ * nothing left to compute — and are answered at parse with their prescription.
+ */
+export const AggregationMetricType = enumWithRetiredValues(
+  ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'],
+  {
+    number: metricTypeExpressionRetired('number'),
+    string: metricTypeExpressionRetired('string'),
+    boolean: metricTypeExpressionRetired('boolean'),
+  },
+);
 export type AggregationMetricType = z.input<typeof AggregationMetricType>;
 
 /**
@@ -237,10 +282,10 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
  * names no single field, so no platform check could judge which fields it
  * reads, and the two strategies never agreed on it: the raw-SQL path emitted
- * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refuses only
- * the `number` / `string` / `boolean` partition (`EXPRESSION_METRIC_TYPES`)
- * and forwards an expression under an aggregate type as a field name, which
- * fails downstream.
+ * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refused only
+ * the `number` / `string` / `boolean` metric types (retired since, #21000 —
+ * see `AggregationMetricType`) and forwards an expression under an aggregate
+ * type as a field name, which fails downstream.
  * A derived value has a declared home the platform CAN judge — an ADR-0021
  * dataset, where a conditional count or sum is a measure with its own
  * structured `filter`, and a ratio / sum / difference / product of measures is

@@ -40,9 +40,6 @@ const result = AggregationMetricType.parse(data);
 * `min`
 * `max`
 * `count_distinct`
-* `number`
-* `string`
-* `boolean`
 
 
 ---
@@ -126,7 +123,7 @@ Type: `[string, string]`
 | **title** | `string` | optional |  |
 | **description** | `string` | optional |  |
 | **sql** | `string` | ✅ | Base SQL statement or Table Name |
-| **measures** | `Record<string, { label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; sql: string; … }>` | ✅ | Quantitative metrics, keyed by metric name: the record key IS the metric's name, published and queried as `<cube>.<key>`. A metric declares no inner `name`. |
+| **measures** | `Record<string, { label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; sql: string; … }>` | ✅ | Quantitative metrics, keyed by metric name: the record key IS the metric's name, published and queried as `<cube>.<key>`. A metric declares no inner `name`. |
 | **dimensions** | `Record<string, { label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; sql: string; … }>` | ✅ | Qualitative attributes, keyed by dimension name: the record key IS the dimension's name, published and queried as `<cube>.<key>`. A dimension declares no inner `name`. |
 | **joins** | `Record<string, { name: string }>` | optional |  |
 | **refreshKey** | `never` | optional | [REMOVED] `analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing read it: no analytics result is cached, so neither `every` nor `sql` ever refreshed anything. Delete the key; every analytics query is computed when it is asked. A refresh cadence is declared again when a result cache exists. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
@@ -146,7 +143,7 @@ Type: `[string, string]`
 | **name** | `never` | optional | [REMOVED] `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. Every consumer resolves a metric by its key in `measures` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
-| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
+| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ |  |
 | **sql** | `string` | ✅ | Column reference: a field of the cube's object ("amount"), a relationship path ending in one ("account.amount"), or "*" for a count. Never a SQL expression: a derived value is declared on an ADR-0021 dataset (a measure-scoped filter, or derived: `{ op, of }`). |
 | **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta. |
 
@@ -219,7 +216,7 @@ Type: `[string, string]`
 | **name** | `never` | optional | [REMOVED] `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. Every consumer resolves a metric by its key in `measures` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
-| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
+| **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ |  |
 | **sql** | `string` | ✅ | Column reference: a field of the cube's object ("amount"), a relationship path ending in one ("account.amount"), or "*" for a count. Never a SQL expression: a derived value is declared on an ADR-0021 dataset (a measure-scoped filter, or derived: `{ op, of }`). |
 | **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta. |
 
