@@ -14,4 +14,4 @@ The same `catch` sat in three more commands:
 - **`os migrate account-issuer --json`.** A refused pre-flight printed a second `{"error":"EEXIT: 1"}` under its report. Without `--json`, it printed an extra `EEXIT: 1` error line.
 - **`os migrate apply`** (text output). A `sys_account.issuer` pre-flight refusal printed an extra `EEXIT: 1` error line.
 
-Each command now prints one document and exits with the status it chose: 0 for a completed or already-concluded run, 1 for a refusal or a failed run. A script that worked around the second document or the exit status 1 can drop that workaround.
+Each command now prints one document and exits with the status it computes. A completed `recorded-by --apply` and an already-concluded or resumed `resume --run` exit 0. Refusals and failed runs still exit 1. A script that worked around the second document or the exit status 1 can drop that workaround.
