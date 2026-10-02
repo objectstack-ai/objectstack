@@ -229,6 +229,10 @@ import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 // chain of their own; it carries the same order #13407 settled at the runtime
 // door (`expandRuntimeViewContainer` in `packages/metadata-protocol`).
 import { deriveViewContainerObject } from './view-container-expansion.js';
+// [#21412] The divergent container `name` refusal — the one judge the boot
+// loop, `os validate` and the runtime save door call too. See the container
+// branch of `_registerArtifactBodyCollections`.
+import { viewContainerNameRefusal } from './view-container-name.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
 
@@ -1177,6 +1181,16 @@ export class MetadataPlugin implements Plugin {
                     // container, so the flattened copy is the duplicate, not a
                     // second definition.
                     if (slots.skip?.('view', viewObject)) continue;
+                    // [#21412] A container whose own `name` disagrees with the
+                    // key derived above is refused through the one judge every
+                    // door that files a container calls, in its words — and
+                    // BEFORE `memLoader.save`, so a refusal files nothing.
+                    // `manager.register` below would refuse the same document
+                    // too (#7378 row 1, `assertMetadataRegisterContract`), but
+                    // in the generic register contract's words and only after
+                    // the loader write; row 1 is unchanged for every type.
+                    const nameRefusal = viewContainerNameRefusal(item, 'artifact', packageId);
+                    if (nameRefusal) throw nameRefusal;
                     applyProtection(item as any, {
                         packageId: packageId,
                         packageVersion: packageVersion,

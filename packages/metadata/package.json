@@ -56,6 +56,16 @@
         "types": "./dist/view-container.d.cts",
         "default": "./dist/view-container.cjs"
       }
+    },
+    "./view-container-name": {
+      "import": {
+        "types": "./dist/view-container-name.d.ts",
+        "default": "./dist/view-container-name.js"
+      },
+      "require": {
+        "types": "./dist/view-container-name.d.cts",
+        "default": "./dist/view-container-name.cjs"
+      }
     }
   },
   "files": [
