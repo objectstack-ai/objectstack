@@ -68,7 +68,8 @@ const SHARE_LINK_SWEEP_SUBJECT = {
 /** URL-safe alphabet (RFC 4648 base64url minus padding). 64 symbols. */
 /**
  * [#21197] Read one of `sys_share_link`'s two `internal: true` columns
- * (`token`, `password_hash`) for rows the engine handed back, keyed by row id.
+ * (`token`, `password_hash`) for rows the engine handed back — one value per
+ * row, in the rows' order (`null` where the column is unset).
  *
  * Both columns are declared `internal`, so the engine's generic read path —
  * every `engine.find` in this plugin, system context included (the strip has
@@ -79,45 +80,51 @@ const SHARE_LINK_SWEEP_SUBJECT = {
  * (`resolveInternalField`, #8118), the one door to a flagged column, one
  * batched read per column.
  *
- * A row that still carries the column (an engine that does not strip, e.g. a
- * test fake) answers from the row, with no privileged read.
+ * Whether a missing key means "stripped" or "unset" is read off the same
+ * declaration the strip itself keys on: the engine's registered schema. A row
+ * that still carries the column answers from the row. An engine whose
+ * registered `sys_share_link` does not declare the column `internal` cannot
+ * have stripped it, so a missing key there is an unset column.
  *
- * ⛔ FAIL-CLOSED when a row lacks the column and the engine offers no accessor:
- * it throws instead of answering "unset". For `password_hash` "unset" means
- * "no password", so a degraded answer would open every password-protected
- * link without its password — the gate this column exists for, silently gone.
- * Every caller sits inside a try/catch that answers an error, so the refusal
- * surfaces as a refused redemption, never as an open one.
+ * ⛔ FAIL-CLOSED when the declaration says the strip ran and the value cannot
+ * be recovered (no accessor, or a row with no id): it throws instead of
+ * answering "unset". For `password_hash` "unset" means "no password", so a
+ * degraded answer would open every password-protected link without its
+ * password — the gate this column exists for, silently gone. Every caller sits
+ * inside a try/catch that answers an error, so the refusal surfaces as a
+ * refused request, never as an open link.
  */
 export async function readShareLinkInternalColumn(
-  engine: Pick<SharingEngine, 'resolveInternalField'>,
+  engine: Pick<SharingEngine, 'resolveInternalField' | 'getSchema'>,
   rows: readonly Record<string, unknown>[],
   field: 'token' | 'password_hash',
-): Promise<Map<string, unknown>> {
-  const out = new Map<string, unknown>();
-  const stripped: string[] = [];
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue;
-    const id = row.id;
-    if (typeof id !== 'string' && typeof id !== 'number') continue;
-    if (field in row) out.set(String(id), row[field] ?? null);
-    else stripped.push(String(id));
-  }
-  if (stripped.length === 0) return out;
-  if (typeof engine.resolveInternalField !== 'function') {
+): Promise<unknown[]> {
+  const out: unknown[] = rows.map((row) =>
+    row && typeof row === 'object' && field in row ? (row[field] ?? null) : undefined,
+  );
+  const missing = out.flatMap((v, i) => (v === undefined ? [i] : []));
+  if (missing.length === 0) return out;
+
+  const declaredInternal = engine.getSchema?.('sys_share_link')?.fields?.[field]?.internal === true;
+  if (!declaredInternal) return out.map((v) => (v === undefined ? null : v));
+
+  const refuse = (why: string): never => {
     throw new Error(
       `sys_share_link rows were read back without '${field}' (the engine's \`internal: true\` strip ran) `
-        + 'but this engine offers no `resolveInternalField` accessor to recover it, so the share-link '
-        + 'route that asked cannot answer and refuses. Wire the ObjectQL engine, which provides the '
-        + 'accessor beside the strip.',
+        + `but ${why}, so the share-link route that asked cannot answer and refuses. Wire the ObjectQL `
+        + 'engine, which provides the `resolveInternalField` accessor beside the strip.',
     );
-  }
-  const values = await engine.resolveInternalField('sys_share_link', stripped, field);
-  for (const id of stripped) {
-    // A row deleted between the read and the dereference stays absent; the
-    // caller treats it as the gone link it is.
-    if (values.has(id)) out.set(id, values.get(id) ?? null);
-  }
+  };
+  if (typeof engine.resolveInternalField !== 'function') refuse('this engine offers no accessor to recover it');
+  const ids = missing.map((i) => {
+    const id = rows[i]?.id;
+    if (typeof id !== 'string' && typeof id !== 'number') refuse('a row carries no id to recover it by');
+    return String(id);
+  });
+  const values = await engine.resolveInternalField!('sys_share_link', ids, field);
+  // A row deleted between the read and the dereference reads as unset; the
+  // caller treats it as the gone link it is.
+  missing.forEach((rowIndex, k) => { out[rowIndex] = values.get(ids[k]) ?? null; });
   return out;
 }
 
@@ -685,10 +692,9 @@ export class ShareLinkService implements IShareLinkService {
       links as unknown as Record<string, unknown>[],
       'token',
     );
-    for (const link of links) {
-      const token = tokens.get(String(link.id));
-      if (typeof token === 'string') link.token = token;
-    }
+    links.forEach((link, i) => {
+      if (typeof tokens[i] === 'string') link.token = tokens[i] as string;
+    });
     return links;
   }
 
@@ -728,8 +734,11 @@ export class ShareLinkService implements IShareLinkService {
     // unprotected. Recovered through the privileged accessor (fail-closed:
     // see `readShareLinkInternalColumn`) into a local, never onto the row —
     // the returned link carries no hash.
-    const passwordHash = (await readShareLinkInternalColumn(this.engine, [row as unknown as Record<string, unknown>], 'password_hash'))
-      .get(String(row.id));
+    const [passwordHash] = await readShareLinkInternalColumn(
+      this.engine,
+      [row as unknown as Record<string, unknown>],
+      'password_hash',
+    );
     if (passwordHash) {
       if (!probe.providedPassword) return null;
       const ok = await this.verifyPassword(probe.providedPassword, String(passwordHash));

@@ -294,8 +294,7 @@ export function registerShareLinkRoutes(
           // without it; read off the row, every protected link would answer
           // "invalid" here instead of prompting for its password. Recovered
           // through the same fail-closed accessor redemption uses.
-          const passwordHash = (await readShareLinkInternalColumn(engine, [row], 'password_hash'))
-            .get(String(row.id));
+          const [passwordHash] = await readShareLinkInternalColumn(engine, [row], 'password_hash');
           if (passwordHash) {
             return sendError(
               res,
