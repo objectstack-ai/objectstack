@@ -57,8 +57,9 @@ fails `tsc` (its input type is `never`).
 
 The `agent.lifecycle` row moves `experimental` → `dead` with a REMOVED note
 (`verifiedAt` 2026-10-02); the tombstone keeps it in the walked shape. No `agent` row is
-`experimental` any more. `os lint` / `os validate` no longer warn
-`liveness-experimental-property` on it: the parse refuses it first.
+`experimental` any more. `os validate` and every other parsing door refuse the key at
+parse, before any advisory runs. `os lint` reads the unparsed stack, so it now grades the
+key `liveness-dead-property` where it used to say `liveness-experimental-property`.
 
 ### `@objectstack/platform-objects`
 
