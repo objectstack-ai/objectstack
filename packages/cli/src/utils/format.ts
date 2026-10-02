@@ -558,6 +558,7 @@ export interface MetadataStats {
   objects: number;
   objectExtensions: number;
   fields: number;
+  picklists: number;
   views: number;
   pages: number;
   apps: number;
@@ -657,6 +658,7 @@ export function collectMetadataStats(config: any): MetadataStats {
     objects: count(stack.objects),
     objectExtensions: count(stack.objectExtensions),
     fields,
+    picklists: count(stack.picklists),
     views: count(stack.views),
     pages: count(stack.pages),
     apps: count(stack.apps),
@@ -1483,6 +1485,7 @@ export function printMetadataStats(stats: MetadataStats) {
       items: [
         ['Objects', stats.objects],
         ['Fields', stats.fields],
+        ['Picklists', stats.picklists],
         ['Extensions', stats.objectExtensions],
         ['Datasources', stats.datasources],
       ],

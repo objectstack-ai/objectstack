@@ -69,11 +69,11 @@ for OAuth, API keys, and which objects/actions become tools.
   the wiring for every directory below
 - `src/objects/` — object definitions (one file per object)
 - `src/views/`, `src/actions/`, `src/flows/`, `src/dashboards/`, `src/apps/`,
-  `src/skills/` — empty to start. Each directory's `index.ts` exports what it
-  holds and `objectstack.config.ts` hands those exports to the stack, so
-  `objectstack generate flow NAME` (or `view`, `action`, …) adds a file and one
-  export line, and the item is loaded, and counted by `pnpm validate`, with no
-  edit to the config
+  `src/skills/`, `src/picklists/` — empty to start. Each directory's `index.ts`
+  exports what it holds and `objectstack.config.ts` hands those exports to the
+  stack, so `objectstack generate flow NAME` (or `view`, `action`, …) adds a
+  file and one export line, and the item is loaded, and counted by
+  `pnpm validate`, with no edit to the config
 
 ## Connectors (default providers)
 

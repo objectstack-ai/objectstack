@@ -157,6 +157,41 @@ export interface ICryptoProvider {
    * reveal the plaintext (use HMAC or SHA-256 of canonical JSON).
    * Same hash for same input enables operators to detect duplicate
    * writes without exposing secrets.
+   *
+   * Not keyed by contract: plain SHA-256 satisfies it, so anyone holding a
+   * candidate input can recompute it. A value that must not be computable
+   * without the provider's key comes from {@link ICryptoProvider.keyedDigest}.
    */
   digest(plain: string): string;
+
+  /**
+   * Keyed digest of `plain` under the provider's server-held key — the
+   * primitive for a value that is handed to a caller yet must not let that
+   * caller confirm a guess about the input offline.
+   *
+   * Each of the following is a requirement on every implementation:
+   *
+   *  1. **Keyed.** The output MUST NOT be computable from `plain` without
+   *     the provider's key. An implementation that holds no key material
+   *     MUST reject — ⛔ never resolve to an unkeyed value (a plain hash of
+   *     `plain`, or a MAC under an empty or publicly known key).
+   *  2. **Stable per key.** Under one key, equal `plain` yields an equal
+   *     output in every process and on every node holding that key, so a
+   *     value one node hands out compares equal when a caller echoes it to
+   *     another. Replacing the key changes every output.
+   *  3. **Not a substitute for {@link ICryptoProvider.digest}.** `digest`
+   *     keeps its own contract and the stability the audit trail relies on;
+   *     nothing that records or compares audit digests moves to this method,
+   *     and this method is not an audit fingerprint.
+   *
+   * Output: `hmac-sha256:` followed by the 64 lowercase hex characters of an
+   * HMAC-SHA-256 — 76 characters drawn from `[0-9a-z:-]`. That one token
+   * travels unchanged in an HTTP header value, a query-string value and a
+   * JSON string, and its prefix keeps it disjoint from the `sha256:`
+   * spelling of an unkeyed content hash.
+   *
+   * Asynchronous because a managed-custody provider computes the MAC inside
+   * its KMS, where the key never leaves.
+   */
+  keyedDigest(plain: string): Promise<string>;
 }

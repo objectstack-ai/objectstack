@@ -35,6 +35,7 @@ function fakeCrypto(): ICryptoProvider {
       return handle;
     },
     digest: (plain: string) => 'sha256:' + plain,
+    keyedDigest: async (plain: string) => `k:${plain.length}`,
   };
 }
 
