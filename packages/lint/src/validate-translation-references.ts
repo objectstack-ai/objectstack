@@ -1119,9 +1119,9 @@ function buildUniverse(stack: AnyRec): Universe {
   //
   // ⛔ A name-only fold is wrong here for a reason peculiar to this rung: the
   // stored RECORD is itself read downstream — `checkActionEntry` judges
-  // `params.<name>`, `outcomeMessages.<outcome>` and `resultDialog.fields.<path>`
-  // off it — so folding a bare name would resolve the action key and then
-  // report every one of those keyed children as an orphan.
+  // `params.<name>`, `outcomeMessages.<outcome>`, `resultDialog.fields.<path>`
+  // and the dialog's own leaves off it — so folding a bare name would resolve
+  // the action key and then report every one of those children as an orphan.
   //
   // ⚠️ And the OWNER is read from the record too, which is what keeps the
   // widening honest: an action a sibling binds to an object joins that object's
@@ -1534,6 +1534,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
 
         // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>
+        //                 | .resultDialog.(title|description|acknowledge)
         //                 | .resultDialog.fields.<path>] — see `checkActionEntry`
         for (const [actionName, rawAction] of Object.entries(asRecord(rawNode._actions))) {
           const actionPath = `${objPath}._actions.${actionName}`;
@@ -1842,25 +1843,34 @@ interface ActionEntryContext {
 }
 
 /**
- * Every KEYED child of one action's translation entry, judged against the
- * declaration the resolver reads it through (#21216).
+ * Every child of one action's translation entry that hangs off something the
+ * action declares, judged against that declaration through the resolver that
+ * reads it (#21216, #21264).
  *
  * Four groups under an action entry are records keyed by a name the action
  * itself declares, and `translateAction` (`@objectstack/spec/system`, the
  * resolver objectui's `useObjectLabel` mirrors) walks the DECLARED side of each,
  * never the bundle's keys — so a key the declaration does not carry is read by
- * nothing, and its copy silently never shows:
+ * nothing, and its copy silently never shows. The result dialog's own leaves
+ * are prose, but they hang off a node the action may not declare at all, and
+ * `resolveActionResultDialog` returns before reading any of them when it
+ * declares none:
  *
- *   | bundle key                         | declared by                          | read by                         |
- *   |------------------------------------|--------------------------------------|---------------------------------|
- *   | `params.<name>`                    | `params[].name` (`field` fallback)   | `translateActionParams`         |
- *   | `params.<name>.options.<value>`    | that param's inline `options[].value`| `translateActionParams`         |
- *   | `outcomeMessages.<outcome>`        | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
- *   | `resultDialog.fields.<path>`       | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
+ *   | bundle key                          | declared by                          | read by                         |
+ *   |-------------------------------------|--------------------------------------|---------------------------------|
+ *   | `params.<name>`                     | `params[].name` (`field` fallback)   | `translateActionParams`         |
+ *   | `params.<name>.options.<value>`     | that param's inline `options[].value`| `translateActionParams`         |
+ *   | `outcomeMessages.<outcome>`         | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
+ *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
+ *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
+ *
+ * A dialog leaf under a DECLARED dialog is read whether or not the dialog
+ * authors that leaf itself — the resolver overlays a translated `title` onto a
+ * dialog that declares none — so declaring the dialog is the whole condition.
  *
  * The leaf keys beside them (`label`, `description`, `confirmText`,
- * `successMessage`, `resultDialog.title` …) are prose with no identifier to
- * resolve, as on the object branch.
+ * `successMessage`) are prose on a node that resolved, read whenever the
+ * action is, as on the object branch.
  *
  * ⛔ One vocabulary: a key naming a target the action does not declare is
  * `translation-target-unknown` at `params`' severity; an OPTION key keyed off
@@ -1871,6 +1881,7 @@ interface ActionEntryContext {
 function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
   checkActionParams(findings, ctx);
   checkActionOutcomeMessages(findings, ctx);
+  checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
 }
 
@@ -2034,6 +2045,41 @@ function checkActionOutcomeMessages(findings: TranslationRefFinding[], ctx: Acti
         `Match the key to an outcome the action's \`outcomeMessages\` declares, declare the ` +
         `outcome there first, or drop it.` +
         (declared.size > 0 ? ` Declared outcomes: ${listNames(declared)}.` : ''),
+    });
+  }
+}
+
+/** The result dialog's prose leaves — every key `ActionResultDialogTranslationSchema` declares beside `fields`. */
+const RESULT_DIALOG_LEAVES = ['title', 'description', 'acknowledge'] as const;
+
+/**
+ * `resultDialog.title` / `.description` / `.acknowledge` — prose, but prose
+ * for a dialog the action must declare.
+ *
+ * `resolveActionResultDialog` returns the action's own `resultDialog` untouched
+ * when it has none, before any lookup, so under an action that declares no
+ * `resultDialog` these leaves are read by nothing: the bundle cannot add a
+ * dialog, only translate one. Under a declared dialog every leaf is read, even
+ * one the dialog does not author itself, so nothing further is judged there.
+ */
+function checkActionResultDialogLeaves(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  if (isRec(ctx.action.resultDialog)) return;
+  const rawDialog = asRecord(isRec(ctx.rawAction) ? ctx.rawAction.resultDialog : undefined);
+
+  for (const leaf of RESULT_DIALOG_LEAVES) {
+    if (rawDialog[leaf] === undefined) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · result dialog "${leaf}"`,
+      path: `${ctx.path}.resultDialog.${leaf}`,
+      message:
+        `Translations carry a result dialog \`${leaf}\`, but ${ctx.subject} declares no ` +
+        `\`resultDialog\`, so nothing reads this copy: a bundle translates a dialog the ` +
+        `action declares and cannot add one.`,
+      hint:
+        `Move the \`resultDialog\` translations under the action that declares the dialog, ` +
+        `declare the \`resultDialog\` on this action first if it should show one, or drop them.`,
     });
   }
 }
