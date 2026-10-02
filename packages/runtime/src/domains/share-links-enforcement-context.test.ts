@@ -53,7 +53,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import { PermissionDeniedError, SecurityPlugin } from '@objectstack/plugin-security';
-import { ShareLinkService } from '@objectstack/plugin-sharing';
+import { ShareLinkService, SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { apiErrorResponse } from '../error-envelope.js';
@@ -916,4 +916,275 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
 
         expectIndistinguishable(await h.resolve(token, { password: 'hunter2' }), await h.resolve(UNKNOWN_TOKEN));
     });
+});
+
+/**
+ * [#21329 — ADR-0111 D8 rule 1, ruling 5950188467 (A′)] Who may mint a link on
+ * an OWNER-PRIVATE object, read at the dispatcher door.
+ *
+ * ## The object
+ *
+ * An analogue of the conversation object the card measured: `access.default:
+ * 'private'` (ADR-0066 D2), so the member baseline's `'*'` wildcard grant does
+ * not cover it and no member reads it through the data door; an `owner_id` the
+ * owner holds; and the `publicSharing` opt-in. On it the visibility read
+ * `createLink` runs refuses the OWNER too — the CRUD gate throws before any
+ * row is looked at — so on the visibility rule alone the owner could never
+ * share their own record.
+ *
+ * ## The ruled matrix
+ *
+ * "the owner mints on an owner-private object; a hierarchy manager without
+ * visibility is refused; a non-owner member is refused; Modify-All mints" —
+ * plus the anonymous resolve of the owner's link, which is what the mint is
+ * for. Each refusal is read as the pair (`status`, `code`) and against the
+ * STORE: a refused mint writes no row.
+ *
+ * ## What is real here
+ *
+ * The domain body, the whole `SecurityPlugin` (its CRUD gate, its
+ * `hasWriteBypass` and `resolveWriteScope` probes, booted over the same engine
+ * double), and the whole `SharingServicePlugin` — booted with
+ * `registerShareLinkRoutes: false`, the per-environment configuration for which
+ * this domain is the only share-link surface. The plugin composes the link
+ * service itself, so the authority each case reaches is the production wiring,
+ * not a hand-assembled copy of it. DOUBLES: storage (`makeEngine` above) and
+ * the enterprise hierarchy resolver, which this open edition does not ship.
+ *
+ * ## Why the route door is not pinned here
+ *
+ * The plugin's own route door reads `err.status` alone, and the CRUD gate's
+ * refusal carries `statusCode`, so on that door the refusals below answer 500
+ * until #21405 lands. Its 201s are the same service call.
+ */
+describe('[#21329] mint authority on an owner-private object (dispatcher door, ruling A′)', () => {
+    const CONV = 'ai_conversations';
+    const CONV_ID = 'conv_1';
+    const OWNER = 'u_owner';
+    const STRANGER = 'u_stranger';
+    const ADMIN = 'u_admin';
+    const MANAGER = 'u_manager';
+
+    const CONVERSATION_SCHEMA = {
+        name: CONV,
+        access: { default: 'private' },
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+    };
+
+    /** The member baseline: a `'*'` wildcard grant, the shape `member_default` has. */
+    const MEMBER_BASELINE: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_member_baseline',
+        label: 'Member baseline (wildcard grant)',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    });
+
+    /** Modify All on the wildcard, which a private object honours (the super-user bits). */
+    const MODIFY_ALL: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_modify_all',
+        label: 'Modify All',
+        objects: {
+            '*': {
+                allowRead: true,
+                allowCreate: true,
+                allowEdit: true,
+                allowDelete: true,
+                viewAllRecords: true,
+                modifyAllRecords: true,
+            },
+        },
+    });
+
+    /**
+     * A hierarchy manager: WRITE depth `unit` on the object and no read grant —
+     * a principal `canManageShares` admits (ADR-0111 D1 DEPTH) on a record the
+     * data door will not let them read.
+     */
+    const UNIT_WRITER: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_unit_writer',
+        label: 'Unit-depth writer, no read',
+        objects: { [CONV]: { allowEdit: true, writeScope: 'unit' } },
+    });
+
+    const SETS = [MEMBER_BASELINE, MODIFY_ALL, UNIT_WRITER];
+
+    /** The envelope `resolveExecutionContext` assembles for a human member of org A. */
+    const principal = (userId: string, permissions: string[]): ExecutionContext =>
+        ({
+            userId,
+            tenantId: ORG_A,
+            email: `${userId}@example.com`,
+            isSystem: false,
+            principalKind: 'human',
+            posture: 'MEMBER',
+            positions: [],
+            permissions,
+            systemPermissions: [],
+            org_user_ids: [userId],
+            accessible_org_ids: [ORG_A],
+        }) as unknown as ExecutionContext;
+
+    const owner = () => principal(OWNER, ['conv_member_baseline']);
+    const stranger = () => principal(STRANGER, ['conv_member_baseline']);
+    const admin = () => principal(ADMIN, ['conv_member_baseline', 'conv_modify_all']);
+    const manager = () => principal(MANAGER, ['conv_member_baseline', 'conv_unit_writer']);
+
+    interface World {
+        tables: Record<string, any[]>;
+        sharing: any;
+        mint(as: ExecutionContext): Promise<{ status: number; body: any }>;
+        resolve(token: string): Promise<{ status: number; body: any }>;
+        revoke(idOrToken: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** A data-door read of the record under `as` — the visibility leg itself. */
+        read(as: ExecutionContext): Promise<unknown>;
+        resolveWriteScopeCalls(): number;
+    }
+
+    async function bootWorld(): Promise<World> {
+        const tables: Record<string, any[]> = {
+            [CONV]: [{ id: CONV_ID, title: 'My chat', owner_id: OWNER, organization_id: ORG_A }],
+            sys_share_link: [],
+            sys_permission_set: [],
+        };
+        const engine = makeEngine(tables, { [CONV]: CONVERSATION_SCHEMA });
+        const services: Record<string, any> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: { get: async () => null, list: async () => SETS },
+            // Cloud's topology: one database per environment, no organization wall.
+            tenancy: { posture: 'single' },
+            // The enterprise seam, doubled: the manager's `unit` covers the owner.
+            'hierarchy-scope-resolver': {
+                resolveOwnerIds: async (c: any, scope: string) =>
+                    c?.userId === MANAGER && scope === 'unit' ? [MANAGER, OWNER] : [String(c?.userId)],
+            },
+        };
+        const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        const getService = (name: string) => {
+            if (name in services) return services[name];
+            throw new Error(`service not registered: ${name}`);
+        };
+        const registerService = (name: string, service: unknown) => { services[name] = service; };
+
+        const securityCtx: any = { logger, hook: vi.fn(), registerService, getService };
+        const security = new SecurityPlugin({
+            defaultPermissionSets: SETS,
+            fallbackPermissionSet: 'conv_member_baseline',
+        });
+        await security.init(securityCtx);
+        await security.start(securityCtx);
+
+        // Count the DEPTH probe, so a mint that consults it is visible.
+        let writeScopeCalls = 0;
+        const realResolveWriteScope = services.security.resolveWriteScope.bind(services.security);
+        services.security.resolveWriteScope = (...args: unknown[]) => {
+            writeScopeCalls += 1;
+            return realResolveWriteScope(...args);
+        };
+
+        const hooks: Record<string, Array<() => Promise<void> | void>> = {};
+        const sharingCtx: any = {
+            logger,
+            hook: (event: string, handler: () => Promise<void> | void) => { (hooks[event] ??= []).push(handler); },
+            registerService,
+            getService,
+        };
+        const plugin = new SharingServicePlugin({ enforce: false, registerShareLinkRoutes: false });
+        await plugin.init(sharingCtx);
+        await plugin.start(sharingCtx);
+        for (const handler of hooks['kernel:ready'] ?? []) await handler();
+
+        const svc = services[SHARE_LINK_SERVICE];
+        if (!svc) throw new Error('the sharing plugin registered no share-link service');
+        const deps = makeDeps(engine, svc);
+        const drive = async (
+            subPath: string,
+            method: string,
+            body: unknown,
+            as: ExecutionContext | undefined,
+        ): Promise<{ status: number; body: any }> => {
+            const res = await handleShareLinksRequest(deps, subPath, method, body, {}, httpContext(as));
+            if (!res.handled || !res.response) throw new Error(`${method} /share-links${subPath} was not handled`);
+            return res.response as { status: number; body: any };
+        };
+
+        return {
+            tables,
+            sharing: services.sharing,
+            mint: (as) => drive('', 'POST', { object: CONV, recordId: CONV_ID }, as),
+            resolve: (token) => drive(`/${token}/resolve`, 'GET', undefined, undefined),
+            revoke: (idOrToken, as) => drive(`/${idOrToken}`, 'DELETE', undefined, as),
+            read: async (as) => engine.find(CONV, { where: { id: CONV_ID }, limit: 1, context: as }),
+            resolveWriteScopeCalls: () => writeScopeCalls,
+        };
+    }
+
+    it('[persona] the object is owner-private: the owner\'s own data-door read is refused at the CRUD gate', async () => {
+        const w = await bootWorld();
+        // The visibility leg is CLOSED for the owner — without this, a 201 below
+        // would prove nothing about the owner branch.
+        await expect(w.read(owner())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        await expect(w.read(stranger())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        await expect(w.read(manager())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        // The Modify-All holder reads it: the super-user bits are honoured on a private object.
+        expect(await w.read(admin())).toHaveLength(1);
+    }, 30_000);
+
+    it('[owner] the owner mints a link on their own record, and an anonymous holder resolves it', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(owner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: OWNER });
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([OWNER]);
+
+        const resolved = await w.resolve(String(res.body.data.token));
+        expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
+        expect(resolved.body.data.record).toMatchObject({ id: CONV_ID, title: 'My chat' });
+    }, 30_000);
+
+    it('[stranger] a non-owner member is refused with the visibility read\'s own refusal, and nothing lands', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(stranger());
+
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        expect(w.tables.sys_share_link).toEqual([]);
+    }, 30_000);
+
+    it('[modify-all] a Modify-All holder mints', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(admin());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: ADMIN });
+    }, 30_000);
+
+    it('[manager] a hierarchy manager without visibility is refused, though they ARE a share-manager of the record', async () => {
+        const w = await bootWorld();
+
+        // The control: this principal holds ADR-0111 D1 DEPTH authority over the
+        // record. Without it the refusal below could be "not a manager at all".
+        expect(await w.sharing.canManageShares(CONV, CONV_ID, manager())).toBe(true);
+        const callsBefore = w.resolveWriteScopeCalls();
+
+        const res = await w.mint(manager());
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        expect(w.tables.sys_share_link).toEqual([]);
+        // The DEPTH branch is not part of mint authority at all: minting never
+        // asked for the caller's write scope.
+        expect(w.resolveWriteScopeCalls(), 'the mint consulted the hierarchy-depth probe').toBe(callsBefore);
+
+        // ...while their revoke authority over the record (D8 rule 2) stands.
+        const minted = await w.mint(owner());
+        expect(minted.status, JSON.stringify(minted.body)).toBe(201);
+        const revoked = await w.revoke(String(minted.body.data.id), manager());
+        expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+        expect(w.tables.sys_share_link[0]?.revoked_at).toBeTruthy();
+    }, 30_000);
 });
