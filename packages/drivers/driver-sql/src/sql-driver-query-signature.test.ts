@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The driver side of #5181's `DriverQuery` narrowing (#6075).
+ * The driver side of #5181's `DriverQuery` narrowing (commit d367f03d6).
  *
  * `packages/spec/src/contracts/data-driver.test.ts` already pins the CONTRACT:
  * `IDataDriver`'s six query-taking methods declare `DriverQuery`. That pin says
@@ -9,7 +9,7 @@
  * compared bivariantly, so an implementation declaring the wider `QueryAST`
  * satisfies the narrower contract and every gate stays green. That is exactly
  * how five drivers kept a stale signature through a full `pnpm typecheck`
- * (125/125) after #6076 merged.
+ * (125/125) after commit 6513c1749 landed.
  *
  * The cost of the gap was a dormant lie rather than a live defect: a caller is
  * now free to omit `object`, so an implementation declaring `query: QueryAST`
@@ -83,7 +83,7 @@ describe('SqlDriver query signatures follow the DriverQuery contract (#6075)', (
 });
 
 /**
- * The two SQL-driver-OWN query doors — not on `IDataDriver`, so #5181/#6075
+ * The two SQL-driver-OWN query doors — not on `IDataDriver`, so #5181 and commit d367f03d6
  * never reached them and both kept `query: any` (#6212).
  *
  * `any` on a query parameter is not "unchecked object name"; it is every check

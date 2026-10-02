@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17586 · retargeted by #17469] A JSON column's stored array survives the
+ * [commit d46deba19 · retargeted by #17469] A JSON column's stored array survives the
  * read — and `booleanFields` never contains one.
  *
  * ## What this file was filed for
@@ -67,8 +67,8 @@
  * @see SqlDriver.isNonTextColumn — the reader that carves out at the reader.
  * @see SqlDriver.isJsonField — the storage half of the #17469 ruling.
  * @see https://github.com/objectstack-ai/objectstack/issues/17469 (the ruling that retargeted this file)
- * @see https://github.com/objectstack-ai/objectstack/issues/17586
- * @see https://github.com/objectstack-ai/objectstack/issues/17343 (the filter half)
+ * @see commit d46deba19
+ * @see commit 82cb69fed (the filter half)
  * @see https://github.com/objectstack-ai/objectstack/issues/11782 (the pass)
  * @see https://github.com/objectstack-ai/objectstack/issues/11635 (the PG cast)
  */
@@ -98,7 +98,7 @@ const BYPASS: DriverOptions = { bypassTenantAudit: true };
  * statement is refused before any row is presented (`could not identify an
  * equality operator for type json`). A property of the COLUMN CLASS, measured
  * on live PostgreSQL 16.13 across both legs of the original card's change and
- * unchanged by it — the mirror of the `LIKE`-over-`json` divergence #17590 owns
+ * unchanged by it — the mirror of the `LIKE`-over-`json` divergence commit e04a0aff2 ruled
  * on the filter side, reached through the read door instead.
  */
 const distinctExecutes = (cell: DialectCell): boolean => cell.id !== 'pg';
@@ -259,11 +259,11 @@ function declareReadSweep(cell: DialectCell): void {
     } else {
       /**
        * The NAMED DIVERGENCE, pinned rather than skipped — the same posture
-       * #17343's suite takes for the filter-side half of this property.
+       * commit 82cb69fed's suite takes for the filter-side half of this property.
        *
        * PostgreSQL's `json` type defines no equality operator and
        * `SELECT DISTINCT` needs one, so this door is REFUSED there for every
-       * JSON column. It is pinned as the ADR-0112 envelope #17639 brought to
+       * JSON column. It is pinned as the ADR-0112 envelope commit 7c2c5aedd brought to
        * this door, and on the CLASS rather than on a bare throw: `picks` is a
        * multi-valued `select` and `tags_` an inherently-multi option type, and
        * both must fail the SAME way, so a future edit that broke one of them
@@ -287,7 +287,7 @@ function declareReadSweep(cell: DialectCell): void {
           expect(err, `distinct() over ${column} must be refused on this backend`).toBeDefined();
           expect(err!.code, `code for ${column}`).toBe('DATABASE_ERROR');
           expect(err!.status, `status for ${column}`).toBe(500);
-          // [#17639] The raw SQLSTATE the caller used to receive is the CAUSE now.
+          // [commit 7c2c5aedd] The raw SQLSTATE the caller used to receive is the CAUSE now.
           expect((err as unknown as { cause?: { code?: string } }).cause?.code, `SQLSTATE for ${column}`)
             .toBe('42883');
         }
@@ -426,7 +426,7 @@ describe('[#17586] the `booleanFields` registry and its four readers', () => {
    * The two registry fills, side by side. The omission the card repairs was
    * present in BOTH, and they are separate code with no shared helper to make
    * that impossible — so a repair reaching only one leaves the defect live on
-   * the other, exactly as #17343's round found.
+   * the other, exactly as commit 82cb69fed's round found.
    */
   it('BOTH registry fills agree — initObjects and registerExternalObject register the same columns', async () => {
     const ext = external(DIALECTS[0][1]);

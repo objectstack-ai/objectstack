@@ -417,7 +417,7 @@ export const HASH_SHADOW_SUFFIX = '__hash';
  * orphan pass reports as `unmapped_column` with a `drop_column` op. Dropping it
  * would take the UNIQUE index it carries with it, silently returning the object
  * to "registered but its declared uniqueness unenforced" — the very state
- * #11374/#11627 exist to end, reached this time through the migration tool
+ * #11627 and commit d0e3a885b exist to end, reached this time through the migration tool
  * rather than through a refused DDL.
  *
  * Matched by SUFFIX rather than by a registry of known names, deliberately: the
@@ -448,7 +448,7 @@ export function isHashShadowColumn(name: string): boolean {
  * 64-character identifier limit.
  *
  * ⚠️ Lives HERE, beside {@link isHashShadowColumn}, rather than in the driver:
- * #13015 was the price of the split. The ORPHAN-column pass knew the shadow
+ * The defect commit cd1348802 fixed was the price of the split. The ORPHAN-column pass knew the shadow
  * vocabulary and the INDEX differ did not, so a healthy shadow-carried UNIQUE
  * had its column protected from a drop while the index that column carries was
  * proposed for a destructive rebuild. Both passes now ask the same module the
@@ -473,7 +473,7 @@ export function hashShadowColumnFor(indexName: string): string {
 /**
  * One key part a hash shadow hashes: the column identity, and whether the
  * generation expression folds it through the NULL-safe `COALESCE(col, ...)`
- * form (ADR-0120 D3, carried into the shadow by #12998).
+ * form (ADR-0120 D3, carried into the shadow by commit df1c75c4b).
  */
 export interface HashShadowKeyPart {
   column: string;
@@ -482,16 +482,16 @@ export interface HashShadowKeyPart {
 
 /**
  * Read the DECLARED key parts back out of a hash shadow's stored
- * `GENERATION_EXPRESSION` (#13015).
+ * `GENERATION_EXPRESSION` (commit cd1348802).
  *
  * This is what makes a shadow-carried key COMPARABLE rather than merely
- * skippable. Since #12998 the expression carries the NULL-safe parts in their
+ * skippable. Since commit df1c75c4b the expression carries the NULL-safe parts in their
  * COALESCE spelling, so the FORM of the key — which columns, and which of them
  * are folded — survives the round trip, and the differ can ask the real
  * question ("does this shadow enforce what metadata declares?") instead of the
  * blind one ("is this a shadow at all?").
  *
- * ⛔ Why the blind question is not good enough: a shadow created BEFORE #12998
+ * ⛔ Why the blind question is not good enough: a shadow created BEFORE commit df1c75c4b
  * hashes the RAW columns, so `CONCAT` returns NULL for every NULL-organization
  * row and the rows the COALESCE bucket exists to constrain are constrained by
  * nothing (#5030's shape). It is indistinguishable BY NAME from a healthy one.
@@ -858,7 +858,7 @@ export function diffManagedTable(args: {
   columns: PhysicalColumn[];
   dialect: SqlDialectName;
   /**
-   * Which columns an index KEYS ON (#11374), keyed by field name — the exact
+   * Which columns an index KEYS ON (commit d0e3a885b), keyed by field name — the exact
    * map {@link indexedKeyColumns} builds. Consulted ONLY by the varchar-length
    * branch below, through {@link varcharColumnChars}, to answer the same
    * question `createColumn` asks before it sizes a text-family column.
@@ -1703,7 +1703,7 @@ export interface PhysicalIndex {
   /**
    * When this index is physically carried by a #11627 hash shadow, the
    * DECLARED key parts that shadow hashes, read back from the generation
-   * expression (#13015 via #12998) by `SqlDriver.introspectIndexes`.
+   * expression (commit cd1348802 via commit df1c75c4b) by `SqlDriver.introspectIndexes`.
    *
    * Absent both when the index is NOT shadow-carried and when it is but the
    * expression could not be read. {@link isHashShadowCarrier} tells those two
@@ -2029,7 +2029,7 @@ export function diffUnbuildableIndexes(args: {
  * field-level `unique` through {@link uniqueIndexesFromFields}, object-level
  * `indexes[]` through {@link normalizeDeclaredIndex} — so "which columns end up
  * in a key" has ONE answer, shared by the index sync that creates them and by
- * the DDL that has to make them keyable in the first place (#11374).
+ * the DDL that has to make them keyable in the first place (commit d0e3a885b).
  *
  * ⚠️ Deliberately NOT filtered by `physicalColumns`, unlike `expectedIndexes`:
  * its caller runs BEFORE the columns exist — deciding a column's TYPE is the
@@ -2275,7 +2275,7 @@ function indexSignature(
  * Answerable from the index alone, by NAME: the shadow is derived from the
  * index name ({@link hashShadowColumnFor}), so a carrier is an index whose sole
  * key column is its own shadow. That is what makes this the FAIL-SAFE half of
- * #13015 — it holds even when the generation expression cannot be read, and a
+ * commit cd1348802 — it holds even when the generation expression cannot be read, and a
  * carrier is never a thing this differ may propose destroying on a guess.
  */
 export function isHashShadowCarrier(index: PhysicalIndex): boolean {
@@ -2283,7 +2283,7 @@ export function isHashShadowCarrier(index: PhysicalIndex): boolean {
 }
 
 /**
- * The key an index ENFORCES, which is not always the key it STORES (#13015).
+ * The key an index ENFORCES, which is not always the key it STORES (commit cd1348802).
  *
  * For an ordinary index the two are the same. For a #11627 shadow-carried
  * UNIQUE the stored key is one VARBINARY(32) generated column and the enforced
@@ -2358,7 +2358,7 @@ export function diffManagedIndexes(args: {
       if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated, tenantField)) return false;
       if (!p.unique || p.partial === true) return false;
       if ((p.expressions?.length ?? 0) > 0 || (p.nullSafeColumns?.length ?? 0) > 0) return false;
-      // #13015: nor is a hash-shadow carrier. Its stored key is one generated
+      // Commit cd1348802: nor is a hash-shadow carrier. Its stored key is one generated
       // column, so the identity comparison below already excludes it — stated
       // outright because the exclusion must survive that comparison changing,
       // and because `replace_unique_index` DROPS the legacy name.
@@ -2428,7 +2428,7 @@ export function diffManagedIndexes(args: {
     // Same normalization on BOTH sides (#4884, ADR-0120 D3): column identity
     // AND key-part form, literal-agnostic on the COALESCE literal — asked of
     // the key the index ENFORCES, which for a #11627 shadow-carried UNIQUE is
-    // not the column it stores (#13015).
+    // not the column it stores (commit cd1348802).
     const pk = enforcedIndexKey(p);
     if (
       p.unique === e.unique &&
@@ -2445,7 +2445,7 @@ export function diffManagedIndexes(args: {
     // (`recreate_index` → drop first) this differ cannot undo. Not ours to
     // reconcile (#4884).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
-    // #13015, fail-safe half: a hash-shadow carrier whose generation
+    // Commit cd1348802, fail-safe half: a hash-shadow carrier whose generation
     // expression could NOT be read (`shadowKey` unresolved). We know by name
     // that the index is driver-owned and that its stored key is a digest, so
     // the identity comparison above is meaningless for it — but we do not know
@@ -2455,7 +2455,7 @@ export function diffManagedIndexes(args: {
     // ⛔ The `!p.shadowKey` half is load-bearing, and was measured: without it
     // this guard swallows the RESOLVED carriers too, which silently demotes the
     // whole fix to the blind skip — every shadow-carried index unreportable,
-    // including a pre-#12998 one hashing the RAW columns whose constraint does
+    // including one from before commit df1c75c4b hashing the RAW columns whose constraint does
     // not cover NULL-organization rows at all. Green, quiet, and the exact
     // trade this fix exists to refuse.
     if (isHashShadowCarrier(p) && !p.shadowKey) continue;
@@ -2471,7 +2471,7 @@ export function diffManagedIndexes(args: {
     // clean → recategorised `safe` (dev autoMigrate may apply); duplicates →
     // blocked with a row report, the old index left in place.
     //
-    // #13015: read through the ENFORCED key, so a pre-#12998 shadow — same
+    // Commit cd1348802: read through the ENFORCED key, so a shadow from before commit df1c75c4b — same
     // columns, hashed RAW instead of through the NULL-safe COALESCE — is
     // recognised as exactly this tightening and gets the same duplicate
     // pre-flight before anything is dropped. The explicit "physical side is
@@ -2530,7 +2530,7 @@ export function diffManagedIndexes(args: {
     // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
     // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
-    // #13015: an orphaned shadow carrier is still an orphan — its declaration
+    // Commit cd1348802: an orphaned shadow carrier is still an orphan — its declaration
     // is gone, and `drop_index` is the right remedy — but the report must name
     // the constraint it enforced, not the digest column it stored.
     const po = enforcedIndexKey(p);

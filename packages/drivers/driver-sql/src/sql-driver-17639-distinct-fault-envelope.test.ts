@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#17639 — `distinct()` joins the enveloped read exits.
+ * Commit 7c2c5aedd — `distinct()` joins the enveloped read exits.
  *
  * ## The measurement this suite is built from
  *
@@ -41,12 +41,12 @@
  * ⛔ It is NOT a request to make `distinct()` ANSWER over a JSON column. The
  * call fails either way; what changes is whether the failure is CLASSIFIED.
  * Whether a `json` column should support a distinct read at all belongs with
- * #17590, which owns the sibling `LIKE`-over-`json` divergence on the filter
+ * the card commit e04a0aff2 closed, which owned the sibling `LIKE`-over-`json` divergence on the filter
  * side of the same columns. This is the same split #11455 made on the
  * `aggregate()` door while #11152 / #11249 still owned the answer question: the
  * envelope is the half that holds whichever way that card rules.
  *
- * ⚠️ RETIREMENT CLAUSE for the Postgres-only block at the bottom: if #17590
+ * ⚠️ RETIREMENT CLAUSE for the Postgres-only block at the bottom: if a card after commit e04a0aff2
  * rules that a `json` column should ANSWER a distinct read, those cases stop
  * failing and that block is RETIRED by that card — exactly as #11635 retired
  * #11455's boolean-aggregand block. What the all-dialect sweep pins is
@@ -62,14 +62,14 @@
  * would not run this statement* — which is the only claim the signal supports.
  * ⛔ Never `INVALID_QUERY` / 400: that would say *"asking for the distinct
  * values of this column is your mistake"*, a verdict about the request that
- * #17590 has not made.
+ * commit e04a0aff2 has not made.
  *
  * | card   | door            | before                         | after                |
  * |--------|-----------------|--------------------------------|----------------------|
  * | #8790  | `count()` WHERE | raw dialect error              | `INVALID_FILTER`/400 |
  * | #8931  | read exits      | raw dialect error, no `status` | `DATABASE_ERROR`/500 |
  * | #11455 | `aggregate()`   | raw dialect error, no `status` | `DATABASE_ERROR`/500 |
- * | #17639 | `distinct()`    | raw dialect error, no `status` | `DATABASE_ERROR`/500 |
+ * | commit 7c2c5aedd | `distinct()`    | raw dialect error, no `status` | `DATABASE_ERROR`/500 |
  *
  * ⭐ The envelope comes from the EXIT, not from recognising `42883` or the
  * words *equality operator* — the #8926 lesson (a predicate arm matched by
@@ -86,7 +86,7 @@
  * compiled from `filters`. A blanket arm would tell the author of
  * `distinct(o, 'nosuchcol')` — who passed no filter at all — that their FILTER
  * was wrong. #11541 closed that gap for `aggregate()` with a clause-attributing
- * classifier; #17857 has since closed the `distinct()` half the same way
+ * classifier; commit 9ccc4179e has since closed the `distinct()` half the same way
  * (`SqlDriver.distinctBackendFault`, pinned by
  * `sql-driver-17857-distinct-unresolvable-column-refusal.test.ts`). What this
  * suite pins was unchanged by that, exactly as this note anticipated: an error
@@ -177,7 +177,7 @@ describe(`[#17639] driver-sql — distinct() takes the backend-fault envelope ($
   // A table that was never provisioned raises a dialect error on all three
   // backends (`42P01` / `SQLITE_ERROR` / `ER_NO_SUCH_TABLE`), so this is the
   // envelope invariant measured on EVERY cell — and it involves no JSON column,
-  // so #17590's ruling cannot move it in either direction.
+  // so the ruling commit e04a0aff2 records cannot move it in either direction.
   it('an unclassified dialect fault on the distinct door carries a code AND a status', async () => {
     const err = await caught(() => driver.distinct(MISSING_TABLE, 'title'));
     expect(err.code, 'code').toBe('DATABASE_ERROR');
@@ -202,8 +202,8 @@ describe(`[#17639] driver-sql — distinct() takes the backend-fault envelope ($
   });
 
   // ⛔ THE FENCE: the envelope claims nothing about the request. Listing the
-  // distinct values of a column is not a malformed query, and #17590 — not this
-  // exit — owns whether the column supports the read.
+  // distinct values of a column is not a malformed query, and the card commit e04a0aff2 closed — not this
+  // exit — owned whether the column supports the read.
   it('the envelope makes NO claim about the query or the filter', async () => {
     const err = await caught(() => driver.distinct(MISSING_TABLE, 'title'));
     expect(err.code).not.toBe('INVALID_QUERY');
@@ -299,7 +299,7 @@ for (const cell of DIALECT_CELLS) {
 // ─────────────────────────────────────────────────────────────────
 //
 // ⚠️ RETIREMENT CLAUSE: this block pins that the JSON-column refusal the card
-// measured is ENVELOPED, never that it refuses. If #17590 rules that a `json`
+// measured is ENVELOPED, never that it refuses. If a card after commit e04a0aff2 rules that a `json`
 // column should ANSWER a distinct read, these cases stop failing and this block
 // is RETIRED by that card — the same clause #11455's boolean-aggregand block
 // carried and #11635 fired.

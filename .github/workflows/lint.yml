@@ -1526,6 +1526,33 @@ jobs:
       - name: Fleet-write dispatcher self-test
         run: pnpm check:pm-fleet-write-dispatch
 
+      # Issue-transfer door self-test (#21295) — the same family and the same
+      # split as the steps above, and it drives the relay they test: the door
+      # sends ONE `transfer` stroke through the dispatcher (or the relay row's
+      # own mutation, directly) and judges it with the validator's own
+      # `validateStroke`. The LIVE path moves a card from one repository to
+      # another on a shared board, so it is emphatically not a thing CI runs on
+      # a pull request; the offline half is all CI can hold.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise: a pull request or an already-moved card refused before any
+      # write; a read-back in which the TARGET decides — an old URL still
+      # answering 200 is a pending redirect, and exit 4 only when the bounded
+      # re-read still finds no card AND the old URL is unchanged; the relay
+      # run's annotation read first for the new number; a failed run that names
+      # the installation remedy and is never fallen back from; and the transfer
+      # never re-sent. Weakening any of them leaves every ordinary invocation
+      # just as green, and a wrong transfer is a write against a shared board,
+      # not a report.
+      #
+      # ⛔ `check:self-test-wired` does not hold this step. No other workflow
+      # names this script, and that gate's population is the scripts a
+      # workflow names, so deleting this step drops the script back out of it
+      # with every gate still green — the same hole the stale-`finding` sweep
+      # step below records, which only the step itself closes.
+      - name: Issue-transfer door self-test
+        run: pnpm check:pm-issue-transfer
+
       # Board-snapshot archiver self-test (#17390) — same family and the same
       # split as every step around it. The LIVE run reads the whole board over
       # REST and commits the result to an orphan branch, so it is not a thing

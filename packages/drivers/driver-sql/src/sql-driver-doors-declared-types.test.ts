@@ -3,7 +3,7 @@
 // #15267 — the five remaining `IDataDriver` doors on `SqlDriver` publish their
 // declared return type, not `any`.
 //
-// #14438 (PR #15280) un-masked `update()` on this class and filed the census of
+// Commit 2200f8ec8 (PR #15280) un-masked `update()` on this class and filed the census of
 // what was left: `findOne`, `create`, `bulkCreate`, `execute` and `explain`
 // each carried an EXPLICIT `Promise<any>` while
 // `packages/spec/src/contracts/data-driver.ts` had already declared every one
@@ -39,7 +39,7 @@
 // against the very `any` being removed. `findOne`'s `null` arm is the one door
 // that also has a runtime face, and it is exercised below.
 //
-// The typed-const form is `sql-driver-update-declared-null.test.ts`'s (#14438),
+// The typed-const form is `sql-driver-update-declared-null.test.ts`'s (commit 2200f8ec8),
 // which is `memory-update-declared-null.test.ts`'s (#13878). `TursoDriver`
 // overrides four of these five doors and carries its own copy of the driver
 // half in its own tsc program (`turso-driver-doors-declared-types.test.ts`);
@@ -64,7 +64,7 @@
 // not whether the door owes its declared type: optionality governs whether the
 // member EXISTS, not what it returns once it does.
 //
-// #17690 adds four MORE doors of the same family — `find`, `upsert`,
+// Commit be5c60291 adds four MORE doors of the same family — `find`, `upsert`,
 // `bulkUpdate` and `temporalFilterValue` — and the reason they were not in
 // #15267's repaired set nor in its deliberately-excluded set is worth one
 // paragraph, because it is the transferable half of this card. #15267's census
@@ -106,7 +106,7 @@ type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B
 type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : never;
 
 /**
- * [#17690] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
+ * [commit be5c60291] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
  * `any[]` and for `Record<string, any>` — and those are exactly the two shapes
  * every door on this card had regressed to. Used as the "is not `any`" half of
  * a nested-`any` door it is a PHANTOM CHECK: it evaluates, it is green, and it
@@ -131,7 +131,7 @@ type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : ne
  * `Record<string, unknown>[]` / `Record<string, unknown>` / `unknown` answer
  * `false`.
  *
- * [#17970] Answering `boolean` is the ONE failure mode this detector has to
+ * [commit 47e6601c5] Answering `boolean` is the ONE failure mode this detector has to
  * stay out of, and staying out of it takes TWO guards, because `T` can reach a
  * distributive conditional for two unrelated reasons. Every leg below is
  * spelled `const x: ContainsAny<Door> = false`, and `false` is ASSIGNABLE to
@@ -176,7 +176,7 @@ type ContainsAnyPerMember<T> = IsAny<T> extends true
       : false;
 
 /**
- * [#17970] The collapse. `ContainsAnyPerMember<T>` is distributive, so on a
+ * [commit 47e6601c5] The collapse. `ContainsAnyPerMember<T>` is distributive, so on a
  * union door it answers a UNION of per-member verdicts; this reports `false`
  * only when that union is exactly `false`, turning any `boolean` into `true`.
  */
@@ -192,7 +192,7 @@ type ContractExecute = Resolved<IDataDriver['execute']>;
 type ContractExplain = Resolved<NonNullable<IDataDriver['explain']>>;
 // `aggregate` is optional too (`aggregate?(...)`), read the same way (#17277).
 type ContractAggregate = Resolved<NonNullable<IDataDriver['aggregate']>>;
-// [#17690] Four more doors. `temporalFilterValue` is synchronous, so it is read
+// [commit be5c60291] Four more doors. `temporalFilterValue` is synchronous, so it is read
 // through `ReturnType` — `Resolved` would answer `never` and pin nothing.
 type ContractFind = Resolved<IDataDriver['find']>;
 type ContractUpsert = Resolved<IDataDriver['upsert']>;
@@ -349,7 +349,7 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
     expect(Number(cell)).toBe(1);
   });
 
-  // [#17690] The four doors a literal-string census could not see. Both halves
+  // [commit be5c60291] The four doors a literal-string census could not see. Both halves
   // each: put any one annotation back and `ContainsAny` flips to `true` while
   // `Equals` flips to `false`, reding this file twice for that door — verified
   // by ablating all four, two errors apiece and nothing else.

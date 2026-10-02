@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17343 · retargeted by #17469] The declared-type gate never fires on a JSON
+ * [commit 82cb69fed · retargeted by #17469] The declared-type gate never fires on a JSON
  * column — and the population of JSON columns is now the one the protocol
  * declares.
  *
  * ## What this file was filed for, and what happened to it
  *
- * #17343: a `multiple: true` BOOLEAN column lost its `$contains` MEMBERSHIP
+ * The defect commit 82cb69fed fixed: a `multiple: true` BOOLEAN column lost its `$contains` MEMBERSHIP
  * filter — the carve-out #14079's declared-type gate never received on its
  * boolean limb, while its numeric limb carried one from the first line it
  * shipped and its temporal limb gained one in #15683. `{ FIELD: { $contains:
@@ -51,7 +51,7 @@
  * ## Which cells executed
  *
  *   - **sqlite** — always, embedded.
- *   - **live mysql / live postgres** — run when provisioned. #17590's ruling
+ *   - **live mysql / live postgres** — run when provisioned. The ruling commit e04a0aff2 records
  *     (2026-09-12) replaced the text lowering with a real MEMBERSHIP construct
  *     compiled per dialect, so all three answer the same rows and this file
  *     carries no per-dialect branch.
@@ -59,11 +59,11 @@
  * @see SqlDriver.isNonTextColumn — the predicate; its JSON carve-out is the invariant.
  * @see SqlDriver.isJsonField — the storage half of the #17469 ruling.
  * @see https://github.com/objectstack-ai/objectstack/issues/17469 (the ruling that retargeted this file)
- * @see https://github.com/objectstack-ai/objectstack/issues/17343
+ * @see commit 82cb69fed
  * @see https://github.com/objectstack-ai/objectstack/issues/14079 (the gate)
  * @see https://github.com/objectstack-ai/objectstack/issues/15683 (the temporal carve-out)
  * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the membership spelling it protects)
- * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the membership construct)
+ * @see commit e04a0aff2 (the membership construct)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -251,11 +251,11 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
   const typed = (config: SqlDriverConfig) => new CompilerProbeDriver(config).declareMulti();
 
   /**
-   * [#17590] "A real predicate over the column" per dialect — the pattern
+   * [commit e04a0aff2] "A real predicate over the column" per dialect — the pattern
    * emitter OR the membership construct that replaced it for `$contains`. This
    * file's question is whether the declared-type gate fired, so it must accept
    * either; asserting one SHAPE here would make it red on the card that changes
-   * the other, which is exactly what #17590 did to its predecessor. [#20024]
+   * the other, which is exactly what commit e04a0aff2 did to its predecessor. [#20024]
    * On SQLite the substring emitter spells `contains` as `instr(` and `ends` as
    * `substr(CAST(`; only `starts` and the `$like` pair keep `GLOB`.
    */
@@ -274,7 +274,7 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
           // JSON column now; the rest of the family is REFUSED there (`400`),
           // ahead of both this card's declared-type gate and the emitter. Either
           // way the gate this file is about does not fire: a refusal is not the
-          // `1 = 0` constant, and the SHAPE per operator is owned by #17590's
+          // `1 = 0` constant, and the SHAPE per operator is owned by commit e04a0aff2's
           // and #21009's own files.
           if (op !== '$contains') {
             let refusal: (Error & { code?: string; status?: number }) | undefined;
@@ -289,7 +289,7 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
           }
           const sql = d.compileWhere({ [field]: { [op]: 'x' } } as FilterCondition);
           expect(sql, `${op} over ${field}`).not.toMatch(/1 = 0|1 = 1/);
-          // [#17590] `$contains` compiles the MEMBERSHIP construct. What this
+          // [commit e04a0aff2] `$contains` compiles the MEMBERSHIP construct. What this
           // card is about is not the shape — it is that the declared-type gate
           // does not fire — so this row asks for "a real predicate over the
           // column".

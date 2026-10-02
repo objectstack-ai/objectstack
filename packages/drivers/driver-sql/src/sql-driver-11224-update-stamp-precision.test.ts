@@ -38,7 +38,7 @@
  * audit answer comparing the two, a "modified since creation?" badge, and above
  * all a millisecond-precision delta cursor (`updated_at > cursor`), which
  * SKIPS every row whose stamp was truncated back below it — the same
- * silent-wrong-answer family as #11067 / #11176 / #11223, reached by a fourth
+ * silent-wrong-answer family as #11176 / #11223 / the one commit 479fba50d fixed, reached by a fourth
  * mechanism. §2 asserts that skip is gone by issuing the cursor comparison as
  * real SQL on the server rather than comparing numbers in JS.
  *

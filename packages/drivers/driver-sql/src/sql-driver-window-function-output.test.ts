@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Rows leaving `findWithWindowFunctions()` (#16609).
+ * Rows leaving `findWithWindowFunctions()` (commit 78bc4ad58).
  *
  * It was the last read door that returned `await builder` with NO presentation:
  * no `formatOutput` (which every `find()` / `findOne()` row gets) and no
@@ -188,15 +188,15 @@ describe('rows leaving findWithWindowFunctions() (#16609)', () => {
       expect(rows.map((r: any) => Number(r.rn))).toEqual([1, 2]);
     });
 
-    // ── THE COLLISION RULING (#16609) ──────────────────────────────────────
+    // ── THE COLLISION RULING (commit 78bc4ad58) ──────────────────────────────────────
     //
     // An alias may be spelled the same as a declared field. SQL decides that
     // one before the driver sees it: `select *` plus `<window> as ok` projects
     // two columns named `ok`, and the row object keeps the LAST — so the
     // COMPUTED value wins the key and the declared column's value is not in the
-    // row at all. That was already true before #16609 and is unchanged by it.
+    // row at all. That was already true before commit 78bc4ad58 and is unchanged by it.
     //
-    // What #16609 rules is the second half: the winning value stays RAW. It is
+    // What commit 78bc4ad58 rules is the second half: the winning value stays RAW. It is
     // a computed number, so no declared field's presentation rule may touch it
     // — applying the `Field.boolean` rule here would fold ROW_NUMBER 1 and 2
     // into `true` and `true` and destroy the value the caller asked for.

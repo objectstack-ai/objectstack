@@ -34,8 +34,31 @@ onlyBuiltDependencies:
 #     version, the patch goes unused and `pnpm install` fails
 #     (ERR_PNPM_UNUSED_PATCH), so a tsup upgrade cannot drop the patch
 #     silently. Re-derive the patch, or retire it, on every tsup bump.
+#   - tsx@4.23.15: this release moved its ESM-API registration out of a
+#     dist/ chunk and into dist/esm/api/index.cjs, two directories deeper,
+#     without rebasing three file-relative specifiers. The one that bites is
+#     the module.register() hooks URL: it now names
+#     dist/esm/api/esm/index.mjs, which does not exist. So a CommonJS caller
+#     of `tsx/esm/api` gets ERR_MODULE_NOT_FOUND from register() on every
+#     Node that lacks tsx's registerHooks path (below 22.22.3 on the 22
+#     line, below 24.11.1 on the 24 line, and 25.0.x). The caller here is
+#     @oclif/core's ts-path. It swallows the error, logs "Could not find tsx"
+#     at debug level, and stays on dist/. Two things break on such a Node.
+#     packages/cli/bin/run-dev.js, the SOURCE entry that the CLI's spawning
+#     tests run, silently loads dist/commands instead of src/commands. And
+#     the CONTROL leg of
+#     packages/cli/test/published-entry-node-env-source-reroute.test.ts
+#     cannot arm, so that file's absence legs stay green with the guard
+#     they pin deleted. The patch points the three specifiers back at the
+#     files 4.23.14 resolved: dist/esm/index.mjs (two of them) and
+#     dist/loader.mjs. Nothing else in the file changes. It ships nowhere:
+#     a published @objectstack/cli install resolves an unpatched tsx, and
+#     its bin/run.js never lets oclif register tsx. Retire the patch when a
+#     tsx release resolves those three paths itself. Until then the same
+#     exact-version rule as tsup's applies on every tsx bump.
 patchedDependencies:
   tsup@8.5.1: patches/tsup@8.5.1.patch
+  tsx@4.23.15: patches/tsx@4.23.15.patch
 
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all

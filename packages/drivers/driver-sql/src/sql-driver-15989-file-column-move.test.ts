@@ -2,7 +2,7 @@
 
 /**
  * [#15989] The ADR-0104 file-family COLUMN step, executed — per dialect, for
- * BOTH encodings, across the window. The ruling on #15041 step 2, and the
+ * BOTH encodings, across the window. Step 2 of ADR-0104's 2026-09-05 addendum, and the
  * director ruling on this card (decision batch #120 item 1).
  *
  * `sql-driver-15989-file-family-bare-id.test.ts` pins what the two ARMS store
@@ -13,7 +13,7 @@
  *
  * ## §1 is the measurement this card exists for
  *
- * The #15041 addendum prescribed `ALTER … USING (col #>> '{}')` with nothing in
+ * The ADR-0104 2026-09-05 addendum prescribed `ALTER … USING (col #>> '{}')` with nothing in
  * front of it, and required the step to abort *"on the first cell that is not a
  * JSON string"*. Those two sentences contradict each other, and which one was
  * wrong was settled by running it: `#>> '{}'` extracts ANY json type as text, so

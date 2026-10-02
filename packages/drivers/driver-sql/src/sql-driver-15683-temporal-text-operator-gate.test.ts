@@ -339,7 +339,7 @@ describe('[#15683] the per-dialect construct, compiled', () => {
     const d = new MultiProbeDriver(DIALECTS[0][1]).declareMulti();
     const membership = d.compileWhere({ milestones: { $contains: '2026-01-05T00:00:00.000Z' } });
     expect(membership).not.toMatch(/1 = 0/);
-    // [#17590] This row's own title said "it is membership, not a substring
+    // [commit e04a0aff2] This row's own title said "it is membership, not a substring
     // test" while the assertion under it named the SUBSTRING construct — the
     // only one that existed when it was written. It is a membership construct
     // now (`json_each` on this SQLite cell), so the assertion says what the
