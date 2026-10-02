@@ -1,8 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // Withdrawing a public form from anonymous intake on a WALLED tenancy posture,
-// on a real showcase boot. The single-posture half lives in
+// on a real boot. The single-posture half lives in
 // `showcase-public-form-withdrawal.dogfood.test.ts`.
+//
+// The form here is a fixture bound to an object declared `tenancy: { enabled:
+// false }`. The showcase's own contact form targets a tenant-scoped object,
+// and on a walled posture the engine refuses an org-less insert into one, so
+// it could not show the published side accepting intake.
 //
 // An anonymous form request carries no organization, and a walled posture
 // resolves none for it, so the anonymous form doors read the env-wide form
@@ -19,11 +24,51 @@
 //     both doors.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { defineStack, defineView } from '@objectstack/spec';
+import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
-const VIEW = '/meta/view/showcase_inquiry.contact';
+const LEAD = 'walled_lead';
+const SLUG = 'walled-lead-intake';
+const VIEW = `/meta/view/${LEAD}.intake`;
+
+const WalledLead = ObjectSchema.create({
+  name: LEAD,
+  label: 'Walled Lead',
+  pluralLabel: 'Walled Leads',
+  sharingModel: 'private',
+  tenancy: { enabled: false },
+  fields: {
+    name: Field.text({ label: 'Name', required: true, maxLength: 120 }),
+  },
+});
+
+const data = { provider: 'object' as const, object: LEAD };
+const WalledLeadViews = defineView({
+  list: { label: 'Leads', type: 'grid', data, columns: [{ field: 'name' }] },
+  formViews: {
+    intake: {
+      type: 'simple',
+      data,
+      sections: [{ name: 'intake', label: 'Intake', columns: 1, fields: [{ field: 'name', required: true }] }],
+      sharing: { enabled: true, allowAnonymous: true, publicLink: `/forms/${SLUG}` },
+    },
+  },
+});
+
+const walledFormStack = defineStack({
+  manifest: {
+    id: 'com.dogfood.walled-public-form',
+    namespace: 'walled',
+    version: '0.0.0',
+    type: 'app',
+    name: 'Walled Public Form Fixture',
+    description: 'One tenancy-disabled object behind an anonymous form, booted on a walled posture.',
+  },
+  objects: [WalledLead],
+  views: [WalledLeadViews],
+});
 const SYS = { isSystem: true } as const;
 
 interface Probe {
@@ -34,7 +79,7 @@ interface Probe {
   landed: unknown[];
 }
 
-describe('showcase on a walled posture: withdrawing the public contact form', () => {
+describe('walled posture: withdrawing a public form from anonymous intake', () => {
   let stack: VerifyStack;
   let admin: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,15 +91,15 @@ describe('showcase on a walled posture: withdrawing the public contact form', ()
   /** Both anonymous doors, plus the rows a submit with a unique marker left. */
   const probe = async (): Promise<Probe> => {
     const marker = `walled_withdrawal_probe_${++probeSeq}`;
-    const get = await stack.api('/forms/contact-us');
+    const get = await stack.api(`/forms/${SLUG}`);
     const getBody = (await get.json()) as { code?: unknown };
-    const submit = await stack.api('/forms/contact-us/submit', {
+    const submit = await stack.api(`/forms/${SLUG}/submit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: marker, email: 'probe@example.com', message: 'probe' }),
+      body: JSON.stringify({ name: marker }),
     });
     const submitBody = (await submit.json()) as { code?: unknown };
-    const landed = await ql.find('showcase_inquiry', { where: { name: marker }, context: SYS });
+    const landed = await ql.find(LEAD, { where: { name: marker }, context: SYS });
     return { get: get.status, getCode: getBody.code, submit: submit.status, submitCode: submitBody.code, landed };
   };
 
@@ -85,7 +130,7 @@ describe('showcase on a walled posture: withdrawing the public contact form', ()
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootStack(walledFormStack as Parameters<typeof bootStack>[0], {
       multiTenant: 'posture-only',
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });
@@ -138,7 +183,7 @@ describe('showcase on a walled posture: withdrawing the public contact form', ()
   it('an organization-scoped edit that leaves the sharing alone still saves (control)', async () => {
     await setActive(orgId);
     const body = structuredClone(published);
-    body.label = `${String(published.label ?? 'Contact')} (tenant)`;
+    body.label = `${String(published.label ?? 'Intake')} (tenant)`;
     const res = await put(body);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(String(res.json.message ?? '')).toContain(`org=${orgId}`);
