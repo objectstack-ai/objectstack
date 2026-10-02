@@ -441,9 +441,9 @@ describe('#21334 a container on another package\'s object never takes that packa
         listViews: {
             in_progress: { label: 'In Progress', type: 'grid', data, columns: PACKAGED_COLUMNS.slice(0, 4) },
         },
-        form: { label: 'Task Form', type: 'simple', sections: [{ label: 'Main', fields: ['title'] }] },
+        form: { type: 'simple', sections: [{ label: 'Main', fields: ['title'] }] },
         formViews: {
-            edit: { label: 'Edit Task', type: 'simple', sections: [{ label: 'Edit', fields: ['title', 'status'] }] },
+            edit: { type: 'tabbed', sections: [{ label: 'Edit', fields: ['title', 'status'] }] },
         },
     };
     const PACKAGED = expandViewContainer(TASK, packagedTaskViews).map((vi) => ({ ...(vi as any) }));
@@ -561,18 +561,29 @@ describe('#21334 a container on another package\'s object never takes that packa
      * Every member kind the spec's expander places, derived FROM the expander:
      * each top-level key of the container schema is offered a single view and a
      * record of views, and a key that yields an expanded item is a member kind.
-     * A single-view member is enumerated twice — bare, and naming its own key.
-     * A kind the spec adds later shows up here, and the enumeration below fails
-     * until it is placed.
+     * A single-view member is enumerated twice — bare, and naming its own key —
+     * when its own schema declares `name` (a `list` does; a `form` does not, so
+     * a named `form` is not authorable). A kind the spec adds later shows up
+     * here, and the enumeration below fails until it is placed.
      */
     function memberKindsOfTheExpander(): string[] {
-        const slots = Object.keys((ViewSchema as unknown as { shape?: Record<string, unknown> }).shape ?? {});
+        const shape = (ViewSchema as unknown as { shape?: Record<string, unknown> }).shape ?? {};
+        const slots = Object.keys(shape);
         expect(slots.length, 'the container schema\'s own keys are readable').toBeGreaterThan(0);
+        const declaresName = (schema: unknown): boolean => {
+            let s: any = schema;
+            for (let i = 0; i < 6 && s; i++) {
+                if (s.shape) return 'name' in s.shape;
+                s = s._zod?.def?.innerType ?? s._def?.innerType ?? (typeof s.unwrap === 'function' ? s.unwrap() : undefined);
+            }
+            return false;
+        };
         const view = { type: 'grid', label: 'probe' };
         const kinds: string[] = [];
         for (const slot of slots) {
             if (expandViewContainer('o', { [slot]: { ...view } }).length > 0) {
-                kinds.push(slot, `${slot}#named`);
+                kinds.push(slot);
+                if (declaresName(shape[slot])) kinds.push(`${slot}#named`);
             } else if (expandViewContainer('o', { [slot]: { k: { ...view } } }).some((vi) => vi.name === 'o.k')) {
                 kinds.push(`${slot}.*`);
             }
@@ -582,7 +593,7 @@ describe('#21334 a container on another package\'s object never takes that packa
 
     const OWN = 'os_qa_probe';
     const listView = { type: 'grid', columns: ['title', 'status'] };
-    const formView = { label: 'Probe Form', type: 'simple', sections: [{ label: 'Probe', fields: ['title'] }] };
+    const formView = { type: 'simple', sections: [{ label: 'Probe', fields: ['title'] }] };
     /**
      * One case per member kind: a container on `showcase_task` with ONLY that
      * member, whose key aims at a name the showcase ships, and the one name the
@@ -599,10 +610,6 @@ describe('#21334 a container on another package\'s object never takes that packa
             shadows: `${TASK}.in_progress`, servedAs: `${TASK}.${OWN}.in_progress`,
         },
         form: { member: { form: formView }, authored: formView, shadows: `${TASK}.form`, servedAs: `${TASK}.${OWN}.form` },
-        'form#named': {
-            member: { form: { ...formView, name: 'edit' } }, authored: { ...formView, name: 'edit' },
-            shadows: `${TASK}.edit`, servedAs: `${TASK}.${OWN}.edit`,
-        },
         'formViews.*': {
             member: { formViews: { edit: formView } }, authored: formView,
             shadows: `${TASK}.edit`, servedAs: `${TASK}.${OWN}.edit`,
