@@ -599,7 +599,6 @@ export class ShareLinkService implements IShareLinkService {
     try {
       record = await readRecord(context.isSystem ? SYSTEM_CTX : context);
     } catch (err) {
-      if (context.isSystem) throw err;
       visibilityRefusal = err;
     }
 
@@ -611,7 +610,13 @@ export class ShareLinkService implements IShareLinkService {
     // the record is read under the system context: the caller's authority is
     // established, and the eligibility gate below must judge the row the
     // anonymous holder will be served (`resolveToken` reads it the same way).
-    if (!record && !context.isSystem && this.canMintWithoutVisibility) {
+    //
+    // A system caller reaches the probe only when its own system-context read
+    // found nothing or failed, and the probe grants it nothing it lacks: it
+    // admits only on a row it re-reads under that same system context. So a
+    // missing record still answers a system caller 404, and a failing read
+    // still fails.
+    if (!record && this.canMintWithoutVisibility) {
       const admitted = await this.canMintWithoutVisibility(input.object, input.recordId, context)
         .catch(() => false);
       if (admitted) record = await readRecord(SYSTEM_CTX);

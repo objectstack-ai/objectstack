@@ -1318,6 +1318,12 @@ describe('[ADR-0111 D8 rule 1 / ruling A′] mint authority: visibility, or the 
     expect(link).toMatchObject({ record_id: 'c1', created_by: ADMIN });
   });
 
+  it('a system caller keeps its 404 for a missing record, with the probe wired', async () => {
+    await expect(service.createLink(mintIn('conversations', 'ghost'), { isSystem: true, userId: OWNER } as any))
+      .rejects.toMatchObject({ status: 404, code: 'RECORD_NOT_FOUND' });
+    expect(minted()).toEqual([]);
+  });
+
   it('visibility still admits on its own, without asking the owner/bypass probe', async () => {
     const link = await service.createLink(conversation(), as(READER));
     expect(link.created_by).toBe(READER);
