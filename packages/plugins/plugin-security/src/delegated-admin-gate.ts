@@ -621,8 +621,8 @@ export class DelegatedAdminGate {
         if (!allowed.has(rowAnchor)) {
           deny(
             allowed.size === 0
-              ? `business unit anchor '${rowAnchor}' cannot be validated against your own '${positionName}' anchor — an anchor that cannot be proven within your own range is refused (cloud#830: anchoring only narrows)`
-              : `business unit anchor '${rowAnchor}' is outside your own effective anchor for '${positionName}' — a delegation may only narrow visibility, never widen it (cloud#830: anchoring only narrows)`,
+              ? `business unit anchor '${rowAnchor}' cannot be validated against your own '${positionName}' anchor — an anchor that cannot be proven within your own range is refused, because the anchor roots the delegate's business-unit visibility and may only narrow yours`
+              : `business unit anchor '${rowAnchor}' is outside your own effective anchor for '${positionName}' — a delegation may only narrow visibility, never widen it, because the anchor roots the delegate's business-unit visibility`,
             { position: positionName, businessUnitId: rowAnchor },
           );
         }

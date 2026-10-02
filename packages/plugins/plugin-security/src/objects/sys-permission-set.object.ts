@@ -333,7 +333,8 @@ export const SysPermissionSet = ObjectSchema.create({
       readonly: true,
       defaultValue: 'admin',
       description:
-        "Record provenance (unified tri-state, A4 #2920): 'platform' = shipped by the " +
+        "Record provenance, on the one platform / package / admin vocabulary that capabilities, " +
+        "permission sets and positions all share: 'platform' = shipped by the " +
         "platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly " +
         "for admins); 'admin' = created/owned in this environment by an administrator " +
         "(live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",

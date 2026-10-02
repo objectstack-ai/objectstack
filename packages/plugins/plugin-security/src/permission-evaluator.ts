@@ -508,7 +508,7 @@ export class PermissionEvaluator {
     } catch (e) {
       allPermSets = [];
       options.logger?.warn?.(
-        '[security] permission-set metadata list() failed — falling back to bootstrap/db sources (#2565)',
+        '[security] permission-set metadata list() failed — falling back to bootstrap/db sources',
         { requested: identifiers, error: (e as Error)?.message },
       );
     }
@@ -555,7 +555,7 @@ export class PermissionEvaluator {
           // DB error silently drops custom permission sets and the
           // resulting 403s point nowhere near the cause (#2565).
           options.logger?.warn?.(
-            '[security] sys_permission_set db lookup failed — unresolved sets grant nothing this request (#2565)',
+            '[security] sys_permission_set db lookup failed — unresolved sets grant nothing this request',
             { unresolved, error: (e as Error)?.message },
           );
         }
