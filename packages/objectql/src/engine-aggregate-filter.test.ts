@@ -958,12 +958,26 @@ describe('[#21242] per-aggregation filter — a { $field } pair no seam lowers i
     }
   });
 
-  it('a direct applyInMemoryAggregation call — no seam, no class rule — 1 of 4, was 3, with or without a field map', () => {
-    // The class rule is `engine.aggregate`'s; this published function applies
-    // the JSON-column rule alone, so a cross-class pair reaches the matcher.
+  it('a direct applyInMemoryAggregation call with no field map — no declaration, no class rule — 1 of 4, was 3', () => {
+    // No declaration, so the pair reaches the matcher, compared as written.
     const ast = withFilter({ closed_at: { $lte: { $field: 'due_on' } } }) as never;
     expect(applyInMemoryAggregation([...DAY_ROWS], ast)).toEqual([{ opp_count: 4, picked: 1 }]);
-    expect(applyInMemoryAggregation([...DAY_ROWS], ast, undefined, FIELDS)).toEqual([{ opp_count: 4, picked: 1 }]);
+  });
+
+  it('[#21299] …with a field map, the same call takes engine.aggregate\'s reference rules: a datetime against a date is refused, before any row', () => {
+    // Was 1 of 4 at #21242's head: this published function applied the
+    // JSON-column rule alone. It now runs the reference rules through the same
+    // function `engine.aggregate` does, so one filter gets one answer whichever
+    // door it enters by.
+    const ast = withFilter({ closed_at: { $lte: { $field: 'due_on' } } }) as never;
+    const withheld: string[] = [];
+    for (const rows of [[], [...DAY_ROWS]]) {
+      const err = syncRefusalOf(() => applyInMemoryAggregation(rows, ast, undefined, FIELDS, (d) => withheld.push(d)));
+      expect(err?.code).toBe('INVALID_FILTER');
+      expect(err?.status).toBe(400);
+    }
+    expect(withheld).toHaveLength(2);
+    for (const line of withheld) expect(line).toContain('"closed_at" is datetime but "due_on" is date');
   });
 });
 

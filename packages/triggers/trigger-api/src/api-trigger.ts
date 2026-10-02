@@ -15,6 +15,14 @@ export interface FlowTriggerBinding {
     readonly condition?: string | { dialect?: string; source?: string; ast?: unknown };
     readonly schedule?: unknown;
     readonly config?: Record<string, unknown>;
+    /**
+     * The hook's secret, read at VERIFICATION time. The automation engine sets
+     * it whenever the flow has a secret — a literal in its start node, or one
+     * the write-only flow credential channel holds, in which case `config`
+     * carries none. Rejects when a held secret does not come back. A host that
+     * binds without that engine leaves it unset and arms from `config.secret`.
+     */
+    readonly resolveSecret?: () => Promise<string | undefined>;
 }
 
 /** Structural mirror of the engine's `FlowTrigger` extension point. */
@@ -48,7 +56,15 @@ export interface TriggerLogger {
 const QUEUE_PREFIX = 'flow-api';
 
 /**
- * One armed inbound hook. `secret` is required by the type, not only by
+ * Where an armed hook's secret comes from: the start node's literal, or a
+ * reader the engine handed over that reads it at verification time.
+ */
+type HookSecret =
+    | { readonly kind: 'literal'; readonly secret: string }
+    | { readonly kind: 'resolved'; readonly resolve: () => Promise<string | undefined> };
+
+/**
+ * One armed inbound hook. A secret is required by the type, not only by
  * {@link ApiTrigger.start}'s check: ADR-0041's `trigger-api` acceptance
  * criteria name a per-flow secret and HMAC verification, so a hook without
  * one has no legal shape to be stored in, and {@link ApiTrigger.handleRequest}
@@ -57,9 +73,14 @@ const QUEUE_PREFIX = 'flow-api';
 interface ArmedHook {
     flowName: string;
     hookId: string;
-    secret: string;
+    secret: HookSecret;
     queue: string;
     callback: (ctx: AutomationContext) => Promise<void>;
+}
+
+/** The trimmed, non-blank string `value` holds, else `undefined`. */
+function usableSecret(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 /** Constant-time string compare (length leak only). */
@@ -104,11 +125,16 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  *   - `hookId`  — URL path token (default `'default'`); rotate it to revoke
  *                 old URLs without renaming the flow.
  *   - `secret`  — HMAC-SHA256 shared secret. **Required** (ADR-0041): a
- *                 binding with no non-blank `secret` is refused — `start()`
- *                 throws naming the flow, and nothing is armed or subscribed.
- *                 The automation engine refuses the same flow earlier, at
- *                 registration, so an author learns before deploying; this
- *                 refusal is what holds for a host that binds without it.
+ *                 binding with no non-blank `secret` and no
+ *                 `resolveSecret` is refused — `start()` throws naming the
+ *                 flow, and nothing is armed or subscribed. The automation
+ *                 engine refuses the same flow earlier, at registration, so an
+ *                 author learns before deploying; this refusal is what holds
+ *                 for a host that binds without it. A flow stored through the
+ *                 metadata save door keeps its secret in the write-only flow
+ *                 credential store instead, and the engine's binding reads it
+ *                 per post through `resolveSecret`; a post whose secret cannot
+ *                 be read is answered `503`, never verified against nothing.
  */
 export class ApiTrigger implements FlowTrigger {
     readonly type = 'api';
@@ -122,20 +148,22 @@ export class ApiTrigger implements FlowTrigger {
 
     /** Currently armed hooks (for diagnostics/tests). */
     listHooks(): Array<{ flowName: string; hookId: string; signed: boolean }> {
+        // Every armed hook is signed: the type admits no unsigned one.
         return [...this.hooks.values()].map(h => ({
-            flowName: h.flowName, hookId: h.hookId, signed: !!h.secret,
+            flowName: h.flowName, hookId: h.hookId, signed: true,
         }));
     }
 
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void {
         const cfg = (binding.config ?? {}) as Record<string, unknown>;
         const hookId = typeof cfg.hookId === 'string' && cfg.hookId.trim() ? cfg.hookId.trim() : 'default';
-        const secret = typeof cfg.secret === 'string' && cfg.secret.trim() ? cfg.secret.trim() : undefined;
+        const literal = usableSecret(cfg.secret);
+        const resolve = typeof binding.resolveSecret === 'function' ? binding.resolveSecret : undefined;
         // ADR-0041 (`trigger-api` acceptance criteria): a per-flow secret and
         // HMAC verification. Refused BEFORE anything is stored or subscribed,
         // so a refused flow leaves no hook behind; the engine's bind catch
         // reports the throw and its binding audit lists the flow as unbound.
-        if (!secret) {
+        if (!literal && !resolve) {
             throw new Error(
                 `[trigger-api] flow '${binding.flowName}' not armed: its start node declares no \`config.secret\`. ` +
                     `An inbound hook is armed only with a per-flow secret that every post is HMAC-verified ` +
@@ -144,6 +172,7 @@ export class ApiTrigger implements FlowTrigger {
         }
         const queue = `${QUEUE_PREFIX}:${binding.flowName}`;
 
+        const secret: HookSecret = resolve ? { kind: 'resolved', resolve } : { kind: 'literal', secret: literal! };
         const hook: ArmedHook = { flowName: binding.flowName, hookId, secret, queue, callback };
         this.hooks.set(binding.flowName, hook);
 
@@ -199,7 +228,23 @@ export class ApiTrigger implements FlowTrigger {
         if (!hook || !safeEqual(hook.hookId, input.hookId)) {
             return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No such hook.' } } };
         }
-        if (!verifySignature(hook.secret, input.rawBody, input.signatureHeader)) {
+        // The secret, read now: a rotation applies to the next post. One that
+        // cannot be read is the deployment's fault, not the sender's, and is
+        // never read as "no secret" — the post is refused without verifying.
+        let secret: string | undefined;
+        try {
+            secret = hook.secret.kind === 'literal' ? hook.secret.secret : usableSecret(await hook.secret.resolve());
+        } catch (err: any) {
+            this.logger.warn(`[trigger-api] the secret of flow '${hook.flowName}' could not be read: ${err?.message ?? err}`);
+            secret = undefined;
+        }
+        if (!secret) {
+            return {
+                status: 503,
+                body: { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The hook secret is unavailable.' } },
+            };
+        }
+        if (!verifySignature(secret, input.rawBody, input.signatureHeader)) {
             return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
         }
 

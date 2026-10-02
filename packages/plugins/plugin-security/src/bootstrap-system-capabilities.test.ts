@@ -26,8 +26,10 @@ import { buildExistingByName } from './seed-name-lookup.js';
  *     unrelated to ownership. Insertion order is what the double used to model,
  *     and it models nothing.
  *  2. **A `null` comparand matches a null OR absent value.** `driver-sql`
- *     compiles `{ field: null }` to `IS NULL`; `driver-memory`'s matcher uses
- *     `value == condition`; MongoDB matches null-or-missing. Strict `===`, which
+ *     compiles `{ field: null }` to `IS NULL`; `driver-memory`'s query path
+ *     matches null-or-missing through mingo (its reference matcher, retired by
+ *     commit `8fec76a2b`, used `value == condition`); MongoDB matches
+ *     null-or-missing. Strict `===`, which
  *     this double used, matches NONE of them and would have made
  *     `organization_id: null` unsatisfiable here while working in production.
  *  4. **`$in` membership**, because the real engine has it (`security-plugin.ts`

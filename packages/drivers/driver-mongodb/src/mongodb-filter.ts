@@ -1148,8 +1148,10 @@ interface LoweredWrite {
  * write becomes its own `$and` branch on the same field, where both constraints
  * survive. That is exactly the guard #13195 landed for `$exists` alone,
  * generalised to every writer rather than restated once per operator.
- * `driver-memory`'s reference matcher loops the operators and therefore cannot
- * express this defect at all; it is the oracle both drivers agree with.
+ * `driver-memory`'s reference matcher looped the operators and therefore could
+ * not express this defect at all; it was the oracle both drivers agreed with
+ * until commit `8fec76a2b` retired it, and `driver-memory`'s
+ * `memory-operator-key-clobber.test.ts` keeps its answers as literal row sets.
  *
  * ## Why rank, and not author order
  *

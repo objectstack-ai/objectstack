@@ -40,8 +40,11 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
  * them correctly rather than refuse them. Framework's `matchesFilterCondition`
  * (`packages/formula/src/matches-filter.ts`) already evaluates them this way and
  * pins it — `expect(m(rec, { $or: [] })).toBe(false) // empty OR matches
- * nothing` — as does `driver-memory`'s matcher (`.some()` over an empty array).
- * These tests hold the remote transport to the same table.
+ * nothing` — as does `driver-memory`'s query path, which runs
+ * `FILTER_LOGIC_CASES`' "empty $or is FALSE" case
+ * (`memory-driver-filter-logic-conformance.test.ts`); its reference matcher
+ * (`.some()` over an empty array) answered the same until commit `8fec76a2b`
+ * retired it. These tests hold the remote transport to the same table.
  *
  * The other half of the fix is that "compiles to nothing" now has exactly ONE
  * cause. An element that is not a filter NODE (null, a scalar, an array, a

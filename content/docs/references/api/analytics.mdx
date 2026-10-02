@@ -97,8 +97,8 @@ const result = AnalyticsEndpoint.parse(data);
 | **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is lowered by `parseFilterAST` on the client before the wire; this field admits only the lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`). |
 | **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **timezone** | `string` | optional |  |
 | **query** | `never` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. The `{ cube, query: {...} }` envelope was the dialect of the retired degraded analytics shim — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
 | **format** | `never` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
@@ -226,8 +226,8 @@ const result = AnalyticsEndpoint.parse(data);
 | **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Presentation-scope date bucketing applied to every selected `date` dimension; an explicit `timeDimensions` entry wins over it, and the dataset dimension's own default is used when neither is set |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`); attaches `<measure>__compare` columns |
 | **totals** | `{ groupings: string[][] }` | optional | Server-side marginal aggregates; each grouping is a dimension subset to additionally aggregate by, `[]` being the grand total |
 | **timezone** | `string` | optional |  |

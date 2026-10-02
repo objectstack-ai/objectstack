@@ -407,8 +407,10 @@ const ORDERING_COMPARAND_DESCRIPTION =
  * one form the platform's own date-macro path can never hand them. This is the
  * declaration aligning to a contract the rest of the stack already keeps, not
  * a new capability: every evaluation surface ALREADY compares strings
- * (`driver-sql` binds `>`/`>=`/`<`/`<=`, `formula`'s `matchesFilter` and
- * `driver-memory`'s matcher fall through to the JS operators).
+ * (`driver-sql` binds `>`/`>=`/`<`/`<=`, `formula`'s `matchesFilter` falls
+ * through to the JS operators, and `driver-memory`'s query path hands the
+ * comparison to mingo, which orders strings; its reference matcher, retired by
+ * commit `8fec76a2b`, fell through to the JS operators).
  *
  * ## Why a BARE string, and not an ISO-shaped refinement (#5685 rider ①)
  *
@@ -937,7 +939,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * | `driver-sql` | ANSWERS both rows | its own `case '$icontains'`, folding through the same emitter that carries the escaping |
  * | `driver-sqlite-wasm` | ANSWERS both rows | INHERITED — `SqliteWasmDriver extends SqlDriver`; this package carries no text case arm of its own, on a different ENGINE |
  * | `driver-turso` | ANSWERS both rows, on BOTH transports | local inherits `SqlDriver`; the remote transport compiles independently and has its own arm |
- * | `driver-memory` — query path, reference matcher, analytics face | ANSWERS both rows | #6520; the pattern faces take {@link asciiCaseInsensitiveRegexSource}, the matcher {@link asciiCaseInsensitiveContains} |
+ * | `driver-memory` — query path, analytics face | ANSWERS both rows | #6520; both take {@link asciiCaseInsensitiveRegexSource} (its reference matcher took {@link asciiCaseInsensitiveContains} until commit `8fec76a2b` retired it) |
  * | `driver-mongodb` | ANSWERS both rows | #6520; an ASCII-only `$regex`, never `$options: 'i'` |
  * | objectql `having` | ANSWERS both rows | #6520; {@link asciiCaseInsensitiveContains} over the aggregated row |
  * | `formula` `matchesFilterCondition` | ANSWERS both rows | #6520; the same helper, on the RLS write-side `check` |
@@ -1194,16 +1196,17 @@ const ASCII_CASE_DELTA = 0x20; // 'a' - 'A'
  *
  * ## Why this is in the spec and not four times in four packages
  *
- * `$icontains` has six JS evaluation faces (`driver-memory`'s query path,
- * reference matcher and analytics face, `driver-mongodb`, objectql's `having`,
- * `@objectstack/formula`'s `matchesFilterCondition`) plus three SQL compilers in
+ * `$icontains` has five JS evaluation faces (`driver-memory`'s query path and
+ * analytics face, `driver-mongodb`, objectql's `having`,
+ * `@objectstack/formula`'s `matchesFilterCondition`; a sixth, `driver-memory`'s
+ * reference matcher, was retired by commit `8fec76a2b`) plus three SQL compilers in
  * `service-analytics`. Every one of them needs the same fold, and this repo has
  * already measured what happens when such a rule is written out per package:
  * *"a list written out here would agree with the spec on the day it was typed
  * and never again"* (`driver-memory/src/filter-refusal.ts`, on the operator
  * vocabulary) — the #3948 shape, reached through the fold instead of the word
  * list. One definition means a fold that is wrong is wrong everywhere at once,
- * which is the only way six faces can be held to one answer.
+ * which is the only way these faces can be held to one answer.
  *
  * ## Why not `toLowerCase()`
  *
@@ -1239,7 +1242,8 @@ export function foldAsciiCase(value: string): string {
  * [#6520] Does `haystack` contain `needle`, ignoring ASCII case only?
  *
  * The `$icontains` predicate for every face that can compare two JS strings
- * directly — the reference matcher, objectql's `having`, `formula`. The fold
+ * directly — objectql's `having` and `formula` (and `driver-memory`'s reference
+ * matcher until commit `8fec76a2b` retired it). The fold
  * runs on BOTH sides, which is the half that is easy to get wrong: folding only
  * the comparand compares a folded needle against a raw haystack and matches just
  * the rows that were already lower-case. `FILTER_TEXT_CASES`' first row (an
@@ -3108,7 +3112,7 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * |---|---|
  * | `driver-sql` (and `driver-sqlite-wasm`, which inherits its compiler) | ANSWERS — `LIKE` / `GLOB` per dialect, caller-bound wildcards |
  * | `driver-turso` — local (inherits `SqlDriver`) and remote (its own compiler) | ANSWERS on both transports |
- * | `driver-memory` — query path and reference matcher | ANSWERS — it widens its own `SUPPORTED_FIELD_OPERATORS` by hand, the way `driver-turso`'s remote transport has carried `$icontains` since #5702. It is the in-memory DOUBLE: an app whose tests run there and whose production runs SQL must not get a 400 for a filter that works |
+ * | `driver-memory` — query path (its reference matcher answered too until commit `8fec76a2b` retired it) | ANSWERS — it widens its own `SUPPORTED_FIELD_OPERATORS` by hand, the way `driver-turso`'s remote transport has carried `$icontains` since #5702. It is the in-memory DOUBLE: an app whose tests run there and whose production runs SQL must not get a 400 for a filter that works |
  * | `@objectstack/formula` `matchesFilterCondition` | ANSWERS — {@link matchesLikePattern}, so a write-side `check` agrees with the read-side SQL |
  * | `driver-mongodb`, `objectql` `having`, `service-analytics` | REFUSE, loudly, in the ADR-0112 `INVALID_FILTER` envelope — they derive acceptance from THIS array, which does not name the operator |
  *
@@ -3139,7 +3143,7 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * | `driver-turso` remote transport | the declared row, through the resolver `TursoDriver` wires |
  * | `driver-memory` query path, `driver-mongodb` | the declared row, from `syncSchema` |
  * | `service-analytics` — `where` and read-scope SQL | the declared row, from the host's `sourceFieldMeta` |
- * | `driver-memory` reference matcher, objectql `having`, `@objectstack/formula` `matchesFilterCondition` | by VALUE — null, `''` and `[]` are empty (they hold no declarations) |
+ * | objectql `having`, `@objectstack/formula` `matchesFilterCondition` (and `driver-memory`'s reference matcher until commit `8fec76a2b` retired it) | by VALUE — null, `''` and `[]` are empty (they hold no declarations) |
  * | `driver-memory` analytics (cube) face | REFUSES — `INVALID_FILTER` / 400, as it refuses `$null` |
  *
  * A declared-row face asked about a column it holds NO declaration for refuses

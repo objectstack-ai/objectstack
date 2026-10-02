@@ -1023,7 +1023,25 @@ export class SysMetadataRepository implements MetadataRepository {
   async restoreVersion(
     ref: MetaRef,
     targetVersion: number,
-    opts: { actor: string | null; source?: string; message?: string; intent?: MetadataWriteIntent },
+    opts: {
+      actor: string | null;
+      source?: string;
+      message?: string;
+      intent?: MetadataWriteIntent;
+      /**
+       * [#20790] The body the ACTIVE row stores, derived from the history body
+       * this restore read — the shape {@link promoteDraft}'s `deriveActiveBody`
+       * has, applied the same way: to the row actually restored, inside the
+       * same call, before the put hashes it. The protocol passes the type's
+       * write-only credential channel strip (R2), so restoring a version
+       * written before a credential moved out of the body never puts the
+       * credential back at rest, nor appends a history copy of it. Return the
+       * argument unchanged when there is nothing to derive.
+       *
+       * Omitted → the history body is restored byte for byte, as before.
+       */
+      deriveRestoredBody?: (historyBody: unknown) => unknown;
+    },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
     const full = this.fullRef(ref);
@@ -1052,7 +1070,8 @@ export class SysMetadataRepository implements MetadataRepository {
       err.status = 409;
       throw err;
     }
-    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+    const historyBody = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+    const body = opts.deriveRestoredBody ? opts.deriveRestoredBody(historyBody) : historyBody;
     // ADR-0048 / #6215 — read the RAW active row, not just its body, and carry
     // its `package_id` into the write. `put` upserts exactly ONE row and scopes
     // its optimistic-lock lookup by package; an unstated `packageId` resolves to
