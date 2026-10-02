@@ -603,6 +603,8 @@ describe('ShareLinkService', () => {
       const links = await svc.listLinks({ object: 'ai_conversations' }, { isSystem: true });
       expect(listed(links)).toEqual([...mine, ...theirs, ...admins, 'shl_empty', 'shl_omitted'].sort());
       expect(shareLinkReads()[0].context.isSystem).toBe(true);
+      // A system caller asking for its own links gets the same rows either way.
+      expect(listed(await svc.listLinks({ createdBy: 'alice' }, { isSystem: true, userId: 'alice' }))).toEqual(mine);
     });
 
     it('revoke and list read one creator rule: what you may revoke as creator is what your list shows', async () => {

@@ -673,7 +673,8 @@ export class ShareLinkService implements IShareLinkService {
     // identity-less caller never takes this path. Every other shape keeps
     // today's read under the caller's context: no creator filter, a foreign
     // creator, an empty or absent identity, and an admin listing someone
-    // else's links. (A system caller keeps its own bypass, as before.)
+    // else's links. A system caller keeps its own bypass, as before; asking
+    // for its own links returns the same rows either way.
     //
     // Two things keep the system read narrow, and neither trusts the filter
     // value: the `created_by` constraint is the caller's identity, written
@@ -682,8 +683,7 @@ export class ShareLinkService implements IShareLinkService {
     // The projection is the one this method has always returned: the engine
     // strips both `internal` columns under any context, the token comes back
     // through the privileged accessor below, and the password hash never does.
-    const selfScoped =
-      context.isSystem !== true && isLinkCreator({ created_by: filter.createdBy }, context);
+    const selfScoped = isLinkCreator({ created_by: filter.createdBy }, context);
 
     const where: Record<string, unknown> = {};
     if (filter.object) where.object_name = filter.object;

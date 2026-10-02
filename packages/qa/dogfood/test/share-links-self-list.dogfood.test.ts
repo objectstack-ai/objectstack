@@ -147,6 +147,21 @@ describe('#21328: GET /share-links is self-scoped for a plain member', () => {
 
   // ── the fixture's own preconditions ───────────────────────────────────────
 
+  it('[persona] the member resolves the platform baseline, is no admin, and is denied sys_share_link at object CRUD', async () => {
+    const res = await stack.apiAs(aTok, 'GET', '/security/explain?object=sys_share_link&operation=read');
+    const text = await res.text();
+    expect(res.status, text).toBe(200);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const layers: any[] = JSON.parse(text)?.layers ?? [];
+    const setNames = layers.flatMap((l) => l.contributors ?? []).map((c: { name?: unknown }) => String(c?.name));
+    expect(setNames, 'a showcase member resolves the platform `member_default`').toContain('member_default');
+    expect(setNames, 'the persona must not be an admin').not.toContain('admin_full_access');
+    expect(
+      layers.find((l) => l.layer === 'object_crud')?.verdict,
+      'no set the member holds grants read on sys_share_link — the fix must not depend on one',
+    ).toBe('denies');
+  });
+
   it('[no-grant] the member holds no sys_share_link grant — the generic data door still refuses the table', async () => {
     const res = await stack.apiAs(aTok, 'GET', '/data/sys_share_link');
     const text = await res.text();
