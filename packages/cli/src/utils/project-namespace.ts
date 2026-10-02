@@ -17,7 +17,16 @@ import { findConfigPath, loadConfig } from './config.js';
  */
 export type ProjectNamespace =
   | { kind: 'no-config' }
-  | { kind: 'loaded'; configPath: string; namespace: string | undefined }
+  | {
+    kind: 'loaded';
+    configPath: string;
+    namespace: string | undefined;
+    /**
+     * The stack the config evaluated to (#21325): `os generate` reads the
+     * objects and flows a binding scaffold may bind from it, off the same load.
+     */
+    config: unknown;
+  }
   | { kind: 'load-failed'; configPath: string; message: string };
 
 /**
@@ -46,6 +55,7 @@ export async function readProjectNamespace(cwd: string = process.cwd()): Promise
       kind: 'loaded',
       configPath,
       namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined,
+      config,
     };
   } catch (error) {
     return {

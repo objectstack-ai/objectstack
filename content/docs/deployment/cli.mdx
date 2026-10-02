@@ -32,15 +32,16 @@ This scaffolds a working project with `objectstack.config.ts`, a sample object, 
 ### Add more metadata
 
 ```bash
-os generate object customer    # Add a Customer object
-os generate flow customer      # Add an automation flow on it
-os generate action customer    # Add an action on it that runs the flow
+os generate object customer                          # Add a Customer object
+os generate flow customer_changed --object customer  # Add an automation flow on it
+os generate action approve --object customer         # Add an action on it that runs the flow
 ```
 
 Each command writes a file and its export line, and the starter's config already
 wires every directory they write into, so all three are part of the stack. The
-flow and the action bind to the object named like them, which is why the object
-comes first: an action bound to an object the stack does not declare is refused.
+flow and the action bind to the object `--object` names, which is why the object
+comes first: a scaffold whose object the stack does not declare is refused, with
+nothing written. The action runs the stack's only flow.
 
 ### Launch the dev server
 
@@ -1440,10 +1441,30 @@ either. A name in the legacy `<namespace>__<name>` form (`order__line`) is
 refused, because no prefix makes it one `os validate` accepts. The namespace is
 read from the loaded config, the same place `os validate` reads it from. If a
 config exists but does not load, the command refuses and writes nothing.
-Without a `namespace` (or without a config), nothing is prefixed. A view's own
-`name` is the object it binds to, prefix included, because the server registers
-a view under that object and refuses one whose `name` says otherwise. Nothing
-else a scaffold names (an action's, flow's or app's own `name`) is prefixed.
+Without a `namespace` (or without a config), nothing is prefixed. Nothing else a
+scaffold names (an action's, flow's or app's own `name`) is prefixed.
+
+**What a scaffold binds comes from you or from the stack, never from its
+name.** A `view`, `action`, `flow` or `app` scaffold refers to metadata the
+project already has, and each reference is checked against the stack the
+config loads before anything is written:
+
+- A **view** is named after the object it binds: `os g view customer` writes
+  the views of the object `os g object customer` writes, prefix included. The
+  container carries no `name` or `label` of its own (the server registers it
+  under its object), and its list shows every field the object declares, under
+  a `list.label` that `os lint` requires.
+- A **flow**, **action** or **app** binds the object you name with
+  `--object` — as declared (`my_app_customer`) or without the namespace prefix
+  (`customer`). Without `--object`, it binds the stack's only object.
+- An **action** runs the flow you name with `--flow`, or the stack's only flow.
+
+When the stack declares none, or several and you named none, or the one you
+named is not declared, the command refuses, lists what the stack does declare,
+and writes nothing: which object a scaffold acts on is yours to say. Outside a
+project (no config) a scaffold that binds is refused too, because there is no
+stack to check it against. `--object` and `--flow` on a type that takes neither
+are refused rather than ignored.
 
 **Every scaffold reaches the stack, or the command says it does not.** The
 `objectstack.config.ts` that `os init` writes for the `app` and `plugin`
@@ -1464,29 +1485,29 @@ After writing, `os g` loads the config again and says which of these holds:
   as it was, and the command prints the import and the `defineStack` key that
   wire the directory.
 - **Refused**: the config loaded before the command wrote anything and no
-  longer loads with the new file in place, because the stack refuses it. Two
-  examples are an action or app bound to an object nobody declared, and a flow
-  in a stack whose `requires` lacks `triggers` or `automation` (`defineStack`
-  refuses a record-change flow without both). The command removes what it
-  wrote, so the project is as it was, and exits 1 with the stack's own reason.
-  Generate the object first (`os g object customer`), then what binds to it,
-  and declare `requires: ['automation', 'triggers']` before `os g flow`.
+  longer loads with the new file in place, because the stack refuses it — for
+  example a flow in a stack whose `requires` lacks `triggers` or `automation`
+  (`defineStack` refuses a record-change flow without both). The command
+  removes what it wrote, so the project is as it was, and exits 1 with the
+  stack's own reason. Declare `requires: ['automation', 'triggers']` before
+  `os g flow`.
 
 `os g` never edits `objectstack.config.ts`: the config is yours, and the
 command only loads it.
 
 ```bash
-os g object customer        # Generate a Customer object
-os g view customer          # Generate a Customer list view
-os g action customer        # Generate an action on Customer records
-os g flow customer          # Generate a flow that runs when a Customer changes
-os g dashboard sales        # Generate a dashboard
-os g app customer           # Generate an app whose navigation opens Customer
-os g skill lead_qual        # Generate an AI skill
-os g picklist industry      # Generate a shared option list select fields name
+os g object customer                          # Generate a Customer object
+os g view customer                            # Generate the Customer list view
+os g flow customer_changed --object customer  # Generate a flow that runs when a Customer changes
+os g action approve --object customer         # Generate an action on Customer records that runs the flow
+os g dashboard sales                          # Generate a dashboard
+os g app sales --object customer              # Generate an app whose navigation opens Customer
+os g skill lead_qual                          # Generate an AI skill
+os g picklist industry                        # Generate a shared option list select fields name
 
-os g object task -d lib/    # Override target directory
-os g object task --dry-run  # Preview without writing
+os g action escalate --object customer --flow customer_changed_flow  # Name the flow when there are several
+os g object task -d lib/                      # Override target directory
+os g object task --dry-run                    # Preview without writing
 ```
 
 **Available types:**
@@ -1554,9 +1575,11 @@ the rules a JSON Schema can express and names the rest under
 **Options:**
 - `-d, --dir <directory>` — Override target directory
 - `--dry-run` — Preview without writing files
+- `--object <object>` — The object a `flow`, `action` or `app` binds; default: the stack's only object
+- `--flow <flow>` — The flow an `action` runs; default: the stack's only flow
 
 **What it does:**
-1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it (see above)
+1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
 2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`
@@ -2352,7 +2375,7 @@ os g object contact
 os g object opportunity
 
 # 3. Add business logic: a flow that runs when an opportunity changes
-os g flow opportunity
+os g flow opportunity_changed --object opportunity
 
 # 4. Validate everything: each file `os g` wrote is counted and checked
 os validate
