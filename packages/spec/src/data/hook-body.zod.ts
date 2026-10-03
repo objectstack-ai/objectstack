@@ -90,6 +90,26 @@ const L2_ONLY_ON_L1 =
   'is an L2 key — it only applies to `language: "js"`. An expression body is a pure '
   + 'formula: it performs no IO, so it has nothing to grant and no sandbox to bound.';
 
+/*
+ * The refusal an L1 body gets where ONLY the L2 body is accepted.
+ *
+ * Unreachable through `HookBodySchema`: that union routes `language:
+ * 'expression'` to `ExpressionBodySchema` by its discriminator, so this
+ * literal's error never fires for a hook or an action body. It fires only where
+ * `ScriptBodySchema` is used on its own — a job's `body`
+ * (`system/job.zod.ts`), the one slot that admits no expression body because an
+ * expression has nothing to do there. Without this message the author gets
+ * zod's bare `expected "js"`, which names the fix and not the reason.
+ */
+const L1_WHERE_ONLY_L2 =
+  '`language: "expression"` is an L1 expression body, and this slot accepts only a sandboxed '
+  + 'JS (L2) body — write `language: "js"`. An expression body is a pure formula: it performs no '
+  + 'IO, so its only effect is the value it returns, and that means something only where a reader '
+  + "consumes the value (a hook's patch, an action's result). Where only the L2 body is accepted "
+  + "— a job's `body` — the body runs for its effects: nothing reads what a job returns except an "
+  + '`{ outcome }` report about work, and an expression can do no work to report on. Put the work '
+  + 'in `source`, with the `capabilities` it uses.';
+
 /**
  * L1 — Pure expression body.
  *
@@ -194,7 +214,11 @@ export const ScriptBodySchema = strictObject(
       + 'limits or grants that were written.',
   },
   {
-  language: z.literal('js'),
+  // Only the value an author plausibly meant gets the prescription; every
+  // other mismatch keeps zod's own message (the `crypto.hash` precedent above).
+  language: z.literal('js', {
+    error: (issue) => (issue.input === 'expression' ? L1_WHERE_ONLY_L2 : undefined),
+  }),
   /** Function body source (NOT a full module — no top-level imports). */
   source: z.string().min(1).describe('Function body source'),
   /**

@@ -16,4 +16,4 @@ Clause-②: no (narrowing)
 
 **The fix.** Drop the body's `name` (the door stamps the save name), or set it to the name the container is saved under.
 
-Not judged here: a standalone view record (`viewKind`) and every other metadata type.
+A standalone view record (`viewKind`) and every other metadata type are judged too, by the same release's every-type refusal at the save, restore and publish doors (its own entry).

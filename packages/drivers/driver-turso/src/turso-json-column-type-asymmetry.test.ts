@@ -43,7 +43,7 @@
  * given the remote transport NUMERIC affinity — `json` contains none of
  * SQLite's affinity markers (`INT`, `CHAR`/`CLOB`/`TEXT`, `BLOB`,
  * `REAL`/`FLOA`/`DOUB`) — i.e. the measured `'0123'` → `123` exposure that
- * #12380 had to defeat on the local half, imported into the half that never had
+ * commit 4045b954d had to defeat on the local half, imported into the half that never had
  * it.
  *
  * ## The instrument is AFFINITY-LEVEL, and that is a requirement, not a taste
@@ -66,7 +66,7 @@
  *
  * Only what NEW columns are declared as. A column created before this change
  * keeps its `json` declaration, keeps NUMERIC affinity, and keeps being
- * defended by #12380's injective codec — `SqlDriver.buildRebuiltColumn` still
+ * defended by commit 4045b954d's injective codec — `SqlDriver.buildRebuiltColumn` still
  * re-declares an introspected `json` column as `json`, so not even a drift
  * rebuild converts one. Nothing on the read path consults the physical type
  * (`isJsonField` answers from metadata), so decoding is identical either way.
@@ -81,7 +81,7 @@
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/12738 (this inversion)
  * @see https://github.com/objectstack-ai/objectstack/issues/12586 (the pin this replaces)
- * @see https://github.com/objectstack-ai/objectstack/issues/12380 (the injective local codec)
+ * @see commit 4045b954d (the injective local codec)
  * @see https://github.com/objectstack-ai/objectstack/issues/11535 (the class)
  */
 
@@ -256,7 +256,7 @@ describe('[#12738] driver-turso — the two transports declare ONE physical colu
     // ⛔ This is the assertion that would go red if anyone converged these two
     // onto `json` instead. It is stated as the RAW-SQL truth on purpose: it
     // asks what the COLUMN does, bypassing the driver codec whose job is to
-    // make the column's answer not matter. #12380's codec still runs and is
+    // make the column's answer not matter. Commit 4045b954d's codec still runs and is
     // still required — for LEGACY columns, which keep their `json` declaration
     // and therefore keep NUMERIC affinity.
     expect(

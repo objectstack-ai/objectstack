@@ -1642,7 +1642,7 @@ export class RemoteTransport {
   }
 
   /**
-   * [#14428] A miss answers `null` — the arm `IDataDriver.update()` declares
+   * [commit ca3fd4b1a] A miss answers `null` — the arm `IDataDriver.update()` declares
    * (#13878), and the answer this driver's LOCAL face (`SqlDriver.update`,
    * through `TursoDriver.update`'s `super` branch) has always given.
    *
@@ -2598,7 +2598,7 @@ export class RemoteTransport {
    *
    * Both transports round-trip every `VALUE_ROUNDTRIP_CASES` value faithfully
    * (`turso-value-roundtrip-conformance.test.ts`, both halves). They arrive
-   * there by different routes: #12380 made the local `Field.json` codec
+   * there by different routes: commit 4045b954d made the local `Field.json` codec
    * injective, so the NUMERIC-affinity column is only ever handed an encoded
    * form it has nothing to convert; this transport's own `serializeValue` /
    * `mapRows` reach the same answer over a column where no conversion was
@@ -2609,7 +2609,7 @@ export class RemoteTransport {
    * and a TEXT cell here, and `find()` answers `123` on both. That is the
    * #11535 class in its quiet phase — two paths agreeing on every visible
    * answer while standing on different ground. PR #12585's ablation is the
-   * loud phase: restoring the pre-#12380 SQLite `json` branch broke the two
+   * loud phase: restoring the SQLite `json` branch from before commit 4045b954d broke the two
    * transports by DIFFERENT counts, diverging on `s_0123`, because only the
    * local column had NUMERIC affinity to destroy a bare `'0123'` with.
    *

@@ -3,7 +3,7 @@
 // #15267 — the `IDataDriver` doors `TursoDriver` OVERRIDES publish their
 // declared return type, not `any`.
 //
-// The same shape #14438 fixed on this class's `update()` override, and for the
+// The same shape commit 2200f8ec8 fixed on this class's `update()` override, and for the
 // same reason it had to be fixed here rather than inherited: `TursoDriver`
 // overrides `findOne`, `create`, `bulkCreate` and `execute` with its own
 // explicit `Promise<any>` on each, so this package's published `.d.ts`
@@ -58,7 +58,7 @@
 // `@objectstack/driver-sql` narrowing does not reach a consumer holding a
 // `TursoDriver`.
 //
-// [#17690] Three more overridden doors join the driver half — `find`,
+// [commit be5c60291] Three more overridden doors join the driver half — `find`,
 // `upsert` and `bulkUpdate` — plus (at the time) `RemoteTransport.beginTransaction`,
 // which lived in this package and in this same tsc program. All four nested their
 // `any` inside a wider type (`Promise<any[]>`, `Promise<Record<string, any>>`,
@@ -114,7 +114,7 @@ type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B
 type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : never;
 
 /**
- * [#17690] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
+ * [commit be5c60291] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
  * `any[]` and for `Record<string, any>` — and those are exactly the two shapes
  * every door on this card had regressed to. Used as the "is not `any`" half of
  * a nested-`any` door it is a PHANTOM CHECK: it evaluates, it is green, and it
@@ -139,7 +139,7 @@ type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : ne
  * `Record<string, unknown>[]` / `Record<string, unknown>` / `unknown` answer
  * `false`.
  *
- * [#17970] Answering `boolean` is the ONE failure mode this detector has to
+ * [commit 47e6601c5] Answering `boolean` is the ONE failure mode this detector has to
  * stay out of, and staying out of it takes TWO guards, because `T` can reach a
  * distributive conditional for two unrelated reasons. Every leg below is
  * spelled `const x: ContainsAny<Door> = false`, and `false` is ASSIGNABLE to
@@ -184,7 +184,7 @@ type ContainsAnyPerMember<T> = IsAny<T> extends true
       : false;
 
 /**
- * [#17970] The collapse. `ContainsAnyPerMember<T>` is distributive, so on a
+ * [commit 47e6601c5] The collapse. `ContainsAnyPerMember<T>` is distributive, so on a
  * union door it answers a UNION of per-member verdicts; this reports `false`
  * only when that union is exactly `false`, turning any `boolean` into `true`.
  */
@@ -198,7 +198,7 @@ type ContractExecute = Resolved<IDataDriver['execute']>;
 // `aggregate` is OPTIONAL on the contract (`aggregate?`), so its function type
 // is read through `NonNullable` — the door is the member, not its presence.
 type ContractAggregate = Resolved<NonNullable<IDataDriver['aggregate']>>;
-// [#17690]
+// [commit be5c60291]
 type ContractFind = Resolved<IDataDriver['find']>;
 type ContractUpsert = Resolved<IDataDriver['upsert']>;
 type ContractBulkUpdate = Resolved<IDataDriver['bulkUpdate']>;
@@ -346,7 +346,7 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
     expect(result === null ? 'absent' : result.name).toBe('before');
   });
 
-  // [#17690] The three further overridden doors, plus the transaction door.
+  // [commit be5c60291] The three further overridden doors, plus the transaction door.
   // [#18063] That fourth slot moved from `RemoteTransport.beginTransaction` —
   // deleted with the rest of that transport's decorative transaction members —
   // to `TursoDriver.beginTransaction`, which this card made assertable. Both

@@ -12,6 +12,8 @@ import { strictObject } from '../shared/strict-object';
 import { retiredKey } from '../shared/retired-key';
 import { isValueDomainMember } from '../shared/value-domain.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { ScriptBodySchema } from '../data/hook-body.zod';
+import { bannedKeys, requiredOneOf } from '../shared/refinement-projection';
 
 /**
  * The cron zone's authoring door — `iana_time_zone` membership, judged by the
@@ -178,6 +180,33 @@ const JOB_TIMEOUT_RETIRED =
   + 'is unchanged. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
+/**
+ * A job with nothing to run. Before `body` existed `handler` was required, so
+ * this shape could not parse; once either key may be omitted the pair needs a
+ * rule of its own, or a job that runs nothing parses green and is skipped at
+ * every boot.
+ */
+const JOB_RUNS_NOTHING =
+  'A job needs something to run: declare `body` (a sandboxed JS body, `{ language: "js", source, '
+  + 'capabilities }` — the preferred form) or `handler` (the name of a `defineStack({ functions })` '
+  + 'entry — deprecated). This job declares neither, so no boot could ever schedule it.';
+
+/**
+ * The time limit of a body job has ONE spelling: the job's own `timeoutMs`.
+ *
+ * `ScriptBodySchema` carries its own per-invocation `timeoutMs` (capped at
+ * 30 s) because a hook or an action body has no other place to say it. A job
+ * does: one attempt of a body job IS one sandbox invocation, so a second
+ * spelling would be the same limit written twice, and the two would disagree
+ * the first time an author changed one of them. The relation is stated once,
+ * on `timeoutMs` below; this is the refusal that keeps it one statement.
+ */
+const JOB_BODY_TIMEOUT_REFUSED =
+  "`body.timeoutMs` is not accepted on a job. A job's time limit is the job's own `timeoutMs`: one "
+  + 'attempt of a body job is one sandbox invocation, so the job-level key is the one limit and the '
+  + 'runtime bounds the sandbox run by it. Move the value to `timeoutMs` on the job (milliseconds, '
+  + 'unchanged).';
+
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
@@ -190,12 +219,66 @@ export const JobSchema = lazySchema(() => strictObject({
   label: z.string().optional().describe('Human-readable label'),
   description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),
-  handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
+  /**
+   * Handler Logic — DEPRECATED, prefer {@link body}.
+   *
+   * The name of a `defineStack({ functions })` entry. A function is code, never
+   * a metadata row (ADR-0088), so a JSON artifact carries only this name and the
+   * callable travels in the artifact's runtime module — which only a door that
+   * imports that module can bind. `body` is the form that travels with the
+   * metadata itself, exactly as it did for hooks.
+   *
+   * Optional since `body` exists, but not both absent: {@link JOB_RUNS_NOTHING}.
+   * When both are present `body` wins, as for hooks.
+   */
+  handler: z.string().optional().describe('Handler function name (must match a key in `defineStack({ functions })`) — DEPRECATED, prefer `body`. When both are present `body` wins; a job must declare one of the two.'),
+  /**
+   * Job Body (L2 sandboxed JS) — the hook body shape, reused by reference.
+   *
+   * Only the L2 member of `HookBodySchema`: an L1 expression is a pure formula
+   * whose only effect is its returned value, and a job runs for its effects —
+   * the one reader of a job's return value is the `{ outcome }` report
+   * (`JobRunOutcome`, `contracts/job-service.ts`), which reports on work an
+   * expression cannot do. The refusal text lives on `ScriptBodySchema.language`
+   * (`data/hook-body.zod.ts`), where it fires only for a slot like this one.
+   *
+   * The body runs in the QuickJS sandbox: no module scope, data only through
+   * `ctx.api` under its declared `capabilities`, logging through `ctx.log`.
+   * The in-process `JobHandlerContext` (`ql`, `logger`, `bundle` —
+   * `@objectstack/runtime`) does not exist there. Its time limit is the job's
+   * {@link timeoutMs}; the body's own `timeoutMs` is refused on a job
+   * ({@link JOB_BODY_TIMEOUT_REFUSED}).
+   *
+   * Authored as data. `objectstack build` does not mint it from the function a
+   * `handler` names: `defineStack` parses `functions` through `z.function()`,
+   * which replaces each callable with a wrapper whose source is not the
+   * author's, and the documented handler form reads `ql` / `logger` off a
+   * destructured `JobHandlerContext` that no sandbox `ctx` carries.
+   */
+  //
+  // `ScriptBodySchema` by reference; the one job-specific rule is a refinement
+  // on this slot, declared through the closed projection list so the published
+  // JSON Schema bans the key too (`propertyNames`), not only the parse.
+  body: ScriptBodySchema.refine(bannedKeys(['timeoutMs']), {
+    message: JOB_BODY_TIMEOUT_REFUSED,
+    path: ['timeoutMs'],
+  }).optional().describe(
+    'Job body — a sandboxed JS (L2) body, the same shape hooks and actions use; an expression (L1) body is refused, because a job runs for its effects and an expression has none. '
+      + 'Preferred over `handler`: when both are present `body` wins. '
+      + 'It runs in the QuickJS sandbox with no module scope (no imports, no helpers or constants from the surrounding file): it reaches data only through `ctx.api` under its declared `capabilities` (`api.read` / `api.write` / `api.transaction`) and logs through `ctx.log` (`log`); the in-process handler context (`ql`, `logger`, `bundle`) does not exist there. '
+      + "Its time limit is the job's `timeoutMs` (see there): long-running work declares a `timeoutMs` that covers it, or splits into bounded runs that each finish within it. "
+      + 'The runtime binder that schedules job bodies has not landed yet: until it does a job runs through `handler`, so keep `handler` beside `body`.',
+  ),
   retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 — state a count to opt in.'),
   // Renamed from `timeout` (#14478): the unit (milliseconds) lived only in the
   // description while the sibling `retryPolicy.backoffMs` spells its own.
   // Tombstoned rather than deleted so the rejection carries the rename.
-  timeoutMs: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout". The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
+  //
+  // ⚠️ THE ONE STATEMENT of how a job body's time limit relates to the body
+  // shape's own `timeoutMs` lives in this describe; `body`'s describe and
+  // JOB_BODY_TIMEOUT_REFUSED point here. Two spellings of one limit is the
+  // defect this keeps out.
+  timeoutMs: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout". A `handler` run is abandoned, not forcibly cancelled. For a job with a `body` this is the ONE time limit: one attempt is one sandbox invocation, the runtime bounds that invocation by this value, and the body shape\'s own `timeoutMs` (capped at 30000 for hooks and actions) is refused on a job — so this key, which has no such cap, is where long-running work states how long it needs. Omit for no per-attempt limit; a `body` run is then still bounded by the sandbox\'s own default invocation limits.'),
   timeout: retiredKey(JOB_TIMEOUT_RETIRED),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 
@@ -206,7 +289,10 @@ export const JobSchema = lazySchema(() => strictObject({
   // and a hard 422 waiting for the day this shape is closed (see
   // `metadata-type-schemas.test.ts` for the invariant and how it was hollow).
   ...MetadataProtectionFields,
-}));
+// Declared through the closed projection list, so the published JSON Schema
+// states the rule (`anyOf` of one `required` per key) instead of being wider
+// than the parse.
+}).refine(requiredOneOf(['body', 'handler']), { message: JOB_RUNS_NOTHING, path: ['body'] }));
 
 export type Job = z.input<typeof JobSchema>;
 /** Post-parse shape of {@link Job} — defaults applied, transforms run (ADR-0122). */
@@ -220,7 +306,15 @@ export type JobParsed = z.infer<typeof JobSchema>;
  * export const nightlySync = defineJob({
  *   name: 'sync_metadata_nightly',
  *   schedule: { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' },
- *   handler: 'syncMetadata', // must be registered in defineStack({ functions: { syncMetadata: () => ... } })
+ *   // The preferred form: sandboxed source that travels with the metadata.
+ *   body: {
+ *     language: 'js',
+ *     source: "const open = await ctx.api.object('task').find({ where: { status: 'open' } }); ctx.log.info('open tasks', { count: open.length });",
+ *     capabilities: ['api.read', 'log'],
+ *   },
+ *   // Deprecated, kept beside `body` until the runtime binder runs job bodies:
+ *   // must be registered in defineStack({ functions: { syncMetadata: () => ... } })
+ *   handler: 'syncMetadata',
  * });
  * ```
  */
