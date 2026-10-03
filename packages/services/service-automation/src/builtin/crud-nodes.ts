@@ -20,10 +20,13 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import {
+    collectStoredMetadataFilterFields,
     ephemeralStoredHashDigest,
     redactStoredMetadataRows,
     serveStoredMetadataHashColumnRows,
+    storedMetadataBodyPredicateRefusal,
     storedMetadataBodyProjection,
+    storedMetadataHashEvaluateRefusal,
     type StoredHashDigest,
 } from '@objectstack/metadata-protocol';
 import type { AutomationEngine } from '../engine.js';
@@ -271,6 +274,56 @@ async function serveFamilyRead<A>(
 }
 
 /**
+ * [#21623] Refuse a node whose filter EVALUATES the stored-metadata family's
+ * body or content hash, the way the generic data door refuses the same filter.
+ *
+ * {@link serveFamilyRead} closes the node's serve and copy exits; this closes
+ * its evaluate exit. A filter over the stored body column, or over a stored
+ * content-hash column, is evaluated against the stored values row by row, so
+ * whether a row comes back answers the predicate even though the row itself
+ * is served projected: a guessed prefix of withheld credential material, or a
+ * guessed hash, returns the row exactly when it is right (the predicate oracle
+ * the family's refusals name). Under `runAs: 'system'` the engine reads
+ * elevated and cannot tell this read from the platform's own internal
+ * readers, so the rule is applied here, before the engine is asked.
+ *
+ * Built only from the door's own functions (`@objectstack/metadata-protocol`),
+ * in the door's own order, never a copy:
+ *  - the columns the filter reads come from the family's ONE filter-field
+ *    collector (`collectStoredMetadataFilterFields`): every key's head and
+ *    every cross-field `{ $field }` comparand, at any depth;
+ *  - the body refusal (`storedMetadataBodyPredicateRefusal`) is asked first,
+ *    then the content-hash refusal (`storedMetadataHashEvaluateRefusal`).
+ *
+ * `query` is the option bag the node hands the engine, so the collector reads
+ * exactly the filter the engine would run: the INTERPOLATED one, since a
+ * `{token}` can resolve to a whole condition (a `$and` list, a comparand) whose
+ * columns the authored template does not show. The node configs declare no
+ * sort and no grouping, so the refusals are fed filter fields only.
+ *
+ * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong,
+ * and re-running it unchanged never succeeds) carrying the door's own error
+ * code, read off the door's refusal rather than spelled again. `undefined`
+ * outside the family ({@link isStoredMetadataBodyObject}) and for a filter that
+ * reads neither column.
+ */
+function storedMetadataFilterRefusal(
+    nodeType: string,
+    objectName: string,
+    query: { where: Record<string, unknown> },
+): (ReturnType<typeof refuseNode> & { code: string }) | undefined {
+    if (!isStoredMetadataBodyObject(objectName)) return undefined;
+    const filterFields = collectStoredMetadataFilterFields(objectName, query);
+    const refuse = (refusal: Error) =>
+        ({ ...refuseNode(`${nodeType}: ${refusal.message}`), code: (refusal as Error & { code: string }).code });
+    const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(objectName, { filterFields });
+    if (bodyPredicateRefusal) return refuse(bodyPredicateRefusal);
+    const hashEvaluateRefusal = storedMetadataHashEvaluateRefusal(objectName, { filterFields });
+    if (hashEvaluateRefusal) return refuse(hashEvaluateRefusal);
+    return undefined;
+}
+
+/**
  * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
  * `delete_record`, wired to the runtime data layer (ObjectQL / IDataEngine).
  * Part of the platform baseline, so the core {@link AutomationServicePlugin}
@@ -352,6 +405,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const fields = cfg.fields;
                 const limit = cfg.limit;
                 const outputVariable = cfg.outputVariable;
+
+                // [#21623] A filter that evaluates the stored-metadata family's
+                // body or content hash is refused before the engine is asked,
+                // with the data door's own code, under either run identity. It
+                // reads the interpolated filter, in the `where` slot both
+                // engine reads below hand it in.
+                const familyRefusal = storedMetadataFilterRefusal('get_record', objectName, { where: filter });
+                if (familyRefusal) return familyRefusal;
 
                 const data = getData();
                 if (!data) {
