@@ -207,10 +207,11 @@ export const LogTimeAction = defineAction({
   icon: 'clock',
   objectName: task,
   type: 'form',
-  // Targets the `edit` FORM view. `showcase_task.default` is the LIST view (the
-  // container's main `list` implicitly claims the `default` key), so pointing a
-  // form action there opens a list as a form — now a build error (#2554).
-  target: 'showcase_task.edit',
+  // Targets the container's default FORM view, `showcase_task.form`.
+  // `showcase_task.default` is the LIST view (the container's main `list`
+  // implicitly claims the `default` key), so pointing a form action there opens
+  // a list as a form — now a build error (#2554).
+  target: 'showcase_task.form',
   // `record_section` so it surfaces in the Task Detail quick-actions bar too.
   locations: ['record_header', 'record_related', 'record_section'],
   refreshAfter: true,
@@ -257,7 +258,7 @@ export const NewTaskAction = defineAction({
   icon: 'plus',
   objectName: task,
   type: 'form',
-  target: 'showcase_task.edit',
+  target: 'showcase_task.form',
   locations: [],
   refreshAfter: true,
 });

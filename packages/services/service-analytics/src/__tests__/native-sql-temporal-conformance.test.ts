@@ -136,39 +136,64 @@ describe('NativeSQLStrategy — temporal conformance', () => {
     db?.close();
   });
 
-  /** Group by `id` so the result rows ARE the matched row ids. */
-  const idsFor = async (query: Omit<AnalyticsQuery, 'cube' | 'measures' | 'dimensions'>) => {
-    const result = await new NativeSQLStrategy().execute(
-      { cube: 'conformance', measures: ['total'], dimensions: ['id'], ...query } as AnalyticsQuery,
-      ctx,
-    );
-    return result.rows.map((r) => String(r.id)).sort();
-  };
+  /**
+   * [ADR-0053 D-D1, amended — #5930 step 4] The matrix runs twice: over the
+   * context above, which wires no declared-type hook (the strategy then reads
+   * every column type-blind, item 7), and over the same context with the hook
+   * the plugin wires (`happened_at` a `datetime`, `happened_on` a `date`), the
+   * reader the shared lowering applies in production. The whole-day rule is the
+   * lowering's alone since this face's own copy was deleted, so both readers
+   * must answer every case.
+   */
+  const READERS: Array<[string, () => StrategyContext]> = [
+    ['no declared-type hook', () => ctx],
+    [
+      'the declared-type hook',
+      () => ({
+        ...ctx,
+        declaredFieldType: (_object: string, field: string) =>
+          field === 'happened_at' ? 'datetime' : field === 'happened_on' ? 'date' : undefined,
+      }) as StrategyContext,
+    ],
+  ];
 
-  for (const c of TEMPORAL_CASES) {
-    it(c.name, async () => {
-      expect(await idsFor({ where: c.filter }), c.note).toEqual([...c.expected].sort());
+  for (const [reader, ctxOf] of READERS) {
+    /** Group by `id` so the result rows ARE the matched row ids. */
+    const idsFor = async (query: Omit<AnalyticsQuery, 'cube' | 'measures' | 'dimensions'>) => {
+      const result = await new NativeSQLStrategy().execute(
+        { cube: 'conformance', measures: ['total'], dimensions: ['id'], ...query } as AnalyticsQuery,
+        ctxOf(),
+      );
+      return result.rows.map((r) => String(r.id)).sort();
+    };
+
+    describe(reader, () => {
+      for (const c of TEMPORAL_CASES) {
+        it(c.name, async () => {
+          expect(await idsFor({ where: c.filter }), c.note).toEqual([...c.expected].sort());
+        });
+
+        // The D-A3 token axis (#4081): the same case spelled in relative tokens,
+        // resolved at the pinned instant, must reach the same rows.
+        if (c.tokenFilter) {
+          it(`${c.name} — via relative tokens`, async () => {
+            expect(await idsFor({ where: resolveTokens(c.tokenFilter) }), c.note).toEqual(
+              [...c.expected].sort(),
+            );
+          });
+        }
+
+        // The dashboard-window path — the shape #3650 dropped entirely. No
+        // granularity, or `canHandle` correctly declines to the ObjectQL strategy.
+        if (c.dateRange) {
+          it(`${c.name} — via timeDimensions.dateRange`, async () => {
+            expect(
+              await idsFor({ timeDimensions: [{ dimension: c.field, dateRange: resolveTokens(c.dateRange) }] }),
+              c.note,
+            ).toEqual([...c.expected].sort());
+          });
+        }
+      }
     });
-
-    // The D-A3 token axis (#4081): the same case spelled in relative tokens,
-    // resolved at the pinned instant, must reach the same rows.
-    if (c.tokenFilter) {
-      it(`${c.name} — via relative tokens`, async () => {
-        expect(await idsFor({ where: resolveTokens(c.tokenFilter) }), c.note).toEqual(
-          [...c.expected].sort(),
-        );
-      });
-    }
-
-    // The dashboard-window path — the shape #3650 dropped entirely. No
-    // granularity, or `canHandle` correctly declines to the ObjectQL strategy.
-    if (c.dateRange) {
-      it(`${c.name} — via timeDimensions.dateRange`, async () => {
-        expect(
-          await idsFor({ timeDimensions: [{ dimension: c.field, dateRange: resolveTokens(c.dateRange) }] }),
-          c.note,
-        ).toEqual([...c.expected].sort());
-      });
-    }
   }
 });

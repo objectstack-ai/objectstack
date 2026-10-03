@@ -463,8 +463,10 @@ describe('#16224 — an overlay that REDEFINES a code-package item is judged fro
     });
 
     /** One metric widget, so the count of findings IS the count of bindings. */
-    const oneWidgetBoard = (dataset: string, value: string) => ({
-        name: 'p16224_dash',
+    // [#21470] Named for the row it is saved under: a body `name` that is not
+    // its row's is refused by the write doors' name judge, before this gate.
+    const oneWidgetBoard = (dataset: string, value: string, name = 'p16224_dash') => ({
+        name,
         label: 'Overlay smoke dashboard',
         widgets: [{ id: 'kpi', type: 'metric', title: 'Total', dataset, values: [value] }],
     });
@@ -577,7 +579,7 @@ describe('#16224 — an overlay that REDEFINES a code-package item is judged fro
 
         // The store-only name resolves, with its own measure…
         const additive = await protocol.saveMetaItem({
-            type: 'dashboard', name: 'p2008_dash', item: oneWidgetBoard('p2008_users', 'order_count'),
+            type: 'dashboard', name: 'p2008_dash', item: oneWidgetBoard('p2008_users', 'order_count', 'p2008_dash'),
         });
         expect(additive.success, '#16223: a store-only name is contributed to the universe').toBe(true);
 

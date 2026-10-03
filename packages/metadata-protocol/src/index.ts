@@ -207,6 +207,20 @@ export {
 } from './metadata-redaction.js';
 export type { StoredHashDigest } from './metadata-redaction.js';
 
+// [#21454] The generic data door's EVALUATE refusals on the same family
+// (#21086 grouping, #21120 body filter / sort, #21207 content-hash evaluate and
+// search). Exported so the in-process reader contexts in `@objectstack/runtime`
+// refuse the evaluate shapes the way the door does — each through the door's
+// OWN predicate, never a copy: a second definition of which shapes leak a
+// stored body or hash is exactly the drift the family's one rule exists to
+// prevent.
+export {
+  storedMetadataBodyGroupingRefusal,
+  storedMetadataBodyPredicateRefusal,
+  storedMetadataHashEvaluateRefusal,
+  storedMetadataSearchRefusal,
+} from './metadata-redaction.js';
+
 export type { MetadataHostEngine } from './host-engine.js';
 
 // [#7560] ADR-0070's read-only-package rule. The authoring path (`saveMetaItem`

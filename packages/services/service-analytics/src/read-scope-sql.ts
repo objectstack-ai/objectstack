@@ -93,20 +93,31 @@ import {
  * `filter-normalizer` with the reduction (see the note at the `length === 0`
  * branch in {@link compileNode} for why). Reduction happens structurally over
  * the whole tree, and it composes with the #5146 NULL-safe `$not` rewrite as
- * "reduce first": {@link nullSafeNegationOperand} maps combinator arrays
- * element-wise (an empty array stays empty, a `{}` leaf has no field to
+ * "reduce first": the rewrite (the shared lowering's, below) maps combinator
+ * arrays element-wise (an empty array stays empty, a `{}` leaf has no field to
  * guard), so the identity a constant reduces to is untouched by the rewrite
  * and the rewrite only ever guards leaves that survive it.
  *
- * ## `$not` is NULL-safe (#5146)
+ * ## `$not` and the negative-polarity operators are NULL-safe (#5146, #5298)
  *
  * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
- * drops every row whose `col` is NULL — while `driver-memory` and `formula`
- * (and, since #5296, `driver-sql`) return those rows. One read scope, two
- * visible sets, chosen by which backend answered. #5146 ruled the JS answer
- * canonical; {@link nullSafeNegationOperand} here is the same rewrite
- * `sql-driver.ts` applies, so an analytics query and an ordinary `find()` scope
- * the same rows.
+ * or `col <> ?` drops every row whose `col` is NULL — while `driver-memory`,
+ * `formula` and `driver-sql` return those rows. One read scope, two visible
+ * sets, chosen by which backend answered. #5146 ruled the JS answer canonical
+ * for `$not`, and #5298 for `$ne` / `$nin` / `$notContains` — and an RLS rule
+ * is evaluated on BOTH sides, read here and by `formula`'s
+ * `matchesFilterCondition` for the write-side `check`, so one rule admitting
+ * two row sets is the security defect #5146 named.
+ *
+ * [ADR-0053 D-D1, amended — #5930 step 4] The ONE source of both rules is the
+ * shared lowering (`lowerFilterCondition`, `@objectstack/spec/data`, its rule
+ * 3), which {@link compileScopedFilterToSql} runs at its entry before a single
+ * clause compiles — the same rewrite the engine and the RLS compile seam run,
+ * so an analytics query and an ordinary `find()` scope the same rows. Every
+ * path into {@link compileNode} passes through it. This compiler kept its own
+ * copy of both rules (a `$not`-operand rewrite with its three polarity tables,
+ * and an `IS NULL OR` wrap on `$ne` / `$nin` / `$notContains`) until this
+ * face's deletion card; it compiles each operator as written now.
  *
  * ## The LIKE family compares LITERALS (#5567)
  *
@@ -238,7 +249,7 @@ import {
  *       family. `translateFieldOperators` passes `$nin` straight through and
  *       compiles `$notContains` to `{ $not: { $regex } }`, and both match a
  *       missing or null field — so it has always answered as this compiler does
- *       through {@link nullValueSatisfiesOperator}.
+ *       (through the shared lowering's NULL-polarity table since #5930 step 4).
  *   (b) `driver-memory` was the one real holdout, and only on its REFERENCE
  *       matcher; its live mingo query path already agreed. #13166 aligned that
  *       matcher, so on the null SEMANTICS cell nothing answers differently now.
@@ -794,10 +805,10 @@ export function compileScopedFilterToSql(
   // face the whole-day upper bound it never applied: a bare-day `$lte` (or a
   // `$between` maximum) on a declared `datetime` column compiles `< next-day`,
   // in the calendar-string domain, and answers the rows `SqlDriver.find` does
-  // on the same filter. It also lays the NULL-polarity guards on as structure,
-  // which this compiler's own copies (`nullSafeNegative`,
-  // `nullSafeNegationOperand`) already answered: idempotent in rows, and
-  // removed by this face's deletion card.
+  // on the same filter. It also lays the NULL-polarity guards on as structure
+  // (#5146, #5298), and since #5930 step 4 it is their ONE source on this
+  // face: {@link compileNode} and {@link compileOperator} compile what they are
+  // handed (see the module header).
   //
   // The shared comparand faces below still judge the scope AS WRITTEN, after
   // compilation (#20018's order). The lowering never refuses and never turns a
@@ -1240,12 +1251,12 @@ function compileNode(node: unknown, qAlias: string, params: unknown[], opts: Rea
       const joiner = key === '$and' ? ' AND ' : ' OR ';
       clauses.push(`(${kept.map((c) => c.sql).join(joiner)})`);
     } else if (key === '$not') {
-      // NULL-safe negation (#5146): totalise the operand's leaves first, so
-      // `NOT (…)` can never be UNKNOWN and this compiler admits the same rows
-      // `driver-sql` / `driver-memory` / `formula` admit. A non-node operand is
-      // left alone so `compileNode` still rejects it with its own message.
-      const operand = isFilterNode(value) ? nullSafeNegationOperand(value) : value;
-      const inner = compileSub(operand, qAlias, opts);
+      // NULL-safe negation (#5146): the operand's leaves arrive TOTAL — the
+      // shared lowering guarded each one at this compiler's entry — so
+      // `NOT (…)` can never be UNKNOWN and this compiler admits the rows
+      // `driver-sql` / `driver-memory` / `formula` admit. A non-node operand
+      // still reaches `compileNode`, which rejects it with its own message.
+      const inner = compileSub(value, qAlias, opts);
       if (inner.sql.length === 0) {
         // `NOT TRUE ≡ FALSE`. Emitting nothing here is what let a `{$not: {}}`
         // read scope through `applyReadScope`'s `if (!sql) return;` and ran the
@@ -1439,31 +1450,6 @@ function membershipMatch(
     );
   }
   return sql;
-}
-
-/**
- * [#5298] Wrap a negative-polarity value test so a row whose column has no value
- * SATISFIES it: `(col IS NULL OR <test>)`.
- *
- * The read-scope twin of `driver-sql`'s `applyNullSafeNegative`, and the reason
- * this compiler had to move in the same PR rather than a later one: an RLS rule
- * is authored once and evaluated on BOTH sides — this file lowers it for the
- * read path while `formula`'s `matchesFilterCondition` evaluates it for the
- * write-side `check`. Leaving the two on different answers for `$ne` is one
- * permission rule admitting two different row sets, which is the security
- * defect #5146 named for `$not` and #5298 ruled for the rest.
- *
- * OR-expansion rather than `IS DISTINCT FROM` / `IS NOT` / `<=>`, for the three
- * reasons recorded on the driver-side twin: `NOT LIKE` has no such form, the
- * SQLite spelling depends on an engine version nothing here pins, and the
- * measured query plans are identical either way.
- *
- * The parentheses are not optional. {@link compileField} joins a field's
- * operators with bare ` AND `, so an unwrapped `col IS NULL OR …` would bind
- * looser than that AND and silently widen the whole scope.
- */
-function nullSafeNegative(col: string, test: string): string {
-  return `(${col} IS NULL OR ${test})`;
 }
 
 /**
@@ -1688,21 +1674,22 @@ function undefinedComparandError(field: string, path: string): Error {
  * conditional on evaluation order. THIS compiler has no such blind spot —
  * {@link compileNode} `.map()`s every `$and`/`$or` child into its own buffer
  * BEFORE any identity is applied (the `$or` TRUE-absorption and the `$and`
- * identity filter both read the fully-compiled list), and
- * {@link nullSafeNegationOperand} rewrites a `$not` operand without dropping a
- * single leaf. Every comparand therefore reaches `compileField`, which is also
+ * identity filter both read the fully-compiled list), and the shared lowering
+ * at {@link compileScopedFilterToSql}'s entry rewrites a `$not` operand without
+ * dropping a single leaf (each guard carries the field's spec through by
+ * reference). Every comparand therefore reaches `compileField`, which is also
  * the only path to {@link bind} — one gate, on the one road.
  *
  * The other half of `driver-sql`'s "runs FIRST" argument does not transfer
  * either, and that is worth stating rather than copying: there, the refusal had
  * to precede the `$not` rewrite because the polarity tables spelled `=== null`
  * while the `$ne` emitter spelled `== null`, so the two disagreed about
- * `undefined` itself. Here {@link nullValueSatisfiesOperator},
- * {@link operatorIsNullTotal} and every arm of {@link compileOperator} spell it
- * `=== null` alike, so the tables and the emitter agree that `undefined` is "a
- * value" — the rewrite for a `{ $not: … }` operand runs, produces a leaf, and
- * that leaf is refused. Nothing inconsistent is being outrun; the silent NULL
- * bind is.
+ * `undefined` itself. Here the shared lowering's NULL-polarity table (#5930
+ * step 4: this compiler kept its own copy until then) and every arm of
+ * {@link compileOperator} spell it `=== null` alike, so the table and the
+ * emitter agree that `undefined` is "a value" — the rewrite for a
+ * `{ $not: … }` operand runs, produces a leaf, and that leaf is refused.
+ * Nothing inconsistent is being outrun; the silent NULL bind is.
  */
 function assertDefinedComparands(field: string, spec: unknown): void {
   const root = `"${field}"`;
@@ -1844,13 +1831,14 @@ function nonBooleanFlagComparandError(op: string, field: string, path: string): 
  * Same reason {@link assertDefinedComparands} sits here: {@link compileField} is
  * the one road every field constraint travels, because {@link compileNode}
  * `.map()`s every child into its own buffer BEFORE any boolean identity is
- * applied, so no sibling can absorb a malformed one. It runs AFTER
- * {@link nullSafeNegationOperand} for a `$not` operand — harmless, and worth
- * stating: that rewrite consults {@link nullValueSatisfiesOperator}, which now
- * reads these two by identity, so a non-boolean is classified before it is
- * refused. The classification is DISCARDED either way (the leaf still reaches
- * `compileField` and still throws), and the rewrite's own synthesised leaves
- * (`{ $null: false }`, `{ $null: true }`) are literal booleans by construction.
+ * applied, so no sibling can absorb a malformed one. It runs AFTER the shared
+ * lowering's `$not` rewrite (at {@link compileScopedFilterToSql}'s entry) —
+ * harmless, and worth stating: that rewrite consults its NULL-polarity table,
+ * which reads these two by identity, so a non-boolean is classified before it
+ * is refused. The classification is DISCARDED either way (the leaf still
+ * reaches `compileField` and still throws), and the rewrite's own synthesised
+ * leaves (`{ $null: false }`, `{ $null: true }`) are literal booleans by
+ * construction.
  *
  * [#20445] `$empty` is the third flag, and it joins the gate on the day its arm
  * lands rather than after a flip is measured: the spec declares it
@@ -2030,9 +2018,11 @@ function compileOperator(
     // [#19975] `val` is never a list here: {@link assertNoListInEqualitySlot}
     // refused one at {@link compileField}, before this emitter runs.
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
-    // [#5298] `$ne: null` stays `IS NOT NULL` — already total, and "has any
-    // value" is false for a row that has none. Only the comparison is guarded.
-    case '$ne': return val === null ? `${col} IS NOT NULL` : nullSafeNegative(col, `${col} <> ${bind(params, val)}`);
+    // [#5298] `$ne: null` is `IS NOT NULL` — already total, and "has any
+    // value" is false for a row that has none. A `$ne` of a value arrives
+    // inside the NULL escape the shared lowering wrote around it (see the
+    // module header), so the comparison compiles as written here.
+    case '$ne': return val === null ? `${col} IS NOT NULL` : `${col} <> ${bind(params, val)}`;
     case '$gt': return `${col} > ${bind(params, val)}`;
     case '$gte': return `${col} >= ${bind(params, val)}`;
     case '$lt': return `${col} < ${bind(params, val)}`;
@@ -2054,9 +2044,9 @@ function compileOperator(
       // header's #13571 section before "harmonising" the two arms.
       if (val.length === 0) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" is empty — an empty exclusion excludes nothing and would compile the read scope to constant TRUE (fail-closed).`);
       assertCompilableMembers(op, field, val);
-      // [#5298] NULL-safe: "not among this list" holds vacuously for a value
-      // that is not there.
-      return nullSafeNegative(col, `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`);
+      // [#5298] "Not among this list" holds vacuously for a value that is not
+      // there: the shared lowering's NULL escape around this leaf says so.
+      return `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`;
     }
     case '$between': {
       if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
@@ -2124,17 +2114,16 @@ function compileOperator(
       assertIcontainsComparandNotRefused(op, field, val);
       return textOverNonTextColumn(op, field, opts)
         ?? textMatch(col, 'contains', val, false, params, opts, true);
-    // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
-    // contain" is true of a value that is not there.
-    // [#20987] The same wrapper around the negated MEMBERSHIP test on a column
-    // declared multi-valued or JSON-stored, `driver-sql`'s NULL rule.
+    // [#5298] `NOT LIKE` is UNKNOWN for a NULL column, and "does not contain"
+    // is true of a value that is not there: the shared lowering's NULL escape
+    // around this leaf says so, for the text test and — [#20987] — for the
+    // negated MEMBERSHIP test on a column declared multi-valued or JSON-stored
+    // alike, `driver-sql`'s NULL rule.
     case '$notContains':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts)
-        ?? nullSafeNegative(
-          col,
-          membershipMatch(col, op, val, field, params, opts) ?? textMatch(col, 'contains', val, true, params, opts),
-        );
+        ?? membershipMatch(col, op, val, field, params, opts)
+        ?? textMatch(col, 'contains', val, true, params, opts);
     case '$startsWith':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'starts', val, false, params, opts);
@@ -2147,7 +2136,7 @@ function compileOperator(
     // not the "anything truthy is IS NULL" rule it used to be. That old rule is
     // what put the STRING `"false"` on the side opposite the `false` it was
     // written to mean; the identity spelling cannot, and it is the spelling
-    // {@link nullValueSatisfiesOperator} now mirrors (#5146 / #5298).
+    // the shared lowering's NULL-polarity table reads (#5146 / #5298).
     case '$null': return val === true ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val === true ? `${col} IS NOT NULL` : `${col} IS NULL`;
     // [#20445] `val` is a boolean here too — the same gate refused anything
@@ -2218,197 +2207,4 @@ function compileEmptyOperator(
     );
   }
   return sql;
-}
-
-// ── [#5146] NULL-safe `$not` ─────────────────────────────────────────────────
-
-/**
- * What one field constraint needs so its compiled SQL is TOTAL — TRUE or FALSE
- * for every row, never UNKNOWN.
- *
- * - `'none'`         — already total (`IS NULL` / `IS NOT NULL`), or a shape
- *                      this compiler refuses outright, which must keep refusing.
- * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
- * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
- */
-type NullGuard = 'none' | 'requireValue' | 'allowNull';
-
-/**
- * Does a NULL column satisfy this one operator, under the semantics the JS
- * backends (`driver-memory`'s `match`, `formula`'s `matchesFilterCondition`)
- * give it? They evaluate a missing value in ordinary two-valued JS — `undefined
- * !== 'won'` is simply `true` — and #5146 ruled that answer canonical.
- *
- * This is `sql-driver.ts`'s `nullValueSatisfiesOperator` table, entry for entry,
- * with ONE deliberate difference that comes from THIS file's emitter rather than
- * from a different reading of #5146:
- *
- *   - `$between` exists in this compiler and not in that table; it is a
- *     positive comparison, so it takes the default (a value that is not there
- *     does not lie between two bounds) exactly as the other comparisons do.
- *
- * ⚠️ [#6387] There used to be a SECOND difference, and its removal is half of
- * that change rather than a tidy-up. `$null` / `$exists` were read here by
- * TRUTHINESS — `Boolean(value)` / `!value` — because {@link compileOperator}
- * wrote them as `val ? … : …`, while `driver-sql` read them by identity because
- * its emitter did. That was correct under the invariant #5146 / #5298 state:
- * each polarity table pins the spelling of ITS OWN emitter, not the other
- * file's. So when the emitter stopped guessing at a non-boolean, these two arms
- * had to move WITH it in the same change — leaving them truthy would have
- * broken the invariant silently, at its own definition, with nothing red. The
- * divergence is gone now because its cause is: both emitters read the declared
- * boolean domain, so both tables spell it by identity, and the two files agree
- * on every arm for the first time.
- *
- * The default is the large positive-comparison family (`$gt`/`$in`/`$contains`/
- * …), every member of which answers `false` for a value that is not there. An
- * operator this compiler does not support also lands here; it is guarded and
- * then still throws from {@link compileOperator}, so fail-closed is preserved.
- */
-function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
-  switch (op) {
-    // `$eq: null` IS the null predicate; any other comparand is a value test.
-    case '$eq': return value === null;
-    // Mirror image: `$ne: null` compiles to `IS NOT NULL`, which a NULL fails.
-    case '$ne': return value !== null;
-    // [#6387] Identity, matching this file's emitter (see the note above).
-    // `assertBooleanFlagComparands` refuses anything but `true` / `false` before
-    // this table is consulted, so each arm is an exhaustive TWO-WAY choice over
-    // the declared domain — and the strict spelling is chosen over the lenient
-    // one it replaces for the reason #5347 gave: `Boolean(value)` and
-    // `value === true` are equivalent only while the gate upstream holds, and
-    // the lenient spelling would quietly resume answering for shapes nobody
-    // ruled on if that gate were ever moved. A NULL column satisfies `$null`
-    // exactly when the author asked for null…
-    case '$null': return value === true;
-    // …and satisfies `$exists` exactly when the author asked for "no value".
-    // `$null: true` and `$exists: false` are the same question, so these two
-    // arms are correctly each other's MIRROR, not each other's copy (#5369).
-    case '$exists': return value === false;
-    // [#20445] Null is empty on every row of the ruled table, so a NULL column
-    // satisfies `$empty: true` and fails its complement — by identity, as the
-    // arm reads it, behind the same boolean gate.
-    case '$empty': return value === true;
-    // Negative-polarity set / substring tests hold vacuously for an absent value.
-    case '$nin': return true;
-    // `$notContains` is the one operator where the two JS backends disagree for
-    // a null-valued field (`driver-memory` answers false, `formula` true).
-    // `formula` is followed because `driver-sql` follows it, so this compiler
-    // does not cast a vote on a disagreement that is filed elsewhere.
-    case '$notContains': return true;
-    default: return false;
-  }
-}
-
-/** Is this operator's compiled SQL already total for a NULL column? */
-function operatorIsNullTotal(op: string, value: unknown): boolean {
-  switch (op) {
-    // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
-    case '$null':
-    case '$exists':
-      return true;
-    // [#20445] Both polarities spell their NULL case out (`col IS NULL OR …` /
-    // `col IS NOT NULL AND …`, `empty-operator-sql.ts`), so the arm is TOTAL.
-    case '$empty':
-      return true;
-    // A null comparand makes these null PREDICATES too, not comparisons.
-    case '$eq':
-    case '$ne':
-      return value === null;
-    default:
-      return false;
-  }
-}
-
-/**
- * The guard one field constraint needs. A constraint is the AND of its
- * operators, so it is total when every operator is, and a NULL column satisfies
- * it only when it satisfies all of them.
- */
-function nullGuardForFieldSpec(spec: unknown): NullGuard {
-  // `{ field: null }` compiles to `IS NULL` — already total.
-  if (spec === null) return 'none';
-  // A scalar / Date is an implicit `=`; a NULL column fails it. A bare array is
-  // REFUSED by `compileField`; classifying it here keeps that refusal reachable
-  // (the unrewritten `{field: […]}` conjunct still throws its own message).
-  if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
-  const entries = Object.entries(spec as Record<string, unknown>);
-  // `{ field: {} }` and any non-`$` key are shapes `compileField` throws on.
-  // Passing them through unrewritten is what preserves the exact error; a guard
-  // wrapped around them would only change which message the caller sees.
-  if (entries.length === 0) return 'none';
-  let total = true;
-  let nullSatisfies = true;
-  for (const [op, value] of entries) {
-    if (!operatorIsNullTotal(op, value)) total = false;
-    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
-  }
-  if (total) return 'none';
-  return nullSatisfies ? 'allowNull' : 'requireValue';
-}
-
-/**
- * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
- * predicate — which is what makes `NOT (…)` mean here what it means in
- * `driver-memory`, `formula` and (since #5296) `driver-sql`.
- *
- * # Why the guard rides the LEAF, not the `NOT`
- *
- * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
- * NULL` are the same predicate. They stop being the same as soon as the operand
- * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
- * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
- * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
- * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
- * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
- * On an RLS lowering that difference is rows a policy excludes becoming visible,
- * so it is the whole reason this is a rewrite and not a suffix.
- *
- * # Why polarity is per operator
- *
- * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
- * `{$not: {a: {$ne: 5}}}` means "a is 5", and both JS backends exclude a NULL
- * row from it. Adding an unconditional null escape there would hand back exactly
- * the rows the scope excludes. So each leaf is guarded in the direction its own
- * operator answers, per {@link nullValueSatisfiesOperator}.
- *
- * The rewrite runs ONLY inside a `$not`; an ordinary comparison's SQL is
- * untouched, so nothing outside a negation changes shape. A nested `$not` is
- * left alone on purpose — its own branch totalises its operand, and
- * `NOT <total>` is itself total, so recursing would stack a redundant guard on
- * the same column.
- */
-function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const guarded: unknown[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
-      // A non-node element is passed through so `compileNode` still rejects it.
-      out[key] = value.map((element) => (isFilterNode(element) ? nullSafeNegationOperand(element) : element));
-      continue;
-    }
-    if (key.startsWith('$')) {
-      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
-      // whatever this compiler does with them today — the rewrite rules on NULL,
-      // not on the operator vocabulary, and an unknown one must still throw.
-      out[key] = value;
-      continue;
-    }
-    const guard = nullGuardForFieldSpec(value);
-    if (guard === 'none') {
-      out[key] = value;
-    } else if (guard === 'requireValue') {
-      // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
-      guarded.push({ [key]: { $null: false } }, { [key]: value });
-    } else {
-      // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the
-      // AND this node's keys form.
-      guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: value }] });
-    }
-  }
-  if (guarded.length > 0) {
-    const existing = Array.isArray(out.$and) ? out.$and : [];
-    out.$and = [...existing, ...guarded];
-  }
-  return out;
 }

@@ -9,6 +9,7 @@ import {
 } from '@objectstack/core';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { MIGRATION_JOURNAL_OBJECT } from '@objectstack/spec/system';
+import { isMissingTableError } from '@objectstack/types';
 
 /**
  * MigrationRecoveryPlugin — boot reconciliation for the ADR-0119 D2 migration
@@ -53,7 +54,9 @@ import { MIGRATION_JOURNAL_OBJECT } from '@objectstack/spec/system';
  * journal has no interrupted runs to find, and a warning there would train
  * operators to ignore this plugin's output, which is the one thing it cannot
  * afford. A scan that FAILS, by contrast, is reported: "I could not check" and
- * "there is nothing to find" are different answers.
+ * "there is nothing to find" are different answers. A journal object that is
+ * registered but whose TABLE does not exist yet (a read-only boot of a fresh
+ * database) is the second answer, not the first: no table, no runs (#21529).
  */
 export class MigrationRecoveryPlugin implements Plugin {
   readonly name = 'com.objectstack.migration-recovery';
@@ -88,6 +91,22 @@ export class MigrationRecoveryPlugin implements Plugin {
       try {
         interrupted = await findInterruptedRuns(engine);
       } catch (err) {
+        // [#21529] A journal table that does not exist holds no runs: no run
+        // was ever journalled on this database. That is "there is nothing to
+        // find", answered by the one shared predicate and only for the journal
+        // itself. A read-only CLI boot of a fresh project (`os migrate resume`
+        // and the other data commands) defers the table's DDL and lands here
+        // on every run, and a warning there trains operators to skim this
+        // plugin's output — the one thing the header says it cannot afford.
+        // ⛔ Any other refusal, a missing table it did not ask about included,
+        // is still "I could not check", below.
+        if (isMissingTableError(err, MIGRATION_JOURNAL_OBJECT)) {
+          logger?.debug?.(
+            `Migration journal scan: ${MIGRATION_JOURNAL_OBJECT} does not exist on this database yet, ` +
+              'so no migration run was ever journalled here — nothing to report.',
+          );
+          return;
+        }
         // "I could not check" is not "there is nothing to find".
         logger?.warn?.(
           `Migration journal scan failed; interrupted migrations (if any) were NOT detected this boot: ${

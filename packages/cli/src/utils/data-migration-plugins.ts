@@ -48,9 +48,11 @@ export async function buildDataMigrationPlugins(
   //
   // The plugin's journal scan rides along. Its measured effects here: a data
   // command booted over an interrupted run warns about that run on stderr
-  // before it does anything else, and a read-only boot of a database that has no
-  // journal table yet warns that it could not check. That database is one these
-  // commands already refuse, because the tables they read are not there either.
+  // before it does anything else. [#21529] A read-only boot of a database that
+  // has no journal table yet is silent: the scan reads the missing table as
+  // "no runs" (`isMissingTableError`, for that table only), and `resume`,
+  // `recorded-by` and `value-shapes` answer such a database with empty work
+  // instead of reading the tables their boot measured absent.
   const { MigrationRecoveryPlugin } = await import('@objectstack/runtime');
   plugins.push(new MigrationRecoveryPlugin());
   if (opts.audit === true) {

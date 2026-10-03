@@ -141,9 +141,15 @@ function makeProtocol(seedRows: Array<Partial<Row>> = []) {
 
 const metaRows = (rows: Map<string, Row>) => [...rows.values()].filter((r) => r.type !== undefined);
 
-/** Spec-valid `view` body, so the ONLY variable under test is the NAME. */
+/**
+ * Spec-valid `view` body, so the ONLY variable under test is the NAME.
+ *
+ * [#21470] It carries no `name` of its own: the door stamps the request name
+ * onto a view body that has none, and a body `name` that differed from the
+ * request name would now be refused by the write doors' name judge — a second
+ * variable this suite does not measure.
+ */
 const VIEW_BODY = {
-    name: 'probe_item',
     label: 'Probe',
     object: 'task',
     viewKind: 'list',

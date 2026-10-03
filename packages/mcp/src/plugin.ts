@@ -23,6 +23,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
 import {
@@ -265,7 +266,7 @@ export class MCPServerPlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['mcp'];
-  version = '1.0.0';
+  version = PACKAGE_VERSION;
   type = 'standard' as const;
   dependencies: string[] = [];
 
@@ -279,7 +280,7 @@ export class MCPServerPlugin implements Plugin {
   async init(ctx: PluginContext): Promise<void> {
     const config: MCPServerRuntimeConfig = {
       name: readEnvWithDeprecation('OS_MCP_SERVER_NAME', 'MCP_SERVER_NAME', { silent: true }) ?? this.options.name ?? 'objectstack',
-      version: this.options.version ?? '1.0.0',
+      version: this.options.version ?? DEFAULT_SERVER_VERSION,
       transport: (readEnvWithDeprecation('OS_MCP_SERVER_TRANSPORT', 'MCP_SERVER_TRANSPORT', { silent: true }) as 'stdio' | 'http') ?? this.options.transport ?? 'stdio',
       instructions: this.options.instructions,
       logger: ctx.logger,

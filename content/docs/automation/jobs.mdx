@@ -4,9 +4,11 @@ navTitle: Scheduled Jobs
 description: Run a TypeScript function on a cron, interval, or one-off schedule — and decide when a job is the right tool instead of a schedule-triggered flow.
 ---
 
-A **job** runs one named function in your bundle on a schedule. You declare the
-schedule as metadata; the platform's job service owns the timing, the retries,
-the per-attempt time limit, and the run history.
+A **job** runs work on a schedule. You declare the schedule as metadata; the
+platform's job service owns the timing, the retries, the per-attempt time limit,
+and the run history. The work is either a sandboxed [`body`](#the-job-body)
+that travels with the metadata — the preferred form — or, deprecated, the name of
+a function in your bundle (`handler`).
 
 {/* os:check */}
 ```typescript
@@ -37,10 +39,10 @@ writes carry*:
 
 | | `job` | `schedule`-type flow |
 |:---|:---|:---|
-| What runs | one TypeScript function from `defineStack({ functions })` | a node graph — record operations, `notify`, `http`, approvals, subflows |
+| What runs | a sandboxed `body`, or (deprecated) one TypeScript function from `defineStack({ functions })` | a node graph — record operations, `notify`, `http`, approvals, subflows |
 | Changeable after deploy | **No.** `job` is `allowRuntimeCreate: false` and `allowOrgOverride: false` — there is no "create job" in Studio and no per-tenant fork | Yes — a new flow can be authored through Studio / `PUT /meta` (`allowRuntimeCreate: true`) |
 | Identity of its data writes | whatever the handler does with the engine it is given | declared by [`runAs`](/docs/automation/flows) — and a `user` run that resolves no trigger user has its data operations **refused**, so a scheduled flow normally declares `runAs: 'system'` |
-| Retry / time limit | `retryPolicy` + `timeout` on the job, honoured by the job adapter | the flow's own error handling |
+| Retry / time limit | `retryPolicy` + `timeoutMs` on the job, honoured by the job adapter | the flow's own error handling |
 | Run history | `sys_job` + `sys_job_run` | `sys_automation_run` |
 
 **Rule of thumb:** if the work is a function you ship and version with your code,
@@ -133,6 +135,85 @@ interval adapter, a cron schedule is **registered but never executed** — the
 adapter says so at `warn` level on registration, because that is the difference
 between "no cron engine here" and a job that silently never runs.
 
+## The job body
+
+A job's `body` is the same sandboxed JavaScript body hooks and script actions
+carry — `{ language: 'js', source, capabilities }` — so the work travels with the
+metadata instead of living in a runtime module only some boots import. When a job
+declares both, `body` wins; `handler` is deprecated beside it. A job must declare
+at least one of the two.
+
+{/* os:check */}
+```typescript
+import { defineJob } from '@objectstack/spec';
+
+export const CloseStaleTasksJob = defineJob({
+  name: 'close_stale_tasks',
+  schedule: { type: 'cron', expression: '0 2 * * *', timezone: 'UTC' },
+  body: {
+    language: 'js',
+    source: `
+      const stale = await ctx.api.object('task').find({ where: { status: 'open' }, limit: 200 });
+      for (const t of stale) await ctx.api.object('task').update({ id: t.id, status: 'closed' });
+      ctx.log.info('closed stale tasks', { count: stale.length });
+    `,
+    capabilities: ['api.read', 'api.write', 'log'],
+  },
+  handler: 'closeStaleTasks', // deprecated — kept until the runtime runs job bodies (see below)
+  timeoutMs: 120000,
+});
+```
+
+<Callout type="warn">
+  **The runtime does not run a job `body` yet.** Scheduling a job's body is a
+  separate change that has not landed: until it does, a job is scheduled through
+  its `handler`, and a job with a `body` and no `handler` is skipped at boot with
+  a `warn`. `os validate` and `os build` say so wherever a `body` is set. Keep
+  `handler` beside `body` for now; the `body` is validated today, so it is ready
+  the day the runtime starts honouring it.
+</Callout>
+
+What running in the sandbox means for the code in `source`:
+
+- **No module scope.** `source` is the function body only: no `import` or
+  `require`, and no helper, constant or variable from the surrounding file — the
+  body is evaluated on its own, with the standard JavaScript globals and `ctx`.
+- **Data only under declared capabilities.** The body reaches records through
+  `ctx.api.object(…)`, and only with the tokens it declares: `api.read`,
+  `api.write`, `api.transaction`. Logging is `ctx.log`, under `log`. An undeclared
+  call throws at run time. Outbound HTTP is not available; use a Connector.
+- **Not the handler's context.** The `JobHandlerContext` a `handler` receives —
+  `ql`, `logger`, `bundle` — does not exist inside the sandbox. A handler is not
+  turned into a body by copying its source: rewrite its `ql.find(…)` reads as
+  `ctx.api.object(…).find(…)` and its `logger` calls as `ctx.log`.
+- **Only the JavaScript body.** The expression (L1) body hooks accept is refused
+  on a job: an expression performs no I/O, so its only effect would be a returned
+  value, and a job runs for its effects.
+
+`objectstack build` does not write a job's `body` for you: write it as data. The
+build cannot read the source of a function a `handler` names — `defineStack`
+parses `functions` into wrappers — and a handler written against
+`JobHandlerContext` would not run in the sandbox as it stands.
+
+### Time limit and long-running work
+
+A body job has **one** time limit, the job's `timeoutMs`. One attempt is one
+sandbox run, and the runtime bounds that run by `timeoutMs`; the `timeoutMs` a
+hook or action body can carry inside `body` is refused on a job, so the limit is
+never written twice. Unlike that body-level key, which is capped at 30 seconds,
+the job-level `timeoutMs` has no cap. Unlike a `handler` attempt, a sandbox run
+over its limit is stopped, not merely abandoned.
+
+So long-running work either **declares a `timeoutMs` that covers it**, or —
+usually better — **splits into bounded runs**: process a page of records per
+run (a `limit` on the read, as above) and let the schedule bring the next run,
+so each attempt finishes well inside its limit and a retry repeats one page
+rather than the whole sweep. Omit `timeoutMs` and a body run is still bounded by
+the sandbox's own default invocation limits, which are far shorter than a long
+sweep needs. A body also runs under the sandbox's per-run memory cap
+(`body.memoryMb`, at most 256), which is one more reason to page rather than load
+everything at once.
+
 ## The handler, and the ways it can fail to be one
 
 `handler` must match a key of `defineStack({ functions })`. At `kernel:ready`
@@ -221,11 +302,13 @@ Two defaults worth knowing before you rely on the block:
   count still means *no retry*. State a count to opt in.
 - **`backoffMultiplier` defaults to `1`** — a flat delay, not exponential.
 
-`timeout` is a **per-attempt** limit in milliseconds. An over-limit run is
+`timeoutMs` is a **per-attempt** limit in milliseconds. An over-limit run is
 recorded with status `timeout` and, being a failure, is retried like any other.
-JavaScript cannot forcibly cancel a running function, so the attempt is
+JavaScript cannot forcibly cancel a running function, so a `handler` attempt is
 *abandoned*, not killed — a handler that ignores its own cancellation can still
-be executing after the platform has moved on. Omit `timeout` for no limit.
+be executing after the platform has moved on. Omit `timeoutMs` for no
+per-attempt limit. For a job with a `body`, `timeoutMs` is also the limit of the
+sandbox run — see [Time limit and long-running work](#time-limit-and-long-running-work).
 
 ## Running on more than one node
 

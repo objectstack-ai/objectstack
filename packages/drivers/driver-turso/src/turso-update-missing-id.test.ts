@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14428] `RemoteTransport.update()` answers a missing id with `null`, so ONE
+ * [commit ca3fd4b1a] `RemoteTransport.update()` answers a missing id with `null`, so ONE
  * `TursoDriver` gives ONE answer to "update a row that is not there".
  *
  * # What was broken
@@ -17,7 +17,7 @@
  * miss. One driver, two answers, chosen by `isRemote` — the divergence class
  * this package has already paid for in #5769, #5903, #6203 and #8413.
  *
- * Since #13878 (PR #14434) `IDataDriver.update()` declares
+ * Since #13878 (commit 93940d492) `IDataDriver.update()` declares
  * `Promise[Record[string, unknown] | null]`, so the fabricated row is not a
  * second way of satisfying the declaration — it is the value the declaration
  * distinguishes from. Maintainer ruling 2026-09-03, posture A (`null`, not
@@ -107,8 +107,8 @@ import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './l
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
- * [#17879] MEASURED — `transportUpdateIsAny` below is a PHANTOM half against
- * a NESTED regression, and `ContainsAny` (#17876) does NOT close it. On disk,
+ * [commit eb9334915] MEASURED — `transportUpdateIsAny` below is a PHANTOM half against
+ * a NESTED regression, and `ContainsAny` (commit be5c60291) does NOT close it. On disk,
  * reverting only `RemoteTransport.update`:
  *
  *   door resolves to  `Record<string, unknown> | null`
@@ -119,7 +119,7 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
  *
  * `ContainsAny` distributes over the not-found arm, so the regressed door
  * answers `boolean`, which `= false` accepts. No swap was made; the two
- * measured repairs are in the #17879 report.
+ * measured repairs are in commit eb9334915's message.
  */
 /** Exact (mutual, non-`any`) type equality. */
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
@@ -257,7 +257,7 @@ describe('[#14428] both TursoDriver faces answer a missing id the same way', () 
     const localHit = await local.update('task', 't1', { title: 'after' });
     const remoteHit = await remote.update('task', 't1', { title: 'after' });
 
-    // [#14438] `update()` declares its not-found arm on both faces; the positive
+    // [commit 2200f8ec8] `update()` declares its not-found arm on both faces; the positive
     // control asserts the row arm before reading it (a narrowing assertion, not a `!`).
     assert(localHit !== null, 'local face answered the not-found arm for an existing id');
     assert(remoteHit !== null, 'remote face answered the not-found arm for an existing id');
