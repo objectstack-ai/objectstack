@@ -678,6 +678,63 @@ export function checkPageSourceCompleteness(
 }
 
 /**
+ * The page kinds whose `source` the metadata save door compiles at save —
+ * `html` and its deprecated alias `jsx` (ADR-0080) — and therefore the only
+ * kinds that carry `requires`: on these the platform derives the list from the
+ * compiled source and stores it (ADR-0080 §5). A `react` source is executed at
+ * render, never compiled at save (ADR-0081), and `full` / `slotted` pages have
+ * no source to derive from, so nothing derives the key there.
+ *
+ * The save door's own compile gate holds the same two kinds
+ * (`COMPILED_PAGE_KINDS` in `metadata-protocol`'s `runtime-authoring-gate.ts`).
+ */
+export const COMPILED_PAGE_KINDS = ['html', 'jsx'] as const;
+
+/**
+ * The `kind` ⇄ `requires` check attached to {@link PageSchema}: `requires` is
+ * accepted only on a page whose `kind` is one of {@link COMPILED_PAGE_KINDS}
+ * (ruling record 5964312254 on #21459, letter A). On a `react`, `full` or
+ * `slotted` page nothing derives it — the save door never compiles their
+ * source, and the Studio page editor drops the key on every save — so a
+ * written list there was a declaration the platform never honoured. It is
+ * refused at `requires`, naming the key, the page's kind and the compiled
+ * kinds.
+ *
+ * The KEY is refused, not its contents: an empty list on a non-compiled page
+ * is refused like a full one, since there is nothing for it to agree with.
+ *
+ * A `kind` that is absent is the spec default, `full`, which does not carry
+ * the key. `PageSchema` has already applied that default when this runs; a
+ * `.shape` mirror without the default reaches here with `kind` absent, and the
+ * same answer holds.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is: a downstream
+ * mirror that derives its schema from `PageSchema.shape` drops every
+ * object-level check, and re-attaches this one with
+ * `.superRefine(checkPageRequiresKind)`. `PageSchema` attaches this same
+ * binding — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageRequiresKind(
+  page: { kind?: string; requires?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (page.requires === undefined) return;
+  const kind = page.kind ?? 'full';
+  if ((COMPILED_PAGE_KINDS as readonly string[]).includes(kind)) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['requires'],
+    message:
+      `\`requires\` is refused on a \`kind: '${kind}'\` page`
+      + (kind === 'full' ? ' (`full` is also the kind of a page that omits `kind`)' : '')
+      + ': it exists only on the kinds whose source the platform compiles at save, `html` and its '
+      + 'deprecated alias `jsx`, where it is derived from the source and stored. On a '
+      + `\`${kind}\` page nothing derives it and nothing enforces it. Delete the key. `
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  });
+}
+
+/**
  * Page Schema
  * Defines a composition of components for a specific context.
  * Supports both platform pages (Salesforce FlexiPage style: record, home, app, utility)
@@ -933,16 +990,20 @@ export const PageSchema = lazySchema(() => strictObject({
     .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080 amendment 2026-06-30). Authoritative over `regions` in both."),
   /**
    * Plugin namespaces an html page's source uses (ADR-0080 §5; ADR-0048
-   * provenance). Derived from the source at save, so authors omit it. On a
-   * server that has the deployment's SDUI component manifest, the save door
-   * compiles a `kind: 'html'` page's source, refuses a written list that
-   * disagrees with it (a draft at its publish), and stores the derived one;
-   * at load, a stored page whose list names a plugin no manifest component
-   * carries is reported and still served. A server with no manifest judges
-   * neither, and says so at boot.
+   * provenance). Derived from the source at save, so authors omit it. The key
+   * exists only on the kinds whose source the save door compiles —
+   * {@link COMPILED_PAGE_KINDS}, `html` (alias `jsx`) — and is refused at
+   * parse on a `react`, `full` or `slotted` page, a page that omits `kind`
+   * included ({@link checkPageRequiresKind}). On a server that has the
+   * deployment's SDUI component manifest, the save door compiles a
+   * `kind: 'html'` page's source, refuses a written list that disagrees with
+   * it (a draft at its publish), and stores the derived one; at load, a stored
+   * page whose list names a plugin no manifest component carries is reported
+   * and still served. A server with no manifest judges neither, and says so at
+   * boot.
    */
   requires: z.array(z.string()).optional()
-    .describe("Plugin namespaces the page's source uses, derived from the source at save — omit it. On a server that has the deployment's SDUI component manifest, saving a kind==='html' page (alias 'jsx') compiles its source and stores the namespaces it uses here; a written list that disagrees with the source is refused (422 INVALID_METADATA, page-requires-disagrees-with-source) — on a draft save it is kept until the draft's publish, which refuses it. At load, a stored page whose list names a plugin no component in that manifest carries is reported, page and plugin named, and is still served. A server with no manifest checks neither and says so once at boot."),
+    .describe("Plugin namespaces the page's source uses, derived from the source at save — omit it. The key exists only on a kind==='html' page (alias 'jsx'), the kinds whose source is compiled at save; on a 'react', 'full' or 'slotted' page — and a page that omits kind, which is 'full' — it is refused at parse. On a server that has the deployment's SDUI component manifest, saving an html page compiles its source and stores the namespaces it uses here; a written list that disagrees with the source is refused (422 INVALID_METADATA, page-requires-disagrees-with-source) — on a draft save it is kept until the draft's publish, which refuses it. At load, a stored page whose list names a plugin no component in that manifest carries is reported, page and plugin named, and is still served. A server with no manifest checks neither and says so once at boot."),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `page` is a registered metadata type, so `MetadataPlugin`'s loader stamps
@@ -955,10 +1016,15 @@ export const PageSchema = lazySchema(() => strictObject({
   // `source` is silently inert — fail loudly at author time, never render empty.
   // Attached by identifier, not inlined: the export is the rule a `.shape`
   // mirror re-attaches (#16489), and it must be this binding, not a copy.
-  .superRefine(checkPageSourceCompleteness));
-// PageSchema's only cross-field rule is the ADR-0080 jsx-source completeness
-// check above. It once also required `recordReview`/`blankLayout` and `slots`
-// (all removed — unrendered roadmap / "required-but-unauthorable" Studio traps).
+  .superRefine(checkPageSourceCompleteness)
+  // ADR-0080 §5 (`requires`): the key exists only on the kinds whose source is
+  // compiled at save (#21459, ruling A). Attached by identifier for the same
+  // reason as the check above.
+  .superRefine(checkPageRequiresKind));
+// PageSchema's cross-field rules are the two `kind` checks above: the
+// ADR-0080/0081 source completeness check and the compiled-kind `requires`
+// check. It once also required `recordReview`/`blankLayout` and `slots` (all
+// removed — unrendered roadmap / "required-but-unauthorable" Studio traps).
 
 export type Page = z.input<typeof PageSchema>;
 /** Post-parse shape of {@link Page} — defaults applied, transforms run (ADR-0122). */

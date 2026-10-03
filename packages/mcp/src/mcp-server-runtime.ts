@@ -18,6 +18,7 @@ import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
 } from './metadata-completeness.js';
+import { DEFAULT_SERVER_VERSION } from './package-version.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
@@ -34,7 +35,7 @@ import { z } from 'zod';
 export interface MCPServerRuntimeConfig {
   /** Human-readable server name. */
   name?: string;
-  /** Server version (semver). */
+  /** Server version (semver). Defaults to the `@objectstack/mcp` package version. */
   version?: string;
   /** Optional instructions describing how to use the server. */
   instructions?: string;
@@ -959,7 +960,7 @@ export class MCPServerRuntime {
   constructor(config: MCPServerRuntimeConfig = {}) {
     this.config = {
       name: 'objectstack',
-      version: '1.0.0',
+      version: DEFAULT_SERVER_VERSION,
       transport: 'stdio',
       ...config,
     };
