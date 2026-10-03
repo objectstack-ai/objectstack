@@ -15,6 +15,7 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { absentTableReads } from '../../utils/absent-table-reads.js';
 
 /**
  * `os migrate account-issuer` — the PLAN leg of the `sys_account.issuer`
@@ -128,17 +129,34 @@ export default class MigrateAccountIssuer extends Command {
       );
 
       if (!flags.json) printStep('Scanning sys_account…');
-      const report = await probeAccountIdentityCollisions(engine as never, {
+
+      // [#21552] Not asked: the read-only boot above measured whether
+      // `sys_account` exists, and a table that does not exist holds no
+      // account, so no two rows collide. The probe reads through this view,
+      // which answers such a table with its true contents (no rows) without
+      // issuing the read. Read anyway, a project whose database does not exist
+      // yet was refused here with exit 1.
+      // ⛔ Only a table the boot MEASURED absent: any other refused read still
+      // throws the probe's refusal below and is never read as a clean table.
+      const reads = absentTableReads(stack);
+      const readEngine = engine as Parameters<typeof probeAccountIdentityCollisions>[0];
+      const readView: typeof readEngine = {
+        find: (object, query, options) =>
+          reads.absent(object) ? Promise.resolve([]) : readEngine.find(object, query, options),
+      };
+      const report = await probeAccountIdentityCollisions(readView, {
         ...(flags['max-records'] != null ? { max: flags['max-records'] } : {}),
       });
 
       if (flags.json) {
+        reads.notice(true);
         await emitJson({ database: stack.dbLabel, ...report, duration: timer.elapsed() });
         if (!report.ok) this.exit(1);
         return;
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      reads.notice(false);
       console.log('');
       console.log(formatAccountIdentityPreflightReport(report));
       console.log('');
