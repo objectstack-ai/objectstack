@@ -89,7 +89,7 @@ const object = (name: string) => ObjectSchema.create({
 
 const fixture = defineStack({
   manifest: {
-    id: 'com.example.dogfood_default_form',
+    id: 'com.example.dogfood-default-form',
     namespace: 'crm',
     version: '0.0.1',
     type: 'app',
