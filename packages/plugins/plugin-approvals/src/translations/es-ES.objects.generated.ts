@@ -253,7 +253,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       actor_id: {
-        label: "Actor"
+        label: "Actor",
+        help: "El usuario que realizó esta acción. Vacío cuando no hay ninguna persona registrada: una acción iniciada por el sistema, o una decisión registrada antes de que se capturara al usuario que decidió, que sigue mostrando el turno en calidad del cual se tomó."
+      },
+      acted_as: {
+        label: "Actuó como",
+        help: "El turno de aprobación pendiente en calidad del cual se realizó esta acción, con la grafía almacenada del turno: un ID de usuario, un correo electrónico o una dirección de puesto. Vacío cuando ningún turno admitió la acción, como las acciones propias del solicitante, las acciones del sistema y las anulaciones de administrador."
       },
       comment: {
         label: "Comentario"

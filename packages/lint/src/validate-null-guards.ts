@@ -594,11 +594,12 @@ export type NullGuardOutcome =
 
 const OUTCOME_CLAUSE: Record<NullGuardOutcome, string> = {
   'fail-closed':
-    'so the rule enforces nothing and the write is rejected fail-closed (#4649/#4763)',
+    'so the rule enforces nothing and the write is rejected fail-closed (a predicate that cannot ' +
+    'evaluate refuses the write rather than being skipped)',
   'fail-open':
     'so the predicate is SKIPPED fail-open — the field is never actually required, the write ' +
     'proceeds unchecked, and the only trace is a `requiredWhen … failed to evaluate — skipped` ' +
-    'log line (#4649/#4811)',
+    'log line',
 };
 
 /**

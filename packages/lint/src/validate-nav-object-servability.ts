@@ -164,7 +164,7 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
                 + `platform administrators included, since that gate reads only the object's \`enable\` `
                 + `block and never the caller. The entry cannot be rescued with `
                 + `\`requiredPermissions\`: they are independent conditions. The server prunes this `
-                + `entry from the served \`/meta\` payload (#7912), so publishing it ships a menu row `
+                + `entry from the served \`/meta\` payload, so publishing it ships a menu row `
                 + `that silently is not there.`,
               hint:
                 `Remove the nav entry, or make "${target}" listable by setting \`enable.apiEnabled: true\` `

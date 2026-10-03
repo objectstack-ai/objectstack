@@ -9,8 +9,9 @@
  * Since #16019 the raw-SQL seam declares its own fault: `DATABASE_ERROR` / 500,
  * a COMPOSED message that discloses neither the statement nor the diagnostic,
  * and the dialect error whole under a non-enumerable `cause`. On a LIVE console
- * that costs nothing — the driver writes the statement and the dialect text to
- * its warn sink one line earlier. In a STORED record it costs everything:
+ * that costs nothing — the driver writes the dialect's diagnostic to its warn
+ * sink one line earlier, with the statement and its bound values cut (#21385).
+ * In a STORED record it costs everything:
  * whoever reads a backfill's `detail` a week later never had that line, so
  * *"no such column: foo"* was replaced, irrecoverably for them, by *"the
  * database refused to run a raw statement"*.
@@ -43,23 +44,34 @@
 import { describe, expect, it } from 'vitest';
 
 import { operatorFacingErrorText } from './driver-error-classification.js';
+import { redactStatementFromMessage } from './driver-fault-redaction.js';
 
 /** `rawStatementFaultError`'s composed message, verbatim (`sql-driver.ts`). */
 const RAW_PATH_COMPOSED =
     'The database refused to run a raw statement. The driver could not attribute the failure ' +
     'to any part of the request, so no verdict about the statement is claimed here. The ' +
-    "backend's own diagnostic and the statement were written to the server log for an " +
-    'operator to read.';
+    "backend's own diagnostic was written to the server log for an operator to read, with " +
+    'the statement and its bound values cut.';
 
 /** `backendStatementFaultError`'s composed message — the READ exit, not this one. */
 const READ_EXIT_COMPOSED =
     "The database refused to run this query for object 'crm_case'. The driver could not " +
     'attribute the failure to any part of the request, so no verdict about the query is ' +
-    "claimed here. The backend's own diagnostic and the compiled statement were written " +
-    'to the server log for an operator to read.';
+    "claimed here. The backend's own diagnostic was written to the server log for an " +
+    'operator to read, with the compiled statement and its bound values cut.';
 
 /** knex 3.3.0 + better-sqlite3: `<formatted statement> - <engine diagnostic>`. */
 const DIALECT_TEXT = 'select "foo" from "sys_metadata" - no such column: foo';
+
+/**
+ * [#21418] What the helper answers for text it reached BELOW the raw-path
+ * sentence: THE driver-fault cut's own answer, under the rule the driver's raw
+ * terminal writes its log line by. Asserted as identity with the cutter rather
+ * than as a spelled-out string, so these cases pin "one cutter, one rule" and
+ * never the cutter's marker wording.
+ */
+const cutBelowRawPath = (text: string): string =>
+    redactStatementFromMessage(text, { statementSent: true });
 
 interface Declared extends Error {
     code?: string;
@@ -97,9 +109,11 @@ describe('[#16657] operatorFacingErrorText — the raw-path envelope', () => {
         expect(thrown.message).toBe(RAW_PATH_COMPOSED);
         expect(thrown.message).not.toContain('no such column');
 
-        // AFTER — the record an operator reads names the column.
-        expect(operatorFacingErrorText(thrown)).toBe(DIALECT_TEXT);
+        // AFTER — the record an operator reads names the column, and [#21418]
+        // carries the dialect's diagnostic, not the statement that led it.
+        expect(operatorFacingErrorText(thrown)).toBe(cutBelowRawPath(DIALECT_TEXT));
         expect(operatorFacingErrorText(thrown)).toContain('no such column: foo');
+        expect(operatorFacingErrorText(thrown)).not.toContain('select "foo" from');
     });
 
     it('walks PAST a nested wrapper that re-composed the same sentence', () => {
@@ -108,7 +122,7 @@ describe('[#16657] operatorFacingErrorText — the raw-path envelope', () => {
         // strand the dialect text one level deeper than the walk looks.
         const thrown = rawStatementFault(rawStatementFault(dialectError()));
 
-        expect(operatorFacingErrorText(thrown)).toBe(DIALECT_TEXT);
+        expect(operatorFacingErrorText(thrown)).toBe(cutBelowRawPath(DIALECT_TEXT));
     });
 
     it('skips a node that carries no message channel at all', () => {
@@ -120,7 +134,7 @@ describe('[#16657] operatorFacingErrorText — the raw-path envelope', () => {
             configurable: true,
         });
         // The intermediate node says nothing; the one below it does.
-        expect(operatorFacingErrorText(silent)).toBe(DIALECT_TEXT);
+        expect(operatorFacingErrorText(silent)).toBe(cutBelowRawPath(DIALECT_TEXT));
     });
 
     it('reads a cause that is a bare string, not an Error', () => {
@@ -229,6 +243,142 @@ describe('[#16657] operatorFacingErrorText — the depth bound actually bounds',
         let atBound: Declared = rawStatementFault(dialectError());
         for (let i = 0; i < 3; i += 1) atBound = rawStatementFault(atBound);
 
-        expect(operatorFacingErrorText(atBound)).toBe(DIALECT_TEXT);
+        expect(operatorFacingErrorText(atBound)).toBe(cutBelowRawPath(DIALECT_TEXT));
+    });
+});
+
+/**
+ * [#21418] The family's fourth position: the helper's answer is cut by
+ * construction, through THE driver-fault cut and no copy of it.
+ *
+ * Every fixture below binds one synthetic sentinel into a raw statement the
+ * way knex prints it on SQLite and MySQL, `<statement, values inlined> -
+ * <diagnostic>`, or inlines it where a dialect's own diagnostic carries a value
+ * (MySQL's duplicate entry, PostgreSQL's invalid input syntax). Each case
+ * asserts, in this order: the fixture really carries the sentinel on the
+ * `cause` the helper reads (so its absence afterwards is a measurement, not a
+ * property of the fixture); the helper's answer carries none of it; and the
+ * dialect's diagnostic survives in that answer. The real producer's leg —
+ * a real `SqlDriver.execute()` refusal with the sentinel bound — is
+ * `driver-sql`'s `sql-driver-16657-operator-facing-cause-text.test.ts`.
+ */
+describe('[#21418] operatorFacingErrorText — a bound value reaches no carrier through the helper', () => {
+    /** Synthetic, and asserted ABSENT from every answer below. */
+    const SENTINEL = 'SENTINEL-21418-BOUND-VALUE';
+
+    /** The `cause` message, read before the helper runs: the non-vacuity leg. */
+    const causeMessageOf = (thrown: Declared): string =>
+        String((thrown as { cause?: { message?: unknown } }).cause?.message ?? '');
+
+    const RAW_PATH_CELLS: Array<[label: string, dialect: string, diagnostic: string]> = [
+        [
+            'SQLite, a statement opening with a verb the shared leak predicate lists',
+            `insert into "crm_account" ("name", "email") values ('Acme', '${SENTINEL}') - ` +
+                'UNIQUE constraint failed: crm_account.email',
+            'UNIQUE constraint failed: crm_account.email',
+        ],
+        [
+            // The predicate reads neither the verb nor this diagnostic (#21345's
+            // class): only the walk's knowledge that a statement was SENT cuts it.
+            'SQLite, a statement opening with a verb the predicate does not list',
+            `with s as (select '${SENTINEL}' as v) select translate(v) from s - ` +
+                'no such function: translate',
+            'no such function: translate',
+        ],
+        [
+            'MySQL, the value inlined in the statement AND in its own diagnostic',
+            `insert into \`crm_account\` (\`email\`) values ('${SENTINEL}') - ` +
+                `Duplicate entry '${SENTINEL}' for key 'crm_account.email'`,
+            "for key 'crm_account.email'",
+        ],
+        [
+            'PostgreSQL, the value inlined in its own diagnostic only',
+            'insert into "crm_account" ("age") values ($1) - ' +
+                `invalid input syntax for type integer: "${SENTINEL}"`,
+            'invalid input syntax for type integer',
+        ],
+    ];
+
+    for (const [label, dialect, diagnostic] of RAW_PATH_CELLS) {
+        it(`the raw-path envelope: ${label}`, () => {
+            const thrown = rawStatementFault(dialectError(dialect));
+            expect(causeMessageOf(thrown)).toContain(SENTINEL);
+
+            const answer = operatorFacingErrorText(thrown);
+
+            expect(answer).not.toContain(SENTINEL);
+            expect(answer).toContain(diagnostic);
+            // One cutter, one rule: the answer IS the cut the driver's own
+            // raw-terminal line writes for this fault.
+            expect(answer).toBe(cutBelowRawPath(dialect));
+        });
+    }
+
+    it('a re-wrapped envelope, and a dialect text at the depth bound, are cut the same way', () => {
+        const dialect = RAW_PATH_CELLS[1][1];
+        let atBound: Declared = rawStatementFault(dialectError(dialect));
+        for (let i = 0; i < 3; i += 1) atBound = rawStatementFault(atBound);
+
+        for (const thrown of [rawStatementFault(rawStatementFault(dialectError(dialect))), atBound]) {
+            const answer = operatorFacingErrorText(thrown);
+            expect(answer).not.toContain(SENTINEL);
+            expect(answer).toContain('no such function: translate');
+        }
+    });
+
+    it('a `cause` that is a bare string is cut the same way', () => {
+        const dialect = RAW_PATH_CELLS[0][1];
+        const answer = operatorFacingErrorText(rawStatementFault(dialect));
+
+        expect(answer).not.toContain(SENTINEL);
+        expect(answer).toBe(cutBelowRawPath(dialect));
+    });
+
+    it('an UNDECLARED driver dump is cut by the shared leak predicate, as the engine\'s own log line is', () => {
+        // No raw-path sentence above it, so the walk knows nothing about where
+        // the text came from: the predicate's verdict decides, exactly as it
+        // does for `redactBoundStatement`'s log line.
+        const dump = dialectError(`update "crm_account" set "email" = '${SENTINEL}' - NOT NULL constraint failed: crm_account.name`);
+        dump.code = 'SQLITE_CONSTRAINT';
+        expect(dump.message).toContain(SENTINEL);
+
+        const answer = operatorFacingErrorText(dump);
+
+        expect(answer).not.toContain(SENTINEL);
+        expect(answer).toContain('NOT NULL constraint failed: crm_account.name');
+        expect(answer).toBe(redactStatementFromMessage(dump.message));
+    });
+
+    it('the thrown value is not touched: its code, status, class and cause reach every other reader as composed', () => {
+        class DialectFault extends Error {}
+        const cause = new DialectFault(RAW_PATH_CELLS[0][1]);
+        const thrown = rawStatementFault(cause);
+        const before = { message: thrown.message, stack: thrown.stack, causeStack: cause.stack };
+
+        expect(operatorFacingErrorText(thrown)).not.toContain(SENTINEL);
+
+        // The cut is of the ANSWER. Classifiers downstream (`isMissingTableError`,
+        // `classifyIndexFailure`) read the error object, so it must not move.
+        expect(thrown.message).toBe(before.message);
+        expect(thrown.stack).toBe(before.stack);
+        expect(thrown.code).toBe('DATABASE_ERROR');
+        expect(thrown.status).toBe(500);
+        expect((thrown as { cause?: unknown }).cause).toBe(cause);
+        expect(cause).toBeInstanceOf(DialectFault);
+        expect(cause.message).toBe(RAW_PATH_CELLS[0][1]);
+        expect(cause.stack).toBe(before.causeStack);
+    });
+
+    it('CONTROL: text that is no driver dump comes back byte-identical, empty text included', () => {
+        // The cut narrows WHAT is written, never whether: the answers the
+        // sections above pin for non-dump text are unchanged by it.
+        expect(operatorFacingErrorText(rawStatementFault('no such table: sys_metadata'))).toBe(
+            'no such table: sys_metadata',
+        );
+        expect(operatorFacingErrorText(new Error('connection terminated unexpectedly'))).toBe(
+            'connection terminated unexpectedly',
+        );
+        expect(operatorFacingErrorText(rawStatementFault(undefined))).toBe(RAW_PATH_COMPOSED);
+        expect(operatorFacingErrorText('')).toBe('');
     });
 });
