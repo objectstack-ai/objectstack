@@ -170,8 +170,9 @@ export const CloseStaleTasksJob = defineJob({
   job's `body` through the same binder. A `handler` is code: it travels only in the
   artifact's runtime module, so it runs only on a boot that loads that module (a
   config, or `os start --artifact`). `os package install` therefore refuses a
-  package whose enabled job has no `body`, with `422 VALIDATION_ERROR` and the
-  remedy: give the job a `body`, or boot it with `os start --artifact`.
+  package whose enabled job has no `body`, or a `body` that does not bind (an
+  expression body, or one carrying `body.timeoutMs`), with `422 VALIDATION_ERROR`
+  and the remedy: give the job a valid `body`, or boot it with `os start --artifact`.
   Uninstalling a package stops its scheduled jobs at once, and a reinstall whose
   new version drops a job stops that job.
 </Callout>
