@@ -1,20 +1,4 @@
 {
- "packages/plugins/plugin-audit/src/audit-writers.ts": {
-  "#5226": 1
- },
- "packages/plugins/plugin-sharing/src/share-link-service.ts": {
-  "#5190": 1
- },
- "packages/plugins/plugin-sharing/src/sharing-rule-service.ts": {
-  "#7795": 1,
-  "#8158": 1
- },
- "packages/plugins/plugin-sharing/src/sharing-service.ts": {
-  "#5103": 1,
-  "#5493": 1,
-  "#5973": 1,
-  "#6428": 1
- },
  "packages/services/service-analytics/src/analytics-service.ts": {
   "#3867": 1,
   "#5222": 1,

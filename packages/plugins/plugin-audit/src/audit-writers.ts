@@ -971,8 +971,9 @@ function auditWriteFailureLine(f: {
         '`OS_SKIP_SCHEMA_SYNC` creates it out-of-band instead). (2) Otherwise it was created on a DIFFERENT ' +
         'datasource than the one this write reached: its ADR-0057 §3.6 lifecycle class routes it to the ' +
         'dedicated `telemetry` datasource whenever one is registered (`os dev` provisions one by default as a ' +
-        'SIBLING SQLite file) — see framework#5226. Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed ' +
-        'object on the primary datasource.'
+        'SIBLING SQLite file), so on a fresh `os dev` boot the table exists in that sibling file and not in the ' +
+        'primary one; look there before concluding it was never created. Set `OS_TELEMETRY_DB=0` to keep ' +
+        'every lifecycle-classed object on the primary datasource.'
       : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
         'on — every audited write that hits it loses its row until it is resolved.';
   return consequence + once + fix;
