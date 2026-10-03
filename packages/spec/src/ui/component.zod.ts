@@ -54,10 +54,9 @@ import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-// [#21464] `object-metric.aggregate` takes the chart aggregate's own `field`
-// and `function` members and its `groupBy` union by reference — one vocabulary
-// for the tile and the chart; only the shape's `groupBy` optionality differs.
-import { ChartAggregateSchema, ChartGroupBySchema } from './chart.zod';
+// [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
+// `groupBy` union, by reference — the tile routes it exactly as the chart does.
+import { ChartGroupBySchema } from './chart.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
@@ -4403,28 +4402,42 @@ export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
  * (`:405-423`, `objectAggregateSpecQuery`) and is floored at the one `'_all'`
  * bucket when absent (`:427`).
  *
- * Each member is the chart's own declaration, by reference: `field` and
- * `function` are `ChartAggregateSchema`'s (the tile's own type names its
- * function vocabulary as that one, `ChartAggregate['function']`, at `:47`),
- * and `groupBy` is `ChartGroupBySchema` (the tile types it as
- * `ChartAggregate['groupBy']`, `:150`). The SHAPE is not the chart's: the chart
- * requires `groupBy`, because an ungrouped chart draws nothing, and a metric
- * paints one number and floors an absent one — every authored `object-metric`
- * in the showcase writes `{ field, function }` with no `groupBy`, and the
- * chart's own header records that the ungrouped need is this block's. So
- * `groupBy` is optional here and nothing else differs.
+ * The vocabulary is declared elsewhere, by reference; the SHAPE is the tile's
+ * own:
  *
- * The one rule the chart's shape carries is restated: a function other than
- * `count` needs a `field` (the tile asks the server for `<field>_<function>`,
- * and the client-side fallback sums `undefined`). The companion pin holds the
- * two verdicts equal over the whole vocabulary, so the copy cannot drift.
+ * - `function` is the query AST's {@link AggregationFunction} — the engine's
+ *   six, `count_distinct` among them. The tile forwards it to the data source
+ *   verbatim (`<field>_<function>` on the analytics wire, which answers
+ *   `_count_distinct`; the function itself on the spec-shape query), and
+ *   objectui's own pin of the unit rule classifies one row per member of that
+ *   enum and mounts each (`__tests__/ObjectMetricWidget.countNotCurrency-10356.test.tsx:102-124`),
+ *   so a `count_distinct` tile is drawn. The chart's five-function subset
+ *   (`ChartAggregateFunctionSchema`) is NOT this vocabulary: the chart leaves
+ *   `count_distinct` out because the client-side fallback cannot compute it,
+ *   and that fallback sums a `count_distinct` on the metric too — but the tile
+ *   reads and draws it wherever the analytics service answers it, so the
+ *   five would refuse a value the tile draws.
+ * - `groupBy` is the chart's {@link ChartGroupBySchema} — the tile types it as
+ *   `ChartAggregate['groupBy']` (`:150`) and routes its object arm the way the
+ *   chart does. Optional here: the chart requires it because an ungrouped chart
+ *   draws nothing, while a metric paints one number and floors an absent one —
+ *   every authored `object-metric` in the showcase writes `{ field, function }`
+ *   with no `groupBy`, and the chart's own header records that the ungrouped
+ *   need is this block's. That is also why the row does not take
+ *   `ChartAggregateSchema` whole: it would refuse every one of those tiles.
+ *
+ * The one rule the chart's aggregate carries is restated: a function other
+ * than `count` needs a `field` (the tile asks the server for
+ * `<field>_<function>`, and the client-side fallback sums `undefined`). The
+ * companion pin holds the two verdicts equal over the chart's vocabulary, so
+ * the copy cannot drift.
  */
 const ObjectMetricAggregateSchema = lazySchema(() => strictObject({
   surface: 'this `object-metric` aggregate',
   history:
     'Until this shape was declared, `aggregate` was `z.unknown()`: a string such as `\'count\'`, a function '
-    + 'outside the five, or `groupby` for `groupBy` passed, and the tile asked the server for a measure it '
-    + 'could not answer, or drew one ungrouped number.',
+    + 'the engine does not have, or `groupby` for `groupBy` passed, and the tile asked the server for a measure '
+    + 'it could not answer, or drew one ungrouped number.',
   guidance: {
     dateGranularity:
       '`dateGranularity` goes INSIDE `groupBy`, not beside it — write `groupBy: { field: "<date field>", dateGranularity: "month" }`.',
@@ -4434,8 +4447,9 @@ const ObjectMetricAggregateSchema = lazySchema(() => strictObject({
       '`objectName` is the metric\'s own member, one level up — the aggregate runs against it and does not name it again.',
   },
 }, {
-  field: ChartAggregateSchema.shape.field,
-  function: ChartAggregateSchema.shape.function,
+  field: z.string().optional()
+    .describe('Field to aggregate — required for every function but `count`, which counts rows'),
+  function: AggregationFunction.describe('Aggregation function — `count`, `sum`, `avg`, `min`, `max` or `count_distinct`'),
   groupBy: ChartGroupBySchema.optional()
     .describe('Field the rows are grouped by, or a `{ field, dateGranularity }` date-bucket node. Omit it for the one number over every row (`_all`)'),
 }).superRefine((agg, ctx) => {
@@ -4575,7 +4589,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
     .optional().describe('Icon container color variant'),
   /** [#21464] The query behind the number — see {@link ObjectMetricAggregateSchema}. */
   aggregate: ObjectMetricAggregateSchema.optional()
-    .describe('Aggregation run against the object: `{ field?, function, groupBy? }` — `function` one of count / sum / avg / min / max (`field` needed for all but count), `groupBy` a field name or a `{ field, dateGranularity }` node, absent for one number over every row'),
+    .describe('Aggregation run against the object: `{ field?, function, groupBy? }` — `function` one of count / sum / avg / min / max / count_distinct (`field` needed for all but count), `groupBy` a field name or a `{ field, dateGranularity }` node, absent for one number over every row'),
   /**
    * Filter the aggregation is scoped by — the `ViewFilterRule` ARRAY form,
    * the one filter orthography every `filter` door in this map shares (#15449,

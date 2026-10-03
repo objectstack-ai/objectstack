@@ -13,8 +13,8 @@
  *
  * Both members are read with one shape (measured at the `.objectui-sha` pin
  * `89cad75d55`; the read points are in the schemas' docblocks), and the row
- * declared them `z.unknown()`. So `aggregate: 'count'`, a function outside the
- * five, `groupby` for `groupBy`, a bare `trend: 'up'` and a `trend` with no
+ * declared them `z.unknown()`. So `aggregate: 'count'`, a function the engine
+ * does not have, `groupby` for `groupBy`, a bare `trend: 'up'` and a `trend` with no
  * `value` all passed the component-props gate, and the tile asked the server
  * for a measure it could not answer, drew one ungrouped number, or painted a
  * lone `%` — with no report.
@@ -27,11 +27,12 @@
  *   when the door refuses everything.
  * - §2 THE REFUSALS: an off-shape value of each member is refused with the
  *   code AND the path, so a refusal for the wrong reason reds.
- * - §3 ONE VOCABULARY: `aggregate`'s `field` and `function` are the chart
- *   aggregate's own members and its `groupBy` the chart's own union, by
+ * - §3 ONE VOCABULARY: `aggregate`'s `function` is the query AST's
+ *   `AggregationFunction` and its `groupBy` the chart's own union, by
  *   identity; the one rule restated here (a function other than `count` needs
- *   a `field`) answers exactly as the chart's does, over the whole vocabulary.
- *   `trend` declares exactly the three members the badge draws.
+ *   a `field`) answers exactly as the chart aggregate's does, over the chart's
+ *   vocabulary, and `count_distinct` needs a field too. `trend` declares
+ *   exactly the three members the badge draws.
  * - §4 THE REGISTRATION: the ADR-0087 D3 entry step 18 carries.
  *
  * The enumeration pin (`component-props-unknown-members.pin.test.ts`) holds the
@@ -44,6 +45,7 @@ import type { z } from 'zod';
 
 import { ComponentPropsMap, ObjectMetricPropsSchema } from './component.zod';
 import { ChartAggregateSchema, ChartAggregateFunctionSchema, ChartGroupBySchema } from './chart.zod';
+import { AggregationFunction } from '../data/query.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
@@ -70,6 +72,9 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     ['an average', { aggregate: { field: 'amount', function: 'avg' } }],
     ['a minimum', { aggregate: { field: 'amount', function: 'min' } }],
     ['a maximum', { aggregate: { field: 'amount', function: 'max' } }],
+    // objectui's unit-rule pin mounts one tile per engine function, `count_distinct` among them
+    // (`plugin-dashboard/src/__tests__/ObjectMetricWidget.countNotCurrency-10356.test.tsx:102-124`).
+    ['a distinct count', { aggregate: { field: 'amount', function: 'count_distinct' } }],
     ['a sum grouped by a field', { aggregate: { field: 'amount', function: 'sum', groupBy: 'stage' } }],
     ['a sum bucketed by month', { aggregate: { field: 'amount', function: 'sum', groupBy: MONTHLY } }],
     ['a fieldless count bucketed by month', { aggregate: { function: 'count', groupBy: MONTHLY } }],
@@ -108,7 +113,9 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
 describe('§2 each member refuses an off-shape value', () => {
   const REFUSED: ReadonlyArray<readonly [label: string, props: Record<string, unknown>, code: string, path: string]> = [
     ['a bare-string aggregate', { aggregate: 'count' }, 'invalid_type', 'aggregate'],
-    ['a function outside the five', { aggregate: { field: 'amount', function: 'count_distinct' } }, 'invalid_value', 'aggregate.function'],
+    ['a function the engine does not have', { aggregate: { field: 'amount', function: 'median' } }, 'invalid_value', 'aggregate.function'],
+    ['a retired function', { aggregate: { field: 'name', function: 'string_agg' } }, 'invalid_value', 'aggregate.function'],
+    ['a distinct count with no field', { aggregate: { function: 'count_distinct' } }, 'custom', 'aggregate.field'],
     ['a sum with no field', { aggregate: { function: 'sum' } }, 'custom', 'aggregate.field'],
     ['`groupby` for `groupBy`', { aggregate: { field: 'amount', function: 'sum', groupby: 'stage' } }, 'unrecognized_keys', 'aggregate'],
     ['`dateGranularity` beside `groupBy`', { aggregate: { field: 'closed_at', function: 'count', dateGranularity: 'month' } }, 'unrecognized_keys', 'aggregate'],
@@ -145,13 +152,13 @@ describe('§2 each member refuses an off-shape value', () => {
 // §3 one vocabulary, not a copy of it
 // ───────────────────────────────────────────────────────────────────────────
 
-describe('§3 `aggregate` holds the chart aggregate\'s own members, and `trend` the badge\'s three', () => {
+describe('§3 `aggregate` holds the engine\'s functions and the chart\'s `groupBy`, and `trend` the badge\'s three', () => {
   const aggregate = () => ObjectMetricPropsSchema.shape.aggregate.unwrap();
   const trend = () => ObjectMetricPropsSchema.shape.trend.unwrap();
 
-  it('`field` and `function` are the chart aggregate\'s own members — the same defs', () => {
-    expect(aggregate().shape.field._zod.def).toBe(ChartAggregateSchema.shape.field._zod.def);
-    expect(aggregate().shape.function._zod.def).toBe(ChartAggregateSchema.shape.function._zod.def);
+  it('`function` is the query AST\'s own aggregation vocabulary — the same def, a superset of the chart\'s', () => {
+    expect(aggregate().shape.function._zod.def).toBe(AggregationFunction._zod.def);
+    expect(ChartAggregateFunctionSchema.options.filter((fn) => !AggregationFunction.options.includes(fn))).toEqual([]);
   });
 
   it('`groupBy` is the chart\'s own union — the same def — and the one member made optional', () => {
@@ -164,7 +171,7 @@ describe('§3 `aggregate` holds the chart aggregate\'s own members, and `trend` 
     expect(Object.keys(aggregate().shape).sort()).toEqual(['field', 'function', 'groupBy']);
   });
 
-  it('answers the count-needs-no-field rule exactly as the chart does, over the whole vocabulary', () => {
+  it('answers the count-needs-no-field rule exactly as the chart aggregate does, over the chart\'s vocabulary', () => {
     const fieldIssue = (r: z.ZodSafeParseResult<unknown>) =>
       issues(r).filter((i) => i.path === 'field').map((i) => i.code);
     for (const fn of ChartAggregateFunctionSchema.options) {

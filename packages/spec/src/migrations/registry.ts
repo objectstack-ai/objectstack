@@ -6259,9 +6259,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ComponentPropsMap` `z.unknown()` close-out): `aggregate` and `trend` were `z.unknown()`, although '
       + 'the tile reads each with one shape, so `aggregate: \'count\'` and a trend with no `value` passed '
       + 'every door, and the tile asked the server for a measure it does not have, or painted a lone `%`. '
-      + '`aggregate` takes the chart aggregate\'s own `field` and `function` members and `groupBy` union by '
-      + 'reference, with `groupBy` optional because a metric is one number; `trend` takes the badge\'s '
-      + 'measured shape. `drillDown` and `compareTo` stay open: each by-reference candidate declares a key '
+      + '`aggregate` takes the query AST\'s aggregation functions and the chart aggregate\'s `groupBy` '
+      + 'union by reference, with `groupBy` optional because a metric is one number; `trend` takes the '
+      + 'badge\'s measured shape. `drillDown` and `compareTo` stay open: each by-reference candidate declares a key '
       + 'the tile never reads (the chart drill-down\'s `filter`, the dashboard comparison\'s `dimension`), and '
       + 'the chart drill-down refuses the `report` the tile draws, so each waits on a ruling. Read by the '
       + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is '
@@ -19913,10 +19913,10 @@ const step18: MigrationStep = {
     // #21464 — two members of the `object-metric` page block were `z.unknown()`
     // although the tile reads each with a fixed shape, so an off-shape value passed
     // the component-props gate and the tile asked the server for a measure it could
-    // not answer or drew an empty badge, in silence. `aggregate` now takes the chart
-    // aggregate's own `field` / `function` members and `groupBy` union by reference
-    // (only `groupBy` is optional: a metric is one number), and `trend` the badge's
-    // measured shape. `drillDown` and `compareTo` are held at `z.unknown()`: each
+    // not answer or drew an empty badge, in silence. `aggregate` now takes the query
+    // AST's aggregation functions and the chart aggregate's `groupBy` union by
+    // reference (`groupBy` optional: a metric is one number), and `trend` the
+    // badge's measured shape. `drillDown` and `compareTo` are held at `z.unknown()`: each
     // by-reference candidate disagrees with the tile's read (the chart's drill-down
     // declares `filter`, which the tile never reads, and refuses `report`, which it
     // draws; the dashboard widget's comparison declares `dimension`, never read on
@@ -19930,22 +19930,23 @@ const step18: MigrationStep = {
       surface: 'page `object-metric` components — `properties.aggregate` and `.trend` (which used to accept any '
         + 'value)',
       replacement: 'the shape the tile reads: `aggregate` `{ field?, function, groupBy? }`, with `function` one of '
-        + '`count`, `sum`, `avg`, `min` or `max`, a `field` for every function but `count`, and `groupBy` a field '
-        + 'name or a `{ field, dateGranularity?, alias? }` date-bucket node — the chart aggregate\'s own members, '
-        + 'with `groupBy` optional; `trend` `{ value, label?, direction? }`, with `value` a number, `label` a string '
+        + 'the engine\'s `count`, `sum`, `avg`, `min`, `max` or `count_distinct`, a `field` for every function but '
+        + '`count`, and `groupBy` the chart aggregate\'s own union — a field name or a `{ field, dateGranularity?, '
+        + 'alias? }` date-bucket node — here optional; `trend` `{ value, label?, direction? }`, with `value` a number, `label` a string '
         + 'or an inline locale map and `direction` `up`, `down` or `neutral`. Write a string `aggregate` as an '
         + 'object (`\'count\'` → `{ function: \'count\' }`); move `dateGranularity` inside `groupBy`; write a bare '
         + 'trend direction as `{ value, direction }`.',
       reason: 'The tile reads these members with one shape, and the page-component row declared them '
         + '`z.unknown()`, so any value passed the component-props gate and the tile answered an off-shape one in '
-        + 'silence: a string `aggregate` or a function outside the five asked the server for a measure it does not '
+        + 'silence: a string `aggregate` or a function the engine does not have asked the server for a measure it does not '
         + 'have, so the tile showed an error or, on the client-side fallback, a sum it was not asked for; '
         + '`groupby` for `groupBy` drew one ungrouped '
         + 'number; and a `trend` with no `value` painted a lone `%`, with a misspelled member or direction simply '
-        + 'not drawn. The row now takes the chart aggregate\'s own `field` and `function` members and its `groupBy` '
-        + 'union by reference, so one vocabulary is judged on the tile and the chart, and the badge\'s measured '
-        + 'shape for `trend`. Only the aggregate\'s optional `groupBy` differs from the chart, because a metric '
-        + 'paints one number over every row. `drillDown` and `compareTo` stay open: the chart\'s drill-down '
+        + 'not drawn. The row now takes the query AST\'s own aggregation functions — the six the tile forwards to '
+        + 'the engine — and the chart aggregate\'s `groupBy` union by reference, and the badge\'s measured shape for '
+        + '`trend`. The aggregate is not the chart\'s whole: the chart requires `groupBy` and five functions, while '
+        + 'a metric paints one number over every row and draws a `count_distinct` wherever the analytics service '
+        + 'answers it. `drillDown` and `compareTo` stay open: the chart\'s drill-down '
         + 'declares a `filter` the tile never reads and refuses a `report` it draws, and the dashboard widget\'s '
         + 'comparison declares a `dimension` this path never reads, so each waits on a ruling between the '
         + 'reference and the read. It is read where every page component\'s props are: the component-props gate '
