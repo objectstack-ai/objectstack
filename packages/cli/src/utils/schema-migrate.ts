@@ -25,6 +25,7 @@ import type {
   PendingSchemaWork,
 } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import { StorageNameMapping } from '@objectstack/spec/system';
 import { describeDriverConnection } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
 import {
@@ -70,6 +71,21 @@ export interface SchemaStack {
    * (#3917). Always `[]` unless the stack was booted with `deferSchemaDdl`.
    */
   pendingSchemaWork: PendingSchemaWork[];
+  /**
+   * [#21529] Did this boot MEASURE `objectName`'s table as absent? `true` only
+   * when the held-back sync above would CREATE it (`create_table`), which the
+   * driver decides with `hasTable` — a fact about the database, not a guess
+   * from a failed read. Always `false` unless the stack was booted with
+   * `deferSchemaDdl`, and `false` again once {@link flushSchemaDdl} has run.
+   *
+   * What it is for: a read-only command does not read a table its own boot
+   * deferred. A table that does not exist holds no rows, so the command
+   * answers its empty work from this ("not asked") instead of issuing the read
+   * and turning the refusal into a query fault. ⛔ Only `create_table` counts:
+   * a table that exists but lacks a column (`add_columns`) is still read, and
+   * whatever that read refuses is still reported.
+   */
+  tableAbsent: (objectName: string) => boolean;
   /**
    * Every object the booted stack knows about — the set the plan is computed
    * against, including objects that arrived from installed packages rather than
@@ -546,6 +562,10 @@ export async function bootSchemaStack(
     if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await d.previewDeferredSchemaWork()));
   }
   sortPendingSchemaWork(pendingSchemaWork);
+  // [#21529] The tables the held-back sync would create: measured absent.
+  const absentTables = new Set(
+    pendingSchemaWork.filter((w) => w.kind === 'create_table').map((w) => w.table),
+  );
 
   return {
     driver,
@@ -553,6 +573,10 @@ export async function bootSchemaStack(
     managedTableCount,
     kernel,
     pendingSchemaWork,
+    // The driver keys its deferred work by physical table, so ask in the same
+    // name (`StorageNameMapping`, the mapping the driver itself applies).
+    tableAbsent: (objectName: string): boolean =>
+      absentTables.has(StorageNameMapping.resolveTableName({ name: objectName })),
     /**
      * Every object this booted stack knows about — the same set the plan is
      * computed against.
@@ -583,6 +607,8 @@ export async function bootSchemaStack(
       for (const d of deferral?.drivers ?? []) {
         if (d.flushDeferredSchemaDdl) performed.push(...(await d.flushDeferredSchemaDdl()));
       }
+      // [#21529] The tables exist now; nothing is measured absent any more.
+      absentTables.clear();
       deferral?.release();
       return sortPendingSchemaWork(performed);
     },

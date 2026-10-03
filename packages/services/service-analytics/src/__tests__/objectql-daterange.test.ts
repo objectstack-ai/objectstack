@@ -60,7 +60,7 @@ type AggOpts = {
 function matches(row: Row, filter: Record<string, unknown>): boolean {
   return Object.entries(filter).every(([key, cond]) => {
     if (key === '$and') return (cond as Record<string, unknown>[]).every((sub) => matches(row, sub));
-    // [#5298] `fieldLeaves` emits a NULL-safe `$ne` as `$or: [{ field: { $null: true } }, { field: { $ne } }]`,
+    // [#5298] The shared lowering writes a NULL-safe `$ne` as `$or: [{ field: { $null: true } }, { field: { $ne } }]`,
     // so a real query genuinely hands this double an `$or` — it is not dormant here.
     if (key === '$or') return (cond as Record<string, unknown>[]).some((sub) => matches(row, sub));
     if (key.startsWith('$')) throw new Error(`test bridge: unhandled operator ${key}`);
@@ -344,18 +344,16 @@ describe('ObjectQLStrategy — window ∧ where on one field (#3650)', () => {
       ctx,
     );
 
-    // [#5298] The `$ne` operand arrives NULL-safe: `fieldLeaves` emits it as an
-    // `or` of the null predicate with the comparison, so "stage is not lost"
-    // keeps the rows that have no stage — the answer every other backend gives.
-    // What this case is about is unchanged and still visible: BOTH operands
-    // survive, the second as its own `$and` conjunct rather than overwriting the
-    // bare equality.
-    // [ADR-0053 D-D1, amended — #5930 step 3] The null predicate now arrives
-    // twice, the shared lowering's escape around this face's own copy — the
-    // same rows; both operands still survive.
+    // [#5298] The `$ne` operand arrives NULL-safe: the shared lowering writes
+    // it as an `$or` of the null predicate with the comparison (once — this
+    // face's own copy of the escape is deleted, #5930 step 4), so "stage is not
+    // lost" keeps the rows that have no stage — the answer every other backend
+    // gives. What this case is about is unchanged and still visible: BOTH
+    // operands survive, the second as its own `$and` conjunct rather than
+    // overwriting the bare equality.
     expect(seen[0].filter).toEqual({
       stage: 'won',
-      $and: [{ $or: [{ stage: { $null: true } }, { $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] }],
+      $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }],
     });
   });
 });
@@ -390,10 +388,21 @@ describe('DatasetExecutor compareTo over the ObjectQL path (#3650)', () => {
   });
 });
 
+/**
+ * [ADR-0053 D-D1 item 8, amended — #5930 step 4] The echo renders each window
+ * through the shared lowering, with the reader `execute()` hands the engine's
+ * `where` seam: the host's declared type of the column (`sourceFieldMeta`, the
+ * hook the plugin answers from the engine's registry). These hosts declare
+ * `close_date` a `datetime`, the column the half-open render is for.
+ */
+const DECLARED_DATETIME = {
+  sourceFieldMeta: (_object: string, field: string) => (field === 'close_date' ? { type: 'datetime' } : undefined),
+};
+
 describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
   it('renders the window as a parameterised half-open pair', async () => {
     const seen: AggOpts[] = [];
-    const svc = makeService(seen);
+    const svc = makeService(seen, DECLARED_DATETIME);
 
     const { sql, params } = await svc.generateSql!({
       cube: 'sales',
@@ -419,7 +428,7 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
 
   it('numbers window placeholders after the caller\'s own filters', async () => {
     const seen: AggOpts[] = [];
-    const svc = makeService(seen);
+    const svc = makeService(seen, DECLARED_DATETIME);
 
     const { sql, params } = await svc.generateSql!({
       cube: 'sales',
@@ -438,7 +447,7 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
   // the five-digit '10000-01-01' as the upper bound — SQL that answers no rows
   // on SQLite, where the column is ISO text that sorts above it.
   it('renders a window ending on the last supported day with no upper bound; 9999-12-30 keeps one', async () => {
-    const svc = makeService([]);
+    const svc = makeService([], DECLARED_DATETIME);
     const echo = (end: string) => svc.generateSql!({
       cube: 'sales',
       dimensions: ['stage'],
@@ -446,14 +455,48 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
       timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01', end] }],
     });
 
+    // [#5930 step 4] The shared lowering keeps only "has a value" beside the
+    // start, `{ $gte, $null: false }`: the same rows as the start alone.
     const last = await echo('9999-12-31');
-    expect(last.sql).toContain('(close_date >= $1)');
+    expect(last.sql).toContain('(close_date >= $1 AND close_date IS NOT NULL)');
     expect(last.sql).not.toContain('close_date <');
     expect(last.params).toEqual(['2026-01-01']);
 
     const control = await echo('9999-12-30');
     expect(control.sql).toContain('(close_date >= $1 AND close_date < $2)');
     expect(control.params).toEqual(['2026-01-01', '9999-12-31']);
+  });
+
+  it('[#5930 step 4] renders the bound execute() hands the engine: inclusive on a declared `date`, and as written where the host names no type', async () => {
+    const echo = (overrides: Record<string, unknown>) => makeService([], overrides).generateSql!({
+      cube: 'sales',
+      dimensions: ['stage'],
+      measures: ['revenue'],
+      timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01', '2026-01-31'] }],
+    });
+    const asWritten = { sql: '(close_date >= $1 AND close_date <= $2)', params: ['2026-01-01', '2026-01-31'] };
+    // A declared `date`: the engine's seam compares a calendar day as written.
+    const onDate = await echo({ sourceFieldMeta: (_o: string, f: string) => (f === 'close_date' ? { type: 'date' } : undefined) });
+    expect(onDate.sql).toContain(asWritten.sql);
+    expect(onDate.params).toEqual(asWritten.params);
+    // No declared type: this face hands the engine `$lte` as written and the
+    // engine's seam, which reads the object's own field map, lowers it; the
+    // echo prints what this face hands it.
+    const undeclared = await echo({});
+    expect(undeclared.sql).toContain(asWritten.sql);
+    expect(undeclared.params).toEqual(asWritten.params);
+  });
+
+  it('[#5930 step 4] a resolved preset that stops before its end renders `<` its end instant', async () => {
+    const { sql, params } = await makeService([], DECLARED_DATETIME).generateSql!({
+      cube: 'sales',
+      dimensions: ['stage'],
+      measures: ['revenue'],
+      timeDimensions: [{ dimension: 'close_date', dateRange: 'this_year' }],
+    });
+    expect(sql).toContain('(close_date >= $1 AND close_date < $2)');
+    expect(params).toHaveLength(2);
+    expect(params.every((p) => typeof p === 'string' && /T00:00:00\.000Z$/.test(p as string))).toBe(true);
   });
 });
 

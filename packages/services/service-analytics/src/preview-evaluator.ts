@@ -32,12 +32,13 @@
 
 import {
   bucketDateKey,
-  nextUtcCalendarDay,
   resolveAnalyticsDateRangeString,
   utcInstantMs,
-  isUnboundedAbove,
   compensatedSum,
+  temporalComparandKind,
+  temporalStorageForm,
   type BucketGranularity,
+  type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -48,9 +49,9 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // same reason: one rule, one spelling, on both faces. [#20010] And, through
 // the same gate, every other arm of the shared comparand-shape face. [#20035]
 // And the comparand-TYPE face, through the same gate again.
-import { invalidFilterError, normalizeWhereComparands, NO_DATETIME_COLUMNS } from './strategies/filter-normalizer.js';
+import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import { emptyGroupValueFor, lowerFilterCondition, type Cube } from '@objectstack/spec/data';
+import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions } from '@objectstack/spec/data';
 
 type Row = Record<string, unknown>;
 
@@ -85,29 +86,6 @@ function compare(a: unknown, b: unknown): number {
     if (ai !== null && bi !== null) return ai - bi;
   }
   return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
-}
-
-/**
- * The inclusive-upper-bound comparison, with the calendar-day rule (#3777): a
- * bare-day bound means "through that whole day", so it is evaluated half-open
- * against the next day. String ordering makes `< nextDay` equivalent to
- * `<= day` for plain date values, so this needs no field-type lookup — which
- * matters here, because the preview sees drafted rows with no schema.
- *
- * Shared by `$lte` and the max of `$between` so the two cannot drift apart.
- *
- * [#20600] `9999-12-31`, the last supported day, has no next day to compare
- * against (`UNBOUNDED_ABOVE`): every instant the platform stores is on or
- * before it, so a value that denotes an instant ({@link utcInstantMs}) is
- * inside the bound, and any other value keeps the comparison as written — the
- * same reading `formula`'s `check` evaluator gives, so the two type-blind
- * surfaces answer one bound alike.
- */
-function lteBound(value: unknown, bound: unknown): boolean {
-  const nextDay = nextUtcCalendarDay(bound);
-  if (isUnboundedAbove(nextDay)) return utcInstantMs(value) !== null || compare(value, bound) <= 0;
-  if (nextDay != null) return compare(value, nextDay) < 0;
-  return compare(value, bound) <= 0;
 }
 
 /** One field operator's predicate, over one row's value. */
@@ -157,24 +135,27 @@ const PREVIEW_FIELD_OPERATORS = new Map<string, PreviewPredicate>([
   ['$gt', (value, expected) => value != null && compare(value, expected) > 0],
   ['$gte', (value, expected) => value != null && compare(value, expected) >= 0],
   ['$lt', (value, expected) => value != null && compare(value, expected) < 0],
-  ['$lte', (value, expected) => {
-    if (value == null) return false;
-    // A bare-day upper bound means "through that whole day" (#3777): the SQL
-    // paths compile it half-open (`< day+1`), and the preview must agree or
-    // a drafted chart shows different numbers than the published one. String
-    // ordering makes `< nextDay` equivalent to `<= day` for plain date
-    // values, so no type lookup is needed here either.
-    return lteBound(value, expected);
-  }],
+  // [ADR-0053 D-D1, amended — #5930 step 4] `$lte` and `$between` compare the
+  // bound they are handed, as every other ordering operator here does. A
+  // bare-day upper bound means "through that whole day" (#3777) on a
+  // `datetime` column, and the shared lowering has already rewritten such a
+  // bound to `$lt` the next day (or, on the last supported day, to
+  // `$null: false`) — with the column's declared type in hand — before
+  // {@link evaluateAnalyticsQueryOverRows} reads a row. A `$lte` or `$between`
+  // that reaches this table is on a column declared something else (`date`,
+  // text, a number), where the comparison as written is the typed drivers'
+  // answer. This face kept a type-blind copy of the rule (`lteBound`) until
+  // #5930 step 4.
+  ['$lte', (value, expected) => value != null && compare(value, expected) <= 0],
   ['$between', (value, expected) => {
     // Was absent, so it fell to the permissive `default` and matched EVERY
     // row — a drafted chart with a range filter silently charted the whole
     // dataset, then changed at publish (found by the ADR-0053 D-A3 matrix,
-    // #4081). The max takes the same whole-day rule as `$lte`.
+    // #4081). Inclusive at both ends, as written (see the note above).
     if (value == null || !Array.isArray(expected) || expected.length !== 2) return false;
     const [min, max] = expected;
     if (min == null || max == null) return false;
-    return compare(value, min) >= 0 && lteBound(value, max);
+    return compare(value, min) >= 0 && compare(value, max) <= 0;
   }],
   // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] `$null` — the one
   // operator the shared lowering emits that this face did not evaluate: the
@@ -626,9 +607,10 @@ export interface PreviewDateRangeWindow {
  *
  * The ARRAY arm is the CALLER's explicit window and is untouched, bound for
  * bound, with the inclusive upper reading it has always had (#16179). Its
- * bare-day widening (#3777) stays in the predicate below rather than moving
- * here: that is a per-face calendar translation, not a window this vocabulary
- * resolved.
+ * bare-day end means the whole day on a `datetime` column (#3777); that is the
+ * shared lowering's rule, applied where {@link evaluateAnalyticsQueryOverRows}
+ * expresses the window as the `{ $gte, $lte }` pair (ADR-0053 D-D1 item 8), not
+ * a translation of this function's.
  *
  * @throws the ADR-0112 envelope for a string outside `DATE_RANGE_PRESETS`.
  */
@@ -651,15 +633,120 @@ export function lowerPreviewDateRange(
 }
 
 /**
+ * [ADR-0053 D-D1, amended — #5930 step 4] The draft preview's column-type
+ * reader for the shared lowering (item 7), built from the host's declared type
+ * of a column of the dataset's object — `sourceFieldMeta`, the same hook the
+ * strategies' `declaredFieldType` reads, handed in by `queryDataset`'s preview
+ * branch. Drafted seed rows carry no schema of their own; the object they are
+ * drafted for does. A caller that hands no declared type cannot read
+ * declarations at all, and every column then reads type-blind.
+ *
+ * - a column declared `datetime` is rewritten: a bare-day upper bound means
+ *   the whole day, and a `$between` splits;
+ * - a column declared any other type is compared as written, as the typed
+ *   drivers compare it;
+ * - a column the host names no type for (an object the registry does not
+ *   hold yet, a key that is not a column) is read type-blind, item 7's reading
+ *   for a seam that cannot read the declaration.
+ */
+export function declaredPreviewLowering(declaredType?: (field: string) => string | undefined): FilterLoweringOptions {
+  return {
+    isDatetimeColumn: (field) => {
+      const type = declaredType?.(field);
+      return typeof type !== 'string' || type === '' ? true : type === 'datetime';
+    },
+  };
+}
+
+/**
+ * [#21505, ADR-0053 D-A1] The draft preview compares a temporal value in its
+ * STORAGE form, on both sides, as `driver-memory` does. The preview has no
+ * driver, so its counterpart of the engine door is the rule that door
+ * applies, `@objectstack/core`'s `temporalStorageForm`, for the kind
+ * `temporalComparandKind` gives the column's declared type. A drafted row
+ * keeps whatever spelling its author wrote, so the row value is put in that
+ * form too, the way a driver puts it on write.
+ *
+ * Without it a drafted chart compared the two spellings as text. An instant
+ * against a bare day, or a window end written shorter than the stored instant,
+ * then counted rows the published chart does not, or missed rows it counts.
+ *
+ * A column the host names no type for stays as written on both sides.
+ */
+type PreviewTemporalKind = (field: string) => TemporalComparandKind | null;
+
+function previewTemporalKind(declaredType?: (field: string) => string | undefined): PreviewTemporalKind {
+  const kinds = new Map<string, TemporalComparandKind | null>();
+  return (field) => {
+    if (!kinds.has(field)) kinds.set(field, temporalComparandKind(declaredType?.(field)));
+    return kinds.get(field)!;
+  };
+}
+
+/** The value comparisons whose comparand takes the storage form: `driver-memory`'s arm set. */
+const STORAGE_FORM_OPERATORS = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$between']);
+
+/** `value` in the storage form of `kind`; a list maps its members, as the drivers do. */
+function storageForm(value: unknown, kind: TemporalComparandKind): unknown {
+  return Array.isArray(value) ? value.map((v) => temporalStorageForm(v, kind)) : temporalStorageForm(value, kind);
+}
+
+/** The condition with each value comparison's comparand on a temporal column in its storage form. */
+function previewStorageComparands(node: Row | undefined, kindOf: PreviewTemporalKind): Row | undefined {
+  if (!node) return node;
+  const out: Row = {};
+  for (const [key, cond] of Object.entries(node)) {
+    const kind = key.startsWith('$') ? null : kindOf(key);
+    if ((key === '$and' || key === '$or') && Array.isArray(cond)) {
+      out[key] = cond.map((arm) => previewStorageComparands(arm as Row, kindOf));
+    } else if (key === '$not' && cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+      out[key] = previewStorageComparands(cond as Row, kindOf);
+    } else if (!kind || cond == null || Array.isArray(cond)) {
+      out[key] = cond;
+    } else if (typeof cond !== 'object' || cond instanceof Date) {
+      out[key] = temporalStorageForm(cond, kind); // implicit equality
+    } else {
+      out[key] = Object.fromEntries(Object.entries(cond as Row).map(([op, expected]) => [
+        op,
+        STORAGE_FORM_OPERATORS.has(op) && expected != null ? storageForm(expected, kind) : expected,
+      ]));
+    }
+  }
+  return out;
+}
+
+/** The row with every declared temporal field in its storage form; the same row when none moved. */
+function previewStorageRow(row: Row, kindOf: PreviewTemporalKind): Row {
+  let out: Row | undefined;
+  for (const [field, value] of Object.entries(row)) {
+    const kind = kindOf(field);
+    if (!kind) continue;
+    const stored = storageForm(value, kind);
+    if (stored === value) continue;
+    out ??= { ...row };
+    out[field] = stored;
+  }
+  return out ?? row;
+}
+
+/**
  * Evaluate `query` over `rows` using the cube's measure/dimension specs.
  * Mirrors the engine strategies' output contract: rows keyed by bare
  * measure/dimension names, `fields` describing each output column.
+ *
+ * `declaredType` is the host's declared type of a column of the drafted
+ * object, which {@link declaredPreviewLowering} turns into this face's reader
+ * for the shared lowering; the production caller always passes it. A caller
+ * that passes none cannot read declarations, and every column then reads
+ * type-blind (ADR-0053 D-D1 item 7).
  */
 export function evaluateAnalyticsQueryOverRows(
   query: AnalyticsQuery,
   cube: Cube,
   rows: Row[],
+  declaredType?: (field: string) => string | undefined,
 ): AnalyticsResult {
+  const lowering = declaredPreviewLowering(declaredType);
   // 1. Row-level filters: `where`, then timeDimension dateRanges.
   // [#19810] The operator vocabulary is decided BEFORE the rows are read, so an
   // unevaluable predicate refuses over an empty seed draft too — see
@@ -680,22 +767,23 @@ export function evaluateAnalyticsQueryOverRows(
   // answered EVERY row; and a bigint within 2^53 was ordered as text
   // (`{ amt: { $gt: 2n } }` lost `amt = 10`), where publish narrows it to its
   // number and serves the right rows.
-  // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] Then the shared
+  // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] Then the shared
   // `FilterCondition → FilterCondition` lowering, on what the door admitted
   // and before the vocabulary gate reads it — the `where` door's seam for this
   // face (the amendment's item 2), with filter tokens already resolved by the
-  // `DatasetExecutor` that calls this evaluator (item 3). Its column-type
-  // reader is {@link NO_DATETIME_COLUMNS} (item 7): drafted rows carry no
-  // schema, so no member is read as `datetime` and {@link lteBound} keeps
-  // answering the whole-day rule as this face's own copy. A type-blind rewrite
-  // here would move one cell away from the typed drivers — `$lte` on the last
-  // supported day over a non-temporal value sorting above it. The NULL guards
-  // apply whatever the type; measured, they move only the rows this face read
-  // through `String()` — a row with no value against the text `'null'` or
-  // `'undefined'` — onto every driver's answer.
-  const where = lowerFilterCondition(normalizeWhereComparands(query.where), NO_DATETIME_COLUMNS);
-  assertPreviewCanEvaluate(where);
-  let filtered = rows.filter((r) => matchesWhere(r, where));
+  // `DatasetExecutor` that calls this evaluator (item 3). It is the one source
+  // of the whole-day bound, the `$between` split and the NULL guards on this
+  // face, read with the reader above: {@link matchesWhere} compares what it is
+  // handed. Measured when the NULL guards arrived (step 3), they moved only the
+  // rows this face read through `String()` — a row with no value against the
+  // text `'null'` or `'undefined'` — onto every driver's answer.
+  const lowered = lowerFilterCondition(normalizeWhereComparands(query.where), lowering);
+  assertPreviewCanEvaluate(lowered);
+  // [#21505] …then each value comparison in the temporal STORAGE form, the
+  // comparand here and the row value at the match (see {@link previewTemporalKind}).
+  const kindOf = previewTemporalKind(declaredType);
+  const where = previewStorageComparands(lowered, kindOf);
+  let filtered = rows.filter((r) => matchesWhere(previewStorageRow(r, kindOf), where));
   const timeDims = query.timeDimensions ?? [];
   for (const td of timeDims) {
     const dim = cube.dimensions?.[td.dimension];
@@ -703,30 +791,22 @@ export function evaluateAnalyticsQueryOverRows(
     if (!td.dateRange) continue;
     // [#16322] One lowering for both arms — the closed preset vocabulary, or
     // the caller's explicit window — and a refusal for anything else.
-    const explicit = Array.isArray(td.dateRange);
     const { start, end, endExclusive } = lowerPreviewDateRange(td.dateRange, query.timezone);
-    // Bare-day end → half-open `< day+1`, the same translation the SQL
-    // paths apply (#3777); a full-timestamp end keeps the historical
-    // `'~'`-suffix trick (inclusive of that instant's own sub-values).
-    // ⛔ Neither reaches a RESOLVED preset window: it states its own upper
-    // reading and is never a bare day — the ten calendar presets stop BEFORE
-    // their end instant, the three rolling ones end at NOW and reach it.
-    // [#20600] A bare end on the last supported day has no next day to stop
-    // before: every value is inside it, so the window keeps its start alone.
-    const nextDay = explicit ? nextUtcCalendarDay(end) : null;
-    filtered = filtered.filter((r) => {
-      const v = String(r[field] ?? '');
-      const inUpper = endExclusive
-        ? v < end
-        : isUnboundedAbove(nextDay)
-          ? true
-          : nextDay != null
-            ? v < nextDay
-            : explicit
-              ? v <= `${end}~`
-              : v <= end;
-      return v >= start && inUpper;
-    });
+    // [ADR-0053 D-D1 item 8, amended — #5930 step 4] The window is the
+    // `{ $gte, $lte }` pair the ObjectQL strategy hands the engine (the
+    // `{ $gte, $lt }` pair of a resolved preset that stops before its end),
+    // on the column the rows carry, through the same lowering and reader as
+    // the `where`, and matched by the same {@link matchesWhere}. So a bare-day
+    // explicit end on a `datetime` column, or on one the reader cannot name,
+    // covers the whole day (#3777) and drops on the last supported day
+    // (#20600), and on a column declared anything else it is inclusive as
+    // written. A resolved preset's ends are instants, which the lowering never
+    // widens. This face kept its own copy of the rule here until #5930 step
+    // 4, with a `'~'`-suffix reading of a full-timestamp end ("inclusive of
+    // that instant's own sub-values") that no other face gives.
+    const bounds = endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };
+    const window = previewStorageComparands(lowerFilterCondition({ [field]: bounds }, lowering), kindOf);
+    filtered = filtered.filter((r) => matchesWhere(previewStorageRow(r, kindOf), window));
   }
 
   // 2. Grouping keys: each selected dimension (time dims bucketed).

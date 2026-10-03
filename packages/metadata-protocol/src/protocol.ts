@@ -38,6 +38,7 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
+import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -94,10 +95,12 @@ import {
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
 import { isMissingTableError } from '@objectstack/metadata/errors';
-// [#21412] The divergent view-container `name` refusal — the one judge the
-// boot loop, `os validate` and the artifact/HMR loader call too; this door
-// passes the name it files the row under. See `saveMetaItem`.
-import { savedViewContainerNameRefusal } from '@objectstack/metadata/view-container-name';
+// [#21412, #21470] The divergent `name` refusal — the one judge the boot loop,
+// `os validate` and the artifact/HMR loader call too. Every door here that
+// writes a `sys_metadata` row passes the name it writes the row under: the save
+// door (`saveMetaItem`), the restore doors (`rollbackMetaItem`, `revertCommit`)
+// and the draft promotion (`promoteDraftForPublish`).
+import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -1222,10 +1225,10 @@ export { stripReadDecorations };
  * into a record risks producing an invalid record (e.g. a non-`<object>.<key>`
  * name). Structural validity is enforced separately by the view metadata schema
  * during the spec-validation step. No-op for non-view types and bodies that
- * already carry a `name`. [#21412] A CONTAINER's authored `name` reaches this
- * function only when it equals `saveName`: `saveMetaItem` refuses a
- * disagreeing one first, through `savedViewContainerNameRefusal`, so keeping
- * the authored `name` can no longer file a container under a second key.
+ * already carry a `name`. [#21412, #21470] A view's authored `name` reaches
+ * this function only when it equals `saveName`: `saveMetaItem` refuses a
+ * disagreeing one first, through `savedItemNameRefusal`, so keeping the
+ * authored `name` can no longer file a view under a second key.
  *
  * When `baseline` is provided (the registry entry this overlay will shadow),
  * missing identity fields — `viewKind`, `object`, `label` — are inherited onto
@@ -5293,6 +5296,32 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21470] What a restore passes to `repo.restoreVersion` as
+     * `deriveRestoredBody`: the divergent `name` refusal FIRST, then
+     * {@link restoredBodyDerivation}. A version stored before `saveMetaItem`
+     * judged every type can carry a `name` that is not its row's; written back,
+     * the write-through registers the row under that `name` and under none by
+     * its own. `restoreVersion` calls this on the very history body it read,
+     * before it reads the active row and before `put` — so a refused version
+     * writes nothing, the position the credential strip already has. The
+     * refusal is the save door's judge and envelope (`VALIDATION_ERROR` / 400):
+     * `rollbackMetaItem` rethrows it, `revertCommit` reports it per item in
+     * `failed[]`. A body that passes comes out of the strip, or byte for byte
+     * where the type has no credential channel.
+     *
+     * @param type The canonical (singular) type the row is restored under.
+     * @param name The name the row is restored under.
+     */
+    private restoredBodyWriter(type: string, name: string): (historyBody: unknown) => unknown {
+        const derive = this.restoredBodyDerivation(type);
+        return (historyBody) => {
+            const nameRefusal = savedItemNameRefusal(type, historyBody, name, 'restore');
+            if (nameRefusal) throw nameRefusal;
+            return derive ? derive(historyBody) : historyBody;
+        };
+    }
+
+    /**
      * Run the registered authoring gate for an about-to-persist body (#3050).
      * No-op when no gate is registered for the type. A gate throw PROPAGATES
      * (with its status/code) — that is the contract: the write is rejected
@@ -8324,12 +8353,23 @@ export class ObjectStackProtocolImplementation implements
                 // another package's object every name a container expands
                 // derives from the container's own name, never one of that
                 // package's `<object>.<key>` names.
+                //
+                // [#21510] …and it never replaces a STORED ROW of that name.
+                // A row stored under exactly the name is the sanctioned
+                // override for it (ADR-0005 keys an overlay by its own name);
+                // an expansion fills only a name with no row of its own. The
+                // test is {@link namesWithOwnStoredRow} over this caller's
+                // `records`, the one the by-name read asks, so the two doors
+                // answer the same row for the name. An item the registry or a
+                // package supplies under the name is still replaced, as before.
                 if (isView) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
                         if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
                     }
+                    const ownRowNames = this.namesWithOwnStoredRow(records);
                     for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
+                        if (ownRowNames.has(vi.name as string)) continue;
                         byName.set(vi.name as string, vi);
                     }
                     items = Array.from(byName.values());
@@ -8791,6 +8831,30 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21510] The names that have a stored row of their own among `records`,
+     * the active rows {@link readActiveOverlayRows} selected for one caller.
+     *
+     * ADR-0005 keys an overlay by its own name, so a row stored under exactly a
+     * name is the sanctioned override for that name. An expansion is derived
+     * from its container, so it fills only a name that is NOT in this set. This
+     * is the one predicate both doors ask: the list read
+     * ({@link readFlattenedMetaItems}) never lets an expansion displace a
+     * stored row of the same name, and the by-name read
+     * ({@link resolveRowlessExpandedView}) answers an expansion only for a name
+     * outside it. Both doors pass the rows they selected for the same caller,
+     * so a name that has a row in one organization only is row-less for every
+     * other caller. ⛔ Never a second test of "this name has its own row":
+     * two tests are two rules, and the doors would disagree again.
+     */
+    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+        const names = new Set<string>();
+        for (const record of records) {
+            if (typeof record?.name === 'string') names.add(record.name);
+        }
+        return names;
+    }
+
+    /**
      * [#21442] The item the list read serves under `request.name` when that
      * name is ROW-LESS — no stored row of its own — and a stored view
      * container in this caller's scope expands it; `undefined` otherwise.
@@ -8817,7 +8881,8 @@ export class ObjectStackProtocolImplementation implements
      * ⛔ No kernel-specific branch — every kernel answers through this path.
      *
      * A stored row of this very name is the name's own row and is answered
-     * as such by the caller's own read, never an expansion. The `container`
+     * as such by the caller's own read, never an expansion — the same
+     * predicate the list read applies ({@link namesWithOwnStoredRow}). The `container`
      * returned is the stored row the item derives from — its own name, body,
      * package and organization — which the layered read reports as the
      * name's provenance and the history and diff reads resolve to.
@@ -8839,7 +8904,7 @@ export class ObjectStackProtocolImplementation implements
             // this name".
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        if (records.some((record) => record?.name === request.name)) return undefined;
+        if (this.namesWithOwnStoredRow(records).has(request.name)) return undefined;
         let found: RowlessExpandedView | undefined;
         for (const expanded of this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, records))) {
             if (expanded.item.name === request.name) found = expanded;
@@ -14920,6 +14985,66 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * An organization-scoped `view` write that changes which public forms
+     * accept anonymous intake, on a deployment whose anonymous form doors do
+     * not read that organization. Returns the refusal, or `null` when the
+     * write is fine.
+     *
+     * An anonymous form request carries no session and so no organization.
+     * The doors resolve the form in `tenancy.defaultOrgId()`'s organization
+     * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
+     * write's organization (every walled posture, degraded or not, answers
+     * `null`), the doors read the env-wide definition, so the write is refused
+     * and the author is pointed at the env-wide save, which every door
+     * honours. A composition with no tenancy service has no posture to judge
+     * (and no session to carry an organization over HTTP), so it is left as is.
+     *
+     * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
+     * an organization-scoped edit that leaves it as the env-wide definition has
+     * it is unaffected. Same code and status as {@link orgScopedWriteRefusal}:
+     * this item's anonymous intake has no per-org channel on this deployment.
+     */
+    private async anonymousFormIntakeOrgScopeRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string | null | undefined;
+        body: unknown;
+    }): Promise<Error | null> {
+        if (!args.organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
+        if (singular !== 'view') return null;
+        const tenancy = this.getServicesRegistry?.().get('tenancy') as
+            | { defaultOrgId?: () => Promise<string | null> }
+            | undefined;
+        if (typeof tenancy?.defaultOrgId !== 'function') return null;
+        const doorOrganization = await tenancy.defaultOrgId();
+        if (doorOrganization === args.organizationId) return null;
+        const proposed = anonymousFormIntakeSlugs(args.body);
+        const served = anonymousFormIntakeSlugs(
+            ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
+        );
+        if (proposed.length === served.length && proposed.every((s, i) => s === served[i])) return null;
+        const list = (slugs: string[]) => (slugs.length ? slugs.map((s) => `'${s}'`).join(', ') : 'none');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot change which public forms accept anonymous intake `
+            + `in organization '${args.organizationId}' (env-wide: ${list(served)}; this write: ${list(proposed)}). `
+            + `An anonymous form request carries no organization, and this deployment resolves `
+            + (doorOrganization
+                ? `it in organization '${doorOrganization}'`
+                : `none for it (a walled tenancy posture never guesses one)`)
+            + `, so the anonymous form doors serve the env-wide definition and would never see this change. `
+            + `Save it env-wide instead (retry with no active organization): that withdraws or publishes the form `
+            + `on every anonymous door. An organization-scoped edit that leaves the form's sharing as the env-wide `
+            + `definition has it is still accepted. See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -17695,6 +17820,18 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
+        // An org-scoped change to a form's anonymous intake that the anonymous
+        // form doors cannot see. Drafts too, so no draft is minted that its
+        // own promotion would refuse. See {@link anonymousFormIntakeOrgScopeRefusal}.
+        {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: request.type,
+                name: request.name,
+                organizationId: request.organizationId,
+                body: request.item,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
 
         if (this.environmentId !== undefined) {
             // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
@@ -17909,20 +18046,21 @@ export class ObjectStackProtocolImplementation implements
         // (#2555 — a console personalization PUT sends only the raw config).
         // See {@link normalizeViewMetadata}.
         {
-            // [#21412] FIRST, before the stamp below can keep an authored
-            // `name`: a view CONTAINER whose own `name` disagrees with the name
-            // this door files the row under is refused, `VALIDATION_ERROR` /
-            // 400, through the one judge the source registrars call. Accepted,
-            // it was stored under the row name and registered under the
-            // body's (`hydrateOverlayIntoRegistry` keys by `body.name`), so one
-            // document answered under two names. The key here is the save
-            // name, not the derived binding: this door keeps a container saved
-            // under a name other than its object (#13407, #21334), and the
-            // body it stamps for one must pass when sent back. A body with no
-            // `name` passes and is stamped below. Containers only — the
-            // every-type half is #21470.
-            if (singularType === 'view') {
-                const nameRefusal = savedViewContainerNameRefusal(request.item, request.name);
+            // [#21412, #21470] FIRST, before the stamp below can keep an
+            // authored `name`: a body of ANY type whose own `name` disagrees
+            // with the name this door files the row under is refused,
+            // `VALIDATION_ERROR` / 400, through the one judge the source
+            // registrars call. Accepted, it was stored under the row name and
+            // registered under the body's (`hydrateOverlayIntoRegistry` keys by
+            // `body.name`), so one row answered under a name nobody saved it
+            // under and under none by its own. The key here is the save name,
+            // not a view container's derived binding: this door keeps a
+            // container saved under a name other than its object (#13407,
+            // #21334), and the body it stamps for one must pass when sent back.
+            // A body with no `name` passes; a view's is stamped below. What
+            // counts as a set `name` per type is the judge's header.
+            {
+                const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
             }
             let baseline: unknown;
@@ -19636,6 +19774,28 @@ export class ObjectStackProtocolImplementation implements
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft' },
         );
+        // [#21470] …and the divergent `name` refusal, on the same body and for
+        // the same reason: a draft stored before `saveMetaItem` judged every
+        // type can carry a `name` that is not its row's, and promoting it
+        // registers the row under that `name`. Refused here, with the save
+        // door's judge and envelope, before `repo.promoteDraft` writes —
+        // exactly as the authoring gate below refuses, so a batch publish
+        // aborts on it as it aborts on that gate.
+        if (draftForGate) {
+            const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
+            if (nameRefusal) throw nameRefusal;
+        }
+        // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
+        // draft saved before that refusal existed must not reach `active`.
+        if (draftForGate) {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: singularType,
+                name: request.name,
+                organizationId: orgId,
+                body: draftForGate.body,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
         // promotion is about to earn, exactly as `saveMetaItem` attaches its
@@ -22889,14 +23049,17 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
-                    const restoreDerivation = this.restoredBodyDerivation(it.type);
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
-                        // [#20790] R2 — the type's credential-channel strip.
-                        ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
+                        // [#21470] The divergent `name` refusal, then [#20790]
+                        // R2's credential-channel strip. A refused version lands
+                        // in `failed[]` below, with nothing written. Judged under
+                        // the SINGULAR type, the spelling the write-through
+                        // registers under. See {@link restoredBodyWriter}.
+                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
@@ -23282,16 +23445,17 @@ export class ObjectStackProtocolImplementation implements
         // real outage (#4867).
         const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
         try {
-            const restoreDerivation = this.restoredBodyDerivation(singularType);
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
                 actor: request.actor ?? null,
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
-                // [#20790] R2 — a rollback past the credential move keeps the
-                // write-only channel's current credential and stores none.
-                ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
+                // [#21470] The divergent `name` refusal, rethrown below with
+                // nothing written; then [#20790] R2 — a rollback past the
+                // credential move keeps the write-only channel's current
+                // credential and stores none. See {@link restoredBodyWriter}.
+                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not

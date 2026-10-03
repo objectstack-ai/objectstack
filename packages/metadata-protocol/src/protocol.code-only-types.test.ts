@@ -145,10 +145,15 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
     // Schema-valid on purpose, like the four above: `field` resolves
     // `FieldSchema`, so a malformed body would 422 before the registry consult
     // and the probe would prove nothing about the code-only gate.
+    //
+    // [#21470] And NAMELESS on purpose: the row is named `<object>.<field>`,
+    // which a dot-free `FieldSchema` `name` can never spell, so a body `name`
+    // would now be refused by the write doors' name judge (`VALIDATION_ERROR`
+    // / 400) once the hatch below opens the door — a different refusal from
+    // the one this probe measures. `FieldSchema` does not require `name`.
     field: {
         name: 'rc3_field_probe.zz_probe',
         item: {
-            name: 'zz_probe',
             label: 'Probe',
             type: 'text',
         },

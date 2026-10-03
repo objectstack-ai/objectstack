@@ -4,15 +4,16 @@
  * [#21454] The stored-metadata-body family at the in-process READER CONTEXTS.
  *
  * The family (`sys_metadata` / `sys_metadata_history`, #21120, #21207) closes
- * every door that serves a stored metadata body, or the stored content hash
- * over it: the body is served as its type's read projection, with stored
- * credential material withheld, and the hash is served in keyed form, never
- * the stored value. The generic data door does both, and that is the
- * reference answer here.
+ * every door that serves, copies OR EVALUATES a stored metadata body, or the
+ * stored content hash over it: the body is served as its type's read
+ * projection with stored credential material withheld, the hash is served in
+ * keyed form, and a filter, sort, grouping or search that would EVALUATE either
+ * one is refused before the query runs. The generic data door does all three,
+ * and that is the reference answer here.
  *
  * Three in-process contexts read the same rows through the engine and served
- * them as stored, because nothing between them and the engine applied either
- * half:
+ * them as stored, because nothing between them and the engine applied any part
+ * of the family's rule:
  *
  *  - a sandboxed body's `ctx.api.object(...)` (`sandbox/body-runner.ts`,
  *    `buildSandboxApi`): action and hook bodies alike, and with them every
@@ -26,36 +27,58 @@
  *
  * The answers all run elevated (`isSystem: true`), so the engine cannot tell
  * them from the platform's own internal readers of the family, which need the
- * stored form. So the projection is applied HERE, at the reader-context seam,
- * and never at the engine.
+ * stored form. So the family's rule is applied HERE, at the reader-context
+ * seam, and never at the engine.
  *
- * ## One serve, consumed
+ * ## Three things this seam does to a family READ, consuming the door's own code
  *
- * Every function the serve calls is the data door's own, imported from
- * `@objectstack/metadata-protocol`: the `type` companion for a projection
- * that names only the body (`storedMetadataBodyProjection`), the body
- * projection (`redactStoredMetadataRows`, which consumes the family's ONE
- * redactor in `@objectstack/spec/kernel`), and the keyed serve
- * (`serveStoredMetadataHashColumnRows`) under the crypto provider's digest or,
- * while none is registered, the same process-scoped ephemeral key the door
- * keys under (`ephemeralStoredHashDigest`). A copy of any of them here would be
- * a second definition of what a credential is, or a second keyed form of one
- * row.
+ * 1. **Refuse the EVALUATE shapes** ({@link refuseOrNarrowStoredMetadataEvaluate}),
+ *    through the generic data door's OWN refusal predicates
+ *    (`storedMetadataBodyGroupingRefusal`, `storedMetadataBodyPredicateRefusal`,
+ *    `storedMetadataHashEvaluateRefusal`, `storedMetadataSearchRefusal`,
+ *    `@objectstack/metadata-protocol`), in the door's own order — a copy of any
+ *    of them here would be a second definition of which shapes leak. A `count`
+ *    with such a predicate is an oracle too, so it is guarded the same way (it
+ *    serves no row, so only the refusal applies to it). A default `$search`
+ *    is NARROWED to the door's served set — the body and hash columns removed,
+ *    judged field by field by the door's own search predicate — rather than
+ *    refused, so a body may still search a family table by `name` exactly as
+ *    the door serves it; a search that would scan nothing after the removal is
+ *    refused.
+ * 2. **Serve the body projected and the hash keyed** ({@link serveStoredMetadataRead}),
+ *    using the door's `storedMetadataBodyProjection`, `redactStoredMetadataRows`
+ *    (the family's ONE redactor in `@objectstack/spec/kernel`) and
+ *    `serveStoredMetadataHashColumnRows`, under the crypto provider's digest or,
+ *    while none is registered, the same process-scoped ephemeral key the door
+ *    keys under (`ephemeralStoredHashDigest`). A copy would serve a second keyed
+ *    form of one row.
+ * 3. **Serve what a WRITE verb RETURNS** ({@link serveStoredMetadataWriteReturn}):
+ *    a write whose return carries the family's body or hash is served the same
+ *    projected / keyed way a read is, since a returned row is a serve. Whether a
+ *    body may write the family AT ALL is the write boundary (#21520), not this
+ *    seam: the write itself passes through, only its RETURN is served.
  *
  * ## What it does not do
  *
  * It judges the object by name with the family's own predicate
- * (`isStoredMetadataBodyObject`), exactly as the door does. Writes, `count`
- * and the evaluate shapes (a filter, sort or grouping on the body or hash
- * columns) are outside it: this seam changes what a READ serves, nothing else.
+ * (`isStoredMetadataBodyObject`), exactly as the door does. The engine's own
+ * action verb (`ScopedRepo.execute`) is never reached by a served body — the
+ * sandbox bridge exposes no `execute`, `sudo` or `withRunAs` — so this seam
+ * leaves it untouched (the reach is recorded on #21454, not closed here).
  */
 
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import { isFilterAST, parseFilterAST, resolveSearchFieldResolution } from '@objectstack/spec/data';
+import { collectConditionFields } from '@objectstack/plugin-security';
 import {
   ephemeralStoredHashDigest,
   redactStoredMetadataRows,
   serveStoredMetadataHashColumnRows,
   storedMetadataBodyProjection,
+  storedMetadataBodyGroupingRefusal,
+  storedMetadataBodyPredicateRefusal,
+  storedMetadataHashEvaluateRefusal,
+  storedMetadataSearchRefusal,
   type StoredHashDigest,
 } from '@objectstack/metadata-protocol';
 
@@ -77,16 +100,120 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Every column a filter NAMES, structure discarded — lowering a `FilterArray`
+ * to a `FilterCondition` first so the array door a direct engine call still
+ * honours (`lowerWhereFilterArray`) is read the same as the object door.
+ *
+ * The walk is the generic data door's sibling, `collectConditionFields`
+ * (`@objectstack/plugin-security`): the door's own `collectFilterFieldKeys` is
+ * internal to `protocol.ts` and cannot be imported here, and restating it would
+ * be the second definition the family rule forbids. This collector gates on a
+ * dotted head and also reads a cross-field `{ $field }` comparand, so it refuses
+ * a DOTTED or COMPARAND reference to the body or hash columns the door's own
+ * collector would miss — strictly MORE than the door, never a legitimate
+ * scalar-column query, since the family columns are the only ones these
+ * predicates name.
+ */
+function filterHeadFields(where: unknown): string[] {
+  if (where == null) return [];
+  const lowered = isFilterAST(where) ? parseFilterAST(where) : where;
+  return [...collectConditionFields(lowered)];
+}
+
+/** The fields an `orderBy` names (`[{ field }]`, or a bare string entry). */
+function sortFieldsOf(orderBy: unknown): unknown[] {
+  if (!Array.isArray(orderBy)) return [];
+  return orderBy.map((entry) => (isPlainRecord(entry) ? entry.field : entry));
+}
+
+/**
+ * Narrow or refuse a `$search` on a family table the way the data door's
+ * `narrowStoredMetadataSearch` does, consuming the door's own search predicate
+ * ({@link storedMetadataSearchRefusal}) as the authority on which columns a
+ * search may never scan:
+ *
+ *  - an EXPLICIT field list (`searchFields`, or the object-form `search.fields`)
+ *    naming an unscannable column is refused;
+ *  - a DEFAULT search is narrowed to the resolved searchable set minus the
+ *    columns the predicate refuses, field by field, and the query runs with that
+ *    `searchFields`; a set that narrows to empty is refused.
+ *
+ * Returns the query the read should run — the same reference when nothing
+ * changed, a shallow copy carrying the narrowed `searchFields` otherwise.
+ */
+function narrowFamilySearch(object: string, query: Record<string, unknown>, engine: unknown): Record<string, unknown> {
+  const search = query.search;
+  const objectForm = search !== null && typeof search === 'object';
+  const explicitRaw = query.searchFields != null
+    ? query.searchFields
+    : objectForm ? (search as Record<string, unknown>).fields : undefined;
+  const param = query.searchFields != null ? 'searchFields' : 'search';
+  const names: string[] = typeof explicitRaw === 'string'
+    ? explicitRaw.split(',').map((s) => s.trim()).filter(Boolean)
+    : Array.isArray(explicitRaw)
+      ? explicitRaw.filter((f): f is string => typeof f === 'string')
+      : [];
+  if (names.length > 0) {
+    const refusal = storedMetadataSearchRefusal(object, names, param);
+    if (refusal) throw refusal;
+    return query;
+  }
+  if (search == null) return query;
+  const schema = typeof (engine as { getObject?: (n: string) => unknown })?.getObject === 'function'
+    ? (engine as { getObject: (n: string) => any }).getObject(object)
+    : undefined;
+  const fields = schema?.fields;
+  if (!fields) return query;
+  const { allowed } = resolveSearchFieldResolution({
+    fields,
+    searchableFields: schema?.searchableFields,
+    displayField: schema?.nameField ?? schema?.displayNameField,
+  });
+  const narrowed = allowed.filter((field) => !storedMetadataSearchRefusal(object, [field], 'search'));
+  if (narrowed.length === 0) {
+    const refusal = storedMetadataSearchRefusal(object, allowed, 'search');
+    if (refusal) throw refusal;
+    return query;
+  }
+  return { ...query, searchFields: narrowed };
+}
+
+/**
+ * Refuse every EVALUATE shape on a family read, in the data door's own order
+ * (search, grouping, body filter / sort, hash filter / sort / grouping), each
+ * through the door's own predicate. Returns the query the read should run,
+ * which may carry a narrowed `$search` field set. A non-family object, and a
+ * query that is not a record, pass through untouched.
+ */
+function refuseOrNarrowStoredMetadataEvaluate(object: string, query: unknown, engine: unknown): unknown {
+  if (!isStoredMetadataBodyObject(object) || !isPlainRecord(query)) return query;
+  const next = narrowFamilySearch(object, query, engine);
+  const grouping = storedMetadataBodyGroupingRefusal(object, next.groupBy);
+  if (grouping) throw grouping;
+  const aggregationFilterFields = Array.isArray(next.aggregations)
+    ? (next.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) => filterHeadFields(a?.filter))
+    : [];
+  const filterFields = [...filterHeadFields(next.where), ...filterHeadFields(next.filter), ...aggregationFilterFields];
+  const sortFields = sortFieldsOf(next.orderBy);
+  const bodyPredicate = storedMetadataBodyPredicateRefusal(object, { filterFields, sortFields });
+  if (bodyPredicate) throw bodyPredicate;
+  const hashEvaluate = storedMetadataHashEvaluateRefusal(object, { groupBy: next.groupBy, filterFields, sortFields });
+  if (hashEvaluate) throw hashEvaluate;
+  return next;
+}
+
+/**
  * Run one READ of `object` and serve its answer the way the generic data door
  * serves the same rows. An object outside the family is read and returned
- * untouched, by reference.
+ * untouched, by reference; a family read first has its EVALUATE shapes refused
+ * and its `$search` narrowed ({@link refuseOrNarrowStoredMetadataEvaluate}).
  *
- * `read` receives the query to run: the caller's own, or, when its projection
- * names the body column without the `type` column that selects the redactor,
- * a copy with `type` added; that column is then taken back off the served
- * rows, so the caller gets exactly the columns it named. The answer may be a
- * row list (`find`, `aggregate`), one row (`findOne`) or `null`; each is served
- * in the shape it arrived in.
+ * `read` receives the query to run: the caller's own (search narrowed), or,
+ * when its projection names the body column without the `type` column that
+ * selects the redactor, a copy with `type` added; that column is then taken
+ * back off the served rows, so the caller gets exactly the columns it named.
+ * The answer may be a row list (`find`, `aggregate`), one row (`findOne`) or
+ * `null`; each is served in the shape it arrived in.
  */
 export async function serveStoredMetadataRead<A>(
   object: string,
@@ -95,9 +222,10 @@ export async function serveStoredMetadataRead<A>(
   read: (query: unknown) => Promise<A>,
 ): Promise<A> {
   if (!isStoredMetadataBodyObject(object)) return read(query);
-  const projection = storedMetadataBodyProjection(object, isPlainRecord(query) ? query.fields : undefined);
+  const guarded = refuseOrNarrowStoredMetadataEvaluate(object, query, engine);
+  const projection = storedMetadataBodyProjection(object, isPlainRecord(guarded) ? guarded.fields : undefined);
   const answer = await read(
-    projection.addedType && isPlainRecord(query) ? { ...query, fields: projection.fields } : query,
+    projection.addedType && isPlainRecord(guarded) ? { ...guarded, fields: projection.fields } : guarded,
   );
   const digest = storedHashDigestOf(engine);
   const opts = { dropType: projection.addedType };
@@ -115,8 +243,35 @@ export async function serveStoredMetadataRead<A>(
   return answer;
 }
 
-/** The repository verbs whose answer carries rows. `count` answers a number and serves no row. */
+/**
+ * Serve what a WRITE verb RETURNS the same projected / keyed way a read is
+ * served — a returned row carrying the family's body or hash is a serve too.
+ * A write whose return is a number (an affected-row count), `null`, or carries
+ * no family column passes through by reference. ⛔ This serves the RETURN only;
+ * it neither permits nor refuses the write, which is the write boundary's
+ * question (#21520).
+ */
+async function serveStoredMetadataWriteReturn<A>(object: string, answer: A, engine: unknown): Promise<A> {
+  if (!isStoredMetadataBodyObject(object)) return answer;
+  const digest = storedHashDigestOf(engine);
+  if (Array.isArray(answer)) {
+    return (await serveStoredMetadataHashColumnRows(object, redactStoredMetadataRows(object, answer), digest)) as A;
+  }
+  if (isPlainRecord(answer)) {
+    const [served] = await serveStoredMetadataHashColumnRows(object, redactStoredMetadataRows(object, [answer]), digest);
+    return served as A;
+  }
+  return answer;
+}
+
+/** The repository verbs whose answer carries rows this seam serves. */
 const ROW_SERVING_READS: ReadonlySet<PropertyKey> = new Set(['find', 'findOne', 'aggregate']);
+/** The verb whose answer is a number: guarded against the evaluate oracle, nothing to serve. */
+const COUNT_READ: PropertyKey = 'count';
+/** The write verbs whose RETURN can carry family content (every alias ObjectRepository exposes). */
+const WRITE_RETURN_VERBS: ReadonlySet<PropertyKey> = new Set([
+  'insert', 'create', 'update', 'updateById', 'upsert', 'delete', 'deleteById', 'updateMany', 'deleteMany',
+]);
 
 /** Marks a scoped context this seam already serves through, so a second wrap is a no-op. */
 const SERVED_THROUGH_SEAM = Symbol.for('objectstack.runtime.storedMetadataReaderSeam');
@@ -127,9 +282,31 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
     get(target, prop) {
       const value = Reflect.get(target, prop, target);
       if (typeof value !== 'function') return value;
-      if (!ROW_SERVING_READS.has(prop)) return value.bind(target);
-      return (query?: unknown, ...rest: unknown[]) =>
-        serveStoredMetadataRead(objectName, query, engine, (q) => value.call(target, q, ...rest));
+      if (ROW_SERVING_READS.has(prop)) {
+        return (query?: unknown, ...rest: unknown[]) =>
+          serveStoredMetadataRead(objectName, query, engine, (q) => value.call(target, q, ...rest));
+      }
+      if (prop === COUNT_READ) {
+        // `async` so a refusal leaves as a rejected promise, the shape every
+        // other verb's refusal takes — `count` answers a number, nothing to
+        // serve, so only the evaluate guard runs.
+        return async (query?: unknown, ...rest: unknown[]) => {
+          refuseOrNarrowStoredMetadataEvaluate(objectName, query, engine);
+          return value.call(target, query, ...rest);
+        };
+      }
+      if (WRITE_RETURN_VERBS.has(prop)) {
+        // [#21454] Serve what the write RETURNS. Measured on `main` (pre-#21520):
+        // an elevated body's family-table write is NOT refused — it runs and
+        // returns the stored row — so this serve carries real family content.
+        // [#21520, option A] The write-verb REFUSAL (an elevated body may not
+        // write a family table at all) attaches HERE, on these same verbs, as a
+        // throw BEFORE `value.apply` — it needs no reshaping of this branch. This
+        // seam serves the return and leaves that policy to #21520.
+        return async (...args: unknown[]) =>
+          serveStoredMetadataWriteReturn(objectName, await value.apply(target, args), engine);
+      }
+      return value.bind(target);
     },
   });
 }
@@ -137,9 +314,8 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
 /**
  * The scoped data API (`ctx.api`) a reader context hands to a body or a
  * handler, with every read of a family object served through
- * {@link serveStoredMetadataRead}. Everything else is the same object, by
- * delegation: a write, a `count`, and every non-family object reach it
- * unchanged.
+ * {@link serveStoredMetadataRead}, every evaluate shape refused, and every
+ * write's RETURN served. Everything else is the same object, by delegation.
  *
  * The contexts the API can derive are served the same way, so no route around
  * the seam opens: `object(name)`, `sudo()`, `withRunAs(...)`, the context a

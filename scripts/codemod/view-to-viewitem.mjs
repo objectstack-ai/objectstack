@@ -134,7 +134,7 @@ function scanFile(file) {
   if (fv) result.formKeys = fv;
   if (/\blist\s*:/.test(src) && !result.listKeys.includes('list')) {
     // The primary `list` becomes its own item unless it duplicates listViews
-    // (the loader dedups by structural signature — reported, not decided here).
+    // (the loader collapses a whole-body restatement — reported, not decided here).
     result.listKeys = ['list (primary — may dedup against listViews)', ...result.listKeys];
   }
   return result;

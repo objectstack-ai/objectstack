@@ -1,0 +1,15 @@
+---
+'@objectstack/metadata-protocol': minor
+'@objectstack/runtime': minor
+---
+
+fix(runtime)!: the in-process reader contexts refuse the stored-metadata-body family's EVALUATE shapes and serve what a write returns, the way the generic data door does (#21454)
+
+Clause-②: yes (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key, spelling, export or stored shape moves; what changes is which query shapes the in-process reader contexts accept over the two stored-metadata tables, and the form in which a write's returned row is served, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+
+**BREAKING**: this narrows what an action or hook body's object API, an action handler's scoped API and an action handler's engine handle accept when they read the two stored-metadata tables. A read there that filters, sorts or groups on the stored body column or on a content-hash column, a read that names one of those columns in an explicit search-field list, and a `count` carrying such a filter, ran before this release and now answer the generic data door's `400 INVALID_FIELD` before the query runs. The route: filter, sort, group and search those tables by their scalar columns (the type, the name, the state and the like), and read the bodies with a plain list, which is served projected — the body as its type's read projection, the content hash in keyed form. A default search with no field list is not refused: it is narrowed to the columns the door serves. Every other column of the two tables, and every other object, is unchanged. It ships as `minor` under the launch-window convention for accept-set narrowings.
+
+- **`@objectstack/metadata-protocol`** now exports the generic data door's four evaluate-refusal predicates — `storedMetadataBodyGroupingRefusal`, `storedMetadataBodyPredicateRefusal`, `storedMetadataHashEvaluateRefusal` and `storedMetadataSearchRefusal` — so the `@objectstack/runtime` reader-context seam refuses the same shapes through the door's own predicates rather than a second copy. Additive: nothing that imported the package before is changed.
+- **`@objectstack/runtime`** extends the stored-metadata reader-context seam (`ctx.api.object(...)` for action and hook bodies, a handler's `ctx.api`, and `ctx.engine.find`): a filter, sort, grouping or search that would evaluate the stored body or content hash of `sys_metadata` / `sys_metadata_history` is refused with the door's `INVALID_FIELD` / 400 before the query runs (a `count` with such a predicate included); a default `$search` is narrowed to the door's served field set rather than refused; and the row a write verb returns is served projected and keyed. The engine's own action verb (`ScopedRepo.execute`) is unreachable from a served body and is left untouched.
