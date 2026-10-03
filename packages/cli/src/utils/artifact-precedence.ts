@@ -10,7 +10,10 @@
  * This is the order `content/docs/deployment/cli.mdx` already publishes for
  * `os start` ("Resolution priority (artifact)"). Each rung is consulted only
  * when every rung above it resolved nothing: the FIRST source that answers is
- * the stack this boot serves, and nothing below it takes part.
+ * the stack this boot serves, and nothing below it takes part — EXCEPT that a
+ * cwd config joins the boot when the resolved artifact is its own compiled
+ * output ({@link cwdConfigJoinsBoot}). That is the triage ruling's amendment
+ * for a host config, whose code plugins its compiled output cannot carry.
  *
  * ## Why one module, and who asks it
  *
@@ -144,18 +147,31 @@ export function resolveArtifactBootSource(opts: {
 }
 
 /**
- * Is `artifactPath` the compiled output of the config at `configPath` — the
- * conventional `<config dir>/dist/objectstack.json` that config compiles to?
+ * Is `artifactPath` the compiled output of the config at `configPath`?
+ *
+ * Two places hold a config's own compiled output, and either one counts:
+ *
+ * - the conventional `<config dir>/dist/objectstack.json`, where `os build`,
+ *   `os start` and a bare `os dev` compile it;
+ * - `compiledTo`, the path the supervising command ITSELF compiles the config
+ *   to, when that is somewhere else. `os dev` with the operator's local
+ *   `OS_ARTIFACT_PATH` compiles the cwd config INTO that path, watches it and
+ *   rebuilds it, so the file there is the config's compiled output too, and a
+ *   config recognised only at the conventional path would boot as a stranger
+ *   to its own build (a host config's code plugins dropped). The command
+ *   declares it, never this predicate: the child is told where the parent
+ *   compiled the config (`OS_INTERNAL_CONFIG_OUTPUT_PATH`).
  *
  * Compared as resolved absolute paths. A URL is never a config's compiled
  * output. A second spelling of the same file (a symlink) answers `false`, which
  * is the safe direction: that boot serves the named artifact alone, and its
  * bytes are the same file either way.
  */
-export function isConfigCompiledArtifact(artifactPath: string, configPath: string): boolean {
+export function isConfigCompiledArtifact(artifactPath: string, configPath: string, compiledTo?: string): boolean {
   if (isRemoteArtifact(artifactPath)) return false;
-  return path.resolve(artifactPath)
-    === path.resolve(path.dirname(configPath), CONVENTIONAL_ARTIFACT_RELATIVE_PATH);
+  const artifact = path.resolve(artifactPath);
+  if (artifact === path.resolve(path.dirname(configPath), CONVENTIONAL_ARTIFACT_RELATIVE_PATH)) return true;
+  return compiledTo !== undefined && !isRemoteArtifact(compiledTo) && artifact === path.resolve(compiledTo);
 }
 
 /**
@@ -163,30 +179,37 @@ export function isConfigCompiledArtifact(artifactPath: string, configPath: strin
  * `objectstack.config.ts` take part in this boot at all?
  *
  * The config is the LOWEST source, so it joins only when nothing above it named
- * a DIFFERENT stack:
+ * a DIFFERENT stack — the order as triage amended it: a cwd config joins the
+ * boot when the resolved artifact is its own compiled output.
  *
  * - `reference` — `OS_ARTIFACT_URL` drives the boot → the config does not join.
  * - `path` — a rung named an artifact → the config joins only when that
- *   artifact IS its own compiled output ({@link isConfigCompiledArtifact}): the
+ *   artifact IS its own compiled output ({@link isConfigCompiledArtifact}, with
+ *   `configCompiledTo` the command's own compile path when it has one): the
  *   config boot then serves that very file as its app bundle (the caller hands
  *   it over explicitly), which is the path `os dev`, a bare `os start` in a
  *   project, and the documented `os start --artifact ./dist/objectstack.json`
- *   all take. Any other artifact boots ALONE — exactly as it boots from a
- *   directory with no config, never mixed with whatever source tree the process
- *   happens to stand in.
+ *   all take. For a HOST config (its `plugins` hold code), its own compiled
+ *   output cannot carry that code, so the config itself is what boots. Any
+ *   other artifact boots ALONE — exactly as it boots from a directory with no
+ *   config, never mixed with whatever source tree the process happens to stand
+ *   in.
  * - `none` — no artifact rung answered → the config is what boots.
  */
 export function cwdConfigJoinsBoot(opts: {
   configExists: boolean;
   configPath: string;
-  artifact: { kind: 'none' } | { kind: 'reference' } | { kind: 'path'; path: string };
+  artifact:
+    | { kind: 'none' }
+    | { kind: 'reference' }
+    | { kind: 'path'; path: string; configCompiledTo?: string };
 }): boolean {
   if (!opts.configExists) return false;
   switch (opts.artifact.kind) {
     case 'reference':
       return false;
     case 'path':
-      return isConfigCompiledArtifact(opts.artifact.path, opts.configPath);
+      return isConfigCompiledArtifact(opts.artifact.path, opts.configPath, opts.artifact.configCompiledTo);
     case 'none':
       return true;
   }

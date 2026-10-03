@@ -63,10 +63,24 @@
 export const INTERNAL_ARTIFACT_PATH_ENV = 'OS_INTERNAL_ARTIFACT_PATH';
 
 /**
+ * The second private variable on the same channel: WHERE the supervising
+ * command compiles the cwd config, when that is not the conventional
+ * `<config dir>/dist/objectstack.json`. `os dev` with the operator's local
+ * `OS_ARTIFACT_PATH` compiles the config into that path, so the artifact there
+ * is the config's own compiled output, and the child must recognise it as such
+ * (`isConfigCompiledArtifact`). Same naming and the same ownership rule as
+ * {@link INTERNAL_ARTIFACT_PATH_ENV}: a private call between two processes the
+ * CLI owns, deliberately undocumented.
+ */
+export const INTERNAL_CONFIG_OUTPUT_PATH_ENV = 'OS_INTERNAL_CONFIG_OUTPUT_PATH';
+
+/**
  * What a supervisor command decided about the artifact, as handed to the child.
  *
  * - `resolved` — a local path or `http(s)://` URL the parent resolved. It is
- *   passed down verbatim.
+ *   passed down verbatim. `configCompiledTo` is where the parent compiles the
+ *   cwd config, when it compiles it somewhere other than the conventional path
+ *   (`os dev` under a local `OS_ARTIFACT_PATH`).
  * - `reference` — `OS_ARTIFACT_URL` is driving this boot. The parent resolves
  *   nothing and says nothing: the child owns the fetch, the `#sha256=`
  *   verification and the refusal.
@@ -74,7 +88,7 @@ export const INTERNAL_ARTIFACT_PATH_ENV = 'OS_INTERNAL_ARTIFACT_PATH';
  *   outcome (`os start`'s quick-start mode).
  */
 export type ArtifactChannelDecision =
-  | { kind: 'resolved'; path: string }
+  | { kind: 'resolved'; path: string; configCompiledTo?: string }
   | { kind: 'reference' }
   | { kind: 'empty' };
 
@@ -87,7 +101,9 @@ export type ArtifactChannelDecision =
  * 1. **The parent OWNS `OS_INTERNAL_ARTIFACT_PATH` in the child env** — it is
  *    set on a `resolved` decision and *deleted* otherwise, so the value the
  *    child reads is a pure function of what the parent decided. An inherited
- *    copy can never speak for a decision the parent did not make.
+ *    copy can never speak for a decision the parent did not make. The same
+ *    holds for `OS_INTERNAL_CONFIG_OUTPUT_PATH`: set only when this decision
+ *    carries a `configCompiledTo`, deleted otherwise.
  *
  * 2. **`OS_BOOT_EMPTY` is only ever ADDED, never removed.** An operator who
  *    exported it keeps whatever it means for them today; this function does not
@@ -122,6 +138,12 @@ export function childEnvWithResolvedArtifact(
     delete childEnv[INTERNAL_ARTIFACT_PATH_ENV];
   }
 
+  if (decision.kind === 'resolved' && decision.configCompiledTo) {
+    childEnv[INTERNAL_CONFIG_OUTPUT_PATH_ENV] = decision.configCompiledTo;
+  } else {
+    delete childEnv[INTERNAL_CONFIG_OUTPUT_PATH_ENV];
+  }
+
   if (decision.kind === 'empty') {
     childEnv.OS_BOOT_EMPTY = '1';
   }
@@ -140,5 +162,16 @@ export function readInternalArtifactPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   const raw = env[INTERNAL_ARTIFACT_PATH_ENV];
+  return raw && raw.trim() !== '' ? raw : undefined;
+}
+
+/**
+ * Reader side, for `serve`: where the supervising `os dev` compiles the cwd
+ * config, when it is not the conventional path. Blank reads as unset.
+ */
+export function readInternalConfigOutputPath(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const raw = env[INTERNAL_CONFIG_OUTPUT_PATH_ENV];
   return raw && raw.trim() !== '' ? raw : undefined;
 }

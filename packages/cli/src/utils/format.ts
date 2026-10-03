@@ -741,6 +741,14 @@ export interface ServerReadyOptions {
    * over {@link configFile}: this is what actually booted (#8978).
    */
   artifactSource?: string;
+  /**
+   * #21501 — the compiled artifact a CONFIG boot loaded as its app bundle (a
+   * non-host config's standalone stack), relative to cwd or redacted. Printed
+   * as a plain `Artifact:` row in the `Config:` row's place: the metadata
+   * served came from that file, so naming the config instead would name a
+   * file that is not what loaded. A host config never sets it.
+   */
+  bundleSource?: string;
   isDev: boolean;
   pluginCount: number;
   pluginNames?: string[];
@@ -1185,11 +1193,14 @@ export function printServerReady(opts: ServerReadyOptions) {
   }
   console.error('');
   // #8978 — name what actually booted, never a file that was not read.
-  // `artifactSource` (OS_ARTIFACT_URL) wins when present; a caller with
-  // neither (the other artifact-fallback paths) gets no row at all rather
-  // than a fabricated or nonexistent one.
+  // `artifactSource` (OS_ARTIFACT_URL) wins when present, then `bundleSource`
+  // (a config boot whose app came from a compiled artifact, #21501); a caller
+  // with none of them (the other artifact-fallback paths) gets no row at all
+  // rather than a fabricated or nonexistent one.
   if (opts.artifactSource) {
     console.error(chalk.dim(`  Artifact: ${opts.artifactSource} (OS_ARTIFACT_URL)`));
+  } else if (opts.bundleSource) {
+    console.error(chalk.dim(`  Artifact: ${opts.bundleSource}`));
   } else if (opts.configFile) {
     console.error(chalk.dim(`  Config:  ${opts.configFile}`));
   }

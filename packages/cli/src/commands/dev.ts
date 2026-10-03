@@ -354,6 +354,12 @@ export default class Dev extends Command {
     // it, watched for it, or judged stale against it.
     const pinnedArtifact = flags.artifact ?? artifactUrl
       ?? (isRemoteArtifact(artifactPath) ? artifactPath : undefined);
+    // Where THIS command compiles the cwd config: the artifact it builds, which
+    // is `<cwd>/dist/objectstack.json` or the operator's local
+    // `OS_ARTIFACT_PATH` (#21501, as triage ruled). That file is the config's
+    // own compiled output wherever it lives, so the config joins the boot that
+    // serves it, and the child is told the path so it recognises it too.
+    const configCompiledTo = pinnedArtifact || !configExists ? undefined : artifactPath;
 
     if (packageName === 'all' && (configExists || flags.artifact)) {
       // `Config:` only when the cwd config takes part in this boot — the same
@@ -361,7 +367,7 @@ export default class Dev extends Command {
       const configJoins = cwdConfigJoinsBoot({
         configExists,
         configPath,
-        artifact: artifactUrl ? { kind: 'reference' } : { kind: 'path', path: artifactPath },
+        artifact: artifactUrl ? { kind: 'reference' } : { kind: 'path', path: artifactPath, configCompiledTo },
       });
       if (configJoins) {
         printKV('Config', configPath, '📂');
@@ -579,7 +585,7 @@ export default class Dev extends Command {
       const localEnv: NodeJS.ProcessEnv = {
         ...childEnvWithResolvedArtifact(
           process.env,
-          artifactUrl ? { kind: 'reference' } : { kind: 'resolved', path: artifactPath },
+          artifactUrl ? { kind: 'reference' } : { kind: 'resolved', path: artifactPath, configCompiledTo },
         ),
         OS_ENVIRONMENT_ID: environmentId,
         OS_SEED_ADMIN: seedAdmin ? '1' : '0',

@@ -9,7 +9,7 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
-import { readInternalArtifactPath } from '../utils/internal-artifact-channel.js';
+import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
 import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
@@ -2374,6 +2374,14 @@ export default class Serve extends Command {
     // against just a `dist/objectstack.json`.
     let useArtifactFallback = false;
     let useEmptyBoot = false;
+    /**
+     * #21501 — the compiled artifact a CONFIG boot loaded as its app bundle,
+     * as the ready banner displays it; set only when one did. A non-host
+     * config's standalone stack serves its metadata from that bundle, so the
+     * banner's `Artifact:` row names it; a host config (its `plugins` hold
+     * code) boots its own module and the row stays `Config:`.
+     */
+    let configBootBundle: string | undefined;
 
     // ── Artifact-pinned boot (#8368) ─────────────────────────────────
     // `OS_ARTIFACT_URL` names the artifact BY REFERENCE — an https:// URL
@@ -2473,7 +2481,11 @@ export default class Serve extends Command {
       configExists,
       configPath: absolutePath,
       artifact: pinnedArtifact ? { kind: 'reference' }
-        : supervisorArtifact ? { kind: 'path', path: supervisorArtifact }
+        : supervisorArtifact
+          // Where the supervisor compiles the cwd config, when it is not the
+          // conventional path (`os dev` under a local OS_ARTIFACT_PATH): the
+          // artifact there is that config's own compiled output too.
+          ? { kind: 'path', path: supervisorArtifact, configCompiledTo: readInternalConfigOutputPath() }
           : { kind: 'none' },
     });
 
@@ -2767,6 +2779,22 @@ export default class Serve extends Command {
             ...(supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
           };
           const bootResult = await createStandaloneStack(standaloneInput);
+          // #21501 — did the standalone stack load a compiled artifact as this
+          // app's bundle? Its AppPlugin over the bundle is the proof (it is
+          // pushed only when the bundle loaded, and a non-host config carries
+          // no plugin of its own). If so, the ready banner names THAT file:
+          // the metadata served came from it, not from the config module. The
+          // path is the runtime's own ladder over the same explicit input the
+          // stack was handed — never a copy of it.
+          if (Array.isArray((bootResult as any)?.plugins) && (bootResult as any).plugins.some(isAppPluginLike)) {
+            const { resolveDefaultArtifactPath, redactArtifactUrl } = await import('@objectstack/runtime');
+            const loaded = resolveDefaultArtifactPath(supervisorArtifact);
+            if (loaded) {
+              configBootBundle = /^https?:\/\//i.test(loaded)
+                ? redactArtifactUrl(loaded)
+                : (path.relative(process.cwd(), loaded) || loaded);
+            }
+          }
           // [#4002] Per-key `api` merge — see mergeBootConfig.
           config = mergeBootConfig(originalConfig as any, bootResult as any) as any;
         } else {
@@ -5332,7 +5360,7 @@ export default class Serve extends Command {
         // something unparseable; the banner then prints paths with no origin
         // rather than a confident wrong URL.
         externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
-        ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
+        ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact, configBootBundle }),
         isDev,
         pluginCount: loadedPlugins.length,
         pluginNames: loadedPlugins,
@@ -6935,16 +6963,22 @@ export function describeRegisteredDriver(
  *   → no config was read and there is no safely-redacted display in hand
  *   here (OS_ARTIFACT_PATH may itself be a credentialed URL) — omit the
  *   row rather than name a nonexistent file or risk leaking a secret.
- * - Neither set → the ordinary config-boot path; report `relativeConfig`
- *   exactly as before.
+ * - Neither set → the config-boot path, which names what that boot actually
+ *   loaded as the app (#21501): `configBootBundle` set — a non-host config
+ *   whose standalone stack served a compiled artifact as its bundle — reports
+ *   THAT file as `bundleSource`; otherwise (a host config, whose `plugins` hold
+ *   code and which boots its own module, or a config whose artifact was absent)
+ *   report `relativeConfig`. No row names a file the boot did not load.
  */
 export function resolveBannerConfigRow(opts: {
   relativeConfig: string;
   useArtifactFallback: boolean;
   pinnedArtifact?: { display: string };
-}): { configFile?: string; artifactSource?: string } {
+  configBootBundle?: string;
+}): { configFile?: string; artifactSource?: string; bundleSource?: string } {
   if (opts.pinnedArtifact) return { artifactSource: opts.pinnedArtifact.display };
   if (opts.useArtifactFallback) return {};
+  if (opts.configBootBundle) return { bundleSource: opts.configBootBundle };
   return { configFile: opts.relativeConfig };
 }
 
