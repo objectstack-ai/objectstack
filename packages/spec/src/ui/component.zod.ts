@@ -3880,20 +3880,19 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * as `schema.resizable ?? schema.resizableColumns` (:5361) — retires to a
  * tombstone naming `resizable`.
  *
- * [#21464] The list members, re-measured at the same pin `89cad75d55` and
- * typed the same way — each was `z.unknown()` (an array of it for the four
+ * [#21464] Six list members, re-measured at the same pin `89cad75d55` and
+ * typed the same way — each was `z.unknown()` (an array of it for the three
  * lists), so a value of the wrong shape passed the component-props gate and
- * the grid dropped or substituted it in silence: `columns` (`normalizeColumns`,
- * :819, dispatching on the FIRST entry — all strings or all `ListColumn`
- * objects; read at :2158 and projected at :2590), `fields` (:1946 — field
+ * the grid dropped or substituted it in silence: `fields` (:1946 — field
  * NAMES on the draw path, `objectSchema.fields[fieldName]` at :3969 / :4012),
  * `selection` (`.type`, :4799-4812), `selectable` (:4813-4815, handed to the
  * table's `selectable` at :5333), `rowActions` (`string[]`, :1834-1835) and
  * `bulkActions` / `batchActions` (`batchActions ?? bulkActions`, :4763, each
  * entry a NAME `resolveBulkActions` folds; a non-string entry is skipped). The
- * four a list view also declares take the list view's own members by
+ * three a list view also declares take the list view's own members by
  * reference; `fields` and `selectable` have no list-view counterpart and
  * declare the measured shape here; `batchActions` takes `bulkActions`'s def.
+ * `columns` stays `z.unknown()`, held for a ruling — see the member.
  */
 export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid`',
@@ -3938,19 +3937,25 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   emptyState: EmptyStateSchema.optional()
     .describe('What the grid draws instead of an empty table: `{ title, message, icon }` — the list view\'s own empty-state shape'),
   /**
-   * [#21464] The list view's own `columns` member, by reference
-   * (`ListViewSchema.shape.columns` — the union of two array shapes the
-   * column entry is declared in): all field-name strings, or all
-   * `ListColumn` entries. `normalizeColumns` (`ObjectGrid.tsx:819` at the pin
-   * `89cad75d55`) decides which by the FIRST entry, and the draw path keeps
-   * only an entry whose `field` is a non-empty string, so a mixed array, a
-   * column keyed `accessorKey` / `header` / `name`, or a key the grid never
-   * reads (`editable`, `options`) drew no column or was ignored. Optional
-   * here, where the list view requires it: a grid with no `columns` derives
-   * them from `fields` or the object.
+   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The by-reference
+   * candidate is the list view's own `columns` member
+   * (`ListViewSchema.shape.columns`: all field-name strings, or all strict
+   * `ListColumn` entries), and the draw path matches it: `normalizeColumns`
+   * (`ObjectGrid.tsx:819` at the pin `89cad75d55`, read at `:2158`) decides
+   * by the FIRST entry, and only an entry with a non-empty string `field`
+   * draws a column. But the grid also reads `options` off an authored column:
+   * the group-header formatter (`:2997-3001`) takes the column whose `field`
+   * is the grouping field and draws the group-header labels from
+   * `colOverride?.options || objectDefField?.options`, the column's list
+   * winning — and objectui's own `gridGroupingMembers-8071` test pins that as
+   * behaviour. `ListColumn` declares no `options`, so the by-reference shape
+   * would refuse a value the grid draws. The renderer-side read is carded as
+   * objectstack-ai/objectui#11544; the member is typed once that is ruled.
+   * (A column `editable` key, by contrast, is read nowhere off an authored
+   * column.)
    */
-  columns: ListViewSchema.shape.columns.optional()
-    .describe('Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view\'s `columns` declares. One spelling per list: an array mixing strings and column objects is refused'),
+  columns: z.array(z.unknown()).optional()
+    .describe('Columns: field names or column definition objects'),
   /**
    * [#21464] Field NAMES. No list-view schema declares this member, so the
    * shape is the one the grid reads (`ObjectGrid.tsx:1946` at the pin
@@ -4373,8 +4378,8 @@ export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
  * type-alias convention pin's default-free family (the Iso839 line deleted
  * with this alias), on the `RecordAlertPropsParsed` route its comment
  * prescribes. The list view's own members taken by reference since carry
- * their defaults too (#21445, #21464: `navigation`'s four, `selection.type`,
- * a column's `prefix.type`).
+ * their defaults too (#21445, #21464: `navigation`'s four and
+ * `selection.type`).
  */
 export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
 

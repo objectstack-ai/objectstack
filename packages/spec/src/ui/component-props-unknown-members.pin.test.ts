@@ -31,10 +31,11 @@
  *   the code AND the path; its ADR-0087 D3 entry is registered.
  *
  * Later stages pin the members they type in their own file, beside this one:
- * the list family (`object-grid` `columns` / `fields` / `selection` /
- * `selectable` / `rowActions` / `bulkActions` / `batchActions`,
- * `object-kanban` `columns`, `object-calendar` `calendar`) in
- * `component-list-family-typed-members.pin.test.ts`.
+ * the list family (`object-grid` `fields` / `selection` / `selectable` /
+ * `rowActions` / `bulkActions` / `batchActions`, `object-kanban` `columns`,
+ * `object-calendar` `calendar`) in
+ * `component-list-family-typed-members.pin.test.ts`. The family's ninth,
+ * `object-grid` `columns`, is held below.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -246,6 +247,14 @@ on(['action:menu'], ['actions[]{}'], staged('objectui-held', 'components/src/ren
 // `types/src/__tests__/kanban-conditional-formatting.test.ts:29-52`), so the
 // narrowing is reported for a ruling instead of shipped.
 on(['object-kanban'], ['conditionalFormatting'], staged('held-for-decision', 'plugin-kanban/src/KanbanBoardCore.tsx:114, evaluated at KanbanImpl.tsx:179 (`resolveConditionalFormatting`)'));
+// The list view's own `columns` is the by-reference shape, and the draw path
+// matches it — but the grid's group-header formatter also reads `options` off
+// an authored column (`colOverride?.options || objectDefField?.options`, the
+// column winning) and draws the group labels from it, which objectui pins as
+// behaviour (`plugin-grid/src/__tests__/gridGroupingMembers-8071.test.tsx:260-301`).
+// `ListColumn` declares no `options`, so the narrowing would refuse a value the
+// grid draws: held until objectstack-ai/objectui#11544 is ruled.
+on(['object-grid'], ['columns[]'], staged('held-for-decision', 'plugin-grid/src/ObjectGrid.tsx:2158 (`normalizeColumns`), `columns[].options` drawn by the group-header formatter at :2997-3001'));
 
 /** Every `z.unknown()` member of every row, keyed as the ledger keys it. */
 function census(): Map<string, UnknownMember> {
