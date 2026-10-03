@@ -1292,6 +1292,230 @@ describe('#21334 a container on another package\'s object never takes that packa
             });
         }
     });
+
+    /**
+     * #21620 — the save door refuses a view container saved under a name that
+     * ANOTHER stored container of the same object expands to.
+     *
+     * Measured on `origin/main` before this change, in-process on both
+     * kernels: with `{ name: 'crm_lead', object: 'crm_lead', list, listViews:
+     * { pipeline } }` stored, a second container `{ object: 'crm_lead', list }`
+     * saved as `crm_lead.pipeline` was accepted. It became that name's own
+     * row, so the first container's expansion no longer filled the name: the
+     * object door listed nothing under it and the by-name read answered the
+     * raw second container. #21558's check does not fire, because the second
+     * container's OWN expansion is `crm_lead.default`.
+     *
+     * Triage's ruling made a broader check (a container named only after its
+     * object) conditional on a census, with this narrower one as the
+     * fallback. The census hit — this door keeps a container saved under a
+     * name other than its object (the #13407 block above, #21412's P2 and
+     * P2b below, this block's own #21334 cases) — so only the name another
+     * stored container of the same object expands to is refused.
+     *
+     * The ruling's three pins, on both kernels and both scopes: the measured
+     * save is refused (every member kind the first container can expand the
+     * name from, the card's own pair, draft mode, a body with no `name`, a
+     * `form`-only body, and a sibling on another package's object); a
+     * container under its object's name saves and expands as before; a view
+     * item under an expanded name still saves. One more control is the
+     * census's: a container under a name of its own, not its object's and not
+     * a sibling's expansion, still saves.
+     */
+    describe('#21620 the save door refuses a container saved under a name another stored container of the same object expands to', () => {
+        const LEAD = 'crm_lead';
+        const leadData = { provider: 'object', object: LEAD };
+        const leadList = (label: string) => ({ label, type: 'grid', data: leadData, columns: [{ field: 'name' }] });
+        const leadForm = { type: 'simple', sections: [{ label: 'Main', fields: ['name'] }] };
+        /** The card's second container: a bare `list`, bound to the same object (its own expansion is `crm_lead.default`). */
+        const second = (name?: string) => ({ ...(name ? { name } : {}), object: LEAD, list: leadList('Other') });
+        /**
+         * A second container whose own expansion (`crm_lead.other`) is never a
+         * name a first container below expands, so the refusal it meets is
+         * this check's and not #21558's.
+         */
+        const secondKeyed = (name: string) => ({ name, object: LEAD, listViews: { other: leadList('Other') } });
+        /**
+         * One first container per member kind, each on the runtime-authored
+         * object the card measured: the name it expands is the second
+         * container's save name.
+         */
+        const FIRST_CASES: Record<string, Record<string, unknown>> = {
+            list: { list: leadList('First Default') },
+            'list#named': { list: { ...leadList('First Named'), name: 'hot' } },
+            'listViews.*': { listViews: { pipeline: leadList('First Pipeline') } },
+            form: { form: leadForm },
+            'formViews.*': { formViews: { edit: leadForm } },
+        };
+        const FIRST = 'lead_first_views';
+
+        const saveIn = (
+            protocol: Protocol, name: string, item: unknown, organizationId?: string, mode?: 'draft' | 'publish',
+        ) => protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId), ...(mode ? { mode } : {}) } as any);
+        const saved = async (write: Promise<unknown>) => expect(((await write) as any)?.success).toBe(true);
+        const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
+        const leadDoor = async (protocol: Protocol, organizationId?: string) =>
+            switcherMatches(((await protocol.getMetaItems({ type: 'view', ...scoped(organizationId) } as any)) as any).items, LEAD);
+        /** The ADR-0112 envelope, and the two subjects the refusal names. */
+        const expectRefused = (error: any, saveName: string, sibling: string) => {
+            expect(error).toBeInstanceOf(Error);
+            expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+            expect(error.message, 'the refusal names the save name').toContain(`'${saveName}'`);
+            expect(error.message, 'the refusal names the container that expands it').toContain(`'${sibling}'`);
+        };
+        /** Nothing of the refused save reached the store or the registry. */
+        const expectNothingWritten = (
+            rows: Map<string, Row>, registry: ReturnType<typeof faithfulRegistry>, storedNames: string[], refused: string,
+        ) => {
+            expect([...rows.values()].filter((r) => r.type === 'view').map((r) => [r.name, r.state]), 'no row and no draft is stored')
+                .toEqual(storedNames.map((n) => [n, 'active']));
+            expect(
+                registry.listItems('view').filter((it) => isAggregatedViewContainer(it) && it.name === refused),
+                'no container is registered under the refused name',
+            ).toEqual([]);
+        };
+        /** `name` answers one view item on BOTH doors — the same item — carrying `label`. */
+        const expectServed = async (protocol: Protocol, name: string, organizationId: string | undefined, label: unknown) => {
+            const listed = named(await leadDoor(protocol, organizationId), name);
+            expect(listed, `exactly one item answers ${name} on the object door`).toHaveLength(1);
+            expect(listed[0]?.label).toBe(label);
+            const read = await byNameDoor(protocol, name, organizationId);
+            expect(isAggregatedViewContainer(read), `${name} by name is a view item, not a raw container`).toBe(false);
+            expect({ name: read?.name, viewKind: read?.viewKind, object: read?.object, config: read?.config })
+                .toEqual({ name, viewKind: listed[0].viewKind, object: LEAD, config: listed[0].config });
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+
+                    for (const [kind, member] of Object.entries(FIRST_CASES)) {
+                        it(`${scope}, the first container's member ${kind}: a second container saved under the name it expands is refused VALIDATION_ERROR / 400; nothing is stored or registered, and the first container's view still answers on both doors`, async () => {
+                            const { protocol, rows, registry } = showcaseHarness(environmentId);
+                            const firstBody = { name: FIRST, object: LEAD, ...member };
+                            const [firstView] = expandViewContainer(LEAD, firstBody) as any[];
+                            expect(expandViewContainer(LEAD, firstBody), 'the first container expands one name').toHaveLength(1);
+                            const name = String(firstView.name);
+                            await saved(saveIn(protocol, FIRST, firstBody, organizationId));
+
+                            expectRefused(await refusalOf(saveIn(protocol, name, secondKeyed(name), organizationId)), name, FIRST);
+                            expectNothingWritten(rows, registry, [FIRST], name);
+                            await expectServed(protocol, name, organizationId, firstView.label);
+                        });
+                    }
+
+                    it(`${scope}: the card's save — '${LEAD}' stored with listViews.pipeline, then a second container saved as ${LEAD}.pipeline — is refused in publish and draft mode, with or without a body \`name\``, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        const first = { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } };
+                        await saved(saveIn(protocol, LEAD, first, organizationId));
+
+                        const PIPELINE = `${LEAD}.pipeline`;
+                        expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), organizationId)), PIPELINE, LEAD);
+                        // A body with no `name` is judged under the name the door stamps on it.
+                        expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(), organizationId)), PIPELINE, LEAD);
+                        expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), organizationId, 'draft')), PIPELINE, LEAD);
+                        expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                        await expectServed(protocol, PIPELINE, organizationId, 'Lead Pipeline');
+                        await expectServed(protocol, `${LEAD}.default`, organizationId, 'All Leads');
+                    });
+
+                    it(`${scope}: a \`form\`-only second container is refused by this check, before the identity stamp could turn it into a malformed view item`, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, formViews: { edit: leadForm } }, organizationId));
+                        const EDIT = `${LEAD}.edit`;
+                        expectRefused(
+                            await refusalOf(saveIn(protocol, EDIT, { name: EDIT, object: LEAD, form: leadForm }, organizationId)), EDIT, LEAD,
+                        );
+                        expectNothingWritten(rows, registry, [LEAD], EDIT);
+                    });
+
+                    it(`${scope}: a sibling on ANOTHER package's object is judged where the readers place its names — a container saved under its own-name expansion is refused`, async () => {
+                        const { protocol, rows } = showcaseHarness(environmentId);
+                        const first = { name: OWN, object: TASK, listViews: { in_progress: { ...listView, label: 'Own In Progress' } } };
+                        await saved(protocol.saveMetaItem({ type: 'view', name: OWN, item: first, packageId: REPAIR } as any));
+                        const UNDER = `${TASK}.${OWN}.in_progress`;
+                        expect(named(await objectDoor(protocol, organizationId), UNDER), 'the sibling serves its own-name expansion').toHaveLength(1);
+
+                        const body = { name: UNDER, object: TASK, list: listView };
+                        expectRefused(await refusalOf(saveIn(protocol, UNDER, body, organizationId)), UNDER, OWN);
+                        expect([...rows.values()].filter((r) => r.type === 'view').map((r) => r.name)).toEqual([OWN]);
+                        expect(named(await objectDoor(protocol, organizationId), UNDER)).toHaveLength(1);
+                        await expectEveryPackagedNameIntact(protocol, organizationId);
+                    });
+
+                    it(`${scope}: CONTROL — a container under its object's name saves and expands as before, beside a sibling, and re-saves`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, 'lead_hot_views', { name: 'lead_hot_views', object: LEAD, listViews: { hot: leadList('Hot Leads') } }, organizationId));
+                        const own = { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } };
+                        await saved(saveIn(protocol, LEAD, own, organizationId));
+                        // Its own row is the row a re-save replaces, never a sibling.
+                        await saved(saveIn(protocol, LEAD, { ...own, list: leadList('All Leads, edited') }, organizationId));
+                        await expectServed(protocol, `${LEAD}.default`, organizationId, 'All Leads, edited');
+                        await expectServed(protocol, `${LEAD}.pipeline`, organizationId, 'Lead Pipeline');
+                        await expectServed(protocol, `${LEAD}.hot`, organizationId, 'Hot Leads');
+                    });
+
+                    it(`${scope}: CONTROL — a view item saved under a sibling's expanded name saves, as that name's sanctioned override`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }, organizationId));
+                        const PIPELINE = `${LEAD}.pipeline`;
+                        const item = { name: PIPELINE, object: LEAD, viewKind: 'list', label: 'ByNameRow', config: { type: 'grid', data: leadData, columns: [{ field: 'name' }] } };
+                        await saved(saveIn(protocol, PIPELINE, item, organizationId));
+                        await expectServed(protocol, PIPELINE, organizationId, 'ByNameRow');
+                    });
+
+                    it(`${scope}: CONTROL (the census) — a container saved under a name of its own, neither its object's nor a sibling's expansion, still saves and serves`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } }, organizationId));
+                        await saved(saveIn(protocol, 'lead_hot_views', { object: LEAD, listViews: { hot: leadList('Hot Leads') } }, organizationId));
+                        await expectServed(protocol, `${LEAD}.hot`, organizationId, 'Hot Leads');
+                        await expectServed(protocol, `${LEAD}.pipeline`, organizationId, 'Lead Pipeline');
+                    });
+                }
+
+                it('the prescription names the sibling container that expands the name and never prescribes a save under it — in the card\'s pair the object\'s own name IS that sibling', async () => {
+                    const { protocol, rows, registry } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    const error = await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE)));
+                    // The envelope, and the sibling named as the container that expands the name.
+                    expectRefused(error, PIPELINE, LEAD);
+                    // A save under the sibling's name would replace its row and drop `pipeline`,
+                    // the view this refusal keeps serving: no arm may name that save. So every
+                    // place the sibling's name appears names it as THE CONTAINER (or as the
+                    // object a view binds to), never as a name to save under.
+                    const leadIns = String(error.message).split(`'${LEAD}'`).slice(0, -1);
+                    expect(leadIns.filter((s) => /container $/.test(s)).length, 'the sibling is named as the container').toBeGreaterThan(0);
+                    expect(
+                        leadIns.filter((s) => !/(container|on) $/.test(s)),
+                        'the sibling\'s (here the object\'s) name is never prescribed as a name to save under',
+                    ).toEqual([]);
+                    expect(error.message).not.toContain(`under '${LEAD}'`);
+                    expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                    await expectServed(protocol, PIPELINE, undefined, 'Lead Pipeline');
+                });
+
+                it('an environment-wide sibling is in an organization caller\'s selection: that caller\'s save under its expanded name is refused', async () => {
+                    const { protocol, rows, registry } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), ORG)), PIPELINE, LEAD);
+                    expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                    await expectServed(protocol, PIPELINE, ORG, 'Lead Pipeline');
+                });
+
+                it('CONTROL — another organization\'s container is not this caller\'s sibling: the save is judged by the caller\'s own selection, as the readers judge', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }, 'org_globex'));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    await saved(saveIn(protocol, PIPELINE, second(PIPELINE), ORG));
+                    // The other organization still gets its own container's view, on both doors.
+                    await expectServed(protocol, PIPELINE, 'org_globex', 'Lead Pipeline');
+                });
+            });
+        }
+    });
 });
 
 /**

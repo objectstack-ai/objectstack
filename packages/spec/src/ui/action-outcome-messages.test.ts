@@ -10,8 +10,10 @@
  *
  * The SELECTION (`outcomeMessages[result.outcome]` → `successMessage` → the
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
- * reader is objectstack-ai/objectui#11344, a later link of the same ruling, and
- * the ledger row stays `planned` until it lands. So the "a handler returning
+ * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
+ * carried from the pin this repo builds against (`.objectui-sha` =
+ * `ab1879721`; `ActionRunner.composeSuccessMessage`), where the ledger row
+ * turned `live`. Its behaviour is pinned on objectui's side, so the "a handler returning
  * `{ outcome: 'archived', … }` resolves to the archived copy, interpolated"
  * acceptance splits in two. HERE: the key is accepted on exactly the two types
  * that have a success payload, refused loudly everywhere it would be inert or

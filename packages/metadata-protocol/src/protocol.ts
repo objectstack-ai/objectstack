@@ -107,6 +107,10 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // door (`saveMetaItem`), the restore doors (`rollbackMetaItem`, `revertCommit`)
 // and the draft promotion (`promoteDraftForPublish`).
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
+// [#21620] The one spelling of "which object a view container binds to" — the
+// derivation the source registrars file a container under — so the save door's
+// sibling-expansion refusal judges "the same object" as every other door does.
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -17955,6 +17959,113 @@ export class ObjectStackProtocolImplementation implements
         return err;
     }
 
+    /**
+     * [#21620] The save door's refusal of a view container saved under a name
+     * that ANOTHER stored container of the same object expands to — with
+     * `{ name: 'crm_lead', object: 'crm_lead', listViews: { pipeline } }`
+     * stored, a second container `{ object: 'crm_lead', list }` saved as
+     * `crm_lead.pipeline`.
+     *
+     * The harm is #21558's, reached through a sibling: the second container
+     * becomes the stored row of `crm_lead.pipeline`, and both read doors give
+     * a name with a row of its own that row (#21510's one predicate,
+     * {@link namesWithOwnStoredRow}). So the first container's expansion no
+     * longer fills the name, the object door — which never enumerates a
+     * container — lists nothing under it, and the by-name read answers the raw
+     * second container: the sibling's view is gone from both doors and no door
+     * answers a view item for the name. #21558's check cannot see this: the
+     * second container's OWN expansion is `crm_lead.default`, never its save
+     * name.
+     *
+     * Triage's ruling on the card named a broader check — a container's name
+     * must be its object's name — and made it conditional on a census, with
+     * THIS narrower check as the fallback. The census hit: this door keeps a
+     * container saved under a name other than its object (#13407's live
+     * authoring path, which the platform checklist's live view-authoring item
+     * drives; #21412's P2 and P2b, ruled; #21334's arm expands one under its
+     * own name, ruled), and Studio's metadata editor re-saves such a container
+     * under its stored name. So the name is judged only against what the
+     * other stored containers of the same object expand to.
+     *
+     * The judgment is the readers' own, never a copy of it:
+     *  - the rows are the ones {@link readActiveOverlayRows} selects for this
+     *    caller, through the read gate the readers apply
+     *    ({@link organizationIdForMetaRead}) and with no package filter, so
+     *    every reader whose selection holds this container and a sibling is
+     *    covered for this caller's scope;
+     *  - each row is parsed by {@link storedOverlayEntries} and expanded by
+     *    {@link expandStoredViewContainers}, with the row's own package
+     *    binding, so every member kind, the expander's de-duplication and
+     *    #21334's arm are judged where the readers place them;
+     *  - the row stored under the save name itself is left out: it is the row
+     *    this save replaces, not a sibling;
+     *  - "the same object" is the expanded view's `object` against
+     *    {@link deriveViewContainerObject} of the body, the one derivation
+     *    every door files a container under.
+     *
+     * The body judged is the one the author sent, with the door's own `name`
+     * stamp applied first (a body with no `name` is judged under the save
+     * name), BEFORE {@link normalizeViewMetadata}'s identity patch — on an
+     * unscoped kernel the sibling's expansion is registered under the name,
+     * and a `form`-only container would take its `viewKind` there and reach
+     * the schema as a malformed view item instead of this refusal.
+     *
+     * A view item (`viewKind` set) is not a container and is untouched: under
+     * an expanded name it is that name's sanctioned override. Rows already
+     * stored in this shape keep their bytes and are served as before; only a
+     * new save of one is refused, and the re-savers that write through this
+     * door (`migrateStoredMetadata`, `duplicatePackage`) record that refusal
+     * as the row's failure instead of re-saving it.
+     *
+     * `VALIDATION_ERROR` / 400, the envelope of the two name checks it sits
+     * beside. The prescription names the stored container that expands the
+     * name, and gives two arms: add the view as a member of THAT container, or
+     * save a view item under the expanded name. ⛔ It never prescribes a save
+     * under a name another stored container holds — not even the object's own
+     * name, which in the card's pair IS the sibling: an author (or an AI)
+     * following such an arm literally would replace the sibling's row and drop
+     * the very view this refusal keeps serving. Runtime words carry no tracker
+     * number.
+     */
+    private async containerSiblingExpansionNameRefusal(
+        type: string,
+        item: unknown,
+        saveName: string,
+        organizationId: string | undefined,
+    ): Promise<(Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined> {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return undefined;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        const body = item as Record<string, unknown>;
+        const stamped = body.name ? body : { ...body, name: saveName };
+        if (!isAggregatedViewContainer(stamped)) return undefined;
+        const object = deriveViewContainerObject(stamped);
+        if (!object) return undefined;
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows({ type }, organizationIdForMetaRead(type, organizationId));
+        } catch (error) {
+            // [#5532] The readers' rule: only an unprovisioned store means "no
+            // rows". Any other failure is not answered as "no sibling".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const siblings = this.storedOverlayEntries({ type }, records)
+            .filter((entry) => entry.name !== saveName);
+        const hit = this.expandStoredViewContainers(type, siblings)
+            .find(({ item: expanded }) => expanded.name === saveName && expanded.object === object);
+        if (!hit) return undefined;
+        const err = new Error(
+            `Invalid view container: it is saved under '${saveName}', which is a name the stored container `
+            + `'${hit.container.name}' expands (its ${String(hit.item.viewKind)} view on '${object}'). An expanded `
+            + `view fills only a name that has no stored row of its own, and this container would be that row, so `
+            + `that view would no longer be served and no read would answer a view under '${saveName}'. Add the `
+            + `view as a member of the container '${hit.container.name}' (its list, listViews, form or formViews), `
+            + `or save a view item (name, object, viewKind and config) under '${saveName}'.`,
+        ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+        err.code = 'VALIDATION_ERROR';
+        err.status = 400;
+        return err;
+    }
+
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
     // receipt served — and is compared in that form (`storedParentForToken`).
     // `storedParentVersion` is the in-process twin for a caller that read the
@@ -18445,6 +18556,16 @@ export class ObjectStackProtocolImplementation implements
                     singularType, request.item, request.name, request.packageId,
                 );
                 if (ownExpansionRefusal) throw ownExpansionRefusal;
+            }
+            // [#21620] …and a view container saved under a name ANOTHER stored
+            // container of the same object expands to, with the same envelope,
+            // judged by the readers' own row selection and expansion. Also
+            // before the stamp. See {@link containerSiblingExpansionNameRefusal}.
+            {
+                const siblingExpansionRefusal = await this.containerSiblingExpansionNameRefusal(
+                    singularType, request.item, request.name, request.organizationId,
+                );
+                if (siblingExpansionRefusal) throw siblingExpansionRefusal;
             }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
