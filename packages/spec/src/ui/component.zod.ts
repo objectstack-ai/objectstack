@@ -404,7 +404,8 @@ const emptyProps = (type: string) =>
 
 /**
  * A component RETIRED at element grain whose props bag is refused WHOLE —
- * `user:profile` (#14159). The `retiredKey` channel one grain wider: where a
+ * `user:profile` (#14159), and `ai:chat_window` (#21504), whose four keys left
+ * with its props def. The `retiredKey` channel one grain wider: where a
  * tombstoned KEY accepts absence and refuses any value, a retired ELEMENT has
  * nothing an author may write at all, so the row is `z.never` — `{}` is refused
  * exactly like a populated bag, `expected: 'never'` / `code: 'invalid_type'` is
@@ -2354,17 +2355,12 @@ export const PageAccordionProps = strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const AIChatWindowProps = strictObject({
-  surface: 'this `ai:chat_window`',
-  history: PROPS_HISTORY,
-  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-}, {
-  mode: z.enum(['float', 'sidebar', 'inline']).default('float').describe('Display mode for the chat window'),
-  agentId: z.string().optional().describe('Specific AI agent to use'),
-  context: z.record(z.string(), z.unknown()).optional().describe('Contextual data to pass to the AI'),
-  /** ARIA accessibility */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-});
+// `AIChatWindowProps` REMOVED (#21504, ADR-0049) with the `ai:chat_window`
+// element it described: `mode` / `agentId` / `context` / `aria` were read by
+// nothing, because no renderer for the element ever shipped. Its row in
+// `ComponentPropsMap` below now refuses the whole bag
+// (`retiredComponentProps`), and the def is recorded in
+// `migrations/entries/retired-defs/18.ui__AIChatWindowProps.ts`.
 
 /**
  * ----------------------------------------------------------------------
@@ -6700,7 +6696,16 @@ export const ComponentPropsMap = {
   'mcp:connect-agent': emptyProps('mcp:connect-agent'),
 
   // AI
-  'ai:chat_window': AIChatWindowProps,
+  // RETIRED by name (#21504, ADR-0049; triage ruling: the `user:profile`
+  // precedent) — no renderer by design, the console's floating chat overlay is
+  // the AI chat entry point. The row STAYS, for the reason `user:profile`'s
+  // does above: every reader that dispatches on the row keeps recognising the
+  // name and answers with the prescription instead of skipping it as an
+  // unregistered custom string. Its four keys (`mode`, `agentId`, `context`,
+  // `aria`) left with `AIChatWindowProps`, so the WHOLE bag is refused — the
+  // node itself is refused at `PageComponentSchema.type`, and a row that still
+  // accepted `{ mode }` would contradict that door one level up.
+  'ai:chat_window': retiredComponentProps('ai:chat_window'),
   'ai:suggestion': strictObject({
     surface: 'this `ai:suggestion`',
     history: PROPS_HISTORY,
