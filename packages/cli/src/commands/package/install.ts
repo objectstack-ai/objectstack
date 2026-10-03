@@ -26,7 +26,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, printStep, isExitSignal } from '../../utils/format.js';
 
 export default class PackageInstall extends Command {
   static override description =
@@ -246,6 +246,7 @@ export default class PackageInstall extends Command {
         console.log(`    ${storageDir}`);
       }
     } catch (error) {
+      if (isExitSignal(error)) throw error;
       printError((error as Error).message);
       this.exit(1);
     }

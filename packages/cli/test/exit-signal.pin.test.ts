@@ -369,7 +369,6 @@ for (const file of COMMAND_FILES) {
 const POPULATION: JsonCommand[] = [];
 for (const [cls, file] of classFile) {
   const faces = jsonFaces(cls as CommandClass);
-  if (faces.length === 0) continue;
   const chain: string[] = [];
   for (let k: unknown = cls; k && classFile.has(k); k = Object.getPrototypeOf(k)) chain.push(classFile.get(k)!);
   POPULATION.push({ id: commandId(file), faces, chain });
