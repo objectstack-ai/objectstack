@@ -494,6 +494,9 @@ export const ShowcaseTranslationBundle = {
             label: '重算所选',
             successMessage: '已为整个选中集重算工时。',
           },
+          // The hook-refusal specimen: every click is refused by
+          // showcase_guard_task_reopen, so it carries no successMessage.
+          showcase_reopen_task: { label: '重新打开' },
         },
         // Section headings of the six form-view projections in
         // `ui/views/task.view.ts` (edit / tabbed / wizard / split / quick).
