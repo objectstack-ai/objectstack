@@ -407,6 +407,9 @@ describe('publishMetaItem carries the runtime authoring gate\'s advisories (#917
     const cleanFlow = () => {
         const flow = advisoryFlow();
         (flow.nodes[1] as any).config.filter = [{ field: 'created_at', operator: 'lt', value: '2020-01-01' }];
+        // [#21470] Named for the row it is saved under (`bounded_purge`): a
+        // body `name` that is not its row's is refused by the write doors.
+        flow.name = 'bounded_purge';
         return flow;
     };
 

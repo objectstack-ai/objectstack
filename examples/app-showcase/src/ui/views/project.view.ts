@@ -170,21 +170,17 @@ export const ProjectViews = defineView({
       },
     },
   },
-  formViews: {
-    // `edit`, not `default`: the main `list` implicitly claims `<object>.default`
-    // in the shared view namespace, so a `default` form key collides (build-time
-    // view-ref lint, framework #2554).
-    edit: {
-      type: 'simple',
-      data,
-      sections: [
-        { name: 'project', label: 'Project', columns: 2, fields: ['name', 'account', 'status', 'health', 'owner'] },
-        { name: 'budget_schedule', label: 'Budget & Schedule', columns: 2, fields: ['budget', 'spent', 'start_date', 'end_date'] },
-      ],
-      // No subforms here: the Tasks subtable is derived from the data model —
-      // showcase_task.project declares `inlineEdit: true`, so every standard
-      // Project form auto-renders it. (A view could still add `subforms` to
-      // override the derived columns/order.)
-    },
+  // The default form — what the create and edit surfaces render.
+  form: {
+    type: 'simple',
+    data,
+    sections: [
+      { name: 'project', label: 'Project', columns: 2, fields: ['name', 'account', 'status', 'health', 'owner'] },
+      { name: 'budget_schedule', label: 'Budget & Schedule', columns: 2, fields: ['budget', 'spent', 'start_date', 'end_date'] },
+    ],
+    // No subforms here: the Tasks subtable is derived from the data model —
+    // showcase_task.project declares `inlineEdit: true`, so every standard
+    // Project form auto-renders it. (A view could still add `subforms` to
+    // override the derived columns/order.)
   },
 });

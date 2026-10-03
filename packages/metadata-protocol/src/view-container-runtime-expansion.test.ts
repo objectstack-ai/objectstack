@@ -31,7 +31,7 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { expandViewContainer, isAggregatedViewContainer, ViewSchema } from '@objectstack/spec/ui';
 import { MetadataPlugin } from '@objectstack/metadata';
-import { savedViewContainerNameRefusal } from '@objectstack/metadata/view-container-name';
+import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
@@ -1005,7 +1005,7 @@ describe('#21412 the save door refuses a container whose own name disagrees with
     it('P1 is refused THROUGH the judge: the door throws exactly what it returns for that document', async () => {
         const body = named('lead_views', leadContainer);
         const { error } = await save('crm_lead', body);
-        expect(error.message).toBe(savedViewContainerNameRefusal(body, 'crm_lead')!.message);
+        expect(error.message).toBe(savedItemNameRefusal('view', body, 'crm_lead', 'save')!.message);
     });
 
     it('P1 answers the envelope a source registrar answers for the same document', async () => {
