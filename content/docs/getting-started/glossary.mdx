@@ -36,7 +36,7 @@ Older docs and talks used **ObjectOS** as the name of this control layer. That n
 Defines the core business data model. Includes Object schema, Field types, Validation rules, Query AST, and Filter conditions. This is the foundation of ObjectQL.
 
 ### UI Protocol
-Server-Driven UI specification for building user interfaces. Includes App structure, Views (List/Form/Kanban/Calendar), Dashboards, Reports, Themes, and Actions.
+Server-Driven UI specification for building user interfaces. Includes App structure, Views (List/Form/Kanban/Calendar), Dashboards, Reports, and Actions.
 
 ### System Protocol
 Infrastructure services including Event Bus, Job Scheduling, Translation (i18n), and Audit Logging. Manages system-level concerns.
@@ -82,49 +82,18 @@ Reusable error maps, suggestions, and metadata normalization utilities.
 ## Architecture Concepts
 
 ### Business Ontology
-The enterprise-AI category's name for the thing these docs otherwise call **typed
-metadata**, the **single source of truth**, or the **app contract**: one machine-readable
-definition of a business domain — its objects and fields, the relations between them, the
-permissions that govern them, and the flows and actions that operate on them. If you
-arrived from that vocabulary, this is the term's referent here: the **Source** you author
-(`objectstack.config.ts`) and the **Artifact** it compiles to (`objectstack.json`), from
-which the runtime derives the database schema, REST API, UI, and MCP server. See
-[Metadata-Driven Development](/docs/concepts/metadata-driven).
+One executable definition of a business — its objects and fields, relations, actions,
+permissions, flows, and agent and tool definitions — that the runtime runs: the **Source**
+you author (`objectstack.config.ts`) and the **Artifact** it compiles to (`objectstack.json`).
+Views, dashboards, apps, and translations are projections of it, not part of it; code does
+not disappear, it moves into the runtime. The slogan this reduces to is **the ontology is
+the software** — the full account is [Business Ontology](/docs/concepts/ontology).
 
-The slogan this reduces to is **the ontology is the software**, and the word is worth
-stating explicitly because ObjectStack's differs from what the term otherwise means, in
-two directions.
-
-**Against a knowledge ontology** (OWL, RDF, a knowledge graph): a knowledge ontology
-*describes* a domain, is read-only to the systems that consult it, and is *reasoned over*
-by an inference engine. An executable ontology *defines* the app, is *run* by the
-runtime, and is *validated* rather than reasoned. ObjectStack has no object inheritance,
-no axioms and no reasoner (the `abstract` key was removed from the spec for exactly that
-reason, ADR-0049), and it is not a semantic layer over your existing systems —
-federating an external datasource is read-only by default and early (see
-[External Datasources](/docs/data-modeling/external-datasources)).
-
-**Against a hosted ontology** (a graph held inside a vendor's system), on two points:
-
-* **You own the definition.** It lives in your repository as ordinary TypeScript,
-  versioned in your VCS and reviewable as a diff, in a format specified and licensed
-  Apache-2.0 — not as a graph held inside a vendor's system and reachable only through
-  that vendor's console.
-* **It is executed, not merely described.** The same definition is enforced at authoring
-  time by Zod schemas and the validation gate, and at runtime on every call — RBAC, FLS,
-  and audit included (see **Agent-Ready Boundaries** below). It is not a descriptive map
-  of behaviour implemented somewhere else, so it cannot drift from the system it
-  describes.
-
-**Core and projections.** The ontology core is objects, relations, actions,
-permissions, flows, and agent and tool definitions. Views, dashboards, apps, and
-translations are *projections* of that core — authored in metadata too, but not
-ontology. And code does not disappear: it moves into the runtime, as hooks, action
-bodies, CEL expressions, and constrained JSX.
-
-Distinct from **semantic layer**, which in these docs means the narrower analytics
-`dataset` layer (ADR-0021) that reports and dashboards bind to — see
-[Analytics & Datasets](/docs/data-modeling/analytics).
+It is executable, not a knowledge ontology: no object inheritance, no axioms, no reasoner.
+Not the industry's **semantic layer** either — a read-only mapping over existing systems
+that describes the business but does not run it. Distinct too from **semantic layer** in
+these docs' narrower sense, the analytics `dataset` layer (ADR-0021) that reports and
+dashboards bind to — see [Analytics & Datasets](/docs/data-modeling/analytics).
 
 ### Protocol-Driven
 A development paradigm where logic is defined in static, declarative data formats (JSON/YAML) with Zod schemas rather than imperative code. The goal is to separate the **Intent** (Business Logic) from the **Implementation** (Tech Stack).
