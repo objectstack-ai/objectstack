@@ -5519,6 +5519,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the tombstone\'s prescription says how to declare the binding that works.',
   },
   {
+    id: 'element-text-variant-heading-subheading-retired',
+    order: 68,
+    text:
+      'It also completes the `element:text` `variant` convergence (#21015, the second release of '
+      + 'the ruled two-release split): the enum is the nine values `ui:text` publishes — `h1`-`h6`, '
+      + '`body`, `caption`, `overline` — and the pre-convergence spellings `heading` and `subheading`, '
+      + 'which every release since the nine were added still accepted, are refused by name with a '
+      + 'prescription naming the level to write. The D2 conversion `element-text-variant-heading-levels` '
+      + 'rewrites `heading` to `h2` and `subheading` to `h3` on every `element:text` page component — '
+      + 'the heading element each one always rendered, so the outline is unchanged and the heading '
+      + 'takes that level\'s style. The `body` default for an absent `variant` is unchanged.',
+  },
+  {
     id: 'field-inline-and-related-list-columns-closed',
     order: 9,
     text:

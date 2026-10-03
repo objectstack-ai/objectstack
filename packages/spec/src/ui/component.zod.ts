@@ -58,7 +58,7 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
 // in page.zod.ts, and the kept `ComponentPropsMap` rows below.
@@ -2373,6 +2373,41 @@ export const PageAccordionProps = strictObject({
  * ----------------------------------------------------------------------
  */
 
+// `element:text` `variant` — the two pre-convergence spellings, retired in
+// release 2 of objectui#7450's ruling B (#21015). A VALUE-level retirement
+// (`enumWithRetiredValues`, shared/retired-key.ts): the members left the enum,
+// so `tsc` refuses them, and the parse answers each with the prescription
+// below instead of zod's anonymous enum message. The ruled hints are
+// `heading` → `h2` and `subheading` → `h3`, or the level the author means: each
+// is the heading ELEMENT the value always rendered (objectui
+// `renderers/basic/elements.tsx` `VARIANT_TAG`, measured at the `.objectui-sha`
+// pin `89cad75d55`), while the size changes — `heading` drew `h3`'s style and
+// `subheading` a medium-weight `text-lg`, and `h2` / `h3` draw their own. The
+// ADR-0087 conversion `element-text-variant-heading-levels` rewrites stored
+// rows and lists the edit for existing sources. No ADR is cited in the text:
+// the retirement rests on the maintainer's ruling, not on an enforce-or-remove
+// verdict — both values were rendered.
+//
+// Module-private and written with `//`, never `/** */`: prose an enum's error
+// map consumes, not documented surface — an export with no reader is a
+// published surface the next narrowing must keep.
+const ELEMENT_TEXT_VARIANT_VOCABULARY =
+  'a heading is a document level, not a text style, and `variant` speaks the nine values `ui:text` '
+  + 'publishes: `h1`-`h6`, `body`, `caption` and `overline`.';
+
+const ELEMENT_TEXT_VARIANT_RETIRED = {
+  heading:
+    '`heading` was removed from `element:text` `variant` (`ElementTextPropsSchema.variant`) in '
+    + `@objectstack/spec 17.7.0 — ${ELEMENT_TEXT_VARIANT_VOCABULARY} Write \`h2\` — the heading element `
+    + '`heading` always rendered, now drawn in the `h2` style — or the level the page outline means. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  subheading:
+    '`subheading` was removed from `element:text` `variant` (`ElementTextPropsSchema.variant`) in '
+    + `@objectstack/spec 17.7.0 — ${ELEMENT_TEXT_VARIANT_VOCABULARY} Write \`h3\` — the heading element `
+    + '`subheading` always rendered, now drawn in the `h3` style — or the level the page outline means. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+} as const;
+
 export const ElementTextPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:text`',
   history: PROPS_HISTORY,
@@ -2392,24 +2427,31 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
    */
   content: I18nLabelSchema.describe('Text or Markdown content — a plain string, or an inline locale map'),
   /**
-   * Text style variant, declared as the PUBLISHED NINE plus the two spellings
-   * this declaration has always accepted.
+   * Text style variant: the PUBLISHED NINE, and nothing else.
    *
    * objectui#7450's ruling (director batch #71, 2026-09-07, maintainer
    * verbatim 「其他同意」) converges `element:text` on the nine values
    * `@object-ui/types` publishes for its text node — `h1`-`h6`, `body`,
    * `caption`, `overline` — with `heading` / `subheading` becoming named
    * refusals carrying migration hints. The maintainer then split the landing
-   * (2026-09-09, option B): release 1 widens and refuses NOTHING, so
-   * out-of-repo authors converge on a released pin before any spelling stops
-   * working; release 2 carries the refusals and waits on a value-level
-   * retirement mechanism that does not exist yet (`retiredKey()` / ADR-0087 D2
-   * retire a KEY, not a VALUE). This entry is release 1. So the accepted set
-   * GROWS by seven and loses nothing: `h1`-`h6` and `overline` were refused
-   * here with `invalid_value` on the 17.3.0 pin, measured, and `heading` /
-   * `subheading` stay accepted.
+   * (2026-09-09, option B) across two releases. Release 1 (#17108, shipped in
+   * 17.5.0) widened by seven and refused NOTHING, so out-of-repo authors could
+   * converge on a released pin before any spelling stopped working; 17.6.0 was
+   * the one full release in which the nine were accepted and the two old
+   * spellings still parsed (triage's window).
    *
-   * Why the widening is authored HERE rather than in objectui: this
+   * This is release 2 (#21015): `heading` and `subheading` leave the enum
+   * through the value-level retirement mechanism (`enumWithRetiredValues`,
+   * #17109 — ⛔ not a one-off refinement on this enum), so `tsc` refuses them
+   * and the parse answers each with its prescription
+   * ({@link ELEMENT_TEXT_VARIANT_RETIRED}) instead of zod's anonymous enum
+   * message. The ADR-0087 conversion `element-text-variant-heading-levels`
+   * (conversions/registry.ts) rewrites them to `h2` / `h3` — the heading
+   * element each one rendered as — for stored rows and `os migrate meta`; the
+   * D3 entry `element-text-variant-heading-subheading-retired` carries the
+   * judgement left to the author (the level the document means).
+   *
+   * Why release 1's widening was authored HERE rather than in objectui: this
    * declaration is the authoring gate, and it already refused the seven. The
    * accurate statement of the defect the ruling names is 「the renderer
    * swallows what the authoring gate already refuses」 — objectui declaring
@@ -2418,25 +2460,24 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
    * catches it.
    *
    * ⚠️ `.optional().default('body')` is KEPT, deliberately, not inherited.
-   * Absence is the one thing a widening must not move: a parsed
+   * Absence is the one thing neither release may move: a parsed
    * `element:text` node with no `variant` materialises `variant: 'body'`
    * today, and it still does — identical bytes in, identical bytes out. The
-   * `ui:text` side of the platform deliberately does NOT synthesise `body`
-   * for an absent `variant` (objectui#6942, protecting unannotated corpus
-   * nodes); that asymmetry is pre-existing, is not this card's to resolve,
-   * and is left exactly where it was. Removing the default here would refuse
-   * nothing and break nothing at the door, but it WOULD change what every
-   * downstream reader sees for an absent key — a silent behaviour change
-   * wearing an additive changeset, which is what the ruling's split exists to
-   * prevent.
+   * retired members were never the default, so absence never meets the
+   * refusal (`enumWithRetiredValues` composes with `.default(…)` unchanged).
+   * The `ui:text` side of the platform deliberately does NOT synthesise
+   * `body` for an absent `variant` (objectui#6942, protecting unannotated
+   * corpus nodes); that asymmetry is pre-existing, is not this card's to
+   * resolve, and is left exactly where it was. Removing the default here
+   * would refuse nothing and break nothing at the door, but it WOULD change
+   * what every downstream reader sees for an absent key — a silent behaviour
+   * change no retirement changeset announces.
    */
-  variant: z.enum([
+  variant: enumWithRetiredValues(
     // The published nine (`@object-ui/types` `TextProps['variant']`).
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline',
-    // Accepted since this shape was declared; release 2 turns these two into
-    // named refusals with migration hints, ⛔ not release 1.
-    'heading', 'subheading',
-  ])
+    ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline'],
+    ELEMENT_TEXT_VARIANT_RETIRED,
+  )
     .optional().default('body').describe('Text style variant'),
   align: z.enum(['left', 'center', 'right'])
     .optional().default('left').describe('Text alignment'),
