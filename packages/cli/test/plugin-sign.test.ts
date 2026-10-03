@@ -99,7 +99,9 @@ describe('os plugin sign refuses a publisher key that is not Ed25519', () => {
       expect(exit).toBe(1);
       const errors = printed.filter((line) => line.includes('✗'));
       expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain(`of type '${type}'`);
+      // The refusal is signPayload's: the key is refused before anything is
+      // signed, not caught afterwards by the self-verification step.
+      expect(errors[0]).toMatch(new RegExp(`signPayload: the private key is of type '${type}'`));
       expect(printed.join('\n')).not.toContain('Plugin signed');
       expect(existsSync(`${artifactPath}.sig`)).toBe(false);
     });
