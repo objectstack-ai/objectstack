@@ -1,5 +1,5 @@
 ---
-'@objectstack/metadata-core': patch
+'@objectstack/metadata-core': minor
 '@objectstack/metadata-protocol': patch
 '@objectstack/rest': patch
 ---
