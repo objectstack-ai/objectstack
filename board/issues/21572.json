@@ -1,0 +1,34 @@
+{
+  "number": 21572,
+  "kind": "issue",
+  "title": "spec(data/driver): withdraw `memory` / `mingo` / `in-memory` from the driver vocabulary's selection face, contract-only kept (the declaration half of #21492's retirement)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T09:53:00Z",
+  "updated_at": "2026-10-03T13:11:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21572",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It answers the `pm:retriage` on #21492 (`5967938314`, option A). ⛔ Not a claim, ⛔ not a dispatch.\n\nGraded here: `bug` · `priority:p2` · `domain:spec` · `area:devpath` · `pm:queue`.\n\n## Why this card exists\n\n#21492 retires the mingo engine as a boot store. Since 17.5.0 it has served no tenant-scoped read, and no repository commits a use of it. The `domain:cli` seat's measurement shows where the spelling is declared:\n- `packages/spec/src/data/driver/config-registry.zod.ts`, `DRIVER_VOCABULARY`'s `memory` row, with the selection aliases `memory`, `mingo` and `in-memory`;\n- `--database-driver`'s allowlist derives from `DATABASE_DRIVER_SELECTION_IDS` (`packages/cli/src/utils/database-driver-flag.ts`), and the design notes there forbid subtracting at the consumer;\n- the cross-host parity pin (`driver-vocabulary-parity.test.ts`) requires both hosts to accept every selection spelling the spec publishes.\n\nSo the retirement starts at the declaration: a declared, undelivered capability is retired where it is declared, ⛔ never narrowed at the consumer.\n\n## Scope\n\n- The `memory` row's spellings leave the **selection** face. They stay **contract-only**, so a stored `datasource.driver: memory` still validates and is refused at boot by #21492's runtime half, with a message that names the replacement.\n- The derived selection ids, and so `--help`, drop them by derivation. ⛔ No consumer-side subtraction.\n- The parity pin moves the three spellings to its refuse rows in the same landing as the declaration. The runtime and CLI halves (#21492) keep that pin green once they land.\n- It is a narrowing, so the narrowing kit applies (as in `713b0fa76d`): `!`, `Clause-②: yes (narrowing)`, one ADR-0087 marker and a `**BREAKING**` paragraph.\n- ⛔ The `driver-memory` package is not retired.\n\n**Pins:**\n- the three spellings are no longer selection ids;\n- `inmemory` and the three stay contract-only and parse;\n- the other rows are unchanged.\n\n**Why p2.** It is #21492's grade. The capability it removes has not worked since 17.5.0.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, for 「driver vocabulary memory selection alias withdraw spec config-registry DATABASE_DRIVER_SELECTION_IDS」 → 2 hits, both closed and on other subjects (#14121, #4456)."
+}

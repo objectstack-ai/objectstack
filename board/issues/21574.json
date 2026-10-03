@@ -1,0 +1,37 @@
+{
+  "number": 21574,
+  "kind": "issue",
+  "title": "docs: adopt the 'Ontology is the software' positioning across README, docs landing page and glossary",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T10:17:16Z",
+  "updated_at": "2026-10-03T11:54:57Z",
+  "closed_at": "2026-10-03T11:53:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21574",
+  "body": "立卡门类别 ③ — 维护者直派的任务 (maintainer-directed task).\n\n## Maintainer ruling (verbatim, untranslated)\n\n> 本体即软件，这个口号不错\n\n> 创建一个issue，更新readme和相关文档\n\nGiven in session https://claude.ai/code/session_011hRnra93sK5Q2gTYYTbdJR on 2026-10-03, after a positioning discussion that settled on the three-line scheme below.\n\n## What changes\n\nAdopt a three-line positioning. The slogan carries the stance, the descriptor carries the promise and the limiter, and today's headline becomes the developer-facing proof line.\n\n| Line | 中文 | English |\n|:---|:---|:---|\n| Slogan | 本体即软件。 | The ontology is the software. |\n| Descriptor | 一份可执行的业务本体。AI 写，运行时跑，Agent 用，归你所有。 | One executable business ontology. AI writes it, the runtime runs it, agents operate it, you own it. |\n| Proof line (kept, demoted) | 装得下，才管得住。 | Apps small enough for AI to hold whole. |\n\nThe slogan is the category claim: the docs already say \"The Schema is the Application\"; this swaps the technical word for the category word. The descriptor is what keeps the claim honest: the ontology here is an executable business ontology (objects, relations, actions, permissions, flows, agent and tool definitions), not a formal ontology in the knowledge-representation sense and not a read-only semantic layer over existing systems.\n\n## Surfaces to update (measured on main at 6dd99b8)\n\n1. README.md: the blockquote headline (line 7) and the two \"business ontology\" sentences (lines 13 and 166). Lead with slogan plus descriptor; keep the \"small enough\" paragraph that already follows (\"The other half is size\") as the proof.\n2. apps/docs/app/[lang]/page.tsx: the hero heading (around line 215), the site description constant (line 36), the \"what that metadata is\" paragraph (around line 297) and the closing card (around line 450). Keep the meta description in sync with the constant.\n3. content/docs/getting-started/glossary.mdx, \"Business Ontology\" entry: extend it into a two-way contrast, knowledge ontology (describes, read-only, reasoned over) versus executable ontology (defines the app, runs it, validated rather than reasoned). Keep the two existing bullets (you own it; it is executed). State the ontology-core versus projections split: core = objects, relations, actions, permissions, flows, agent and tool definitions; projections = views, dashboards, apps, translations, themes.\n4. content/docs/concepts/index.mdx (\"The Three Truths\", line 95) and content/docs/concepts/metadata-driven.mdx (section 3 \"The Schema is the Application\", line 142): add the one-line bridge from \"the schema is the application\" to \"in the enterprise-AI vocabulary, the ontology is the software\", and name the core versus projection split once.\n5. Any other hand-written page that restates the headline. Re-run the grep for \"hold whole\", \"small enough\" and \"business ontology\" over README.md, content/docs and apps/docs before opening the PR; the list above is what that grep returned at 6dd99b8.\n\n## Guardrails for the author\n\n- Four facts must survive in the copy; they are what keeps the word \"ontology\" defensible: there is no object inheritance, no axioms and no reasoner (the spec retired the abstract key under ADR-0049 for exactly this reason); it is not a semantic layer over existing systems (datasource federation is early); views, dashboards, apps and i18n are projections, not ontology; code does not disappear, it moves into the runtime (hooks, action bodies, CEL and constrained JSX remain).\n- Docs only. No spec, runtime or packages/* change. Never touch content/docs/references/** (auto-generated), content/docs/releases/** (release-owned) or packages/*/CHANGELOG.md.\n- content/blog/context-window-is-the-constraint.mdx is a dated post; leave it as is.\n- The docs build (pnpm --filter @objectstack/docs build) must stay green. No new page, so no meta.json change.\n- Changeset: nothing here publishes, so the skip-changeset label qualifies only if packages/ is untouched; verify before applying it.\n\n## Non-goals (follow-ups, not this card)\n\n- Naming the ontology core inside packages/spec (an ontology namespace or a documented subset). Separate spec-lane card if the maintainer wants it.\n- Carrying the slogan into the console or Studio copy. That is the objectui sibling repo.\n\n## Who acts\n\ndomain:devx lane, one os-dev dispatch via /pm-dispatch, one docs-only PR. Precedent on the same surfaces: #9241 (closed, landed by #9242) changed the README headline and the docs landing page hero together under the maintainer's 2026-08-17 tagline ruling; the 2026-10-03 ruling above supersedes that wording. Two carry-overs from #9241 still hold: the number discipline (150k always names the whole app including UI, 100k always names the business logic; never swap the nouns) applies to any retained copy, and the GitHub repository description field lives outside git, so this card ends with a reminder for the maintainer to paste the slogan and descriptor there by hand.\n\n## Duplicate check (2026-10-03, open and closed)\n\n- Query \"README slogan tagline positioning headline hero copy\": 2 hits, both closed, #9241 (previous tagline change, the precedent above) and #12239 (docs homepage).\n- Query \"business ontology, ontology is the software, executable ontology docs glossary README\": 0 hits.\n- Query \"small enough for AI to hold whole, context window positioning docs landing page\": 0 hits.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

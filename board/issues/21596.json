@@ -1,0 +1,32 @@
+{
+  "number": 21596,
+  "kind": "issue",
+  "title": "qa(checklist): a script action refused by a hook with a user-facing sentence shows exactly one error toast carrying it — the re-observation objectui#9151 has had no home for since 2026-09-14",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T14:55:13Z",
+  "updated_at": "2026-10-03T14:55:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21596",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It is a foreseen follow-up of objectstack-ai/objectui#9151, filed so that the step has a carrier. ⛔ Not a claim, ⛔ not a dispatch.\n\nGraded here: `tests` · `priority:p2` · `domain:devx` (`docs/qa/**`) · `area:workflow` · `pm:queue`.\n\n## Why this card exists\n\n- **The symptom.** objectui#9151: in a dogfood pass on published 17.4.0 (objectstack-ai/hotclm#45), a script action whose `beforeUpdate` hook refused a transition with a user-facing sentence produced **zero toast elements**. The server answered 500 with the sentence in the body.\n- **What has been measured since:**\n  - The status half is fixed: #17265 / PR #17679 answer 4xx.\n  - PR objectui#9252 pinned the console chain as **correct end to end** on objectui `main`. A 500 or a 400 carrying the sentence gives exactly one `error` toast with that sentence, and an unreadable body still toasts the `failed (HTTP …)` fallback.\n  - Both app-side candidates, a per-action `toast` opt-out and a custom dispatch, measure **false** in `hotclm`. They were read at `14c899f` on 2026-09-12 (objectui#9151 `5643997103`) and re-read at the same head in this round: `showOnError` has 0 hits in `src/`, and custom handler wiring has 0 hits.\n- **So no code defect survives measurement, and the symptom has never been re-observed on a current build.** objectui#9151 sat `pm:blocked` on a `hotclm` card that no board can read, so nobody re-observed it.\n\n## The item (for `checklist-author`)\n\n- **Area:** the action surface in `docs/qa/platform-checklist/areas/`. The author picks the area file by its existing grouping.\n- **Clause:** on a stock app, a `script` action whose server-side hook refuses with a user-facing sentence answers a **4xx**. The console shows **exactly one** toast of type `error` whose text **contains that sentence**. The record is left unchanged.\n- **Verify:** count toast nodes in the DOM after the response lands, and tie the toast to that request in the network log, as RUNNER requires. ⛔ \"I saw a toast\" is not enough.\n- **Fixture:** the author measures first whether the showcase carries a hook-refused script action. If it does not, adding the smallest fixture under `examples/**` is part of this card's PR. ⛔ The item is not authored against a fixture that does not exist.\n\n## Done when\n\n- The item is in the checklist, and **one run** of it is recorded on a console built at the current `.objectui-sha`.\n- objectui#9151's `Restart-when:` reads that run.\n  - **PASS:** objectui#9151 closes `completed` on PR objectui#9252's diagnosis.\n  - **FAIL:** objectui#9151 restarts with the run's evidence as its new reproduction."
+}

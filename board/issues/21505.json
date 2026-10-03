@@ -2,8 +2,8 @@
   "number": 21505,
   "kind": "issue",
   "title": "service-analytics read scope: compileScopedFilterToSql binds a temporal comparand on a declared datetime column as written (no ADR-0053 D-A1 storage coercion), so PostgreSQL reads a bare day in the session zone and SQLite misses `$ne`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T00:58:51Z",
-  "updated_at": "2026-10-03T08:09:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T08:35:26Z",
+  "closed_at": "2026-10-03T08:34:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 9,
   "locked": false,

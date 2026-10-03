@@ -1,0 +1,32 @@
+{
+  "number": 21583,
+  "kind": "issue",
+  "title": "skills/objectstack-i18n: the `_actions` row and the `translation-target-unknown` paragraph omit the action-entry keys `os validate` judges (param options, `outcomeMessages`, `resultDialog` leaves and fields)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T12:22:32Z",
+  "updated_at": "2026-10-03T12:56:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21583",
+  "body": "Filed on the maintainer's instruction, given in session `session_01UtnxvdiN376GF3sgXwAw4d`'s chat and quoted verbatim: 「1. 一处技能文档修改等您动手： `skills/objectstack-i18n/SKILL.md`  有一处修改没有建卡，你应该创建issue」. Until now this was a debt without a card, recorded on the `domain:spec` seat post #6017 under \"Owed by this seat, no card\". Filed by `domain:spec` seat 1 after stand-down. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What is wrong (read on `origin/main` `cc645f2385`)\n\nThe published skill `skills/objectstack-i18n/SKILL.md` teaches the translation-bundle shape that agents write. It lags what `os validate` / `os lint` / `os compile` now judge under an action entry. Those rules came with #21216 (PR #21258), #21264 (PR #21304) and #21261. The reference page, `content/docs/protocol/kernel/i18n-standard.mdx` `:1039`–`:1058`, already states every rule. The skill states only part of them.\n\n1. **The `_actions.{action_name}` row (`:164`)** lists `label`, `description`, `confirmText`, `successMessage`, `params.{param_name}` and a bare `resultDialog`. Missing:\n   - `params.{param}.options.{value}`: a param's inline option values. A wrong key is a `translation-option-key-unknown` warning. A param that references a `field` with no inline `options` is not judged.\n   - `outcomeMessages.{outcome}`: an outcome the action's own `outcomeMessages` declares.\n   - `resultDialog.title` / `.description` / `.acknowledge`: valid only when the action declares a `resultDialog`. Under an action that declares none, they are a `translation-target-unknown` error (`checkActionResultDialogLeaves`, `packages/lint/src/validate-translation-references.ts` `:2065`).\n   - `resultDialog.fields.{path}`: the literal `path` of a field in `resultDialog.fields[]`, dots included (`client.secret` is one key).\n   - The same sub-keys hold under `globalActions.{action}` (`checkActionEntry`, called from both loops).\n2. **The `globalActions` line (`:170`)** reads \"(object-less actions)\". It matches #21261. It does not say that a `globalActions` key naming a bound action is an error, or that the message names the `objects.{owner}._actions.{action}` key to write instead (`i18n-standard.mdx` `:1053`).\n3. **The `translation-target-unknown` paragraph (`:198`–`:202`)** lists what a key can fail to name: \"object, field, view, tab, action, param, section, validation rule, app, nav item, dashboard, widget or flow screen\". It omits three cases that are now errors:\n   - an outcome the action does not declare;\n   - a result-dialog field path the action does not declare;\n   - result-dialog copy under an action with no `resultDialog`.\n\n   It also does not say that param option keys share the option warning.\n\n**Reach:** an agent that authors a bundle from this skill gets no warning about any of these shapes:\n- it has no way to learn that `outcomeMessages` and `resultDialog.fields` copy is keyable;\n- it gets no warning that dialog copy under a dialog-less action fails `os validate` with an error;\n- it is not told that a bound action's copy under `globalActions` is refused.\n\nThe skill's own pointer to `translation.zod.ts` does not cover the lint's cross-reference rules.\n\n## Direction (for triage, not a ruling)\n\n- Bring the three places in line with `i18n-standard.mdx` `:1039`–`:1058`, which is already right. ⛔ No second vocabulary: name the keys and rules the way the page and the lint do.\n- `skills/**` is governed text (Tier H), so the PR lands only by the maintainer's hand or authorized approval. Triage `5943006586` on #21264 already named it \"a separate Tier H PR\" (`domain:skills`).\n- Earlier reading of the same three gaps: record `5944914497` ③ on PR #21304.\n\n## Dedupe\n\nAll 134 open issues and PRs were listed over REST, and the 300 most recently updated closed ones. Their titles and bodies were grepped for `objectstack-i18n`, `i18n/SKILL`, `resultDialog` and `outcomeMessages`. The hits are:\n- #21264 and PR #21304 (the lint change itself, closed);\n- #21464 (`ComponentPropsMap`, unrelated);\n- #10663 (a QA run record);\n- #6017 (the seat post).\n\nNone carries this edit.\n\nDedupe words: `objectstack-i18n skill _actions outcomeMessages resultDialog` · `translation-target-unknown skill paragraph` · `i18n SKILL.md Tier H action keys`"
+}

@@ -2,8 +2,8 @@
   "number": 20751,
   "kind": "issue",
   "title": "runtime strings in the `domain:services` packages carry tracker numbers (168 messages in 17 packages, 263 ledgered ids): this lane's share of the #20513 A/A burn-down",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T02:06:33Z",
-  "updated_at": "2026-10-03T07:38:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T10:50:01Z",
+  "closed_at": "2026-10-03T10:50:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 24,
+  "comments": 30,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20751",
   "body": "Filing gate: **③ a task the maintainer assigned.** The maintainer's words, 2026-09-30T01:37Z, in the live PM chat with the director seat: 「20513 A」, recorded in ruling 5902360492 on #20513 as question 1 A and question 2 A. The execution parameter this card carries, verbatim: \"Other lanes (533 entries across 29 packages): one child card per lane, `Blocked-by:` this card, split by the owning seats.\"\n\nBlocked-by: #20513\n\nFiled by the `domain:engine` execution seat 1 (`session_01DEvba2nBuD4tWzfq8r8NFY`, `os-support-ai`), which holds #20513. ⛔ Not a claim. Reader: triage (route to `domain:services`; this seat does not label another lane's card), then the `domain:services` seat, which splits and stages this share once #20513 closes.\n\n## What the ruling fixes (5902360492)\n\n- **The rule is unchanged.** `AGENTS.md`: 「Runtime strings — refusal prose, prescriptions, anything an author is shown — carry no tracker number (`pnpm check:doc-authoring`): the lesson goes into the text.」\n- **End state:** the tracker numbers leave runtime text in stages, per package, until the `check:doc-authoring` ledger (`scripts/doc-authoring-prose-id.baseline.json`) is empty.\n- **Scope, all three categories:** runtime strings (refusals, prescriptions, log lines), metadata text shown to authors and administrators (object and field descriptions and their translations), and the test strings shipped under `src/`.\n- **Form:** each rewritten string states what the cited card decided, in words (form D, as #20233 did). Author-visible text first, log lines last.\n- **Mechanics:** one PR per stage, each recomputing the ledger with `--census-ledger` in the same PR. The ledger only shrinks, and every lane's stages share that one file, so they are serial. `domain:engine`'s five stages on #20513 run first; this card is `Blocked-by: #20513`.\n\n## This lane's share\n\nTwo readings, which count different things:\n- **Census:** the #20513 dev round (`os-dev-report` 5900801368, `out_of_scope_findings`, at `36d043be17`), in messages, split by class. Its file and line lists are there.\n- **Ledger:** `scripts/doc-authoring-prose-id.baseline.json` at `origin/main` `01e78dcee`, in id occurrences. This is the instrument the ruling's end state names.\n\n| package | census messages | census classes | ledger occurrences |\n|:--|--:|:--|--:|\n| `plugins/plugin-security` | 34 | logger 20 / thrown 1 / envelope 3 / factory 2 / prose 8 | 43 |\n| `services/service-automation` | 28 | logger 12 / thrown 2 / envelope 2 / factory 2 / prose 10 | 33 |\n| `plugins/plugin-auth` | 27 | logger 10 / thrown 3 / envelope 0 / factory 2 / prose 12 | 28 |\n| `plugins/plugin-webhooks` | 20 | logger 5 / thrown 5 / envelope 0 / factory 0 / prose 10 | 33 |\n| `services/service-analytics` | 15 | logger 1 / thrown 3 / envelope 0 / factory 9 / prose 2 | 34 |\n| `plugins/plugin-approvals` | 10 | logger 8 / thrown 1 / envelope 0 / factory 0 / prose 1 | 25 |\n| `plugins/plugin-sharing` | 7 | logger 3 / thrown 2 / envelope 0 / factory 0 / prose 2 | 7 |\n| `services/service-datasource` | 6 | logger 0 / thrown 0 / envelope 1 / factory 0 / prose 5 | 9 |\n| `services/service-messaging` | 6 | logger 0 / thrown 4 / envelope 0 / factory 0 / prose 2 | 23 |\n| `services/service-storage` | 3 | logger 1 / thrown 0 / envelope 0 / factory 0 / prose 2 | 4 |\n| `connectors/connector-mcp` | 2 | logger 0 / thrown 2 / envelope 0 / factory 0 / prose 0 | 2 |\n| `plugins/plugin-email` | 2 | logger 1 / thrown 1 / envelope 0 / factory 0 / prose 0 | 6 |\n| `services/service-knowledge` | 2 | logger 2 / thrown 0 / envelope 0 / factory 0 / prose 0 | 3 |\n| `services/service-queue` | 2 | logger 1 / thrown 1 / envelope 0 / factory 0 / prose 0 | 2 |\n| `services/service-sms` | 2 | logger 1 / thrown 0 / envelope 0 / factory 0 / prose 1 | 2 |\n| `plugins/plugin-audit` | 1 | logger 0 / thrown 0 / envelope 0 / factory 0 / prose 1 | 6 |\n| `triggers/trigger-record-change` | 1 | logger 1 / thrown 0 / envelope 0 / factory 0 / prose 0 | 1 |\n| `services/service-i18n` | not in the census | — | 2 |\n| **total** | **168** | | **263** |\n\n- 17 packages; the largest shares are `plugin-security` (34), `service-automation` (28), `plugin-auth` (27) and `plugin-webhooks` (20). `service-i18n` is in the ledger but was not in the census (the gate reads positions the dev's instrument did not); the ledger is the instrument that decides \"empty\".\n- Sibling, ⛔ not this card: #20596 (dead tracker citations in this lane's **comments**).\n- PR #20738 (`Part of #20513`, merged as `5a23096ca`) already fixed 4 of the `service-automation` messages: the `resumeAuthority` registration warning in `engine.ts` and its three siblings. The census column above predates it.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「runtime string tracker number ledger doc-authoring burn-down」: 0 hits;\n- 「runtime warnings print tracker numbers to authors」: 3 hits. #20513 (the parent, the control), #20233 (closed; migration-entry prose) and #11529 (unrelated). None is a lane child.\n\nDedupe words: `runtime string tracker number domain:services` · `doc-authoring ledger burn-down services lane` · `20513 A/A lane child`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

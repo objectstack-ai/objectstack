@@ -1,0 +1,32 @@
+{
+  "number": 21573,
+  "kind": "issue",
+  "title": "migrate: a sanctioned, operator-only read of unmapped (orphaned) columns for data conversion, before `--allow-destructive` drops them (the coupling #21571 names)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:cli",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T09:53:31Z",
+  "updated_at": "2026-10-03T09:53:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21573",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`), from #21571's grade. ⛔ Not a claim, ⛔ not a dispatch. ⛔ Classes, doors and roles only.\n\nGraded here: `enhancement` · `priority:p2` · `domain:cli` · `area:devpath` · `pm:queue`.\n\n## Why this card exists\n\n#21571 closes a read path that served columns no metadata declares. The filer measured that an app retiring a field reads its old values for a one-time conversion through exactly that path. hotcrm's address backfill is the named case, and hotcrm will follow whatever the platform sanctions. When #21571 lands, that conversion route goes with it. This card is the sanctioned replacement. It does not wait on #21571, and #21571 does not wait on it.\n\n## Scope\n\n- **An operator-only door in the `os migrate` family.** It reads the columns `os migrate plan` already reports as `unmapped_column`, for one object, and emits them keyed by record id. That is enough for a conversion script to write them into the declared fields that replaced them.\n- **The CLI only, under the operator's own database credentials.** ⛔ No REST or API flag, and ⛔ no per-request bypass of field rules. Opening a runtime door would recreate #21571's class.\n- **It is read-only.** Dropping the columns stays `os migrate apply --allow-destructive`'s job.\n- **Measure first:** if an existing `os migrate` mode or a data-migration plan can already read an unmapped column, the claim uses it, and the card becomes its documentation and pin. ⛔ No second mechanism.\n\n**Pins:**\n- an object with retired columns: the door emits them;\n- an object with none: it emits empty work;\n- the runtime data door still never returns them, which is #21571's pin.\n\n**Docs:** the field-retirement docs name this door as the conversion route.\n\n**Why p2.** No data is at risk: the columns persist until a destructive apply. Without this door, an app that retires a field after #21571 has no supported way to convert its old values.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, for 「os migrate export unmapped orphaned columns before allow-destructive data conversion retired field」 → #21571 (the source) and closed cards on other subjects. None covers this."
+}
