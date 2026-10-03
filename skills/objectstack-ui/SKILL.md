@@ -74,16 +74,14 @@ custom page or form config. Prefer, in order:
    relationship didn't mark inline:
 
    ```typescript
-   formViews: {
-     default: {
-       type: 'simple',
-       sections: [{ group: 'invoice_header' }],  // a declared fieldGroup
-       subforms: [
-         { childObject: 'invoice_line', // relationshipField + columns are
-           title: 'Line Items',         // derived from the child object;
-           addLabel: 'Add line' },      // set `columns` here only to override.
-       ],
-     },
+   form: {
+     type: 'simple',
+     sections: [{ group: 'invoice_header' }],  // a declared fieldGroup
+     subforms: [
+       { childObject: 'invoice_line', // relationshipField + columns are
+         title: 'Line Items',         // derived from the child object;
+         addLabel: 'Add line' },      // set `columns` here only to override.
+     ],
    },
    ```
 

@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form.",
-      "expected_output": "One `defineView({ list, listViews, formViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, a `listViews.my_open` entry with `filter` triples (`{ field: 'assigned_to', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `formViews.edit` with `type: 'simple'` and `sections` referencing a declared field group.",
+      "expected_output": "One `defineView({ list, form, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, a `listViews.my_open` entry with `filter` triples (`{ field: 'assigned_to', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `form` with `type: 'simple'` and `sections` referencing a declared field group.",
       "files": [],
       "assertions": {
         "must_contain": ["defineView", "provider: 'object'", "listViews", "groupByField", "link: true", "{current_user_id}"],
