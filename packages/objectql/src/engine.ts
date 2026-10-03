@@ -116,6 +116,9 @@ import {
   // boundary ratchet forbids the `/core` entry closure — engine.ts included —
   // from importing `@objectstack/metadata-protocol`, where it was written.
   recordNotFoundError,
+  // The data door's object-existence 404, shared for the same reason: an
+  // in-process verb refuses a name the registry does not resolve with it.
+  objectNotFoundError,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -9203,14 +9206,25 @@ export class ObjectQL implements IObjectQLEngine {
    * Accepts the canonical short name (e.g., 'account') or, for explicit
    * cross-package disambiguation, the canonical object name (e.g., 'account'). The result is
    * the physical table name derived via `StorageNameMapping.resolveTableName`.
+   *
+   * One name space with the data door: the target resolves ONLY through the
+   * registry. A name the registry does not resolve is refused with the door's
+   * own `OBJECT_NOT_FOUND` 404 (`objectNotFoundError`), never handed to the
+   * driver as a raw table name. Before this, every in-process guard keyed by a
+   * registered object name could be stepped around by naming the target some
+   * other way, and an in-process caller (a sandboxed body, an action handler,
+   * a hook) read what the door refused to serve.
+   *
+   * Platform code that must address storage without a registry entry has a
+   * declared path a body cannot reach: the driver itself
+   * (`datasource(name)`, `getDriverForObject(name)`), held by host code only.
    */
   private resolveObjectName(name: string): string {
     const schema = this._registry.getObject(name);
     if (schema) {
       return StorageNameMapping.resolveTableName(schema);
     }
-    // Return name as-is (canonical name = table name; no FQN prefix to strip)
-    return StorageNameMapping.resolveTableName({ name });
+    throw objectNotFoundError(name);
   }
 
   /**
@@ -9219,17 +9233,25 @@ export class ObjectQL implements IObjectQLEngine {
    * docblock states the semantics; {@link judgeWhereAdmission} records the
    * pipeline and why it is the same one every verb runs.
    *
-   * The object name resolves exactly as the verbs resolve it, and the field map
-   * is the one they read, so the verdict (and the object name inside its
+   * A registered name resolves exactly as the verbs resolve it, and the field
+   * map is the one they read, so the verdict (and the object name inside its
    * message) is the one execution would give. It stops before `getDriver`:
    * nothing is resolved from or sent to a datasource.
+   *
+   * It judges the FILTER, not the object's existence. For a name the registry
+   * does not resolve, the verbs refuse the object itself (`OBJECT_NOT_FOUND`,
+   * before admission); this member still judges the filter there, with no
+   * field map, as the contract states, because it reads nothing and hands the
+   * name to no driver. That keeps the authoring-time judge (`os validate`,
+   * whose engine holds only the stack's own objects) answering about the
+   * filter for an object the platform or another package defines.
    */
   judgeFilter(
     objectName: string,
     where: EngineQueryOptions['where'],
     options?: EngineFilterJudgementOptions,
   ): EngineFilterJudgement {
-    const object = this.resolveObjectName(objectName);
+    const object = this._registry.getObject(objectName) ? this.resolveObjectName(objectName) : objectName;
     return judgeWhereAdmission(
       object,
       options?.operation ?? 'find',
