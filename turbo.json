@@ -261,7 +261,8 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
         "$TURBO_ROOT$/scripts/**",
         "$TURBO_ROOT$/packages/rest/src/analytics-nested-relation-filter.test.ts",
-        "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts"
+        "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts",
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts"
       ]
     },
     "@objectstack/lint#test": {

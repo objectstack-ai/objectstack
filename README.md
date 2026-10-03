@@ -4,19 +4,16 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)
 [![Docs](https://img.shields.io/badge/docs-objectstack.ai-0a0a0a.svg)](https://objectstack.ai/docs)
 
-> ## Apps small enough for AI to hold whole.
+> ## The ontology is the software.
 >
-> ObjectStack turns the whole app — data model, UI, workflows, permissions —
-> into typed metadata that fits in a single context window. Agents read it
-> whole, reason it whole, refactor it whole.
+> **One executable business ontology.** AI writes it, the runtime runs it, agents
+> operate it, you own it.
 >
-> That metadata is your **business ontology** — an open, versioned definition of
-> your objects, permissions, and flows that you own, not code scattered across a
-> framework. Strict TypeScript, Zod schemas, and a validation gate catch the
-> agent's mistakes at authoring time; the runtime derives the database, REST API,
-> UI, and MCP server, and enforces permissions and audit on every call.
+> 本体即软件。
+>
+> Apps small enough for AI to hold whole.
 
-`Fits in an agent's context` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0
+`Executable` · `AI-writable` · `Agent-operable` · `You own it` · Apache-2.0
 
 <p align="center">
   <a href="https://youtu.be/CX_FlOoOtr0">
@@ -26,11 +23,9 @@
   <a href="https://youtu.be/CX_FlOoOtr0"><b>▶&nbsp; Watch: ObjectStack in 90 Seconds</b></a>
 </p>
 
-**Everything in this repo is the open stack** — protocol, microkernel, SDK,
-CLI, and the production runtime, Apache-2.0 with no open-core asterisks
-([LICENSING.md](./LICENSING.md)). You build & ask with Claude Code or any coding
-agent: the agent writes the metadata in your repo and operates the running app
-over MCP. Want the same loop hosted, in the browser, nothing to install? That's
+You build & ask with Claude Code or any coding agent: the agent writes the
+metadata in your repo and operates the running app over MCP. Want the same loop
+hosted, in the browser, nothing to install? That's
 [ObjectOS](https://www.objectos.ai), the commercial runtime environment built on
 this stack.
 
@@ -79,7 +74,21 @@ No install at all? Open a live app on
 </p>
 <p align="center"><sub>Prefer clicking? Studio authors the same metadata visually — same artifacts, same gate.</sub></p>
 
-## What one definition gives you
+## What we mean by ontology
+
+Your app's definition — objects and fields, relations, actions, permissions,
+flows, and agent and tool definitions — is a **business ontology**: open,
+versioned, and yours, not code scattered across a framework. It is executable,
+not a knowledge-representation ontology: no inheritance, no axioms, no reasoner —
+validated rather than reasoned over — and it is not a semantic layer over your
+existing systems (federating an external datasource is read-only by default and
+early). Views, dashboards, apps, and translations are projections of the
+ontology, not part of it, and code does not disappear: it moves into the
+runtime, as hooks, action bodies, CEL, and constrained JSX. The full account is
+[Business Ontology](https://objectstack.ai/docs/concepts/ontology); the short
+form is the [glossary entry](https://objectstack.ai/docs/getting-started/glossary#business-ontology).
+
+## The runtime runs it
 
 Point an agent at an empty repo and you get a one-off codebase: every screen
 hand-invented, every mistake yours to find at runtime. ObjectStack gives the
@@ -136,6 +145,24 @@ curl http://localhost:3000/api/v1/data/support_desk_ticket
 In the browser, the typed client SDK and React hooks (`useQuery`, `useMutation`,
 `usePagination`) live in [`@objectstack/client-react`](packages/client-react).
 
+## Agents are the first users
+
+Objects are tools, actions are tools, permissions decide what an agent may call,
+and audit records what it did. Because the app is typed metadata, the runtime
+serves it as an **MCP server** at `/api/v1/mcp` — on by default. Point any MCP
+client at it and an agent can inspect and *operate* the app you just built,
+under the same permissions and RLS as a human:
+
+```bash
+claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
+```
+
+The first tool call opens a browser to sign you in — each deployment is its own
+OAuth server, so there's no token to copy-paste. Headless setups (CI,
+containers) use an API key instead. Objects are exposed automatically; actions
+opt in with `ai: { exposed: true }`. See
+[Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp) for both flows.
+
 ## Why the mistakes don't ship
 
 "AI writes it" is only useful if AI's mistakes don't reach production. Four gates
@@ -152,7 +179,7 @@ The reason this works is the same reason TypeScript was the right host language:
 **an agent's errors become located, corrective text it can read and fix itself**,
 in seconds — instead of a silent runtime failure nobody traces back.
 
-The other half is size. The bundled example CRM — [`examples/app-crm`](./examples/app-crm):
+The other half is size: apps small enough for AI to hold whole. The bundled example CRM — [`examples/app-crm`](./examples/app-crm):
 objects, views, a dashboard, a lead-conversion flow, permission sets, actions,
 translations — is small enough for an agent to load end-to-end, reason about
 every dependency, and refactor across data, API, UI, and permissions in one
@@ -163,26 +190,18 @@ hoping. Measure it yourself:
 find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
 ```
 
-> Your objects, permissions, and flows are your business ontology — and the
+## You own it
+
+**Everything in this repo is the open stack** — protocol, microkernel, SDK,
+CLI, and the production runtime, Apache-2.0 with no open-core asterisks
+([LICENSING.md](./LICENSING.md)). The definition lives in your repository as
+ordinary TypeScript, versioned in your VCS and reviewable as a diff — not a
+graph held inside a vendor's system.
+
+> The ontology is the software. Your objects, relations, actions, permissions,
+> flows, and agent and tool definitions are your business ontology — and the
 > definition layer of the AI era should be an open protocol you own.
 > [Read why](https://www.objectos.ai/en/blog/ai-ontology-open-protocol/).
-
-## Your app is AI-operable, for free
-
-Because the app is typed metadata, the runtime serves it as an **MCP server** at
-`/api/v1/mcp` — on by default. Point any MCP client at it and an agent can
-inspect and *operate* the app you just built, under the same permissions and RLS
-as a human:
-
-```bash
-claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
-```
-
-The first tool call opens a browser to sign you in — each deployment is its own
-OAuth server, so there's no token to copy-paste. Headless setups (CI,
-containers) use an API key instead. Objects are exposed automatically; actions
-opt in with `ai: { exposed: true }`. See
-[Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp) for both flows.
 
 ## Ship it
 

@@ -31,11 +31,16 @@
  * as a selection. Offering them here would widen the flag on no ruling, and would
  * be a behaviour change wearing a refactor's clothes.
  *
- * Every id in the derived set IS offered: no driver is withheld from the flag
- * today. Should one ever need to be, it gets declared on the table's row (the
- * exception belongs next to `hasLocalDefault`, where every host can see it) —
- * never subtracted here, which would recreate the second definition this file
- * deletes.
+ * Every id in the derived set IS offered, and the one driver withheld from the
+ * flag is withheld exactly the way this note always said it would have to be:
+ * on the table's ROW, never subtracted here. The in-memory (mingo) engine was
+ * retired as a boot store, and its row in `@objectstack/spec`'s driver table
+ * moved `memory`, `mingo` and `in-memory` from its selection aliases to its
+ * contract-only ones, so `memory` left `DATABASE_DRIVER_SELECTION_IDS` — and
+ * this allowlist and `--help` with it — by derivation, with no line in this
+ * file. `--database-driver memory` is therefore refused by oclif at parse time,
+ * in oclif's words (the legal kinds, sqlite among them); the boot doors that
+ * still see the spelling name the SQLite replacements.
  */
 
 import { Flags } from '@oclif/core';

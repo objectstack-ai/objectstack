@@ -3,13 +3,13 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError } from '@objectstack/core';
 import { declaredUserMessage, readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
 // the posture, is what the runtime authoring gate is told.
-import { postureEnforcesWall } from '@objectstack/spec/security';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
@@ -38,7 +38,6 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
-import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -90,6 +89,13 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
+    // The one rule for which forms a `view` body opens to anonymous intake —
+    // the same rule the anonymous form doors in `@objectstack/rest` serve by.
+    anonymousFormIntakeSlugs,
+    // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
+    // the anonymous form doors read it — the runtime authoring gate's input for
+    // its public-form intake advisory (see `tenancyPostureInForce()`).
+    anonymousFormIntakePosture,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -117,6 +123,7 @@ import {
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
+    type SearchFieldMeta,
     classifyDottedFilterHead,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
@@ -207,7 +214,6 @@ import {
     serveStoredHashTokens,
     serveStoredMetadataHashColumnRows,
     serveStoredMetadataHashColumns,
-    STORED_METADATA_UNSEARCHABLE_COLUMNS,
     storedMetadataHashEvaluateRefusal,
     storedMetadataSearchRefusal,
     type StoredHashDigest,
@@ -1715,8 +1721,10 @@ function stripDerivedProvenance(item: unknown): unknown {
  * the same verdict from the same row (cloud#970's shape, for non-`object`
  * types).
  *
- * ⚠️ Its ONE caller applies it BEFORE {@link mergeArtifactProtection}, and the
- * order is the whole contract: where a real artifact exists the artifact's
+ * ⚠️ Both callers — the container in `hydrateOverlayIntoRegistry` and, since
+ * #21511, each view expansion it registers (`expandRuntimeViewContainer`
+ * under `tenantAuthored`) — apply it BEFORE {@link mergeArtifactProtection},
+ * and the order is the whole contract: where a real artifact exists the artifact's
  * envelope still overwrites `_provenance` (and `_packageId` /
  * `_packageVersion` / `_lock*`) on the way out, so package protection is
  * untouched — ADR-0010 §3.3 precedence is unchanged in both directions.
@@ -3960,6 +3968,13 @@ const FILTER_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']
  * produce one, but `POST /data/:object/query` is not the only door — the RPC
  * dispatcher and in-process callers hand over live objects — and a gate that
  * can hang the read path is worse than the defect it closes.
+ *
+ * [#21544] ⛔ This answers the ingress gate's question — does each named KEY
+ * exist — and its failure direction (a hole, never a false 400) is right only
+ * for that question. It is NOT what the stored-metadata family's evaluate
+ * refusals read: a filter can read a column without naming it as a key (a
+ * cross-field comparand), and a hole there is a leak, not a missing 400. That
+ * question has its own collector, {@link collectStoredMetadataFilterFields}.
  */
 function collectFilterFieldKeys(
     where: unknown,
@@ -3981,6 +3996,204 @@ function collectFilterFieldKeys(
         out.push(key);
     }
     return out;
+}
+
+/**
+ * [#21544] The stored-metadata family's ONE filter-field collector: every column
+ * a read query's filters READ, judged the way the family's evaluate refusals
+ * ({@link storedMetadataBodyPredicateRefusal},
+ * {@link storedMetadataHashEvaluateRefusal}) need it. The generic data door
+ * calls it, and so does the in-process reader-context seam in
+ * `@objectstack/runtime` (`stored-metadata-reader-seam.ts`), on the same query,
+ * so the two answer every filter identically. `[]` for an object outside the
+ * family ({@link isStoredMetadataBodyObject}) or a query that is not a record.
+ *
+ * The filter positions it reads are a read query's three: `where`, `filter`
+ * (the engine option alias a direct engine call may still carry) and each
+ * `aggregations[i].filter`. ⛔ Not `having`: its keys and references name the
+ * AGGREGATED row's columns — group keys and aggregation aliases — and the
+ * engine refuses any other name before a row exists, so a family column can
+ * never be read there, while an alias that happens to be spelled like one
+ * (`{ function: 'count', alias: 'metadata' }`) is a legitimate count.
+ *
+ * What counts as a read, and why it is more than the ingress gate's
+ * {@link collectFilterFieldKeys} collects. The first two rules are measured
+ * reaches at the generic data door before this collector existed (a family
+ * column evaluated, unrefused); the rest are the stricter collector's rules,
+ * adopted whole so the door and the seam agree — where measured, the door
+ * already refused those shapes elsewhere (its dotted-path rule, the engine's
+ * filter doors), and now the family's own refusal answers them first:
+ *
+ * - **A cross-field comparand is a read.** `{ name: { $eq: { $field: 'metadata' } } }`
+ *   compares each row's `name` with its stored body, and the SQL drivers
+ *   evaluate it: row presence discloses the referenced column exactly as a
+ *   filter on it would. Every node under a field key that carries a string
+ *   `$field` — an operator bag, a list member, an `addDays` offset — is a read
+ *   of that column: the reference shape `driver-sql` resolves (the spec's
+ *   `FieldReferenceSchema`), taken without its other refinements, so a
+ *   malformed reference is refused here rather than read.
+ * - **Depth never hides a read.** The walk is iterative and visits every node
+ *   once per reading, so it terminates on a self-referential live object
+ *   without a depth backstop: the ingress collector's backstop stops at 32
+ *   levels, and a body predicate nested below it was evaluated unrefused.
+ * - **A dotted name reads its head.** `metadata.x` reads `metadata`, as a
+ *   key and as a reference.
+ * - **A `$` key is never a column, and what sits beneath one is read as a
+ *   condition** — the three declared combinators and any other alike, so an
+ *   unrecognised combinator cannot hide a family column (the engine refuses
+ *   one anyway; the refusal just arrives first).
+ * - **A field key's value is read for references only.** The keys of a
+ *   nested-relation condition (`{ owner: { region: 'NA' } }`) are another
+ *   object's columns; a `$field` beneath one is still collected, so the
+ *   ambiguous spelling is refused rather than resolved.
+ * - **A `FilterArray` is lowered first** (`parseFilterAST`), the sugar a direct
+ *   engine call still honours on `where`, so either authoring form reads the
+ *   same.
+ *
+ * Each column is returned once.
+ */
+export function collectStoredMetadataFilterFields(object: string, query: unknown): string[] {
+    if (!isStoredMetadataBodyObject(object)) return [];
+    if (query === null || typeof query !== 'object' || Array.isArray(query)) return [];
+    const bag = query as Record<string, unknown>;
+    const filters: unknown[] = [bag.where, bag.filter];
+    if (Array.isArray(bag.aggregations)) {
+        for (const aggregation of bag.aggregations) {
+            if (aggregation !== null && typeof aggregation === 'object') {
+                filters.push((aggregation as { filter?: unknown }).filter);
+            }
+        }
+    }
+    const out = new Set<string>();
+    for (const filter of filters) collectFilterReads(isFilterAST(filter) ? parseFilterAST(filter) : filter, out);
+    return [...out];
+}
+
+/** The head segment of a column name: `metadata.x` reads `metadata`. */
+function headSegment(name: string): string {
+    return name.split('.')[0] as string;
+}
+
+/**
+ * The walk {@link collectStoredMetadataFilterFields} runs over one filter
+ * condition. A node is visited as a CONDITION (its non-`$` keys are columns)
+ * or as a COMPARAND (the value under a column key, where only a `$field`
+ * reference is a read), at most once per reading — two readings, because a
+ * live object reached once as a comparand and once as a condition must be read
+ * both ways.
+ */
+function collectFilterReads(root: unknown, out: Set<string>): void {
+    const seenAsCondition = new WeakSet<object>();
+    const seenAsComparand = new WeakSet<object>();
+    const pending: Array<{ node: unknown; condition: boolean }> = [{ node: root, condition: true }];
+    while (pending.length > 0) {
+        const { node, condition } = pending.pop() as { node: unknown; condition: boolean };
+        if (node === null || typeof node !== 'object') continue;
+        const seen = condition ? seenAsCondition : seenAsComparand;
+        if (seen.has(node)) continue;
+        seen.add(node);
+        if (Array.isArray(node)) {
+            for (const member of node) pending.push({ node: member, condition });
+            continue;
+        }
+        const record = node as Record<string, unknown>;
+        if (!condition && typeof record.$field === 'string') out.add(headSegment(record.$field));
+        for (const [key, value] of Object.entries(record)) {
+            if (condition && !key.startsWith('$')) {
+                out.add(headSegment(key));
+                pending.push({ node: value, condition: false });
+            } else {
+                pending.push({ node: value, condition });
+            }
+        }
+    }
+}
+
+/**
+ * The slice of an object definition {@link narrowStoredMetadataSearch} reads:
+ * the field map, the declared `searchableFields`, and the display field the
+ * search resolution falls back on.
+ */
+export interface StoredMetadataSearchSchema {
+    fields?: unknown;
+    searchableFields?: unknown;
+    nameField?: unknown;
+    displayNameField?: unknown;
+}
+
+/**
+ * [#21207, #21544] A `search` on a stored-metadata table never scans its body or
+ * content-hash columns — the ONE narrowing the generic data door and the
+ * in-process reader-context seam (`@objectstack/runtime`) both call, so a
+ * search answers the same through either.
+ *
+ * A search is a substring filter the engine evaluates over every column it
+ * scans, and with no `searchableFields` declared it scans every text-like
+ * column — the stored body and both stored hashes among them. Over those it is
+ * the verifier the filter refusals close: a guessed hash, or a guessed prefix
+ * of withheld credential material, returns the row exactly when it is right.
+ * The authority on which columns a search may never scan is the family's
+ * search predicate ({@link storedMetadataSearchRefusal}), asked per field:
+ *
+ * - an EXPLICIT field list — `searchFields`, else the object-form
+ *   `search.fields`, the engine's own precedence and both its shapes (a comma
+ *   string or an array) — naming one is refused, `INVALID_FIELD` / 400, the
+ *   evaluate refusals' envelope, under the caller's wire spelling of the slot
+ *   (`wireSpelling`, the door's; the bare canonical name when absent);
+ * - a search that names none is NARROWED: the object's resolved searchable set
+ *   ({@link resolveSearchFieldResolution}) minus those columns is returned, for
+ *   the caller to run as `searchFields` — the engine intersects an override
+ *   with that set and never widens it;
+ * - a set that narrows to nothing is refused rather than returned empty: an
+ *   empty override is ABSENT to the engine, which would then scan the whole
+ *   default set, these columns included.
+ *
+ * Returns `undefined` when the query runs as it is — an object outside the
+ * family, no search, an explicit list that passes, or no readable field map
+ * (the engine has none to expand a search over either; the same rule the door's
+ * field gates apply: a non-object, array or empty `fields`). Throws the refusal.
+ */
+export function narrowStoredMetadataSearch(
+    object: string,
+    query: Readonly<Record<string, unknown>>,
+    schema: StoredMetadataSearchSchema | null | undefined,
+    wireSpelling: Readonly<{ search?: string; searchFields?: string }> = {},
+): string[] | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const search = query.search;
+    const objectForm = search !== null && typeof search === 'object';
+    const objectFormFields = objectForm ? (search as Record<string, unknown>).fields : undefined;
+    const [explicit, param] = query.searchFields != null
+        ? [query.searchFields, wireSpelling.searchFields ?? 'searchFields']
+        : objectFormFields != null
+            ? [objectFormFields, wireSpelling.search ?? 'search']
+            : [undefined, ''];
+    const names: string[] = typeof explicit === 'string'
+        ? explicit.split(',').map((s) => s.trim()).filter(Boolean)
+        : Array.isArray(explicit) ? explicit.filter((f: unknown): f is string => typeof f === 'string') : [];
+    if (names.length > 0) {
+        const refusal = storedMetadataSearchRefusal(object, names, param);
+        if (refusal) throw refusal;
+        return undefined;
+    }
+    if (search == null) return undefined;
+    const fields = schema?.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
+        return undefined;
+    }
+    const { allowed } = resolveSearchFieldResolution({
+        fields: fields as Record<string, SearchFieldMeta>,
+        searchableFields: schema?.searchableFields as string[] | undefined,
+        displayField: (schema?.nameField ?? schema?.displayNameField) as string | undefined,
+    });
+    const searchParam = wireSpelling.search ?? 'search';
+    const narrowed = allowed.filter((field) => !storedMetadataSearchRefusal(object, [field], searchParam));
+    if (narrowed.length === 0) {
+        const refusal = storedMetadataSearchRefusal(object, allowed, searchParam);
+        if (refusal) throw refusal;
+        return undefined;
+    }
+    return narrowed;
 }
 
 /**
@@ -5244,6 +5457,73 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * Run every registered uninstall cleanup for one package and report each
+     * outcome (ADR-0086 D3, #2747) — THE one runner of the registry above.
+     *
+     * [#21490] Extracted from {@link deletePackage}, which calls it as its last
+     * step, so that a door uninstalling a package the protocol never stored —
+     * install-local's `DELETE /api/v1/marketplace/install-local/:manifestId`,
+     * whose package has no `sys_packages` row and no `sys_metadata` rows —
+     * runs the SAME cleanups after its own removal instead of none. Measured on
+     * that door before this existed: the package's object answered 404 after a
+     * restart while its `managed_by: package` `sys_permission_set` row and its
+     * user grant survived. `deletePackage` itself does not fit that door: it
+     * refuses without a tenant scope, answers `success: false` when it deletes
+     * no `sys_metadata` row, and withdraws the package from the running
+     * registry, which that door never did.
+     *
+     * Best-effort per cleanup and never throws: a cleanup's failure is an
+     * outcome (`success: false`), its text quoted only when the cleanup
+     * declared a refusal. Ghost grants are a security condition, so every
+     * caller surfaces a failed outcome — on its response, as `deletePackage`
+     * does — and never swallows it.
+     */
+    async runUninstallCleanups(
+        request: Pick<DeletePackageRequest, 'packageId' | 'organizationId' | 'actor'>,
+    ): Promise<UninstallCleanupOutcome[]> {
+        const cleanups: UninstallCleanupOutcome[] = [];
+        for (const [name, cleanup] of this.uninstallCleanups) {
+            try {
+                const r = await cleanup({
+                    packageId: request.packageId,
+                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                    ...(request.actor ? { actor: request.actor } : {}),
+                });
+                cleanups.push({
+                    name,
+                    success: r?.success !== false,
+                    removed: typeof r?.removed === 'number' ? r.removed : 0,
+                    ...(r?.error ? { error: r.error } : {}),
+                });
+            } catch (e: any) {
+                // [#8136] A cleanup is arbitrary plugin code that goes straight
+                // at the engine (plugin-security deletes `sys_permission_set`
+                // rows and their bindings), so a driver failure lands here
+                // verbatim — and this outcome rides on the RESPONSE by design,
+                // inside `details`, where no boundary's message withhold can
+                // reach it. Quoted only when the cleanup declared a refusal.
+                // [#12536] The mark travels beside the withheld sentence, not
+                // instead of it: `error` stays whatever #8136's rule licenses,
+                // and a cleanup that refused in the author's own words is still
+                // reported as a refusal rather than as one that merely
+                // "failed".
+                const cleanupUserMessage = declaredUserMessage(e);
+                cleanups.push({
+                    name,
+                    success: false,
+                    removed: 0,
+                    error: clientFacingFailureText(e, 'cleanup failed'),
+                    ...(cleanupUserMessage !== undefined ? { userMessage: cleanupUserMessage } : {}),
+                });
+                console.warn(
+                    `[protocol.runUninstallCleanups] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
+                );
+            }
+        }
+        return cleanups;
+    }
+
+    /**
      * Register the awaited mutation projector for a metadata type (ADR-0094).
      * Called by the domain plugin that owns the derived read-model (e.g.
      * plugin-security registers the `permission` → `sys_permission_set`
@@ -5593,6 +5873,10 @@ export class ObjectStackProtocolImplementation implements
         // #6285 kind, read here per publish and passed in so the gate stays pure.
         const sduiManifest = this.resolveSduiManifest();
 
+        // [#21476] The tenancy posture in force — a host fact of the same kind,
+        // read here per publish and passed in so the gate stays pure.
+        const tenancyPostureInForce = this.tenancyPostureInForce();
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -5608,6 +5892,10 @@ export class ObjectStackProtocolImplementation implements
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
+            // [#21476] The posture IN FORCE, for the public-form intake
+            // advisory — a separate input from the requested one above, on
+            // purpose: see `tenancyPostureInForce()`.
+            ...(tenancyPostureInForce !== undefined ? { tenancyPostureInForce } : {}),
             ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
             ...(restoredCredentialPaths !== undefined ? { restoredCredentialPaths } : {}),
             // [#20312] The deployment's component manifest, read per publish;
@@ -5938,6 +6226,40 @@ export class ObjectStackProtocolImplementation implements
             return postureEnforcesWall(resolveTenancyPosture());
         } catch {
             return true;
+        }
+    }
+
+    /**
+     * [#21476] The tenancy posture IN FORCE, as this kernel's `tenancy` service
+     * reports it (`anonymousFormIntakePosture`, `@objectstack/metadata-core`) —
+     * the runtime authoring gate's input for its public-form intake advisory.
+     * `undefined` when no tenancy service is registered.
+     *
+     * The doors that advisory speaks for read exactly this: both anonymous form
+     * doors in `@objectstack/rest` ask the same service through the same
+     * reader, and it is the posture SecurityPlugin hands the engine. So a
+     * DEGRADED walled deployment (a wall requested and not enforceable, which
+     * the service reports as `single`) gets no advisory, because its doors do
+     * serve the form and its engine does take the insert.
+     *
+     * ⛔ It does NOT replace {@link orgWallEnforced}. That input is the
+     * REQUESTED posture, read fail-closed: #6155 Q3=A names
+     * `postureEnforcesWall(resolveTenancyPosture())` as the #6285 refusal's
+     * input verbatim, and an unrecognized `OS_TENANCY_POSTURE` reads as walled
+     * (ADR-0105). Feeding that refusal this reading instead would narrow it —
+     * off on a degraded deployment, on a composition with no tenancy service,
+     * and on an unrecognized posture value — which is a ruling's to make, not
+     * an advisory's. Two rules, two questions, two inputs.
+     *
+     * Read per publish, as {@link resolveSduiManifest} reads its service, and
+     * never allowed to fail the write: a service whose posture cannot be read
+     * reports none, and the advisory is simply not raised.
+     */
+    private tenancyPostureInForce(): TenancyPosture | undefined {
+        try {
+            return anonymousFormIntakePosture(this.getServicesRegistry?.().get('tenancy'));
+        } catch {
+            return undefined;
         }
     }
 
@@ -10302,21 +10624,24 @@ export class ObjectStackProtocolImplementation implements
      *
      * The REST API-exposure gate (`enforceApiAccess`, ADR-0049 / #1889) skips
      * objects it cannot find in metadata, and justified that with "the data
-     * path will 404 anyway". It would not. `engine.find` resolves an
-     * UNREGISTERED name straight to a physical table name
-     * (`resolveObjectName` → `StorageNameMapping.resolveTableName({ name })`),
-     * so the request only 404'd as a *side effect* of the driver complaining
-     * about a missing table (which the REST layer recognises by matching the
-     * driver's error string) — and did not 404 at all when a table with that
-     * name happened to exist: out-of-band DDL, a registration that failed
-     * after `syncObjectSchema` had already run, a registration race. In that
-     * window the exposure gate was silently skipped and the rows were served.
+     * path will 404 anyway". It would not. `engine.find` then resolved an
+     * UNREGISTERED name straight to a physical table name, so the request
+     * only 404'd as a *side effect* of the driver complaining about a missing
+     * table (which the REST layer recognises by matching the driver's error
+     * string) — and did not 404 at all when a table with that name happened
+     * to exist: out-of-band DDL, a registration that failed after
+     * `syncObjectSchema` had already run, a registration race. In that window
+     * the exposure gate was silently skipped and the rows were served.
      *
      * The gate lives HERE, at the protocol ingress, for the same reason
-     * `enforceApiAccess` does: this is the external API boundary. Internal
-     * callers (hooks, flows, migrations, raw ObjectQL) talk to the engine
-     * directly and are deliberately unaffected — `apiEnabled` and this check
-     * both control automatic API exposure, not data access.
+     * `enforceApiAccess` does: this is the external API boundary, and it
+     * answers before the query is parsed. `apiEnabled` controls automatic API
+     * exposure, not data access, and internal callers (hooks, flows,
+     * migrations, raw ObjectQL) are unaffected by it. The object-existence
+     * half is no longer the door's alone: the engine's in-process verbs now
+     * refuse a name the registry does not resolve with this same envelope
+     * (`objectNotFoundError`, `@objectstack/core`), so an in-process caller
+     * cannot read a table by a name this gate refuses.
      *
      * ## Tiering — mirrors the #3545 decision recorded in `api-exposure.ts`
      *
@@ -10405,11 +10730,9 @@ export class ObjectStackProtocolImplementation implements
             }
             return;
         }
-        const err: any = new Error(`Object '${object}' not found`);
-        err.code = 'OBJECT_NOT_FOUND';
-        err.status = 404;
-        err.object = object;
-        throw err;
+        // The one envelope, shared with the engine's in-process verbs, which
+        // refuse an unresolved name the same way (`objectNotFoundError`).
+        throw objectNotFoundError(object);
     }
 
     /**
@@ -11441,62 +11764,6 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#21207] A `search` on a stored-metadata table never scans its body or
-     * content-hash columns ({@link STORED_METADATA_UNSEARCHABLE_COLUMNS}).
-     *
-     * A search is a substring filter the engine evaluates over every column it
-     * scans, and with no `searchableFields` declared it scans every text-like
-     * column — the stored body and both stored hashes among them. Over those
-     * it is the verifier the filter refusals close: a guessed hash, or a guessed
-     * prefix of withheld credential material, returns the row exactly when it
-     * is right. So an explicit field list naming one is refused
-     * (`INVALID_FIELD` / 400, the evaluate refusals' envelope), and a search
-     * that names none is handed to the engine with the object's searchable set
-     * minus those columns — the engine intersects an override with that set and
-     * never widens it. Runs after {@link assertSearchFieldsAreSearchable}, so a
-     * name that is not searchable at all keeps its own answer.
-     */
-    private narrowStoredMetadataSearch(
-        object: string,
-        options: Record<string, any>,
-        wireSpelling: Record<string, string>,
-    ): void {
-        if (!isStoredMetadataBodyObject(object)) return;
-        const objectForm = options.search !== null && typeof options.search === 'object';
-        const [explicit, param] = options.searchFields != null
-            ? [options.searchFields, wireSpelling.searchFields ?? 'searchFields']
-            : objectForm && options.search.fields != null
-                ? [options.search.fields, wireSpelling.search ?? 'search']
-                : [undefined, ''];
-        const names: string[] = typeof explicit === 'string'
-            ? explicit.split(',').map((s: string) => s.trim()).filter(Boolean)
-            : Array.isArray(explicit) ? explicit.filter((f: unknown): f is string => typeof f === 'string') : [];
-        if (names.length > 0) {
-            const refusal = storedMetadataSearchRefusal(object, names, param);
-            if (refusal) throw refusal;
-            return;
-        }
-        if (options.search == null) return;
-        const gate = this.resolveQueryFields(object);
-        // No field map: the engine has none to expand a search over either.
-        if (!gate) return;
-        const { allowed } = resolveSearchFieldResolution({
-            fields: gate.fields,
-            searchableFields: gate.schema?.searchableFields,
-            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
-        });
-        const narrowed = allowed.filter((field) => !STORED_METADATA_UNSEARCHABLE_COLUMNS.includes(field));
-        if (narrowed.length === 0) {
-            // An empty override is ABSENT to the engine, which would then scan
-            // the whole default set — these columns included. Refuse instead.
-            const refusal = storedMetadataSearchRefusal(object, allowed, wireSpelling.search ?? 'search');
-            if (refusal) throw refusal;
-            return;
-        }
-        options.searchFields = narrowed;
-    }
-
-    /**
      * [#4254] GROUP-BY axis. A grouping target the object does not have is
      * refused (`400 INVALID_FIELD`); a grouping target the spec cannot read is
      * refused as a shape (`400 INVALID_QUERY`).
@@ -12026,7 +12293,13 @@ export class ObjectStackProtocolImplementation implements
         }
         // [#21207] …and on a stored-metadata table a search never scans the body
         // or content-hash columns: refused when named, narrowed away otherwise.
-        this.narrowStoredMetadataSearch(request.object, options, wireSpelling);
+        // Runs after the searchability gate above, so a name that is not
+        // searchable at all keeps its own answer. [#21544] The ONE narrowing,
+        // a module function the in-process reader-context seam calls too.
+        const narrowedSearchFields = narrowStoredMetadataSearch(
+            request.object, options, this.engine?.registry?.getObject?.(request.object), wireSpelling,
+        );
+        if (narrowedSearchFields) options.searchFields = narrowedSearchFields;
 
         // Boolean fields
         for (const key of ['distinct', 'count']) {
@@ -12145,14 +12418,14 @@ export class ObjectStackProtocolImplementation implements
         // evaluates the body — a filter oracle that rebuilds a withheld
         // credential by probing, or an order over the same bytes — so it is
         // refused here, in the same shape as the grouping refusal, before the
-        // engine is asked. Field keys are collected the same way
-        // `assertFilterFieldsExist` reads them, so a nested-relation filter whose
-        // HEAD segment is the body column is caught too.
-        const aggregationFilterFields = Array.isArray(options.aggregations)
-            ? (options.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) =>
-                  collectFilterFieldKeys(a?.filter))
-            : [];
-        const filterFields = [...collectFilterFieldKeys(options.where), ...aggregationFilterFields];
+        // engine is asked. [#21544] The columns a filter READS are collected by
+        // the family's ONE collector, which the reader-context seam calls too:
+        // every key's head AND every cross-field `{ $field }` comparand, at any
+        // depth, in `where` and each `aggregations[i].filter` — so a filter that
+        // reads the body or a hash without naming it as a key (a comparand), or
+        // names it below the ingress collector's depth backstop, is refused like
+        // a direct one. `[]` outside the family.
+        const filterFields = collectStoredMetadataFilterFields(request.object, options);
         const sortFields = Array.isArray(options.orderBy)
             ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
             : [];
@@ -16720,7 +16993,18 @@ export class ObjectStackProtocolImplementation implements
     private expandRuntimeViewContainer(
         type: string,
         data: unknown,
-        options: { packageId?: string | null },
+        options: {
+            packageId?: string | null;
+            /**
+             * [#21511] State each expansion's authorship the way
+             * {@link hydrateOverlayIntoRegistry} states its container's:
+             * {@link stateTenantAuthorship} first, then the item's own
+             * artifact envelope merged over it. Set only by the caller that
+             * REGISTERS the expansions ({@link hydrateExpandedViewItems}); the
+             * registry-free reads serve exactly what they served before.
+             */
+            tenantAuthored?: boolean;
+        },
     ): Record<string, unknown>[] {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
         if (!isAggregatedViewContainer(data)) return [];
@@ -16754,7 +17038,11 @@ export class ObjectStackProtocolImplementation implements
             const ownArtifact = (viArtifact as { _packageId?: unknown } | undefined)?._packageId === ownPackageId
                 ? viArtifact
                 : undefined;
-            out.push(mergeArtifactProtection(item, ownArtifact) as Record<string, unknown>);
+            // [#21511] The marker goes on BEFORE the envelope, never after:
+            // where the item's own artifact exists, its `_provenance` still
+            // wins (ADR-0010 §3.3), as it does on the container.
+            const authored = options.tenantAuthored ? stateTenantAuthorship(item) : item;
+            out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
     }
@@ -16921,6 +17209,21 @@ export class ObjectStackProtocolImplementation implements
      * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
      * combination #7736's own pin ever exercised), now with the corrected
      * derivation chain.
+     *
+     * ## [#21511] An expansion inherits its container's authorship
+     *
+     * Every expansion registered here is derived from a stored row, so it is
+     * tenant-authored exactly as its container is, and it carries the same
+     * marker {@link hydrateOverlayIntoRegistry} stamps on the container
+     * ({@link stateTenantAuthorship}, applied before the item's own artifact
+     * envelope). Without it, an expansion of a package-bound container sat
+     * under its bare name wearing that package's `_packageId` and no tenant
+     * marker, so `SchemaRegistry.getArtifactItem`'s bare-key fallback took it
+     * for a code artifact: on an unscoped kernel the by-name read reported
+     * the expanded view `resettable` and the layers read reported it as its
+     * own `code` layer (for a package-less container too, through the
+     * runtime-only `getItem` arm), where `env_local`, which registers nothing,
+     * reported neither. With the marker both kernels give one answer.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -16928,7 +17231,7 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
-        for (const item of this.expandRuntimeViewContainer(type, data, options)) {
+        for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
             registry.registerItem(type, item, 'name' as any);
         }
     }
@@ -17581,6 +17884,77 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
+    /**
+     * [#21558] The save door's refusal of a view container saved under a name
+     * its OWN expansion produces — `{ name: 'crm_lead.default', object:
+     * 'crm_lead', list }` saved as `crm_lead.default`, whose bare `list`
+     * expands to exactly that name.
+     *
+     * Both read doors give a name with a stored row of its own that row, and
+     * let an expansion fill only a name with no row (#21510's one predicate,
+     * `namesWithOwnStoredRow`). Such a container IS the row of that name, so
+     * its own expansion never fills it: the object door, which never
+     * enumerates a container, lists nothing under the name, and the by-name
+     * read answers the raw container. No door answers a view item for it, and
+     * nothing told the author why. Triage's ruling refuses the shape here, at
+     * authoring (Prime Directive 12), and keeps the readers' one predicate
+     * whole: ⛔ no second own-row test in the readers.
+     *
+     * "A name its own expansion produces" is answered by the readers' own
+     * expansion, {@link expandRuntimeViewContainer}, never by a copy of its
+     * naming, so the save door and the read doors cannot disagree about it:
+     * every member kind and the expander's de-duplication are covered as the
+     * readers place them. A container on another package's object expands
+     * under its own name (#21334), as `<object>.<container name>…`, which is
+     * never the container name itself, so that arm is never refused. The
+     * package binding is the request's, as the registry write-through
+     * registers the expansion.
+     *
+     * The body judged is the one the author sent, with the door's own `name`
+     * stamp ({@link normalizeViewMetadata}: a missing or falsy `name` becomes
+     * the save name) applied first, since the expansion of an unnamed
+     * container is placed by that name. It is asked BEFORE that function's
+     * identity patch: a container whose only member is `form` is not one of
+     * the shapes the patch leaves alone, so under the name of a registered
+     * view item it would take that item's `viewKind`, stop being a container,
+     * and reach the schema as a malformed view item instead of this refusal.
+     *
+     * A view item (`viewKind` set) is not a container, so a view item saved
+     * under an expanded name is untouched: it is the sanctioned override for
+     * that name. Rows already stored in this shape are untouched too: the
+     * read doors serve them as before, and only a new save is refused.
+     *
+     * `VALIDATION_ERROR` / 400, the envelope of the name check it sits beside
+     * (`savedItemNameRefusal`): an authoring refusal of the request's own
+     * name, decided from the body. The prescription is the ruling's: save the
+     * container under its object's name, or save a view item under the
+     * expanded name. Runtime words carry no tracker number.
+     */
+    private containerOwnExpansionNameRefusal(
+        type: string,
+        item: unknown,
+        saveName: string,
+        packageId: string | null | undefined,
+    ): (Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        const body = item as Record<string, unknown>;
+        const stamped = body.name ? body : { ...body, name: saveName };
+        const own = this.expandRuntimeViewContainer(type, stamped, { packageId })
+            .find((expanded) => expanded.name === saveName);
+        if (!own) return undefined;
+        const object = String(own.object);
+        const err = new Error(
+            `Invalid view container: it is saved under '${saveName}', which is a name its own expansion `
+            + `produces (its ${String(own.viewKind)} view on '${object}'). An expanded view fills only a name `
+            + `that has no stored row of its own, and this container would be that row, so no read would answer `
+            + `a view under '${saveName}'. Save the container under its object's name, '${object}', or save a `
+            + `view item (name, object, viewKind and config) under '${saveName}'.`,
+        ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+        err.code = 'VALIDATION_ERROR';
+        err.status = 400;
+        return err;
+    }
+
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
     // receipt served — and is compared in that form (`storedParentForToken`).
     // `storedParentVersion` is the in-process twin for a caller that read the
@@ -18061,6 +18435,16 @@ export class ObjectStackProtocolImplementation implements
             {
                 const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
+            }
+            // [#21558] …and a view container saved under a name its OWN
+            // expansion produces, with the same envelope. Asked of the body as
+            // authored, before the stamp below can take a registry entry's
+            // `viewKind` onto it. See {@link containerOwnExpansionNameRefusal}.
+            {
+                const ownExpansionRefusal = this.containerOwnExpansionNameRefusal(
+                    singularType, request.item, request.name, request.packageId,
+                );
+                if (ownExpansionRefusal) throw ownExpansionRefusal;
             }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
@@ -21701,45 +22085,9 @@ export class ObjectStackProtocolImplementation implements
         // sys_permission_set rows and their bindings. Best-effort per cleanup;
         // outcomes ride on the response so a failed revocation (ghost grants —
         // a security condition) is visible to the caller, never silent.
-        const cleanups: UninstallCleanupOutcome[] = [];
-        for (const [name, cleanup] of this.uninstallCleanups) {
-            try {
-                const r = await cleanup({
-                    packageId: request.packageId,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-                    ...(request.actor ? { actor: request.actor } : {}),
-                });
-                cleanups.push({
-                    name,
-                    success: r?.success !== false,
-                    removed: typeof r?.removed === 'number' ? r.removed : 0,
-                    ...(r?.error ? { error: r.error } : {}),
-                });
-            } catch (e: any) {
-                // [#8136] A cleanup is arbitrary plugin code that goes straight
-                // at the engine (plugin-security deletes `sys_permission_set`
-                // rows and their bindings), so a driver failure lands here
-                // verbatim — and this outcome rides on the RESPONSE by design,
-                // inside `details`, where no boundary's message withhold can
-                // reach it. Quoted only when the cleanup declared a refusal.
-                // [#12536] The mark travels beside the withheld sentence, not
-                // instead of it: `error` stays whatever #8136's rule licenses,
-                // and a cleanup that refused in the author's own words is still
-                // reported as a refusal rather than as one that merely
-                // "failed".
-                const cleanupUserMessage = declaredUserMessage(e);
-                cleanups.push({
-                    name,
-                    success: false,
-                    removed: 0,
-                    error: clientFacingFailureText(e, 'cleanup failed'),
-                    ...(cleanupUserMessage !== undefined ? { userMessage: cleanupUserMessage } : {}),
-                });
-                console.warn(
-                    `[protocol.deletePackage] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
-                );
-            }
-        }
+        // [#21490] Through the registry's one runner, which install-local's
+        // uninstall door calls too.
+        const cleanups = await this.runUninstallCleanups(request);
 
         return {
             success: failed.length === 0 && deleted.length > 0,

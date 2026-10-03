@@ -7,7 +7,7 @@
  *
  * Responsibilities:
  * - L1 ExpressionBody — evaluated as a `return (<source>)` snippet.
- * - L2 ScriptBody    — wrapped in `(async (ctx) => { <source> })(ctx)` (hooks)
+ * - L2 ScriptBody    — wrapped in `(async (ctx) => { <source> })(ctx)` (hooks, jobs)
  *                      or `(async (input, ctx) => { <source> })(input, ctx)` (actions).
  * - Hard timeout via QuickJS interrupt handler.
  * - Capability gating — host-side `ctx.api`, `ctx.crypto`, `ctx.log` are only
@@ -50,6 +50,15 @@ import type {
 
 const DEFAULT_HOOK_TIMEOUT_MS = 250;
 const DEFAULT_ACTION_TIMEOUT_MS = 5000;
+// [#21489] A job body whose job declares no `timeoutMs` gets the budget an
+// action body gets. It is CPU time (ADR-0102 D1): the body's `ctx.api` awaits
+// are not charged, so it bounds runaway script work, never a slow query. A job
+// that needs more says so in `JobSchema.timeoutMs`, the one limit of a body job
+// (uncapped, unlike `ScriptBody.timeoutMs`), which reaches this runner as
+// `opts.timeoutMs` and wins. No env override, unlike the two above: those lift
+// a floor on a loaded host for the per-request paths, and a job's own
+// `timeoutMs` is already the declared place to state how long it needs.
+const DEFAULT_JOB_TIMEOUT_MS = 5000;
 const DEFAULT_MEMORY_MB = 32;
 // Wall-clock backstop (ADR-0102 D1): the CPU budget bounds VM-active time, but a
 // body parked forever on a host call that never settles burns no CPU — the
@@ -62,6 +71,11 @@ export interface QuickJSScriptRunnerOptions {
   hookTimeoutMs?: number;
   /** Default per-invocation **CPU-time** budget for actions (ms). */
   actionTimeoutMs?: number;
+  /**
+   * Default per-invocation **CPU-time** budget for job bodies (ms), used only
+   * when the job declares no `timeoutMs`. Default 5000.
+   */
+  jobTimeoutMs?: number;
   /**
    * Wall-clock ceiling (ms) — the backstop for a body stuck on a never-settling
    * host call. Effective ceiling is `max(this, cpuBudget)`, so it can never cut
@@ -85,6 +99,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     this.opts = {
       hookTimeoutMs: opts.hookTimeoutMs ?? resolveSandboxTimeoutMs('hook', DEFAULT_HOOK_TIMEOUT_MS),
       actionTimeoutMs: opts.actionTimeoutMs ?? resolveSandboxTimeoutMs('action', DEFAULT_ACTION_TIMEOUT_MS),
+      jobTimeoutMs: opts.jobTimeoutMs ?? DEFAULT_JOB_TIMEOUT_MS,
       wallCeilingMs: opts.wallCeilingMs ?? resolveSandboxTimeoutMs('wallCeiling', DEFAULT_WALL_CEILING_MS),
       memoryMb: opts.memoryMb ?? DEFAULT_MEMORY_MB,
     };
@@ -154,7 +169,15 @@ export class QuickJSScriptRunner implements ScriptRunner {
    * and pushed template authors toward denormalized rollup workarounds (#1867).
    */
   private resolveTimeout(opts: ScriptRunOptions, bodyTimeoutMs: number | undefined): number {
-    const def = opts.origin.kind === 'hook' ? this.opts.hookTimeoutMs : this.opts.actionTimeoutMs;
+    // One default per origin kind, spelled per kind rather than as a
+    // hook-or-else branch: a job body falling into the action branch would have
+    // read the action's env override as its own (#21489).
+    const def =
+      opts.origin.kind === 'hook'
+        ? this.opts.hookTimeoutMs
+        : opts.origin.kind === 'job'
+          ? this.opts.jobTimeoutMs
+          : this.opts.actionTimeoutMs;
     const explicit = [opts.timeoutMs, bodyTimeoutMs].filter((n): n is number => typeof n === 'number');
     return explicit.length > 0 ? Math.min(...explicit) : def;
   }
@@ -289,7 +312,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
             }`;
-      const wrapped = args.origin.kind === 'hook'
+      // A job body takes the hook's `(ctx)` wrapper (#21489): it has no input to
+      // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
+      // the whole surface. Only an action body is `(input, ctx)`.
+      const wrapped = args.origin.kind !== 'action'
         ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined;
             (async (ctx) => { ${args.source} })(globalThis.__ctx).then(
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },

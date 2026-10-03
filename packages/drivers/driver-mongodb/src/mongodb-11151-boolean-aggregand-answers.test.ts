@@ -7,10 +7,10 @@
  * ## The ruling this suite pins
  *
  * - **`sum` / `avg` answer arithmetic** — `3` / `0.5` over a 3-true/3-false
- *   fixture. The #11065 family shape, landed on `driver-memory` and on every
+ *   fixture. The commit 20950404c family shape, landed on `driver-memory` and on every
  *   SQL dialect (#11635).
  * - **`min` / `max` answer `0` / `1`** — #11152 (maintainer 2026-08-28,
- *   applied on that card's comment 5448627494, ruling verbatim and
+ *   landed as commit f6fa22ce1, ruling verbatim and
  *   untranslated: 「12745 A回，其他同意。」), SUPERSEDING #11249's
  *   `false` / `true`: booleans aggregate as NUMBERS on every face, with no
  *   per-aggregate exception, so one boolean column's aggregates answer in one

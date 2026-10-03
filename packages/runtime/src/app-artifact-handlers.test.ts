@@ -22,7 +22,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { bindAppArtifactHandlers, appArtifactHandlerOwner } from './app-artifact-handlers.js';
+import { bindAppArtifactHandlers, appArtifactHandlerOwner, collectHooksWithoutBody } from './app-artifact-handlers.js';
 
 const APP_ID = 'com.example.tasksapp';
 const OWNER = appArtifactHandlerOwner(APP_ID);
@@ -112,5 +112,87 @@ describe('#21321: bindAppArtifactHandlers', () => {
 
         await expect(ql.executeAction('tasks_app_task', 'imperative_task', {})).resolves.toEqual({ mine: true });
         expect(owned(ql, 'metadata-service')).toEqual(['tasks_app_task:authored_task']);
+    });
+});
+
+/**
+ * #21585 — a hook with no `body` on a door that carries no runtime module.
+ *
+ * The engine resolves a hook's function-name `handler` against the bundle's
+ * `functions`, then against every function already registered on the engine,
+ * by bare name. A door that brings no runtime module (install-local) brings no
+ * function of the package's own, so such a hook could bind only to code the
+ * package does not ship. That door passes `withholdHooksWithoutBody`; a boot
+ * does not, and its own handler hooks bind as they always did.
+ */
+describe('#21585: hooks with no body — the judgement, and the door that withholds them', () => {
+    const OTHER_APP = 'com.example.otherapp';
+    const STAMP = 'shared_stamp';
+    /** Another app's function, registered on the same engine under its own owner. */
+    const otherApp = {
+        manifest: { id: OTHER_APP, version: '0.1.0', type: 'app' },
+        objects: [],
+        functions: { [STAMP]: (ctx: any) => { ctx.input.status = (ctx.input.status ?? '') + 'other'; } },
+    };
+    const HANDLER_ONLY = { name: 'tasks_app_handler_only', object: 'tasks_app_task', events: ['beforeInsert'], handler: STAMP };
+    const BOTH = { ...HOOK, name: 'tasks_app_both', handler: STAMP };
+    const pkg = (hooks: unknown[], extra: Record<string, unknown> = {}) => ({
+        manifest: { id: APP_ID, version: '0.1.0', type: 'app' },
+        objects: [{ name: 'tasks_app_task', fields: {} }],
+        hooks,
+        ...extra,
+    });
+    const recordingLogger = () => {
+        const warned: string[] = [];
+        return { warned, logger: { ...quiet, warn: (m: string) => { warned.push(String(m)); } } };
+    };
+
+    it('collectHooksWithoutBody names every hook whose code is only a handler, or nothing — never one with a body', () => {
+        const NEITHER = { name: 'tasks_app_neither', object: 'tasks_app_task', events: ['beforeInsert'] };
+        const STRING_BODY = { ...HANDLER_ONLY, name: 'tasks_app_string_body', body: 'not a body object' };
+
+        expect(collectHooksWithoutBody(pkg([HOOK, HANDLER_ONLY, BOTH, NEITHER, STRING_BODY]))).toEqual([
+            { name: HANDLER_ONLY.name, handler: STAMP },
+            { name: NEITHER.name },
+            // A non-object `body` is not read as one by the engine: its handler would be resolved.
+            { name: STRING_BODY.name, handler: STAMP },
+        ]);
+        expect(collectHooksWithoutBody(pkg([]))).toEqual([]);
+        expect(collectHooksWithoutBody({ manifest: { id: APP_ID } })).toEqual([]);
+    });
+
+    it('with withholdHooksWithoutBody, a hook with no body is NOT bound and is warned — no other app’s function runs for it', async () => {
+        const ql = new ObjectQL({ logger: quiet } as any);
+        bindAppArtifactHandlers(ql as any, otherApp, { appId: OTHER_APP, logger: quiet });
+        const { warned, logger } = recordingLogger();
+
+        const bound = bindAppArtifactHandlers(ql as any, pkg([HANDLER_ONLY, HOOK]), {
+            appId: APP_ID, logger, withholdHooksWithoutBody: true,
+        });
+
+        expect(bound.withheldHooks).toEqual([HANDLER_ONLY.name]);
+        expect(bound.hooks, 'the body hook beside it still binds').toBe(1);
+        expect(await insertStatus(ql), 'the body hook fires; the withheld hook runs nothing').toBe('stamped');
+        expect(warned.some((m) => m.includes(HANDLER_ONLY.name) && m.includes('NOT bound') && m.includes('`body`'))).toBe(true);
+    });
+
+    it('…and a hook carrying both a body and a handler binds its body under that option', async () => {
+        const ql = new ObjectQL({ logger: quiet } as any);
+        bindAppArtifactHandlers(ql as any, otherApp, { appId: OTHER_APP, logger: quiet });
+
+        const bound = bindAppArtifactHandlers(ql as any, pkg([BOTH]), { appId: APP_ID, logger: quiet, withholdHooksWithoutBody: true });
+
+        expect(bound.withheldHooks).toEqual([]);
+        expect(await insertStatus(ql)).toBe('stamped');
+    });
+
+    it('a boot (no option) still binds an app’s own handler hook to its own function — unchanged', async () => {
+        const ql = new ObjectQL({ logger: quiet } as any);
+        const own = (ctx: any) => { ctx.input.status = (ctx.input.status ?? '') + 'own'; };
+
+        const bound = bindAppArtifactHandlers(ql as any, pkg([HANDLER_ONLY], { functions: { [STAMP]: own } }), { appId: APP_ID, logger: quiet });
+
+        expect(bound).toMatchObject({ hooks: 1, functions: 1, withheldHooks: [] });
+        expect(await insertStatus(ql)).toBe('own');
     });
 });

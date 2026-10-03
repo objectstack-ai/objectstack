@@ -1062,6 +1062,286 @@ describe('#21334 a container on another package\'s object never takes that packa
             });
         }
     });
+
+    /**
+     * #21511 — an expansion inherits its container's authorship, so the
+     * unscoped kernel answers an expanded view as `env_local` does.
+     *
+     * Registry hydration (an unscoped kernel's environment-wide rows only)
+     * registered each expansion of a stored container under its bare name with
+     * no tenant marker, while the container itself carries one
+     * (`_provenance: 'org'`). Measured on `origin/main` before this change, with
+     * this harness and the card's probe: `getMetaItem(...).resettable` answered
+     * `true` for a package-bound container (`env_local`: `false`), and
+     * `getMetaItemLayered` answered the hydrated expansion as the `code` layer
+     * for a package-bound and a package-less container alike (`env_local`:
+     * `null`). Triage's ruling: each expansion carries its container's marker,
+     * and the save door's acceptance of a write by an expanded name is
+     * unchanged.
+     */
+    describe('#21511 an expanded view of a stored container answers as tenant-authored on both kernels', () => {
+        /** The arms registry hydration registers: environment-wide rows. */
+        const ENV_WIDE = CONTAINERS.filter((c) => c.organizationId === undefined);
+        /** What the two reads tell a caller about an item's code layer and its affordances. */
+        const answer = async (protocol: Protocol, name: string) => {
+            const meta = (await protocol.getMetaItem({ type: 'view', name } as any)) as any;
+            const layered = (await protocol.getMetaItemLayered({ type: 'view', name })) as any;
+            return {
+                resettable: meta.resettable, editable: meta.editable, deletable: meta.deletable, lock: meta.lock,
+                provenance: meta.provenance, packageId: meta.packageId, code: layered.code,
+            };
+        };
+        const kernelName = (environmentId: string | undefined) => environmentId ?? 'unscoped';
+
+        for (const c of ENV_WIDE) {
+            for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                it(`${c.arm}, member ${kind}: the expanded view is not resettable and has no code layer, on both kernels alike`, async () => {
+                    const answers = [];
+                    for (const [, environmentId] of KERNELS) {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                        const a = await answer(protocol, m.servedAs);
+                        expect(a.resettable, `${kernelName(environmentId)}: no package ships it`).toBe(false);
+                        expect(a.code, `${kernelName(environmentId)}: no artifact, so no code layer`).toBeNull();
+                        answers.push(a);
+                    }
+                    expect(answers[1], 'the unscoped kernel answers as env_local does').toEqual(answers[0]);
+                });
+            }
+
+            it(`${c.arm}: on an unscoped kernel each registered expansion carries its container's tenant marker`, async () => {
+                const { protocol, registry } = showcaseHarness(undefined);
+                const m = MEMBER_CASES['listViews.*'];
+                await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                const container = registry.getItem('view', OWN);
+                expect(container?._provenance, 'the container is registered as tenant-authored').toBe('org');
+                const expansions = registry.listItems('view').filter((it) => String(it.name).startsWith(`${TASK}.${OWN}`));
+                expect(expansions.map((it) => it.name), 'hydration registered the expansion').toEqual([m.servedAs]);
+                for (const it of expansions) {
+                    expect(it._provenance, `${it.name} inherits the container's marker`).toBe(container?._provenance);
+                    expect(it._packageId, `${it.name} keeps its container's package`).toBe(c.ownPackage);
+                    expect(isCodeArtifactBody(it), `${it.name} is no code artifact`).toBe(false);
+                }
+            });
+
+            it(`${c.arm}: the save door still accepts a write by an expanded name, alike on both kernels, and that row then answers the name`, async () => {
+                const m = MEMBER_CASES['listViews.*'];
+                const byName = {
+                    name: m.servedAs, object: TASK, viewKind: 'list', label: 'ByName',
+                    config: { type: 'grid', data, columns: [{ field: 'title' }] },
+                };
+                const outcomes = [];
+                for (const [, environmentId] of KERNELS) {
+                    const { protocol, rows } = showcaseHarness(environmentId);
+                    await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                    const saved = (await save(protocol, m.servedAs, byName, c)) as any;
+                    const stored = [...rows.values()]
+                        .filter((r) => r.name === m.servedAs)
+                        .map((r) => ({ package_id: r.package_id, organization_id: r.organization_id, state: r.state }));
+                    expect(stored, `${kernelName(environmentId)}: stored once, in the container's scope`)
+                        .toEqual([{ package_id: c.packageId ?? null, organization_id: null, state: 'active' }]);
+                    expect((await byNameDoor(protocol, m.servedAs))?.label).toBe('ByName');
+                    expect(named(await objectDoor(protocol), m.servedAs).map((v) => v.label)).toEqual(['ByName']);
+                    outcomes.push({ success: saved?.success, stored, ...(await answer(protocol, m.servedAs)) });
+                }
+                expect(outcomes[0].success).toBe(true);
+                expect(outcomes[1], 'the unscoped kernel answers the write as env_local does').toEqual(outcomes[0]);
+            });
+        }
+
+        it('CONTROL — an expansion its own package ships keeps that artifact\'s envelope over the marker (ADR-0010 §3.3): resettable, with the packaged code layer, on both kernels alike', async () => {
+            const overlay = {
+                name: TASK,
+                list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
+                listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+            };
+            const shipped = [DEFAULT, `${TASK}.in_progress`];
+            const answers: Record<string, unknown>[][] = [];
+            for (const [, environmentId] of KERNELS) {
+                const { protocol, registry } = showcaseHarness(environmentId);
+                // A package-less overlay OF the showcase's own container (ADR-0005,
+                // name-keyed): it expands to names the showcase ships, in its slot.
+                await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any);
+                const perKernel = [];
+                for (const name of shipped) {
+                    const a = await answer(protocol, name);
+                    expect(a.resettable, `${kernelName(environmentId)}, ${name}: the showcase ships it`).toBe(true);
+                    expect((a.code as any)?.label, `${kernelName(environmentId)}, ${name}: the packaged code layer`)
+                        .toBe(PACKAGED.find((v) => v.name === name)?.label);
+                    perKernel.push(a);
+                    if (environmentId === undefined) {
+                        const hydrated = registry.listItems('view')
+                            .filter((it) => it.name === name && String(it.label).startsWith('Customized'));
+                        expect(hydrated, `${name}: hydration registered the overlay's expansion`).toHaveLength(1);
+                        expect(
+                            { _provenance: hydrated[0]._provenance, _packageId: hydrated[0]._packageId },
+                            `${name}: the artifact's envelope is merged over the marker, not under it`,
+                        ).toEqual({ _provenance: 'package', _packageId: SHOWCASE });
+                    }
+                }
+                answers.push(perKernel);
+            }
+            expect(answers[1], 'the unscoped kernel answers as env_local does').toEqual(answers[0]);
+        });
+    });
+
+    /**
+     * #21558 — the save door refuses a view container saved under a name its
+     * own expansion produces.
+     *
+     * Measured on `origin/main` before this change, with this harness: the
+     * card's save, `{ name: 'showcase_task.default', object: 'showcase_task',
+     * list }` under `showcase_task.default`, was accepted on both kernels; the
+     * object door then listed nothing under that name (the container is the
+     * name's own row, so #21510's predicate keeps its expansion out, and a
+     * container is never enumerated) while the by-name read answered the raw
+     * container — no door answered a view item for the name. Triage's ruling:
+     * refuse it at the write door with a named error and a prescription (save
+     * the container under its object's name, or a view item under the
+     * expanded name); ⛔ no second own-row test in the readers.
+     *
+     * The refusal asks the readers' own expansion, so every member kind is
+     * covered as the expander places it. The two controls are the ruling's: a
+     * container under its object's name saves and expands as before, and a
+     * view item under an expanded name saves, as the sanctioned override.
+     */
+    describe('#21558 the save door refuses a view container saved under a name its own expansion produces', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        const saveIn = (
+            protocol: Protocol, name: string, item: unknown, organizationId?: string, mode?: 'draft' | 'publish',
+        ) => protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId), ...(mode ? { mode } : {}) } as any);
+        const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
+        /** The minimum a rejection pin asserts — the ADR-0112 envelope — plus the subjects it names. */
+        const expectRefused = (error: any, saveName: string) => {
+            expect(error).toBeInstanceOf(Error);
+            expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+            expect(error.message, 'the refusal names the save name').toContain(`'${saveName}'`);
+            expect(error.message, 'the prescription names the object\'s own name').toContain(`'${TASK}'`);
+        };
+        /** The doors answer `name` with the one item `expectItem` names, and the same item on both. */
+        const expectBothDoors = async (
+            protocol: Protocol, name: string, organizationId: string | undefined, expectItem: (v: any) => void,
+        ) => {
+            const listed = named(await objectDoor(protocol, organizationId), name);
+            expect(listed, `exactly one item answers ${name} on the object door`).toHaveLength(1);
+            expectItem(listed[0]);
+            const read = await byNameDoor(protocol, name, organizationId);
+            expectItem(read);
+            expect(withoutDiagnostics(read), `${name}: the by-name read answers the item the object door lists`)
+                .toEqual(withoutDiagnostics(listed[0]));
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                        it(`${scope}, member ${kind}: a container saved under ${m.shadows}, a name its own expansion produces, is refused VALIDATION_ERROR / 400; nothing is stored or registered`, async () => {
+                            const { protocol, rows, registry } = showcaseHarness(environmentId);
+                            const body = { name: m.shadows, object: TASK, ...m.member };
+                            expect(expandViewContainer(TASK, body).map((vi) => vi.name), 'the save name is its own expansion\'s')
+                                .toEqual([m.shadows]);
+
+                            expectRefused(await refusalOf(saveIn(protocol, m.shadows, body, organizationId)), m.shadows);
+                            expect([...rows.values()].filter((r) => r.type === 'view'), 'no row is stored').toEqual([]);
+                            expect(
+                                registry.listItems('view').filter((it) => isAggregatedViewContainer(it) && it.name === m.shadows),
+                                'no container is registered under the name',
+                            ).toEqual([]);
+                            // The doors answer exactly what they answered before the save.
+                            await expectEveryPackagedNameIntact(protocol, organizationId);
+                        });
+                    }
+
+                    it(`${scope}: the card's save is refused as a draft too, and no draft is stored`, async () => {
+                        const { protocol, rows } = showcaseHarness(environmentId);
+                        const body = { name: DEFAULT, object: TASK, list: { label: 'SelfNamed', type: 'grid', columns: [{ field: 'title' }] } };
+                        expectRefused(await refusalOf(saveIn(protocol, DEFAULT, body, organizationId, 'draft')), DEFAULT);
+                        expect([...rows.values()].filter((r) => r.type === 'view'), 'no draft row is stored').toEqual([]);
+                    });
+
+                    it(`${scope}: a container saved under its object's name saves and expands as before`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const overlay = {
+                            name: TASK,
+                            list: { label: 'Overlay', type: 'grid', data, columns: [{ field: 'title' }] },
+                            listViews: { in_progress: { label: 'Overlay In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+                        };
+                        const saved = (await saveIn(protocol, TASK, overlay, organizationId)) as any;
+                        expect(saved?.success).toBe(true);
+                        await expectBothDoors(protocol, DEFAULT, organizationId, (v) => expect(v?.label).toBe('Overlay'));
+                        await expectBothDoors(protocol, `${TASK}.in_progress`, organizationId, (v) => expect(v?.label).toBe('Overlay In Progress'));
+                    });
+
+                    it(`${scope}: a view item saved under an expanded name saves, as that name's sanctioned override`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const item = {
+                            name: DEFAULT, object: TASK, viewKind: 'list', label: 'ByNameRow',
+                            config: { type: 'grid', data, columns: [{ field: 'title' }, { field: 'status' }] },
+                        };
+                        const saved = (await saveIn(protocol, DEFAULT, item, organizationId)) as any;
+                        expect(saved?.success).toBe(true);
+                        await expectBothDoors(protocol, DEFAULT, organizationId, (v) => expect(v?.label).toBe('ByNameRow'));
+                    });
+                }
+            });
+        }
+    });
+});
+
+/**
+ * #21558 on an object no code package ships: the refusal follows the readers'
+ * expansion, the expander's de-duplication included, so a container saved
+ * under the de-duplicated name its own expansion gave a member is refused
+ * too, and a container under its object's name still saves.
+ */
+describe('#21558 a container under its own expanded name, on a runtime-authored object', () => {
+    async function saveCrm(name: string, item: unknown) {
+        const harness = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(harness.engine);
+        const error = await protocol.saveMetaItem({ type: 'view', name, item }).then(() => null, (e: any) => e);
+        const viewRows = Array.from(harness.rows.values()).filter((r) => r.type === 'view');
+        return { ...harness, protocol, error, viewRows };
+    }
+    const list = { label: 'All Leads', type: 'grid', columns: [{ field: 'name' }] };
+    const other = { label: 'Other', type: 'grid', columns: [{ field: 'company' }] };
+
+    for (const [saveName, member] of [
+        ['crm_lead.default', { list }],
+        ['crm_lead.pipeline', { listViews: { pipeline: list } }],
+        // `listViews.default` takes `crm_lead.default` first, so the expander
+        // renames the bare `list` to `crm_lead.default_2`.
+        ['crm_lead.default_2', { listViews: { default: list }, list: other }],
+    ] as const) {
+        it(`saved under ${saveName}: refused VALIDATION_ERROR / 400, nothing stored or registered`, async () => {
+            const body = { name: saveName, object: 'crm_lead', ...member };
+            expect(expandViewContainer('crm_lead', body).map((vi) => vi.name), 'the save name is its own expansion\'s')
+                .toContain(saveName);
+            const { error, viewRows, registered } = await saveCrm(saveName, body);
+            expect(error).toBeInstanceOf(Error);
+            expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+            expect(viewRows).toEqual([]);
+            expect(registered.get('view')?.size ?? 0).toBe(0);
+        });
+    }
+
+    it('a container with no `name` is judged under the name the door stamps on it: refused under crm_lead.default', async () => {
+        const { error, viewRows } = await saveCrm('crm_lead.default', { object: 'crm_lead', list });
+        expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(viewRows).toEqual([]);
+    });
+
+    it('CONTROL: the same container under its object\'s name saves, and its expansion fills crm_lead.default', async () => {
+        const { error, protocol } = await saveCrm('crm_lead', { name: 'crm_lead', object: 'crm_lead', list });
+        expect(error).toBeNull();
+        const listed: any = await protocol.getMetaItems({ type: 'view' });
+        expect(switcherMatches(listed.items, 'crm_lead').map((v: any) => [v.name, v.label])).toEqual([['crm_lead.default', 'All Leads']]);
+    });
 });
 
 /**

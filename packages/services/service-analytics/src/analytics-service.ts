@@ -1138,6 +1138,16 @@ export interface AnalyticsServiceConfig {
    */
   sqlDialect?: (object: string) => AcceptedSqlDialect | undefined;
   /**
+   * [#21441] The date-bucket expression the driver backing `object` groups
+   * `field` by at `granularity`, as SQL text in its own dialect, or
+   * `undefined` when the host cannot answer. See
+   * `DatasetScopedStrategyContext.dateBucketSql` (`strategies/types.ts`).
+   *
+   * Answered by the plugin from the driver that executes the aggregate. A host
+   * that wires nothing keeps the echo's representative `date_trunc(…)`.
+   */
+  dateBucketSql?: (object: string, field: string, granularity: string) => string | undefined;
+  /**
    * [#19995, ruling C] The data engine's judge-only `where` admission,
    * `IObjectQLEngine.judgeFilter` (#20157): would the engine admit this
    * `where` on this object, without running it? `undefined` when this host
@@ -1490,6 +1500,9 @@ export class AnalyticsService implements IAnalyticsService {
         this.diagnoseSqlDialectAnswer(object, answered);
         return answered;
       },
+      // [#21441] The executing driver's own bucket expression, for the ObjectQL
+      // face's echo; passed through untouched, `undefined` included.
+      dateBucketSql: config.dateBucketSql,
       // [#19995, ruling C] The engine's own admission verdict on a read scope,
       // asked by `ObjectQLStrategy` at its engine-bound merges. The host's
       // answer is passed through untouched, `undefined` included. A host that

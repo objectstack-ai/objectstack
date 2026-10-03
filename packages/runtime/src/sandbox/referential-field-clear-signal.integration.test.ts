@@ -81,6 +81,8 @@ const PROBE_SOURCE = `
   });
 `;
 
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 describe('#13644 — a shipped body observes ctx.referentialFieldClear across the sandbox boundary', () => {
@@ -170,6 +172,9 @@ describe('#13644 — a shipped body observes ctx.referentialFieldClear across th
     expect(cleared.account).toBeNull();
 
     // [commit 13a6cb4ad] Withheld-noise pin, same as the sibling harnesses.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

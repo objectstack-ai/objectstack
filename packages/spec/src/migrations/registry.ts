@@ -341,7 +341,8 @@ const step17: MigrationStep = {
       'but because the authoring gate already rejects the spellings loudly; the chain and the ',
       'stored-row replay are the seams that accept them.\n\n',
       'Finishing the same datasource surface, the canonical driver id `mongo` is renamed to ',
-      '`mongodb` (#6345). The two spellings have both been accepted since #4410 and both still ',
+      '`mongodb`. The two spellings have both been accepted since `datasource.config` was first ',
+      'parsed against its driver\'s own contract, and both still ',
       'are, so no boot breaks and no data moves — what changed is which one is CANONICAL, and ',
       'that string is published as `DRIVER_CATALOG.id` and is what the Studio connection form ',
       'writes into `datasource.driver`. Every row written before the rename therefore carries ',
@@ -5177,7 +5178,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'connector-error-mapping-retired',
     order: 22,
     text:
-      'It also retires `connector.errorMapping` (#14676, ADR-0049 enforce-or-remove; triage '
+      'It also retires `connector.errorMapping` (ADR-0049 enforce-or-remove; triage '
       + 'ruling 2026-09-02): `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys) '
       + 'were authorable through `ConnectorSchema` — and, via `DeclarativeConnectorEntrySchema`, '
       + 'through `stack.connectors[]` and the `/meta/connector` door — and read by nothing: no '
@@ -5518,6 +5519,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the tombstone\'s prescription says how to declare the binding that works.',
   },
   {
+    id: 'element-text-variant-heading-subheading-retired',
+    order: 68,
+    text:
+      'It also completes the `element:text` `variant` convergence (#21015, the second release of '
+      + 'the ruled two-release split): the enum is the nine values `ui:text` publishes — `h1`-`h6`, '
+      + '`body`, `caption`, `overline` — and the pre-convergence spellings `heading` and `subheading`, '
+      + 'which every release since the nine were added still accepted, are refused by name with a '
+      + 'prescription naming the level to write. The D2 conversion `element-text-variant-heading-levels` '
+      + 'rewrites `heading` to `h2` and `subheading` to `h3` on every `element:text` page component — '
+      + 'the heading element each one always rendered, so the outline is unchanged and the heading '
+      + 'takes that level\'s style. The `body` default for an absent `variant` is unchanged.',
+  },
+  {
     id: 'field-inline-and-related-list-columns-closed',
     order: 9,
     text:
@@ -5598,14 +5612,16 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 19,
     text:
       'Finally, it narrows the per-option `default` key OUT of the form-view options '
-      + 'vocabulary (#12868, ADR-0049 declared-but-unenforced; maintainer ruling 2026-08-28 '
-      + 'on the objectui#6263 analysis, disposition 甲): `SelectOptionSchema` serves two '
-      + 'surfaces and only the OBJECT-field face reads `default` (#7246 / PR #7388 — '
-      + '`applyFieldDefaults` falls back to the option marked `default: true`; that face, its '
-      + 'alias rows and its precedence pin are untouched). On a form-view field\'s option list '
+      + 'vocabulary (ADR-0049 declared-but-unenforced; maintainer ruling 2026-08-28 '
+      + 'on the console form renderer\'s analysis, disposition 甲): `SelectOptionSchema` serves '
+      + 'two surfaces and only the OBJECT-field face reads `default` (enforced there by a '
+      + 'maintainer ruling of 2026-08-10 — `applyFieldDefaults` falls back to the option marked '
+      + '`default: true`; that face, its alias rows and its precedence pin are untouched). On a '
+      + 'form-view field\'s option list '
       + 'the key parsed clean and nothing read it — the insert-path fallback consults the '
       + 'object definition\'s options, never a form view\'s, and no form renderer seeds a value '
-      + 'from it (measured on objectui#6263; the ruled census found ZERO authored occurrences '
+      + 'from it (measured against the console\'s form controls, none of which reads the key; '
+      + 'the ruled census found ZERO authored occurrences '
       + 'across the tree, the example apps and the published *.form.ts corpus). The FormView '
       + 'vocabulary\'s own option shape (`FormSelectOptionSchema`, ui/view.zod.ts) now refuses '
       + 'the key with the prescription; the mechanical conversion strips it from stored '
@@ -5641,6 +5657,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'declared-type entry\'s reason: deleting the key is the migration, and a conversion that '
       + 'dropped it would accept it at load, the grace window ruling B refused. Its D3 record is '
       + 'the semantic entry `inline-grid-column-identity-only-currency-scale-refused`.',
+  },
+  {
+    id: 'hook-body-stored-metadata-target-refused',
+    order: 67,
+    text:
+      'It also refuses, at parse, a hook whose `body` targets a table of stored metadata, '
+      + '`sys_metadata` or `sys_metadata_history` (maintainer ruling 2026-10-03, letter A: an '
+      + 'app-authored body may not touch those tables, whose only writer for a body is the metadata '
+      + 'protocol). The runtime already refused such a hook where a body becomes a handler, so it '
+      + 'never ran, while the metadata save door answered 200 for it. `HookSchema` now refuses the '
+      + 'same set at `object`, or at the list member, with the runtime\'s prescription to change '
+      + 'metadata through the metadata API, judged by the one predicate the runtime uses: a hook '
+      + 'with a `body` in any form whose target names either table. A code `handler` and the '
+      + 'wildcard `\'*\'` stay outside it, as they are at registration. No key is removed, so there is '
+      + 'no tombstone, and no D2 conversion exists: a refused hook carries no intent a rewrite could '
+      + 'keep. Its D3 record is the semantic entry `hook-body-stored-metadata-target-refused`.',
   },
   {
     id: 'list-view-page-mount-retired',
@@ -5700,8 +5732,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'mapping-lookup-params-retired',
     order: 13,
     text:
-      'It also retires the import mapping `lookup` transform\'s steering params (#10329, '
-      + 'ADR-0049 enforce-or-remove — the sub-walk half of 17.0.0\'s #4509 mapping cleanup): '
+      'It also retires the import mapping `lookup` transform\'s steering params (ADR-0049 '
+      + 'enforce-or-remove — the sub-walk half of the 17.0.0 mapping cleanup that retired '
+      + '`extractQuery` / `errorPolicy` / `batchSize`): '
       + '`fieldMapping[].params.object` / `.fromField` / `.toField` / `.autoCreate` declared a '
       + 'per-entry reference-resolution dialect the import path never implemented — `lookup` '
       + 'copies the cell through and resolution runs off the target field\'s own metadata — '
@@ -5715,10 +5748,11 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'memory-persistence-placeholder-refused',
     order: 1,
     text:
-      'Protocol 18 extends the #8336 unresolved-placeholder refusal to the memory '
+      'Protocol 18 extends the publish-time refusal of unresolved placeholders, which protocol '
+      + '17 applied to datasource connection config, to the memory '
       + 'driver\'s config-material persistence keys: `persistence.path` (file persistence '
       + 'and the `auto` override) and `persistence.key` (localStorage and the `auto` '
-      + 'override) refuse `${…}` placeholder syntax at publish (#8495). Nothing resolves a '
+      + 'override) refuse `${…}` placeholder syntax at publish. Nothing resolves a '
       + 'placeholder there — the driver would create a literal `./${DATA_DIR}/…` path or '
       + 'write under the literal localStorage key — the same authored-under-a-false-belief '
       + 'shape, one surface over. The memory driver\'s `initialData` stays deliberately '
@@ -5729,8 +5763,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'metadata-customization-protocol-retired',
     order: 20,
     text:
-      'It also retires the paper metadata-customization protocol whole (#13135, re-charter '
-      + 'of #12057; ADR-0049 enforce-or-remove, maintainer ruling 2026-08-29): '
+      'It also retires the paper metadata-customization protocol whole (ADR-0049 '
+      + 'enforce-or-remove, maintainer ruling 2026-08-29): '
       + '`kernel/metadata-customization.zod.ts` — the three-layer platform/user patch-overlay '
       + 'model with field-level change tracking and a 3-way-merge story — was exported, '
       + 'documented as the customization architecture, and implemented ONLY by an unreachable '
@@ -5960,20 +5994,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 16,
     text:
       'Finally, it retires nine of the eleven members of the plugin manifest\'s '
-      + '`contributes` block (#10724, ADR-0049 enforce-or-remove; triage graded 2026-08-21, '
+      + '`contributes` block (ADR-0049 enforce-or-remove; triage graded 2026-08-21, '
       + 'cloud census leg discharged clean 2026-08-24): `events`, `menus`, `themes`, '
       + '`translations`, `actions`, `drivers`, `fieldTypes`, `functions` and `commands`. '
-      + '#10627 measured — three repos, controlled — that the whole monorepo contains exactly '
-      + 'one non-test read of `manifest.contributes`, and it reads `kinds`; the other nine '
+      + 'A census of all three repos, with controls, measured that the whole monorepo '
+      + 'contains exactly one non-test read of `manifest.contributes`, and it reads `kinds`; '
+      + 'the other nine '
       + 'members parsed, entered the manifest, and changed nothing, while published docs and '
       + 'the schema\'s own JSDoc kept teaching them (`commands` documented Commander.js '
       + 'resolution the CLI dropped for oclif; `fieldTypes` advertised a registration seam '
       + 'that never existed). All nine are retiredKey tombstones mirroring `loading`; '
-      + '`kinds` survives (live reader) and `routes` is untouched pending its own fork '
-      + '(#10726). D3 semantic, no D2 conversion: a manifest is not a stack collection '
+      + '`kinds` survives (live reader), and `routes` was left to a ruling of its own, which '
+      + 'retired it as well (the `plugin-manifest-contributes-routes-retired` entry). D3 '
+      + 'semantic, no D2 conversion: a manifest is not a stack collection '
       + 'member, so a conversion would be a transform with no seam that ever runs. '
-      + 'On the surviving `kinds` bucket it also retires the `globs` sub-field (#11169, '
-      + 'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-24): the schema promised '
+      + 'On the surviving `kinds` bucket it also retires the `globs` sub-field (ADR-0049 '
+      + 'enforce-or-remove; maintainer ruling 2026-08-24): the schema promised '
       + 'that declaring `globs` enables file-type discovery, but discovery globs '
       + '`filePatterns` off the metadata type registry — which `contributes.kinds` does '
       + 'not extend, as `metadata-plugin.zod.ts` records outright — so an authored '
@@ -6017,8 +6053,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'stack-themes-carrier-retired',
     order: 11,
     text:
-      'Finally, it retires the stack `themes` carrier and `ThemeSchema` whole (#10485, '
-      + 'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-21, disposition B: 退役授权面): '
+      'Finally, it retires the stack `themes` carrier and `ThemeSchema` whole (ADR-0049 '
+      + 'enforce-or-remove; maintainer ruling 2026-08-21, disposition B: 退役授权面): '
       + 'the pipeline was live from the authoring gate through artifact ingest and stopped '
       + 'there — zero non-test readers of stored `theme` items, `theme` never a registered '
       + 'metadata type, no first-party app mounting the spec-aware provider, nothing '
@@ -6046,16 +6082,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 14,
     text:
       'Finally, it retires the component-translation copy key '
-      + '`pages.<name>.components.<id>.submitLabel` and its `submit` alias (#10926, ADR-0049; '
+      + '`pages.<name>.components.<id>.submitLabel` and its `submit` alias (ADR-0049; '
       + 'maintainer ruling 2026-08-22): the face is measured, not mirrored — each copy key '
       + 'exists because some component in `ComponentPropsMap` declares it — and '
-      + '`submitLabel`\'s only declarer was `element:form`, retired whole above (#9249), so '
+      + '`submitLabel`\'s only declarer was `element:form`, retired whole above, so '
       + 'the key had no declared component left to translate and the resolver overlay was '
       + 'its only reader. Retire won over re-anchor because the live form surface '
       + '(`object-form`) speaks `submitText` (`I18nLabelSchema`), localizable at its own '
       + 'authoring site; re-anchoring would have widened the face for one word. The '
       + 'mechanical conversion strips the key from stored bundles and items (pure lossless '
-      + 'delete — nothing read it since #9249), at the acknowledged cost of dropping the '
+      + 'delete — nothing read it once `element:form` was retired), at the acknowledged cost '
+      + 'of dropping the '
       + 'bespoke-component route for that one word.',
   },
   {
@@ -6129,6 +6166,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
       + '`columns` untouched) on `object-form` page components, on every form payload a view '
       + 'carries, and on the assembled-manifest `viewItems` channel.',
+  },
+  {
+    id: 'ui-object-form-members-typed',
+    order: 67,
+    text:
+      'It also types four members of the `object-form` page block (#21464, the third stage of the '
+      + '`ComponentPropsMap` `z.unknown()` close-out): `contentLayout`, `submitBehavior`, '
+      + '`navigateOnSuccess` and `mobile` were `z.unknown()`, although the form reads each with one shape, '
+      + 'so a `submitBehavior` `kind` the form does not know passed every door and fell through to the '
+      + 'thank-you panel. `submitBehavior` takes the form view\'s own block by reference; the other three '
+      + 'take the measured shape. The form\'s `fields` and `sections` and the master-detail form\'s two '
+      + 'stay open — the form draws a `{ name }` field entry and an inline runtime field inside a section, '
+      + 'which the typed shapes would refuse — and `customFields` stays open until the spec declares the '
+      + 'runtime form field its entries are. Read by the component-props gate (advisory); a stored page '
+      + 'still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-form-members-typed`.',
   },
   {
     id: 'ui-object-grid-export-options-closed',
@@ -6298,8 +6351,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
  * could act on, so removing it is behaviour-preserving; retired from the
  * load path (the schema refuses live authors), replayed by `migrate meta`
  * and the stored-row rehydration seam. Semantic: the memory-driver
- * persistence placeholder refusal (#8495) — the #8336 parent adjudication
- * applied to the two config-material memory keys its deliberate
+ * persistence placeholder refusal (commit 4bfe1a539, PR #8666: `${…}` refused
+ * at publish in `persistence.path` / `persistence.key`) — the #8336 parent
+ * adjudication applied to the two config-material memory keys its deliberate
  * `initialData` exclusion never covered — the
  * `MetadataPluginConfig.additionalTypes` retirement (#8586, ADR-0049): the
  * inert plugin kind-declaration key, tombstoned on the 17.x line, with no D2
@@ -10852,6 +10906,49 @@ const step18: MigrationStep = {
         + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
         + 'a console-side change filed in the objectui repository, blocked on that release.',
     },
+    // #21015 — release 2 of objectui#7450's ruling B: `element:text` `variant`
+    // refuses the pre-convergence spellings `heading` and `subheading` by name
+    // (`enumWithRetiredValues`). The family's one D3 entry; the D2 half is
+    // `element-text-variant-heading-levels`, which rewrites each to the heading
+    // element it always rendered. This entry carries the judgement the chain
+    // cannot make — whether that level is the one the page means, now that it
+    // draws in that level's style.
+    {
+      id: 'element-text-variant-heading-subheading-retired',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'page components of type element:text — properties.variant authored as heading or subheading '
+        + '(ElementTextPropsSchema.variant)',
+      replacement:
+        "one of the nine values `ui:text` publishes: `h1`-`h6`, `body`, `caption` or `overline`. 'heading' "
+        + "→ 'h2' and 'subheading' → 'h3' (the heading element each one always rendered), or the level the "
+        + 'page outline means',
+      reason:
+        'The ruling converged `element:text` on the vocabulary `ui:text` already publishes, because a '
+        + 'heading is a document level, not a text style: `heading` and `subheading` named a style and '
+        + 'left the renderer to pick a level. It landed in two releases so authors outside this repository '
+        + 'could move first — 17.5.0 added the nine and refused nothing, and 17.6.0 was a full release in '
+        + 'which both vocabularies parsed. The D2 conversion `element-text-variant-heading-levels` makes '
+        + 'the ruled edit: `heading` → `h2`, `subheading` → `h3`. That keeps the heading element (the '
+        + 'renderer drew `heading` as an h2 element and `subheading` as an h3 element), so the document '
+        + 'outline a screen reader walks is unchanged, but not the size: `heading` drew in the `h3` style '
+        + 'and `subheading` in a medium-weight small heading style, and `h2` / `h3` draw their own, larger '
+        + 'styles. Whether the page wanted that level is the author\'s call — a heading placed for its '
+        + 'size rather than its place in the outline may want a deeper level. Nothing is dropped at rest: '
+        + 'a stored page replays the rewrite at rehydration; a page component\'s `properties` is not '
+        + 'parsed on the save path, and the component-props gate reports an old spelling as an advisory '
+        + '`component-props-invalid` finding, carrying the prescription, on `os validate`, `os build` and '
+        + '`os lint`. ADR-0087',
+      acceptanceCriteria:
+        'No `element:text` page component carries `variant` `heading` or `subheading`; `os validate` '
+        + 'reports no `component-props-invalid` finding under `properties.variant` for these blocks. For '
+        + 'each rewritten block, open the page and check the heading: it renders the same heading element '
+        + 'as before, in its level\'s style. Where the old, smaller look mattered more than the level, '
+        + 'pick the level whose style you want and confirm the outline still reads in order. A block that '
+        + 'omits `variant` still renders as `body`.',
+      conversionIds: ['element-text-variant-heading-levels'],
+    },
     {
       id: 'engine-dotted-filter-refused',
       surface:
@@ -13078,6 +13175,49 @@ const step18: MigrationStep = {
         + 'no entry carries `field`, `fieldName` or `key`, and no column declaring `type: \'currency\'` '
         + 'carries `scale`. Each column `name` names a field of the subform\'s `childObject`, and the '
         + 'master-detail grid renders a value — not a blank cell — in each column for a row that has one.',
+    },
+    // #21565 — the D3 entry for `HookSchema`'s refusal of a hook body bound to a
+    // stored-metadata table: the authoring half of #21520's ruling A (record
+    // 5965059068), whose runtime half refuses the same hook at bind. It narrows the
+    // hook's accept set; no key is removed, so there is no tombstone and no
+    // RETIRED_KEYS_BY_MAJOR row. There is no D2 conversion either: a refused hook
+    // carries no intent the chain could rewrite into one the runtime runs.
+    {
+      id: 'hook-body-stored-metadata-target-refused',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span and a table cell.
+      surface:
+        'hook.object naming sys_metadata or sys_metadata_history, as the string or as any member of the '
+        + 'list, on a hook that carries a body',
+      replacement:
+        'Change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), '
+        + 'where it is validated and its provenance is recorded. Delete the hook, or point its `object` at '
+        + 'the tables the logic really concerns. Elevation (`runAs`, a system context) does not change this.',
+      reason:
+        '`HookSchema` accepted a hook whose `body` targets `sys_metadata` or `sys_metadata_history`, the '
+        + 'tables that hold stored metadata. The maintainer ruled (2026-10-03) that an app-authored body may '
+        + 'not touch those tables: for a body, the metadata protocol is their only writer, where a change is '
+        + 'validated and its provenance recorded. The runtime enforces that where a body hook becomes a '
+        + 'handler, refusing such a hook at registration so that it never runs, but every authoring door '
+        + 'still accepted it: the metadata save door answered 200, and the author learned otherwise only '
+        + 'from a server log. The parse now refuses it too, with the runtime\'s own prescription, so '
+        + '`objectstack validate`, `defineStack`, compile, an artifact\'s parse and the metadata save door '
+        + '(a 422) each name the target at `object`, or at the list member. The refused set is exactly the '
+        + 'runtime\'s: a hook carrying a `body`, in any form, whose `object` names a stored-metadata table, '
+        + 'as the string or as any member of the list, and one such member refuses the whole hook. A hook '
+        + 'with no `body` (a code `handler`, which is how the platform writes its own hooks) and the '
+        + 'wildcard `\'*\'` are outside it, as they are at registration: a wildcard names no stored-metadata '
+        + 'table, so it binds, and the runtime never runs its body for those tables\' events. No authored '
+        + 'hook targeting either table was measured in this repository, its examples or hotcrm. There is no '
+        + 'mechanical rewrite: retargeting the hook, dropping its body or deleting it each changes what the '
+        + 'author wrote, and the runtime already never ran it. A stored hook row of this shape still loads, '
+        + 'now with a `[metadata_spec_invalid]` warning and a `_diagnostics` badge, and is still never bound.',
+      acceptanceCriteria:
+        '`objectstack validate` reports no issue at a hook\'s `object` path: no hook that carries a `body` '
+        + 'names `sys_metadata` or `sys_metadata_history` in its `object`, as the string or in the list. '
+        + 'Every change those hooks made to metadata is made through the metadata API instead. Saving each '
+        + 'formerly affected hook through the metadata API succeeds instead of answering a 422 that names '
+        + '`object`, and boot logs no binding refusal naming one of those tables for a hook.',
     },
     {
       id: 'hook-register-undispatched-lifecycle-event-refused',
@@ -19470,6 +19610,55 @@ const step18: MigrationStep = {
         + 'group per value of that field, and a board that showed one swimlane shows one swimlane per value — '
         + 'check that this is the grouping you meant.',
     },
+    // #21464 — four members of the `object-form` page block were `z.unknown()`
+    // although the form reads each with a fixed shape, so an off-shape value passed
+    // the component-props gate and the form fell back or ignored it in silence. The
+    // row now takes the form view's own `submitBehavior` by reference and the
+    // measured shape for `contentLayout`, `navigateOnSuccess` and `mobile`. The
+    // form's `fields` and `sections` and the master-detail form's two are held at
+    // `z.unknown()` (the form draws a `{ name }` field entry and an inline runtime
+    // field inside a section, which the typed shapes would refuse), and
+    // `customFields` waits for the spec to declare objectui's runtime form field.
+    // D3 only: page-component `properties` is not parsed on the metadata save or
+    // load path, so a stored page is never refused; an off-shape value has no
+    // rewrite that says what the author meant; and the authored census found no
+    // authored value to respell — the refused values are fixtures probing that the
+    // form refuses them.
+    {
+      id: 'ui-object-form-members-typed',
+      surface: 'page `object-form` components — `properties.contentLayout`, `.submitBehavior`, '
+        + '`.navigateOnSuccess` and `.mobile` (which used to accept any value)',
+      replacement: 'the shape the form reads: `contentLayout` `\'simple\'` or `\'tabbed\'`; `submitBehavior` the '
+        + 'form view\'s own block — `{ kind: \'thank-you\', title?, message? }`, `{ kind: \'redirect\', url, '
+        + 'delayMs? }` with a relative `url`, `{ kind: \'continue\' }` or `{ kind: \'next-record\' }`; '
+        + '`navigateOnSuccess` a relative path string; `mobile` `{ stickyActions?, stepper?, stepperMinFields?, '
+        + 'stepperFieldsPerStep?, fullscreenLongText? }`, with `stepper` `true`, `false` or `\'auto\'` and the two '
+        + 'counts positive integers. Write a `submitBehavior` `kind` as one of the four; move a `redirect` '
+        + 'destination to a relative path; write `heading` as `title`.',
+      reason: 'The form reads these members with one shape, and the page-component row declared them '
+        + '`z.unknown()`, so any value passed the component-props gate and the form answered an off-shape one '
+        + 'with a silent default: a `submitBehavior` `kind` it does not know fell through to the thank-you panel; '
+        + 'a misspelled `contentLayout` such as `\'tabs\'` stacked the sections; a `navigateOnSuccess` that is not a '
+        + 'string threw after the record was written, so the submit reported a failure; and a `mobile` member it '
+        + 'does not read, or a `stepper` outside `true` / `false` / `\'auto\'`, was ignored. The row now takes '
+        + 'the form view\'s own `submitBehavior` by reference — the block the renderers already judge a redirect '
+        + '`url` through — so one value is judged the same way on the form view and the block, and the measured '
+        + 'shape for the other three. The form\'s `fields` and `sections` and the master-detail form\'s two stay '
+        + 'open, because the form draws a `{ name }` field entry and an inline runtime field inside a section, '
+        + 'which the typed shapes would refuse; and `customFields` stays open until the spec declares the '
+        + 'runtime form field its entries are. It is read where every page component\'s props are: the '
+        + 'component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and '
+        + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s '
+        + '`properties` is not parsed on the metadata save or load path. No conversion is registered: nothing '
+        + 'on the load path refuses the shape, and an off-shape value has no rewrite that both keeps what the '
+        + 'form shows today and honours what the author wrote — which is the judgment this entry leaves to the '
+        + 'upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-form` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under the four members\' paths. '
+        + 'Each form that set one of them now shows it: the post-submit behaviour it names, the modal\'s tabbed '
+        + 'sections, the navigation after a save, and the phone presentation.',
+    },
     // #21229 — an `object-grid` page block's `exportOptions` was `z.unknown()`, so a
     // bare format array (the list view's legacy spelling, which the list view lifts
     // to `{ formats }`) was accepted on the grid, whose renderer reads
@@ -24932,7 +25121,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // The 2026-08-08 ADR-0049 sweep (#6486) adds twenty-three more across three
   // members (4 + 10 + 9), all route 3 and all whole-def: `system/http-server.zod.ts`'s
   // runtime vocabulary (#5295, D3 `http-server-runtime-vocabulary-retired`),
-  // `api/protocol.zod.ts`'s viewId-addressed view CRUD (#6239, D3
+  // `api/protocol.zod.ts`'s viewId-addressed view CRUD (commit f549a0d4a, D3
   // `view-management-protocol-retired`) and the whole L2 ETL layer (#6414, D3
   // `etl-pipeline-layer-retired`). None had a carrier key and none was ever
   // parsed outside its own unit tests, so again there is no tombstone and no D2

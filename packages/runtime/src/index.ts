@@ -39,6 +39,11 @@ export {
     normalizeDatabaseUrl,
     UNIFIED_DEFAULT_DB_FILENAME,
     LEGACY_DEFAULT_DB_FILENAMES,
+    // The in-memory engine's retirement as a boot store: one predicate and one
+    // sentence, so the CLI's legacy `os serve` resolver refuses it exactly as
+    // this package's own doors do.
+    namesRetiredMemoryEngine,
+    retiredMemoryEngineMessage,
 } from './resolve-project-database.js';
 export type {
     ResolveProjectDatabaseUrlOptions,
@@ -62,8 +67,28 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // [#21321] The ONE binder of an app artifact's script-action bodies and body
 // hooks, under the owner `app:<appId>` — called by `AppPlugin.start` and by the
 // install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate.
-export { bindAppArtifactHandlers, appArtifactHandlerOwner } from './app-artifact-handlers.js';
-export type { AppArtifactHandlerBinding, AppArtifactHandlerBindingOptions } from './app-artifact-handlers.js';
+// [#21489] …and its job half: `scheduleAppArtifactJobs` schedules a package's
+// jobs (a `body` runs sandboxed on every door), and `collectJobsWithoutBody`
+// names the enabled jobs no JSON door can run (no `body`, or one that does not
+// bind), which install-local refuses.
+// [#21585] `collectHooksWithoutBody` names the hooks whose code is only a
+// function-name `handler`: install-local refuses them, and withholds them on a
+// rehydrate (`withholdHooksWithoutBody`).
+export {
+    bindAppArtifactHandlers,
+    appArtifactHandlerOwner,
+    scheduleAppArtifactJobs,
+    collectJobsWithoutBody,
+    collectHooksWithoutBody,
+} from './app-artifact-handlers.js';
+export type {
+    AppArtifactHandlerBinding,
+    AppArtifactHandlerBindingOptions,
+    AppArtifactJobScheduling,
+    AppArtifactJobSchedulingOptions,
+    JobWithoutBody,
+    HookWithoutBody,
+} from './app-artifact-handlers.js';
 // #14094 — what a DECLARATIVE job's handler is invoked with. A job has no graph,
 // so unlike a flow `script` node it is given data reach (`ql`) instead of being a
 // pure value-returner whose I/O the surrounding graph performs.

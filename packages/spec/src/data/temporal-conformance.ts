@@ -208,16 +208,16 @@ export interface TemporalRow {
  * strictly after it, and `d_next` on the next midnight — the exclusive edge.
  */
 export const TEMPORAL_ROWS: readonly TemporalRow[] = [
-  { id: 'a_epoch', at: '1969-12-31T23:00:00.000Z', on: '1969-12-31', writerForm: 'wire',   why: 'pre-epoch instant (negative epoch ms) — any surface assuming a non-negative epoch, or reading one as a Julian day (#3773), breaks here first' },
+  { id: 'a_epoch', at: '1969-12-31T23:00:00.000Z', on: '1969-12-31', writerForm: 'wire',   why: 'pre-epoch instant (negative epoch ms) — any surface assuming a non-negative epoch, or reading one as a Julian day as SQLite bucketing once did, breaks here first' },
   { id: 'a_old',   at: '2026-04-19T10:00:00.000Z', on: '2026-04-19', writerForm: 'wire',   why: 'well before any window here' },
   { id: 'b_prev',  at: '2026-07-27T14:00:00.000Z', on: '2026-07-27', writerForm: 'native', why: 'the day before the boundary day' },
   { id: 'c_open',  at: '2026-07-28T00:00:00.000Z', on: '2026-07-28', writerForm: 'native', why: 'boundary day at exactly 00:00 — the only instant a midnight-anchored bound keeps' },
-  { id: 'd_mid',   at: '2026-07-28T09:15:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, morning — dropped by the #3777 bug' },
-  { id: 'e_late',  at: '2026-07-28T21:40:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, evening — dropped by the #3777 bug' },
+  { id: 'd_mid',   at: '2026-07-28T09:15:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, morning — dropped when a bare-day upper bound stopped at midnight' },
+  { id: 'e_late',  at: '2026-07-28T21:40:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, evening — dropped when a bare-day upper bound stopped at midnight' },
   { id: 'f_next',  at: '2026-07-29T00:00:00.000Z', on: '2026-07-29', writerForm: 'native', why: 'next midnight — the exclusive edge a half-open bound must NOT keep' },
   { id: 'g_eom',   at: '2026-07-31T23:59:59.999Z', on: '2026-07-31', writerForm: 'wire',   why: 'last representable instant of a month — month rollover' },
   { id: 'h_leap',  at: '2024-02-29T12:00:00.000Z', on: '2024-02-29', writerForm: 'native', why: 'leap day — February rollover' },
-  { id: 'z_last',  at: '9999-12-31T10:00:00.000Z', on: '9999-12-31', writerForm: 'native', why: 'the last supported day (years 0001..9999), after its midnight — the one day with no next day, so its whole-day upper bound bounds nothing (#20600)' },
+  { id: 'z_last',  at: '9999-12-31T10:00:00.000Z', on: '9999-12-31', writerForm: 'native', why: 'the last supported day (years 0001..9999), after its midnight — the one day with no next day, so its whole-day upper bound bounds nothing and none is compiled' },
 ] as const;
 
 /** Which declared field type a case filters on. */
@@ -267,7 +267,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     tokenFilter: { at: { $gte: '{90_days_ago}', $lte: '{today}' } },
     dateRange: ['{90_days_ago}', '{today}'],
     expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
-    note: '#3777: the default dashboard window. Pre-fix returned only b_prev + c_open — everything after 00:00 on the final day vanished.',
+    note: 'The default dashboard window, whose bare-day $lte keeps the whole final day. Pre-fix returned only b_prev + c_open — everything after 00:00 on the final day vanished.',
   },
   {
     name: 'date: the same window is unchanged (already whole-day)',
@@ -390,7 +390,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     kind: 'datetime',
     filter: { at: { $gte: '1969-12-31', $lte: '1969-12-31' } },
     expected: ['a_epoch'],
-    note: 'Negative epoch ms. The #3773 family: any surface that assumes a datetime is a non-negative epoch, or reads one as a Julian day, breaks here first.',
+    note: 'Negative epoch ms. The family of the SQLite bucketing defect that read an epoch-ms datetime as a Julian day: any surface that assumes a datetime is a non-negative epoch, or reads one as a Julian day, breaks here first.',
   },
 
   // ── The last supported day: no next day, so no upper bound (#20600) ───────
@@ -445,7 +445,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     filter: { on: '2026-07-28' },
     tokenFilter: { on: '{today}' },
     expected: ['c_open', 'd_mid', 'e_late'],
-    note: '#1874: `date == today` silently matched nothing while dates were stored as instants. Equality on a date column is plain calendar-day text equality — Phase 1\'s whole point.',
+    note: '`date == today` silently matched nothing while dates were stored as instants; ADR-0053 stores a date as its calendar day, so equality on a date column is plain calendar-day text equality — Phase 1\'s whole point.',
   },
   {
     name: 'date: $in of two resolved days',
@@ -454,7 +454,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     filter: { on: { $in: ['2026-07-28', '2026-07-27'] } },
     tokenFilter: { on: { $in: ['{today}', '{yesterday}'] } },
     expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
-    note: 'The `expires_on: { $in: [daysFromNow(30)] }` template shape from the #1874 family — element-wise, order-independent.',
+    note: 'The `expires_on: { $in: [daysFromNow(30)] }` template shape that surfaced ADR-0053 — element-wise, order-independent.',
   },
 ] as const;
 
@@ -546,7 +546,7 @@ export const TEMPORAL_TIME_CASES: readonly TemporalTimeCase[] = [
     name: 'time: a business-hours window keeps both bounds',
     filter: { at: { $gte: '09:00:00', $lte: '18:00:00' } },
     expected: ['c_open', 'd_mid', 'e_mid_ms', 'f_close'],
-    note: '#3994, measured: 4 of 7 rows silently dropped. An epoch-ms row failed `>= 09:00:00` outright (INTEGER < TEXT on SQLite) and a full-timestamp row failed `<= 18:00:00` lexicographically.',
+    note: 'Measured before `Field.time` took one canonical `HH:MM:SS[.fff]` text form: 4 of 7 rows silently dropped. An epoch-ms row failed `>= 09:00:00` outright (INTEGER < TEXT on SQLite) and a full-timestamp row failed `<= 18:00:00` lexicographically.',
   },
   {
     name: 'time: an inclusive upper bound is EXACT, not widened',

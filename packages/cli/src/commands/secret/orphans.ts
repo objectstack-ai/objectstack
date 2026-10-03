@@ -19,6 +19,7 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
+import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
@@ -268,7 +269,20 @@ export default class SecretOrphans extends Command {
       // report, and this command's whole safety property is that no row goes
       // unmentioned. A driver that ever answered something else is a contract
       // violation to fix at that driver, not to absorb here.
-      const rawSecrets = await secretDriver.find('sys_secret', {});
+      //
+      // [#21552] Not asked: the report's read-only boot measured which tables
+      // exist, and a table that does not exist holds no row, so there is
+      // nothing to report on it. Every read below, the union's included, asks
+      // `reads` first and takes an absent table as no rows. Read anyway, a
+      // project whose database does not exist yet was refused with exit 1.
+      // `--delete` booted plain, so there nothing is absent and every read is
+      // real; its one write goes through the unwrapped driver.
+      // ⛔ Only a table the boot MEASURED absent: any other refused read still
+      // lands in the catch below, and an empty answer is never invented for it.
+      const reads = absentTableReads(stack, (object) => engine.getConfigs()[object]);
+      const rawSecrets: Record<string, unknown>[] = reads.absent('sys_secret')
+        ? []
+        : await secretDriver.find('sys_secret', {});
       const rawById = new Map(rawSecrets.map((r) => [String(r.id), r]));
       // ⛔ `ciphertext` is dropped here and not carried into the plan: the plan
       // is printed and serialised, and cipher material must not be reachable
@@ -285,7 +299,7 @@ export default class SecretOrphans extends Command {
 
       const settingDriver = engine.getDriverForObject('sys_setting');
       const settingRows: SettingRowSnapshot[] = settingDriver
-        ? (await settingDriver.find('sys_setting', {})).map((r) => ({
+        ? (reads.absent('sys_setting') ? [] : await settingDriver.find('sys_setting', {})).map((r) => ({
           namespace: String(r.namespace ?? ''),
           key: String(r.key ?? ''),
           scope: (r.scope as string | null | undefined) ?? null,
@@ -300,13 +314,17 @@ export default class SecretOrphans extends Command {
         typeof collectEncryptedSpecifierRefs
       >[0];
 
-      const union = await collectSecretReferenceUnion({ engine, declaredDatasources });
+      const union = await collectSecretReferenceUnion({
+        engine: secretUnionReadView(engine, reads),
+        declaredDatasources,
+      });
       const plan = planSysSecretOrphanSweep({
         secrets,
         union,
         attributableTo: collectEncryptedSpecifierRefs(manifests),
         settingRows,
       });
+      reads.notice(json);
 
       if (!flags.delete) {
         if (json) { await emitJson({ mode: 'report', plan }, 0, { compact: true }); return; }
@@ -440,10 +458,11 @@ export default class SecretOrphans extends Command {
       if (failed.length > 0) this.exit(1);
     } catch (error) {
       // [#21391] A read the scan could not make is a refusal, and under
-      // `--json` a refusal is still one JSON document. The report boots
-      // read-only, so a database that lacks a table it reads (`sys_secret` on
-      // one never booted with the platform objects) is refused here, where
-      // the plain boot used to create the table and report nothing.
+      // `--json` a refusal is still one JSON document. [#21552] A table the
+      // report's read-only boot measured absent (`sys_secret` on a database
+      // never booted with the platform objects) is not one of them: it is
+      // answered above with no rows and never read. Any other refused read
+      // lands here.
       if (isExitSignal(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (json) { await emitJson({ error: 'scan_failed', message, ...errorCodeFields(error) }, 1, { compact: true }); return; }

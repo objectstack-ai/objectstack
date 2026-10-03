@@ -18,6 +18,17 @@
  * below; `engine-shared-filter-lowering-seam.test.ts` pins the rest of it).
  *
  * The witness is the recording driver's `where`, as in the seam's own pin.
+ *
+ * [#21516] The verbs no longer reach this branch through an unregistered name.
+ * An in-process verb resolves its target only through the registry and
+ * refuses a name it does not resolve with the data door's `OBJECT_NOT_FOUND`,
+ * before admission and before any driver; a registered object always carries
+ * a field map (the registry injects the system columns). So the verb cases
+ * below now pin the refusal, the typed control is unchanged, and the
+ * no-field-map stage is still exercised where it is reachable: the judge, which
+ * reads nothing and judges the filter for a name the registry does not hold.
+ * Item 7's rule — a seam that cannot read the declared type lowers type-blind —
+ * is unchanged.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -73,39 +84,24 @@ describe('[#20822] an object with no field map: the engine seam lowers type-blin
     expect(engine.registry.getObject(REGISTERED)).toBeDefined();
   });
 
-  it('find: a bare-day `$lte` on any column reaches the driver as `$lt` the next day', async () => {
-    await engine.find(UNREGISTERED, { where: { closed_at: { $lte: '2026-07-28' } } });
-    expect(lastWhere('find')).toEqual({ closed_at: { $lt: '2026-07-29' } });
-    // Type-blind means every column: no declaration says `note` is not a datetime.
-    await engine.find(UNREGISTERED, { where: { note: { $lte: '2026-07-28' } } });
-    expect(lastWhere('find')).toEqual({ note: { $lt: '2026-07-29' } });
-  });
-
-  it('find: `$between` with a bare-day maximum splits and widens its upper end', async () => {
-    await engine.find(UNREGISTERED, { where: { closed_at: { $between: ['2026-07-01', '2026-07-28'] } } });
-    expect(lastWhere('find')).toEqual({ closed_at: { $gte: '2026-07-01', $lt: '2026-07-29' } });
-  });
-
-  it('findOne and count take the same reading', async () => {
-    await engine.findOne(UNREGISTERED, { where: { closed_at: { $lte: '2026-07-28' } } });
-    expect(lastWhere('findOne') ?? lastWhere('find')).toEqual({ closed_at: { $lt: '2026-07-29' } });
-    await engine.count(UNREGISTERED, { where: { closed_at: { $lte: '2026-07-28' } } });
-    expect(lastWhere('count')).toEqual({ closed_at: { $lt: '2026-07-29' } });
-  });
-
-  it('aggregate: its `where` takes the same reading', async () => {
-    await engine.aggregate(UNREGISTERED, {
-      where: { closed_at: { $lte: '2026-07-28' } },
-      groupBy: ['note'],
-      aggregations: [{ function: 'count', alias: 'n' }],
-    } as EngineAggregateOptions);
-    expect(lastWhere('find')).toEqual({ closed_at: { $lt: '2026-07-29' } });
-  });
-
-  it('an instant, and `$gte` / `$lt` on a bare day, are never widened', async () => {
-    const where = { closed_at: { $lte: '2026-07-28T12:00:00.000Z' }, note: { $gte: '2026-07-01', $lt: '2026-07-28' } };
-    await engine.find(UNREGISTERED, { where });
-    expect(lastWhere('find')).toBe(where);
+  it('[#21516] every verb refuses the unregistered name with the door\'s OBJECT_NOT_FOUND, and the driver sees nothing', async () => {
+    const where = { closed_at: { $lte: '2026-07-28' } };
+    const verbs: Array<[string, () => Promise<unknown>]> = [
+      ['find', () => engine.find(UNREGISTERED, { where })],
+      ['findOne', () => engine.findOne(UNREGISTERED, { where })],
+      ['count', () => engine.count(UNREGISTERED, { where })],
+      ['aggregate', () => engine.aggregate(UNREGISTERED, {
+        where,
+        groupBy: ['note'],
+        aggregations: [{ function: 'count', alias: 'n' }],
+      } as EngineAggregateOptions)],
+    ];
+    for (const [verb, call] of verbs) {
+      const refused: any = await call().then(() => undefined, (e) => e);
+      expect({ verb, code: refused?.code, status: refused?.status, object: refused?.object })
+        .toEqual({ verb, code: 'OBJECT_NOT_FOUND', status: 404, object: UNREGISTERED });
+    }
+    expect(seen).toEqual([]);
   });
 
   it('control — a field map keeps the typed scope: only the declared datetime is rewritten', async () => {

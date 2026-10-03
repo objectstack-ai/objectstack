@@ -34,6 +34,11 @@ import {
   RowHeightSchema,
   RowColorConfigSchema,
   ListViewSchema,
+  // [#21464] `object-form.submitBehavior` is the form view's own member (read
+  // off `FormViewSchema.shape`, the one place that declares the post-submit
+  // union): both form renderers switch on exactly that union, so one
+  // declaration judges the form view and the block.
+  FormViewSchema,
 } from './view.zod';
 // [#21445] `object-grid.bulkActionDefs` is the list view's bulk-action def,
 // by identity — the element `ListViewSchema.bulkActionDefs` declares.
@@ -53,7 +58,7 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
 // in page.zod.ts, and the kept `ComponentPropsMap` rows below.
@@ -2368,6 +2373,41 @@ export const PageAccordionProps = strictObject({
  * ----------------------------------------------------------------------
  */
 
+// `element:text` `variant` — the two pre-convergence spellings, retired in
+// release 2 of objectui#7450's ruling B (#21015). A VALUE-level retirement
+// (`enumWithRetiredValues`, shared/retired-key.ts): the members left the enum,
+// so `tsc` refuses them, and the parse answers each with the prescription
+// below instead of zod's anonymous enum message. The ruled hints are
+// `heading` → `h2` and `subheading` → `h3`, or the level the author means: each
+// is the heading ELEMENT the value always rendered (objectui
+// `renderers/basic/elements.tsx` `VARIANT_TAG`, measured at the `.objectui-sha`
+// pin `89cad75d55`), while the size changes — `heading` drew `h3`'s style and
+// `subheading` a medium-weight `text-lg`, and `h2` / `h3` draw their own. The
+// ADR-0087 conversion `element-text-variant-heading-levels` rewrites stored
+// rows and lists the edit for existing sources. No ADR is cited in the text:
+// the retirement rests on the maintainer's ruling, not on an enforce-or-remove
+// verdict — both values were rendered.
+//
+// Module-private and written with `//`, never `/** */`: prose an enum's error
+// map consumes, not documented surface — an export with no reader is a
+// published surface the next narrowing must keep.
+const ELEMENT_TEXT_VARIANT_VOCABULARY =
+  'a heading is a document level, not a text style, and `variant` speaks the nine values `ui:text` '
+  + 'publishes: `h1`-`h6`, `body`, `caption` and `overline`.';
+
+const ELEMENT_TEXT_VARIANT_RETIRED = {
+  heading:
+    '`heading` was removed from `element:text` `variant` (`ElementTextPropsSchema.variant`) in '
+    + `@objectstack/spec 17.7.0 — ${ELEMENT_TEXT_VARIANT_VOCABULARY} Write \`h2\` — the heading element `
+    + '`heading` always rendered, now drawn in the `h2` style — or the level the page outline means. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  subheading:
+    '`subheading` was removed from `element:text` `variant` (`ElementTextPropsSchema.variant`) in '
+    + `@objectstack/spec 17.7.0 — ${ELEMENT_TEXT_VARIANT_VOCABULARY} Write \`h3\` — the heading element `
+    + '`subheading` always rendered, now drawn in the `h3` style — or the level the page outline means. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+} as const;
+
 export const ElementTextPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:text`',
   history: PROPS_HISTORY,
@@ -2387,24 +2427,31 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
    */
   content: I18nLabelSchema.describe('Text or Markdown content — a plain string, or an inline locale map'),
   /**
-   * Text style variant, declared as the PUBLISHED NINE plus the two spellings
-   * this declaration has always accepted.
+   * Text style variant: the PUBLISHED NINE, and nothing else.
    *
    * objectui#7450's ruling (director batch #71, 2026-09-07, maintainer
    * verbatim 「其他同意」) converges `element:text` on the nine values
    * `@object-ui/types` publishes for its text node — `h1`-`h6`, `body`,
    * `caption`, `overline` — with `heading` / `subheading` becoming named
    * refusals carrying migration hints. The maintainer then split the landing
-   * (2026-09-09, option B): release 1 widens and refuses NOTHING, so
-   * out-of-repo authors converge on a released pin before any spelling stops
-   * working; release 2 carries the refusals and waits on a value-level
-   * retirement mechanism that does not exist yet (`retiredKey()` / ADR-0087 D2
-   * retire a KEY, not a VALUE). This entry is release 1. So the accepted set
-   * GROWS by seven and loses nothing: `h1`-`h6` and `overline` were refused
-   * here with `invalid_value` on the 17.3.0 pin, measured, and `heading` /
-   * `subheading` stay accepted.
+   * (2026-09-09, option B) across two releases. Release 1 (#17108, shipped in
+   * 17.5.0) widened by seven and refused NOTHING, so out-of-repo authors could
+   * converge on a released pin before any spelling stopped working; 17.6.0 was
+   * the one full release in which the nine were accepted and the two old
+   * spellings still parsed (triage's window).
    *
-   * Why the widening is authored HERE rather than in objectui: this
+   * This is release 2 (#21015): `heading` and `subheading` leave the enum
+   * through the value-level retirement mechanism (`enumWithRetiredValues`,
+   * #17109 — ⛔ not a one-off refinement on this enum), so `tsc` refuses them
+   * and the parse answers each with its prescription
+   * ({@link ELEMENT_TEXT_VARIANT_RETIRED}) instead of zod's anonymous enum
+   * message. The ADR-0087 conversion `element-text-variant-heading-levels`
+   * (conversions/registry.ts) rewrites them to `h2` / `h3` — the heading
+   * element each one rendered as — for stored rows and `os migrate meta`; the
+   * D3 entry `element-text-variant-heading-subheading-retired` carries the
+   * judgement left to the author (the level the document means).
+   *
+   * Why release 1's widening was authored HERE rather than in objectui: this
    * declaration is the authoring gate, and it already refused the seven. The
    * accurate statement of the defect the ruling names is 「the renderer
    * swallows what the authoring gate already refuses」 — objectui declaring
@@ -2413,25 +2460,24 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
    * catches it.
    *
    * ⚠️ `.optional().default('body')` is KEPT, deliberately, not inherited.
-   * Absence is the one thing a widening must not move: a parsed
+   * Absence is the one thing neither release may move: a parsed
    * `element:text` node with no `variant` materialises `variant: 'body'`
    * today, and it still does — identical bytes in, identical bytes out. The
-   * `ui:text` side of the platform deliberately does NOT synthesise `body`
-   * for an absent `variant` (objectui#6942, protecting unannotated corpus
-   * nodes); that asymmetry is pre-existing, is not this card's to resolve,
-   * and is left exactly where it was. Removing the default here would refuse
-   * nothing and break nothing at the door, but it WOULD change what every
-   * downstream reader sees for an absent key — a silent behaviour change
-   * wearing an additive changeset, which is what the ruling's split exists to
-   * prevent.
+   * retired members were never the default, so absence never meets the
+   * refusal (`enumWithRetiredValues` composes with `.default(…)` unchanged).
+   * The `ui:text` side of the platform deliberately does NOT synthesise
+   * `body` for an absent `variant` (objectui#6942, protecting unannotated
+   * corpus nodes); that asymmetry is pre-existing, is not this card's to
+   * resolve, and is left exactly where it was. Removing the default here
+   * would refuse nothing and break nothing at the door, but it WOULD change
+   * what every downstream reader sees for an absent key — a silent behaviour
+   * change no retirement changeset announces.
    */
-  variant: z.enum([
+  variant: enumWithRetiredValues(
     // The published nine (`@object-ui/types` `TextProps['variant']`).
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline',
-    // Accepted since this shape was declared; release 2 turns these two into
-    // named refusals with migration hints, ⛔ not release 1.
-    'heading', 'subheading',
-  ])
+    ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline'],
+    ELEMENT_TEXT_VARIANT_RETIRED,
+  )
     .optional().default('body').describe('Text style variant'),
   align: z.enum(['left', 'center', 'right'])
     .optional().default('left').describe('Text alignment'),
@@ -5284,6 +5330,44 @@ const OBJECT_FORM_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * [#21464] An `object-form`'s `mobile` block — the five members the form reads
+ * at the `.objectui-sha` pin `89cad75d55` (`plugin-form/src/ObjectForm.tsx:1857-1942`,
+ * the flat arm only), and nothing else. No form view declares the block, so
+ * the shape is the read's own, as objectui declares it (`ObjectFormSchema.mobile`):
+ *
+ * - `stickyActions` pins the submit / cancel bar to the bottom of the viewport
+ *   (`:1935`, `:1941`);
+ * - `stepper` routes a flat form through the wizard: `true` always (a desktop
+ *   viewport included), `'auto'` only on a phone-width viewport once the form
+ *   has `stepperMinFields` fields (`:1874-1884`, default 8);
+ *   `stepperFieldsPerStep` is the fields per step (`:1876`, default 1 — the
+ *   read clamps a smaller count to 1);
+ * - `fullscreenLongText` offers the fullscreen editor on every long-text field
+ *   (`:1858-1869`).
+ *
+ * The block's presence marks the wrapper (`data-mobile-form`, `:1942`), so an
+ * empty `{}` is legal and changes nothing else. Module-private, as
+ * {@link ObjectKanbanLaneSchema} is.
+ */
+const ObjectFormMobileSchema = lazySchema(() => strictObject({
+  surface: 'this `object-form` `mobile` block',
+  history:
+    'Until this shape was declared, `mobile` was `z.unknown()`: a misspelled member or a `stepper` '
+    + 'value outside `true` / `false` / `\'auto\'` passed, and the form rendered without it.',
+}, {
+  stickyActions: z.boolean().optional()
+    .describe('Pin the submit / cancel bar to the bottom of a phone-width viewport'),
+  stepper: z.union([z.boolean(), z.literal('auto')]).optional()
+    .describe("One-step-at-a-time wizard for a flat form — `true` always, `'auto'` only on a phone-width viewport once the form has `stepperMinFields` fields, `false` (the default) never"),
+  stepperMinFields: z.number().int().positive().optional()
+    .describe("The field count at which `stepper: 'auto'` steps up (default 8)"),
+  stepperFieldsPerStep: z.number().int().positive().optional()
+    .describe('Fields shown per stepper step (default 1)'),
+  fullscreenLongText: z.boolean().optional()
+    .describe('Offer a fullscreen editor on textarea and rich-text fields'),
+}));
+
+/**
  * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
  * the sub-forms it forwards the whole bag into: `TabbedForm`, `WizardForm`,
  * `SplitForm`, `DrawerForm`, `ModalForm` — the declared set is the UNION of
@@ -5318,8 +5402,36 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   }).optional()
     .describe("Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns`"),
   columns: z.number().optional().describe('Number of field columns (multi-column forms), honoured under either `layout`'),
+  /**
+   * [#21464] HELD at `z.unknown()` entries, in the enumeration pin's ledger as
+   * held for a ruling. The renderer's own declared type is field-name strings
+   * (objectui `ObjectFormSchema.fields: string[]`), but its read also draws a
+   * `{ name }` entry by that name (`plugin-form/src/ObjectForm.tsx:961-981`,
+   * `flatFields.ts:71-79` at the pin `89cad75d55`), and measured writers author
+   * one — objectui's published page-builder guide among them — so typing the
+   * member to strings would refuse a value the form draws.
+   */
   fields: z.array(z.unknown()).optional().describe('Limit/order the fields shown'),
+  /**
+   * [#21464] Kept `z.unknown()`, in the enumeration pin's ledger with the
+   * objectui-held contracts: each member is objectui's runtime form field
+   * (`FormField`, identity key `name`), drawn whole by the form renderer
+   * (`plugin-form/src/customFieldsMerge.ts:78-108` at the pin `89cad75d55`).
+   * The spec declares no such field — its own form field (`FormFieldSchema`,
+   * `view.zod.ts`) is keyed by `field` and is never matched by the merge — so
+   * the spec declares that contract first, then this member takes it.
+   */
   customFields: z.unknown().optional().describe('Custom field definitions merged into the generated set'),
+  /**
+   * [#21464] HELD at `z.unknown()` entries, in the enumeration pin's ledger as
+   * held for a ruling. The form view's own `sections` (`FormSectionSchema`) is
+   * the by-reference shape, and every section key the renderer reads is
+   * declared there, but a section's `fields` also draws an inline runtime form
+   * field `{ name, type, … }` as it stands (`plugin-form/src/sectionFields.ts:367-369`
+   * at the pin `89cad75d55`, its "shape 3"), which the form view's field entry
+   * (keyed by `field`) refuses; objectui's README and its own pins author that
+   * shape and assert that it renders and submits.
+   */
   sections: z.array(z.unknown()).optional()
     .describe('Form sections ({ label, description?, fields } — wizard steps / tab panes)'),
   title: I18nLabelSchema.optional().describe('Form title'),
@@ -5335,7 +5447,15 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   drawerWidth: z.union([z.string(), z.number()]).optional().describe('Drawer width (drawer)'),
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal)'),
   modalCloseButton: z.boolean().optional().describe('Show the modal close button (modal)'),
-  contentLayout: z.unknown().optional().describe('Modal content layout config (modal)'),
+  /**
+   * [#21464] Typed to the read: the modal presentation is its only reader,
+   * and it tests `schema.contentLayout === 'tabbed' && groups.length > 1`
+   * (`plugin-form/src/ModalForm.tsx:854` at the pin `89cad75d55`, declared
+   * `'simple' | 'tabbed'` at `:151`); any other value stacks the sections, so
+   * a misspelled `'tabs'` used to draw the stacked layout with no report.
+   */
+  contentLayout: z.enum(['simple', 'tabbed']).optional()
+    .describe("How the modal presentation lays out its sections (modal) — 'simple' stacks them (the default); 'tabbed' puts each section on its own tab once more than one section has a field to show"),
   confirmOnDiscard: z.boolean().optional().describe('Confirm before discarding edits (drawer/modal)'),
   submitText: I18nLabelSchema.optional().describe('Submit button label'),
   cancelText: I18nLabelSchema.optional().describe('Cancel button label'),
@@ -5344,15 +5464,42 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   showSubmit: z.boolean().optional().describe('Show the submit button'),
   showCancel: z.boolean().optional().describe('Show the cancel button'),
   showReset: z.boolean().optional().describe('Show the reset button'),
-  submitBehavior: z.unknown().optional()
-    .describe("What happens after a successful submit ({ kind: 'thank-you' | …, title?, message? })"),
+  /**
+   * [#21464] The form view's own `submitBehavior` member, by reference
+   * (`FormViewSchema.shape.submitBehavior`, the union discriminated on
+   * `kind`). Both form renderers switch on `kind` and read exactly that
+   * union's members — `url` and `delayMs` on `redirect`, `title` and `message`
+   * on `thank-you` (`plugin-form/src/ObjectForm.tsx:1312-1370` and
+   * `WizardForm.tsx:1005-1065` at the pin `89cad75d55`) — and judge a redirect
+   * `url` at submit by parsing a form view through this same schema
+   * (`submitRedirect.ts:202`), so one declaration judges the form view, this
+   * block and the renderer's own verdict. A `kind` outside the four fell
+   * through to the thank-you arm in silence.
+   */
+  submitBehavior: FormViewSchema.shape.submitBehavior
+    .describe("What happens after a successful submit — the same block a form view's `submitBehavior` declares: `{ kind: 'thank-you', title?, message? }`, `{ kind: 'redirect', url, delayMs? }` (a relative `url`, interpolating declared record fields as `{{record.field_name}}`), `{ kind: 'continue' }` or `{ kind: 'next-record' }`. Takes precedence over `navigateOnSuccess` and `resetOnSuccess`"),
   successMessage: I18nLabelSchema.optional().describe('Toast message on successful submit'),
   resetOnSuccess: z.boolean().optional().describe('Reset the form after a successful submit'),
-  navigateOnSuccess: z.unknown().optional().describe('Navigate after a successful submit'),
+  /**
+   * [#21464] Typed to the read: `resolveSuccessNavigate`
+   * (`plugin-form/src/successBehavior.ts:118-131` at the pin `89cad75d55`,
+   * called from `ObjectForm.tsx:1373` and `WizardForm.tsx:1071`) takes a
+   * string template, replaces `{id}` / `{recordId}` with the saved record's
+   * id (URL-escaped) and follows the result only when it is a relative
+   * reference; a declared value it refuses is reported on the success toast
+   * (`ObjectForm.tsx:1412-1429`). Any other value reached `template.replace`
+   * after the record had been written, and the submit then reported a failure.
+   * It is read only when `submitBehavior` is absent, and the renderer marks it
+   * deprecated in that key's favour.
+   */
+  navigateOnSuccess: z.string().optional()
+    .describe("Relative path to navigate to after a successful create/update — `{id}` / `{recordId}` are replaced with the saved record's id, URL-escaped; an absolute URL is refused at submit and reported on the success toast. Ignored when `submitBehavior` is set — prefer `submitBehavior`"),
   readOnly: z.boolean().optional().describe('Render every field read-only'),
   initialValues: z.record(z.string(), z.unknown()).optional().describe('Prefill values (create mode)'),
   initialData: z.record(z.string(), z.unknown()).optional().describe('Alternate spelling of `initialValues` the renderer also reads'),
-  mobile: z.unknown().optional().describe('Mobile presentation overrides'),
+  /** [#21464] The five members the form reads — see {@link ObjectFormMobileSchema}. */
+  mobile: ObjectFormMobileSchema.optional()
+    .describe('Phone presentation options, each opt-in — `{ stickyActions?, stepper?, stepperMinFields?, stepperFieldsPerStep?, fullscreenLongText? }`. Read by the flat (simple, sectionless) form'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
@@ -5503,6 +5650,13 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
     error: (issue) =>
       typeof issue.input === 'string' ? MASTER_DETAIL_FORM_TYPE_RETIRED.get(issue.input) : undefined,
   }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half"),
+  /**
+   * [#21464] `sections` and `fields` are handed to the parent `object-form`
+   * verbatim (`plugin-form/src/MasterDetailForm.tsx:1692-1693` at the pin
+   * `89cad75d55`), so each is read exactly as that block's member is — and is
+   * HELD with it, in the enumeration pin's ledger, for the same reason (see
+   * {@link ObjectFormPropsSchema}'s `sections` and `fields`).
+   */
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
   details: z.array(masterDetailDetailEntry()).optional()

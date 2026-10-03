@@ -55,7 +55,7 @@ import { describe, expect, it } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSecret, SysSetting } from '@objectstack/platform-objects/system';
+import { SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
@@ -229,7 +229,10 @@ async function bootKernel(opts: { withEngine?: boolean } = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [SysSetting, SysSecret]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+  // [#21516] The settings service writes its audit row through
+  // `sys_setting_audit`; the engine refuses a name its registry does not hold,
+  // so the harness registers it beside the two it already did, as a boot does.
+  for (const o of [SysSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
 
   const probe = new ReadyHookFromInitPlugin();
   const kernel = new LiteKernel({ logger: { level: 'error' } as never });
@@ -365,7 +368,10 @@ describe('engine-less callers outside the window observe nothing new', () => {
     const engine = new ObjectQL();
     engine.registerDriver(driver, true);
     await engine.init();
-    for (const o of [SysSetting, SysSecret]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+    // [#21516] The settings service writes its audit row through
+    // `sys_setting_audit`; the engine refuses a name its registry does not hold,
+    // so the harness registers it beside the two it already did, as a boot does.
+    for (const o of [SysSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
 
     const svc = new SettingsService({ env: {}, engineBindPending: true });
     svc.registerManifest(probeManifest);

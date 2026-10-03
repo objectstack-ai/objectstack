@@ -697,12 +697,14 @@ function scanBoundaryLines() {
 //                               `--census-ledger` in the same PR, so burn-down
 //                               is recorded where review can see it.
 //
-// While the baseline is non-empty, the ratchet IS this leg's blindness floor:
-// a walker or prefilter that goes blind reads 0 sites against 632 pinned
-// pairs and reds as stale. The id regex itself is shared with the spec leg,
-// whose per-bucket floors guard it independently. If the baseline is ever
-// burned to empty, add an explicit seen-floor here in the same PR — at that
-// point the stale arm can no longer catch a dormant walker.
+// While the baseline was non-empty, the ratchet WAS this leg's blindness
+// floor: a walker or prefilter that went blind read 0 sites against the pinned
+// pairs (632 at census time) and redded as stale. The baseline has since been
+// burned to empty (`{}`), so the stale arm can no longer catch a dormant
+// walker — 0 measured against 0 pinned is green. The explicit seen floor,
+// PACKAGES_PROSE_SEEN_FLOOR below, landed in the same PR that emptied it and
+// does that job now. The id regex itself is shared with the spec leg, whose
+// per-bucket floors guard it independently.
 //
 // ## What this leg deliberately does NOT do
 //
@@ -713,6 +715,33 @@ function scanBoundaryLines() {
 const PACKAGES_PROSE_ROOT = 'packages';
 const PACKAGES_PROSE_EXCLUDED = 'packages/spec';
 const PACKAGES_PROSE_LEDGER = 'scripts/doc-authoring-prose-id.baseline.json';
+
+/**
+ * The leg's explicit SEEN FLOOR — the blindness floor the stale arm stopped
+ * being when the baseline was burned to empty (see "The ratchet" above).
+ *
+ * With `{}` pinned there is nothing left to go stale, so a scan that went
+ * blind would read 0 ids against 0 pinned and print green. This floor reds it
+ * instead: the REAL tree's reading must stay at or above both numbers, each
+ * judged on its own, so one measure can never cover for the other.
+ *
+ *   filesParsed  sources the prefilter admitted and the parser read
+ *   stringsSeen  string literals and templates the walker visited in them
+ *
+ * Reading when the floor was pinned (the PR that emptied the baseline, at
+ * 0edca886c): 1252 parsed sources, 86276 strings. The floor sits at about half
+ * of each — 600 and 40000, a margin of 652 sources (52%) and 46276 strings
+ * (54%) — so ordinary churn (a package added or retired, a file split or
+ * merged, ids moved out of comments) never trips it, while a dormant walker,
+ * a blind prefilter or a root that lost most of its population does. Both
+ * numbers are measured AFTER the prefilter, which admits a file on any
+ * tracker-shaped token, comments included, so they also fall as ids leave
+ * comments; the margin is sized for that too.
+ *
+ * Raising a number after re-measuring is the landing author's to take;
+ * lowering one is ⛔ MAINTAINER-ONLY, the same split as SELF_TEST_BATTERIES.
+ */
+const PACKAGES_PROSE_SEEN_FLOOR = Object.freeze({ filesParsed: 600, stringsSeen: 40000 });
 
 /**
  * Cheap byte-level prefilter: a SUPERSET of {@link INTERNAL_ID} (no
@@ -847,6 +876,18 @@ function comparePackageProseLedger(counts, ledger) {
     }
   }
   return { growth, stale };
+}
+
+/**
+ * The seen-floor verdict for one reading: every measure of
+ * {@link PACKAGES_PROSE_SEEN_FLOOR} the reading falls below, each judged on its
+ * own. Empty means the reading clears the floor. A measure the reading does
+ * not carry at all is a breach, never a pass (`undefined >= n` is false).
+ */
+function packageProseSeenFloorBreaches(reading, floor = PACKAGES_PROSE_SEEN_FLOOR) {
+  return Object.keys(floor)
+    .filter((measure) => !(reading[measure] >= floor[measure]))
+    .map((measure) => ({ measure, seen: reading[measure], floor: floor[measure] }));
 }
 
 const posix = (p) => p.split(sep).join('/');
@@ -1507,13 +1548,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'spec text: boundary output': 8,
   'cross-package prose ids': 11,
   'cross-package ledger arithmetic': 7,
+  'cross-package seen floor': 8,
 });
 
 // The registry is shrink-only in the same sense its counts are: DELETING an
 // entry silences that battery's floor exactly as effectively as zeroing it, so
 // the registry's own size is pinned too. Adding a battery raises this number;
 // removing one is the same ⛔ MAINTAINER-ONLY edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1945,7 +1987,7 @@ function selfTest() {
     }
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the GENERATED table — a prescription filed under each of a list of keys by `Object.fromEntries(keys.map(…))` rather than written as an object literal (red both HOISTED into a const spread into an options factory\'s `guidance` and generated INLINE at the `guidance:` key itself, green when the id is removed; ⛔ and a generated VALUE table reaching no sink stays unswept, because `.map()` is TRANSPARENT to the climb and never a position of its own), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.'
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the GENERATED table — a prescription filed under each of a list of keys by `Object.fromEntries(keys.map(…))` rather than written as an object literal (red both HOISTED into a const spread into an options factory\'s `guidance` and generated INLINE at the `guidance:` key itself, green when the id is removed; ⛔ and a generated VALUE table reaching no sink stays unswept, because `.map()` is TRANSPARENT to the climb and never a position of its own), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth; and, the baseline now being empty, the SEEN FLOOR that took over the stale arm\'s blindness-floor job reds a below-floor reading on each measure independently, a dormant walker and a missing measure included, while a reading at the floor stays green) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.'
     + ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every`
     + ' battery at or above its pinned floor.');
   return SELF_TEST_VERDICT;
@@ -3012,6 +3054,33 @@ function selfTestPackagesProse(expect, battery) {
     stale.stale.length, 1);
   expect('...named precisely', stale.stale[0]?.file, 'packages/widgets/src/gone.ts');
   expect('...without inventing growth', stale.growth.length, 0);
+
+  battery('cross-package seen floor');
+  // ── The seen floor: the blindness floor once the baseline is empty ────────
+  // The fixture tree above is a handful of files, so its OWN reading is the
+  // below-floor case: judged against the real floor it must red on both
+  // measures, from the same function main() asks.
+  const fixtureBreaches = packageProseSeenFloorBreaches(r).map((b) => b.measure).sort().join(',');
+  expect('a below-floor reading reds on both measures (the fixture tree against the real floor)',
+    fixtureBreaches, 'filesParsed,stringsSeen');
+  expect('a dormant walker (0 sources, 0 strings) reds on both measures',
+    packageProseSeenFloorBreaches({ filesParsed: 0, stringsSeen: 0 }).length, 2);
+  const atFloor = { ...PACKAGES_PROSE_SEEN_FLOOR };
+  expect('a reading exactly AT the floor is green', packageProseSeenFloorBreaches(atFloor).length, 0);
+  expect('one string short reds on that measure alone — the other cannot cover for it',
+    packageProseSeenFloorBreaches({ ...atFloor, stringsSeen: atFloor.stringsSeen - 1 })
+      .map((b) => b.measure).join(','), 'stringsSeen');
+  expect('one source short reds on that measure alone',
+    packageProseSeenFloorBreaches({ ...atFloor, filesParsed: atFloor.filesParsed - 1 })
+      .map((b) => b.measure).join(','), 'filesParsed');
+  expect('a measure the reading does not carry is a breach, never a pass',
+    packageProseSeenFloorBreaches({ stringsSeen: atFloor.stringsSeen }).map((b) => b.measure).join(','),
+    'filesParsed');
+  expect('the breach names the reading and the floor it fell under',
+    JSON.stringify(packageProseSeenFloorBreaches({ ...atFloor, filesParsed: 3 })[0]),
+    JSON.stringify({ measure: 'filesParsed', seen: 3, floor: atFloor.filesParsed }));
+  expect('the pinned floor is a real floor on both measures (a zero floor passes a blind scan)',
+    PACKAGES_PROSE_SEEN_FLOOR.filesParsed > 0 && PACKAGES_PROSE_SEEN_FLOOR.stringsSeen > 0, true);
 }
 
 function main() {
@@ -3132,6 +3201,7 @@ function main() {
   }
   const prosePinned = JSON.parse(readFileSync(PACKAGES_PROSE_LEDGER, 'utf8'));
   const { growth: proseGrowth, stale: proseStale } = comparePackageProseLedger(packageProse.counts, prosePinned);
+  const proseFloorBreaches = packageProseSeenFloorBreaches(packageProse);
 
   // The boundary is stated on EVERY verdict, red or green — a reader of the
   // green line must be able to see what the clean bill covers, and a reader of
@@ -3237,6 +3307,22 @@ function main() {
     );
   }
 
+  if (proseFloorBreaches.length > 0) {
+    failed = true;
+    console.error(`\n✗ doc authoring guard: the cross-package leg read LESS of the tree than its seen floor allows:\n`);
+    for (const b of proseFloorBreaches) console.error(`  ${b.measure}: ${b.seen} measured, floor ${b.floor}`);
+    console.error(
+      `\nThe prose-id baseline (${PACKAGES_PROSE_LEDGER}) is empty, so its verdict is only`
+      + `\nworth something if the scan actually read the tree: a walker or prefilter that goes`
+      + `\nblind reads 0 ids against 0 pinned, which the ledger alone would print as green. Find`
+      + `\nwhat stopped reaching the sources under ${PACKAGES_PROSE_ROOT}/ — the walk in`
+      + `\ncollectPackageProseFiles(), the ${PACKAGES_PROSE_EXCLUDED} exclusion, PACKAGES_PROSE_PREFILTER,`
+      + `\nthe string visit in scanPackageProseIds() — and restore it. If the population really`
+      + `\nshrank, re-measure with --census and state both readings in the PR; lowering`
+      + `\nPACKAGES_PROSE_SEEN_FLOOR is ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option.\n`,
+    );
+  }
+
   if (proseGrowth.length > 0) {
     failed = true;
     console.error(`\n✗ NEW internal issue-id reference(s) in sibling-package string prose:\n`);
@@ -3291,7 +3377,9 @@ function main() {
   console.log(
     `✓ doc authoring guard: sibling-package prose ids hold the baseline — `
     + `${packageProse.sites.length} pinned site(s) across ${packageProse.counts.size} file(s), `
-    + `${packageProse.stringsSeen} string(s) read in ${packageProse.filesParsed} parsed source(s), `
+    + `${packageProse.stringsSeen} string(s) read in ${packageProse.filesParsed} parsed source(s) `
+    + `(seen floor ${PACKAGES_PROSE_SEEN_FLOOR.stringsSeen} strings / `
+    + `${PACKAGES_PROSE_SEEN_FLOOR.filesParsed} sources), `
     + `no growth, no burn-down unrecorded.`,
   );
 }

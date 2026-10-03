@@ -116,6 +116,9 @@ import {
   // boundary ratchet forbids the `/core` entry closure — engine.ts included —
   // from importing `@objectstack/metadata-protocol`, where it was written.
   recordNotFoundError,
+  // The data door's object-existence 404, shared for the same reason: an
+  // in-process verb refuses a name the registry does not resolve with it.
+  objectNotFoundError,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -287,6 +290,14 @@ import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
 import { materializeDeclaredFields } from './declared-fields.js';
+// [#21571] The declared column set — the read verbs' default projection, their
+// explicit-projection filter and the write path's undeclared-key door, one list.
+import {
+  PLATFORM_PROVISIONED_COLUMNS,
+  declaredColumnSet,
+  rowsWithDeclaredColumnsOnly,
+  withDeclaredColumnsOnly,
+} from './declared-read-columns.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -1909,19 +1920,17 @@ function assertProjectionHasNoDottedPaths(
  *   because the partial-success path (`insertMany`) reports per row and must
  *   cull the bad rows instead of failing the batch around them.
  */
-const PLATFORM_PROVISIONED_COLUMNS = ['id', 'created_at', 'updated_at'] as const;
-
 function undeclaredWriteFieldErrors(
   object: string,
   schema: { fields?: unknown } | undefined,
   rows: readonly unknown[],
 ): Array<Error | undefined> {
   const out: Array<Error | undefined> = new Array(rows.length);
-  const fields = schema?.fields;
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return out;
-  const declared = new Set(Object.keys(fields as Record<string, unknown>));
-  if (declared.size === 0) return out;
-  for (const provisioned of PLATFORM_PROVISIONED_COLUMNS) declared.add(provisioned);
+  // [#21571] The declared set and its "no opinion" cases (no map, an array
+  // map, an empty map) are `declaredColumnSet`'s, shared with the read verbs'
+  // default projection — one answer to "is this a column of the object".
+  const declared = declaredColumnSet(schema);
+  if (!declared) return out;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
@@ -5560,21 +5569,19 @@ export class ObjectQL implements IObjectQLEngine {
    * `resolveFileReferences` and `cascadeDeleteRelations` make — never a
    * hand-rolled code test.
    *
-   * ⚠️ The old comment's "`sys_organization` may not be registered at all (a
-   * lean embedding, a bare-kernel test)" is NOT a second benign cause, and a
-   * predicate written for it would have guarded a case that cannot reach this
-   * catch. Measured on this seam:
-   *
-   *  - an object missing from the REGISTRY does not fail the read at all on a
-   *    driver that tolerates an unknown table — {@link find} returns `[]`
-   *    through the normal path, never entering the catch;
-   *  - a strict driver surfaces that same install as a MISSING TABLE, i.e. as
-   *    the one benign cause above;
-   *  - and "no driver at all" cannot reach here: {@link getDriver} answers every
-   *    object from the default driver, which the first {@link registerDriver}
-   *    always sets and nothing ever clears, so the only engine whose routing
-   *    fails for `sys_organization` is one with no drivers — where the write
-   *    that would have asked already failed on its OWN object.
+   * A SECOND benign cause, now that an unresolved name is refused rather than
+   * handed to the driver: `sys_organization` is not registered at all (a lean
+   * embedding, a bare-kernel test). Before an in-process verb refused an
+   * unresolved name, that install reached the driver and read `[]` on a
+   * tolerant one or a MISSING TABLE on a strict one — the one driver cause
+   * above. It now resolves to the engine's own `OBJECT_NOT_FOUND` before any
+   * driver is asked, so this probe asks the REGISTRY first and treats an
+   * absent `sys_organization` as the lean-install case it always was: there is
+   * no organization object here, so there is no organization to derive. This
+   * is the probe handling absence itself, on a path a body cannot reach — it
+   * never relies on the resolver's old raw-table fall-through, which is now
+   * gone. It is not a spelling allow-list: the question is "is the object
+   * provisioned," asked of the one registry, not "is this one of N names."
    *
    * Everything else — connection loss, pool exhaustion, a timeout mid-boot, a
    * datasource that never connected ({@link DatasourceUnavailableError}), a
@@ -5588,6 +5595,14 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private async probeInstallOrganizations(): Promise<readonly string[]> {
     if (this.organizationProbeMemo) return this.organizationProbeMemo;
+    // The lean-install case: no `sys_organization` object is registered, so
+    // there is no organization to derive. Asking the registry first keeps the
+    // probe off the resolver's refusal for an unregistered name (a path a body
+    // cannot reach), exactly as the old raw-table fall-through read `[]`.
+    if (!this._registry.getObject(ORGANIZATION_OBJECT)) {
+      this.organizationProbeMemo = [];
+      return this.organizationProbeMemo;
+    }
     let ids: readonly string[] = [];
     try {
       const rows = await this.find(ORGANIZATION_OBJECT, {
@@ -9203,14 +9218,25 @@ export class ObjectQL implements IObjectQLEngine {
    * Accepts the canonical short name (e.g., 'account') or, for explicit
    * cross-package disambiguation, the canonical object name (e.g., 'account'). The result is
    * the physical table name derived via `StorageNameMapping.resolveTableName`.
+   *
+   * One name space with the data door: the target resolves ONLY through the
+   * registry. A name the registry does not resolve is refused with the door's
+   * own `OBJECT_NOT_FOUND` 404 (`objectNotFoundError`), never handed to the
+   * driver as a raw table name. Before this, every in-process guard keyed by a
+   * registered object name could be stepped around by naming the target some
+   * other way, and an in-process caller (a sandboxed body, an action handler,
+   * a hook) read what the door refused to serve.
+   *
+   * Platform code that must address storage without a registry entry has a
+   * declared path a body cannot reach: the driver itself
+   * (`datasource(name)`, `getDriverForObject(name)`), held by host code only.
    */
   private resolveObjectName(name: string): string {
     const schema = this._registry.getObject(name);
     if (schema) {
       return StorageNameMapping.resolveTableName(schema);
     }
-    // Return name as-is (canonical name = table name; no FQN prefix to strip)
-    return StorageNameMapping.resolveTableName({ name });
+    throw objectNotFoundError(name);
   }
 
   /**
@@ -9219,17 +9245,25 @@ export class ObjectQL implements IObjectQLEngine {
    * docblock states the semantics; {@link judgeWhereAdmission} records the
    * pipeline and why it is the same one every verb runs.
    *
-   * The object name resolves exactly as the verbs resolve it, and the field map
-   * is the one they read, so the verdict (and the object name inside its
+   * A registered name resolves exactly as the verbs resolve it, and the field
+   * map is the one they read, so the verdict (and the object name inside its
    * message) is the one execution would give. It stops before `getDriver`:
    * nothing is resolved from or sent to a datasource.
+   *
+   * It judges the FILTER, not the object's existence. For a name the registry
+   * does not resolve, the verbs refuse the object itself (`OBJECT_NOT_FOUND`,
+   * before admission); this member still judges the filter there, with no
+   * field map, as the contract states, because it reads nothing and hands the
+   * name to no driver. That keeps the authoring-time judge (`os validate`,
+   * whose engine holds only the stack's own objects) answering about the
+   * filter for an object the platform or another package defines.
    */
   judgeFilter(
     objectName: string,
     where: EngineQueryOptions['where'],
     options?: EngineFilterJudgementOptions,
   ): EngineFilterJudgement {
-    const object = this.resolveObjectName(objectName);
+    const object = this._registry.getObject(objectName) ? this.resolveObjectName(objectName) : objectName;
     return judgeWhereAdmission(
       object,
       options?.operation ?? 'find',
@@ -11866,13 +11900,12 @@ export class ObjectQL implements IObjectQLEngine {
     // projection is a different fact and no longer reaches this filter via
     // the engine — `assertProjectionHasNoDottedPaths` above refused it.
     if (_findSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
-      const known = new Set(Object.keys(_findSchema.fields));
       // Always allow the primary key + audit columns even if not present in
       // schema.fields. Without this, callers requesting `select=id,name`
       // silently get the `id` projected away, breaking record navigation.
-      known.add('id');
-      known.add('created_at');
-      known.add('updated_at');
+      // [#21571] The same three the default projection and the write door
+      // admit — `PLATFORM_PROVISIONED_COLUMNS`, one list.
+      const known = new Set<string>([...Object.keys(_findSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       // Whole names, no head-splitting: only plain entries reach here (the
       // dotted refusal above fired on anything carrying a '.').
       const filtered = ast.fields.filter(f => known.has(f));
@@ -11910,6 +11943,19 @@ export class ObjectQL implements IObjectQLEngine {
 
       try {
           let result = await driver.find(object, hookContext.input.ast as QueryAST, hookContext.input.options as any);
+
+          // [#21571] The read's default projection is the DECLARED field set:
+          // a column no metadata declares (a field retired in an upgrade,
+          // whose column additive sync leaves behind) never leaves the engine.
+          // Shaped here, on the rows as the driver returned them, so it holds
+          // whichever driver answered and whichever rung of a driver's
+          // recovery ladder answered (driver-sql retries `select('*')` when a
+          // projected statement names a missing column) — and before formulas,
+          // `expand`, file references and the hooks, so all of them see the
+          // declared record. See `declared-read-columns.ts`.
+          if (Array.isArray(result)) {
+            result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+          }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
           // [#20082] With the caller's permission map when a formula calls
@@ -12146,12 +12192,9 @@ export class ObjectQL implements IObjectQLEngine {
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
     // refused any dotted entry above, so none reaches this filter).
     if (_findOneSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
-      const known = new Set(Object.keys(_findOneSchema.fields));
       // Always allow the primary key + audit columns even if not present
-      // in schema.fields (matches `find()` behavior).
-      known.add('id');
-      known.add('created_at');
-      known.add('updated_at');
+      // in schema.fields (matches `find()` behavior, one list).
+      const known = new Set<string>([...Object.keys(_findOneSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       const filtered = ast.fields.filter(f => known.has(f));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
@@ -12186,6 +12229,10 @@ export class ObjectQL implements IObjectQLEngine {
       hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any);
 
       let result = await driver.findOne(objectName, hookContext.input.ast as QueryAST, hookContext.input.options as any);
+
+      // [#21571] Same default projection as `find`, same position: the
+      // declared field set, applied to the row as the driver returned it.
+      result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).

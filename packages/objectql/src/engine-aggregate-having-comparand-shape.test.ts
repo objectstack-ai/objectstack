@@ -942,30 +942,22 @@ describe('[#20127] having — a { $field, addDays } pair is judged by each aggre
       });
     }
 
-    it('a registry-less host is not judged — the pair is answered, as written, as an addDays pair is', async () => {
-      // No declaration, so no column has a type or a class: the fail-open
-      // direction #20127 took for an `addDays` pair, kept for a plain one.
-      //
-      // [#21242] What answers it is `@objectstack/formula`'s matcher, which no
-      // longer keeps a whole-day copy of the bare-day upper bound: a pair that
-      // reaches it without a seam is compared as written (ADR-0053 D-D1 item
-      // 5). No group of DT_ROWS closes on its first due day, so they keep
-      // `c1` either way. `c4` does, at 15:00: the deleted copy read the day as
-      // "through that day" and kept `c4` beside `c1`; as written, the
-      // instant's text sorts above the bare day, and `c4` is dropped.
-      const ON_THE_DUE_DAY = {
-        customer_id: 'c4', amount: 10, cap: 1, placed_on: '2026-01-05', due_on: '2026-01-05', grace: 0,
-        opened_at: '2026-01-05T08:00:00.000Z', closed_at: '2026-01-05T15:00:00.000Z',
-      };
+    it('a registry-less host is not judged — [#21516] the engine refuses the object itself, before any read', async () => {
+      // [#21516] An in-process verb resolves its target only through the
+      // registry and refuses a name it does not resolve with the data door's
+      // own `OBJECT_NOT_FOUND` before `having` or any read runs: no class
+      // verdict is invented, and no group is answered from a table reached by
+      // its raw name. How the matcher compares a pair as written (#21242) is
+      // pinned on the registered cases beside this one.
       for (const [door, native] of DOORS) {
-        for (const rows of [DT_ROWS, [...DT_ROWS, ON_THE_DUE_DAY]]) {
-          const { driver } = makeDriver(rows, native);
-          const engine = new ObjectQL();
-          engine.registerDriver(driver, true);
-          await engine.init();
-          const out = await engine.aggregate(OBJECT, { ...DT_QUERY, having: { last_closed: { $lte: { $field: 'first_due' } } } });
-          expect(groups(out), door).toEqual(['c1']);
-        }
+        const { driver } = makeDriver(DT_ROWS, native);
+        const engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        const refused: any = await engine
+          .aggregate(OBJECT, { ...DT_QUERY, having: { last_closed: { $lte: { $field: 'first_due' } } } })
+          .then(() => undefined, (e) => e);
+        expect({ code: refused?.code, status: refused?.status }, door).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
       }
     });
 

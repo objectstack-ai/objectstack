@@ -71,6 +71,18 @@ import {
     // transports — never a REST-local restatement.
     metaWriteCapabilityVerdict,
     type MetaWriteCapabilityVerdict,
+    // Which form candidates the anonymous form doors serve — the one rule the
+    // metadata protocol also judges organization-scoped `view` writes by.
+    anonymousFormIntakeCandidates,
+    // [#21476] Whether such a form can take intake on this posture, and why not
+    // — the one predicate the runtime authoring gate's advisory reads too.
+    anonymousFormIntakePosture,
+    anonymousFormIntakeUnavailability,
+    anonymousFormIntakeUnavailableMessage,
+    anonymousFormObjectName,
+    anonymousFormSharingPath,
+    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into.
+    objectFieldVisibilityFingerprint,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -1746,6 +1758,40 @@ function refuseNonAuthoringCaller(caller: unknown, res: any, reading: string): b
 type MetaReadVerdict =
     | { kind: 'serve'; document: any }
     | { kind: 'refuse'; send: (res: any) => void };
+
+// [#21476] The intake-availability predicate, its posture reader, the object a
+// form submits into, where its `sharing` sits and the reason it states all live
+// in `@objectstack/metadata-core` (`anonymous-form-intake.ts`): both doors, the
+// admin read below and the runtime authoring gate's save/publish advisory read
+// them from there, so none of the three can disagree with another.
+
+/** [#21331] The organization an anonymous form request reads the form in (`defaultOrgId()`). */
+async function anonymousFormOrganization(tenancy: any): Promise<string | undefined> {
+    if (!tenancy || typeof tenancy.defaultOrgId !== 'function') return undefined;
+    const organizationId = await tenancy.defaultOrgId();
+    return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
+}
+
+/**
+ * [#21476] Put the admin read's intake reasons in `_diagnostics.warnings`, where
+ * a derived view warning already goes (`stampRenameWarning`). A declared read
+ * decoration, so a GET then PUT round trip never stores it.
+ */
+function stampAnonymousFormIntakeWarnings(
+    document: any,
+    warnings: ReadonlyArray<{ path: string; message: string }>,
+): any {
+    if (warnings.length === 0 || !document || typeof document !== 'object') return document;
+    const prior = document._diagnostics;
+    const diagnostics: Record<string, any> = prior && typeof prior === 'object' ? { ...prior } : { valid: true };
+    diagnostics.warnings = [...(Array.isArray(prior?.warnings) ? prior.warnings : []), ...warnings];
+    return { ...document, _diagnostics: diagnostics };
+}
+
+/** [#21476] Those reasons' ETag dimension; empty when there is none (the ADR-0106 D3 fold). */
+function anonymousFormIntakeFingerprint(warnings: ReadonlyArray<{ path: string; message: string }>): string {
+    return objectFieldVisibilityFingerprint(warnings.map((w) => JSON.stringify([w.path, w.message])));
+}
 
 /**
  * RestServer
@@ -3789,8 +3835,17 @@ export class RestServer {
         return {
             ...this.metaItemReadGateSources(environmentId, req, p, policy.app === 'author-exempt'),
             requestLocale: (i18n) => this.extractLocale(req, i18n),
-            translateEnvelope: (envelope, document) =>
-                this.translateMetaEnvelope(req, req.params.type, environmentId, envelope as Record<string, any>, document),
+            // [#21476] The uncached arm's share of the public-form intake
+            // reason the cached arm states (`GET /meta/:type/:name`).
+            translateEnvelope: async (envelope, document) =>
+                this.translateMetaEnvelope(
+                    req, req.params.type, environmentId, envelope as Record<string, any>,
+                    RestServer.metaTypeSingular(req.params.type) === 'view'
+                        ? stampAnonymousFormIntakeWarnings(
+                            document, await this.anonymousFormIntakeWarnings(environmentId, req, p, document),
+                        )
+                        : document,
+                ),
         };
     }
 
@@ -6585,8 +6640,15 @@ export class RestServer {
                             // against the fingerprinted ETag, which is the one
                             // that identifies what we are actually sending.
                             const maskApplies = maskPosture.kind !== 'passthrough';
+                            // [#21476] Same move for a `view`: its body can carry
+                            // the public-form intake reason, which derives from
+                            // the posture and the bound object, and the
+                            // protocol's validator hashes neither. With no reason
+                            // the folded ETag is byte-identical, so a view's
+                            // `304` answers exactly as before.
+                            const intakeFolds = metaType === 'view';
                             const cacheRequest = {
-                                ifNoneMatch: maskApplies ? undefined : (req.headers['if-none-match'] as string),
+                                ifNoneMatch: (maskApplies || intakeFolds) ? undefined : (req.headers['if-none-match'] as string),
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
                             };
 
@@ -6644,6 +6706,14 @@ export class RestServer {
                                 cachedDocument = masked.document;
                                 visibilityFingerprint = masked.fingerprint;
                             }
+                            // [#21476] The administrator's read names why an open
+                            // public form is not offered on this posture.
+                            let intakeFingerprint = '';
+                            if (intakeFolds) {
+                                const warnings = await this.anonymousFormIntakeWarnings(environmentId, req, p, cachedDocument);
+                                cachedDocument = stampAnonymousFormIntakeWarnings(cachedDocument, warnings);
+                                intakeFingerprint = anonymousFormIntakeFingerprint(warnings);
+                            }
 
                             // [ADR-0106 D6 tier 2] Visibility undetermined →
                             // the body is unmasked, so it must not be stored or
@@ -6670,12 +6740,15 @@ export class RestServer {
                                 // to the pre-ADR one. A cohort shares 304s; a
                                 // permission change moves the fingerprint and
                                 // self-invalidates the stale 304.
-                                const value = foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint);
+                                const value = foldVisibilityFingerprintIntoEtag(
+                                    foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                    intakeFingerprint,
+                                );
                                 const etagValue = result.etag.weak
                                     ? `W/"${value}"`
                                     : `"${value}"`;
                                 res.header('ETag', etagValue);
-                                if (maskApplies && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
+                                if ((maskApplies || intakeFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
                                     res.status(304).send();
                                     return;
                                 }
@@ -10514,11 +10587,100 @@ export class RestServer {
     }
 
     /**
+     * [#21331 · #21476] The `tenancy` service an anonymous form request reads,
+     * or `undefined` in the supported no-tenancy composition. Which
+     * organization it answers, and why it fails closed: the comment above
+     * `resolveFormBySlug` in {@link registerFormEndpoints}.
+     */
+    private async resolveAnonymousFormTenancy(environmentId: string | undefined, req: any): Promise<any | undefined> {
+        try {
+            const envId = environmentId === 'platform'
+                ? undefined
+                : await this.resolveRequestEnvironmentId(environmentId, req);
+            if (envId && this.kernelManager) {
+                const kernel: any = await this.kernelManager.getOrCreate(envId);
+                return typeof kernel?.getServiceAsync === 'function'
+                    ? await kernel.getServiceAsync('tenancy')
+                    : undefined;
+            }
+            if (this.tenancyServiceProvider) return await this.tenancyServiceProvider(environmentId);
+            return undefined;
+        } catch (err) {
+            if (isServiceNotRegisteredError(err)) return undefined;
+            throw new AuthzStoreUnavailableError('tenancy', err);
+        }
+    }
+
+    /**
+     * The object schemas an anonymous form request reads, in the organization
+     * the form itself was resolved in (#21331). They carry the columns the
+     * registry injects, `organization_id` among them.
+     */
+    private async readFormObjectDefinitions(
+        p: RestProtocol,
+        environmentId: string | undefined,
+        organizationId: string | undefined,
+    ): Promise<any[]> {
+        const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+            type: 'object',
+            ...(environmentId ? { environmentId } : {}),
+            ...(organizationId ? { organizationId } : {}),
+        };
+        const r: any = await p.getMetaItems(objectsRequest);
+        return Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
+    }
+
+    /**
+     * [#21476] The administrator's read of a `view`: one warning per open
+     * public form that cannot take intake on this deployment, located at that
+     * form's `sharing` and naming why. Asked through the SAME predicate, the
+     * same tenancy read and the same object read as both anonymous doors
+     * (`registerFormEndpoints`), so the reason is shown exactly when the doors
+     * answer not-found. A view with no open public form reads nothing.
+     */
+    private async anonymousFormIntakeWarnings(
+        environmentId: string | undefined,
+        req: any,
+        p: RestProtocol,
+        view: unknown,
+    ): Promise<Array<{ path: string; message: string }>> {
+        if (!view || typeof view !== 'object' || typeof (p as any).getMetaItems !== 'function') return [];
+        const candidates = anonymousFormIntakeCandidates(view);
+        if (candidates.length === 0) return [];
+        const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
+        const posture = anonymousFormIntakePosture(tenancy);
+        let objects: Promise<any[]> | undefined;
+        const readObjects = (): Promise<any[]> => (objects ??= anonymousFormOrganization(tenancy)
+            .then((organizationId) => this.readFormObjectDefinitions(p, environmentId, organizationId)));
+        const warnings: Array<{ path: string; message: string }> = [];
+        for (const candidate of candidates) {
+            const object = anonymousFormObjectName(view, candidate.form);
+            if (!object) continue;
+            const unavailable = await anonymousFormIntakeUnavailability(
+                object,
+                posture,
+                async () => (await readObjects()).find((o: any) => o?.name === object),
+            );
+            if (!unavailable) continue;
+            warnings.push({
+                path: anonymousFormSharingPath(view as Record<string, any>, candidate),
+                message: anonymousFormIntakeUnavailableMessage(candidate.slug, unavailable),
+            });
+        }
+        return warnings;
+    }
+
+    /**
      * Register public (anonymous) form endpoints.
      *
      * Public forms are opt-in: a `FormView` becomes accessible to anonymous
-     * visitors only when `sharing.allowAnonymous === true` AND a
-     * `sharing.publicLink` slug is configured. Two routes are registered:
+     * visitors only when `sharing.enabled === true`, `sharing.allowAnonymous
+     * === true` AND a `sharing.publicLink` slug is configured
+     * (`anonymousFormIntakeCandidates`, `@objectstack/metadata-core`). A form
+     * whose bound object cannot take an anonymous submission on this
+     * deployment's posture is not offered either
+     * ({@link anonymousFormIntakeUnavailability}): both routes answer it exactly
+     * as they answer a withdrawn form. Two routes are registered:
      *
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
@@ -10536,53 +10698,25 @@ export class RestServer {
      *
      * The matched FormView's parent ViewSchema is found by scanning
      * `protocol.getMetaItems({ type: 'view' })`. For each entry we inspect
-     * `form.sharing` and every entry in `formViews`; the first FormView
-     * whose `sharing.publicLink` matches `/forms/:slug` (or just `:slug`)
-     * wins. The response carries the matched form view under `form` and
+     * `form.sharing`, every entry in `formViews` and a flattened form item's
+     * `config.sharing`; the first open FormView whose `sharing.publicLink`
+     * matches `/forms/:slug` (or just `:slug`) wins. The response carries the matched form view under `form` and
      * the inferred target object, matching what the frontend's
      * `mapViewSpecToEmbeddableConfig` expects.
      */
     private registerFormEndpoints(basePath: string): void {
         const isScoped = basePath.includes('/environments/:environmentId');
 
-        const slugMatchesPublicLink = (publicLink: string | undefined, slug: string): boolean => {
-            if (!publicLink || typeof publicLink !== 'string') return false;
-            // Accept `/forms/:slug`, `forms/:slug`, or a bare slug.
-            const normalized = publicLink.replace(/^\/+/, '').replace(/^forms\//, '');
-            return normalized === slug;
-        };
-
+        // Which form candidates are open to anonymous intake is ONE rule,
+        // shared with the write-time judgement in `@objectstack/metadata-protocol`
+        // (`anonymousFormIntakeCandidates`): `sharing.enabled === true`,
+        // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
         const findPublicFormView = (views: any[], slug: string): { view: any; form: any; object: string } | null => {
             for (const view of views ?? []) {
                 if (!view || typeof view !== 'object') continue;
-                const candidates: Array<{ form: any; key?: string }> = [];
-                // Authoring/nested shape (defineView): { form, formViews: { key: {...} } }.
-                if (view.form && view.form.sharing) candidates.push({ form: view.form });
-                const formViews = view.formViews;
-                if (formViews && typeof formViews === 'object') {
-                    for (const [key, fv] of Object.entries(formViews)) {
-                        if (fv && typeof fv === 'object' && (fv as any).sharing) {
-                            candidates.push({ form: fv as any, key });
-                        }
-                    }
-                }
-                // Flattened registered shape (getMetaItems → one item per view:
-                // { name, object, viewKind:'form', config:{ data, sections, sharing } }).
-                // A form view carries its sharing under `config`; without this branch
-                // public-form resolution silently fails for the standard view metadata.
-                if (view.viewKind === 'form' && view.config && typeof view.config === 'object'
-                    && (view.config as any).sharing) {
-                    candidates.push({ form: view.config, key: view.name });
-                }
-                for (const c of candidates) {
-                    const sharing = c.form?.sharing;
-                    if (!sharing || sharing.allowAnonymous !== true) continue;
-                    if (!slugMatchesPublicLink(sharing.publicLink, slug)) continue;
-                    const objectName =
-                        c.form?.data?.object ??
-                        view?.list?.data?.object ??
-                        view?.form?.data?.object ??
-                        view?.object;
+                for (const c of anonymousFormIntakeCandidates(view)) {
+                    if (c.slug !== slug) continue;
+                    const objectName = anonymousFormObjectName(view, c.form);
                     if (!objectName) continue;
                     return { view, form: c.form, object: objectName };
                 }
@@ -10610,7 +10744,8 @@ export class RestServer {
         //
         // Asked ONCE per request, in `resolveFormBySlug`. Every door below
         // reads the form through that one resolution, so no door keeps its
-        // own copy of "is this form public".
+        // own copy of "is this form public" — nor, since #21476, of "can it
+        // take intake on this posture", which the same tenancy read answers.
         //
         // Fails CLOSED. A tenancy service that is registered but cannot be
         // reached raises `AuthzStoreUnavailableError`, the classification
@@ -10620,32 +10755,6 @@ export class RestServer {
         // supported no-tenancy composition. The wiring mirrors
         // `resolveProtocol`, so the tenancy service and the protocol always
         // come from the same kernel.
-        const resolveFormOrganization = async (
-            environmentId: string | undefined,
-            req: any,
-        ): Promise<string | undefined> => {
-            let tenancy: any;
-            try {
-                const envId = environmentId === 'platform'
-                    ? undefined
-                    : await this.resolveRequestEnvironmentId(environmentId, req);
-                if (envId && this.kernelManager) {
-                    const kernel: any = await this.kernelManager.getOrCreate(envId);
-                    tenancy = typeof kernel?.getServiceAsync === 'function'
-                        ? await kernel.getServiceAsync('tenancy')
-                        : undefined;
-                } else if (this.tenancyServiceProvider) {
-                    tenancy = await this.tenancyServiceProvider(environmentId);
-                }
-            } catch (err) {
-                if (isServiceNotRegisteredError(err)) return undefined;
-                throw new AuthzStoreUnavailableError('tenancy', err);
-            }
-            if (!tenancy || typeof tenancy.defaultOrgId !== 'function') return undefined;
-            const organizationId = await tenancy.defaultOrgId();
-            return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
-        };
-
         const resolveFormBySlug = async (
             environmentId: string | undefined,
             req: any,
@@ -10653,7 +10762,8 @@ export class RestServer {
         ): Promise<{ view: any; form: any; object: string; organizationId: string | undefined } | null> => {
             const p = await this.resolveProtocol(environmentId, req);
             if (typeof (p as any).getMetaItems !== 'function') return null;
-            const organizationId = await resolveFormOrganization(environmentId, req);
+            const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
+            const organizationId = await anonymousFormOrganization(tenancy);
             const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                 type: 'view',
                 ...(environmentId ? { environmentId } : {}),
@@ -10666,7 +10776,17 @@ export class RestServer {
                     ? result
                     : [];
             const match = findPublicFormView(items, slug);
-            return match ? { ...match, organizationId } : null;
+            if (!match) return null;
+            // [#21476] A form that cannot take intake on this posture is not
+            // offered: `null` here IS the withdrawn form's answer on both
+            // doors, so an anonymous caller learns nothing about the tenancy.
+            const unavailable = await anonymousFormIntakeUnavailability(
+                match.object,
+                anonymousFormIntakePosture(tenancy),
+                async () => (await this.readFormObjectDefinitions(p, environmentId, organizationId))
+                    .find((o: any) => o?.name === match.object),
+            );
+            return unavailable ? null : { ...match, organizationId };
         };
 
         // GET /forms/:slug — resolve and return the public form spec

@@ -3043,7 +3043,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3052,7 +3052,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the four seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })): showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
+          "the five seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives; showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
           "showcase_task (title required text + done boolean, defaultValue false), showcase_inquiry (status select whose 'new' option is default:true + source plain text with NO default), showcase_project (budget/spent currency + the spent_within_budget script rule that REJECTS spent > budget*1.2)",
           "seeded rows: not-done task 'Build homepage' (done:false) for the transition PATCH; already-done tasks 'Audit current IA' and 'App wireframes' (done:true) for the non-transition proof; projects 'Data Platform' (budget 600000 / spent 420000) and 'Website Relaunch' (budget 150000 / spent 60000)",
           "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe",
@@ -3061,8 +3061,8 @@
         "knownGaps": [
           "afterInsert and afterDelete have NO fixture hook — the four seeded hooks cover beforeInsert, beforeUpdate and afterUpdate only. Exercise these two events with a scratch log hook or record the variant knownGap; do not fake coverage.",
           "beforeDelete has NO seeded showcase hook — the abort-blocks-delete contract is pinned only by the dogfood hef_ref_guard fixture (packages/qa/dogfood/test/hook-error-format.dogfood.test.ts), a test-only stack, not the showcase app; drive beforeDelete via a scratch hook or cite that pin.",
-          "priority ordering (lowest-first on the SAME object+event) is not fixture-covered: no two showcase hooks share an object+event (normalize is showcase_task/before*, audit is showcase_task/afterUpdate — different events), so ordering needs a scratch pair of hooks on one object+event with distinct priorities.",
-          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four fixtures never throw (their trim/stamp/log bodies always succeed). The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
+          "priority ordering (lowest-first on the SAME object+event) is not fixture-covered: showcase_normalize_task_title (priority 50) and showcase_guard_task_reopen (priority 60) do share showcase_task/beforeUpdate, but neither logs and the guard fires only on a reopening write it then refuses, so their order is not observable from outside; ordering needs a scratch pair of logging hooks on one object+event with distinct priorities.",
+          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four hooks this item drives never throw (their trim/stamp/log bodies always succeed). The one seeded hook that throws, showcase_guard_task_reopen, is a beforeUpdate abort and does not stand in for this item's beforeInsert abort-rollback clause. The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
           "the async audit/warn lines land AFTER the HTTP write resolves (fire-and-forget runs once the engine has moved on) — a log read taken before the async body executes shows no line; settle before judging any no-fire."
         ]
       },
@@ -3085,7 +3085,7 @@
         "condition fails CLOSED (#4775) — SCRATCH: an unevaluable/uncompilable condition ABORTS the operation and is NOT softened by onError:'log' nor fire-and-forgotten (the gate runs OUTSIDE both); add a scratch hook with a broken condition (unit-pinned in hook-wrappers.ts)"
       ],
       "steps": [
-        "boot showcase isolated; sign in as seeded admin; confirm the four hooks actually registered before asserting any no-fire — GET /api/v1/meta/types/hook (or the boot log) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
+        "boot showcase isolated; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/types/hook (or the boot log) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
         "stamp defaults (beforeInsert): POST /api/v1/data/showcase_inquiry {name:'os-qa-<runid>'} OMITTING status AND source; re-read via GET and confirm source == 'web' — the hook is the SOLE producer of that value (the source field carries no default), so a correct read proves the hook fired; status == 'new' corroborates but is NOT hook-attributable alone (the 'new' status option is default:true)",
         "title trim (beforeInsert + beforeUpdate): POST /api/v1/data/showcase_task with title '  os-qa-<runid>  ' (leading/trailing spaces) and valid required fields; re-read → title == 'os-qa-<runid>' (insert trim); then PATCH the same row's title to another padded value and re-read → trimmed again (update trim); ONE multi-event hook covered both",
         "completion audit — FIRES (transition): PATCH /api/v1/data/showcase_task/<Build homepage id> {done:true} (previous done:false); after the HTTP response resolves, settle briefly (the audit is async fire-and-forget, it runs after the write returns), then read the server log for 'task completed: Build homepage'",
@@ -3176,7 +3176,7 @@
         "ref": "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (pins the beforeInsert stamp: status='new'/source='web' on an anonymous inquiry submit); packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (pins the beforeDelete onError:'abort' throw → REST error body). Declarative-wrapper semantics (two-root condition, async, retry, onError, fail-closed) are unit-pinned in packages/objectql/src/hook-wrappers.ts + hook-binder.ts tests. The transition audit / over-budget warn / priority-ordering LOG oracles and the abort/log/priority SCRATCH variants are NOT yet dogfood-pinned — drive them by hand."
       },
       "source": [
-        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
+        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
         "packages/spec/src/data/hook.zod.ts#HookSchema (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
         "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
         "packages/objectql/src/hook-binder.ts#bindHooksToEngine (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
@@ -3198,6 +3198,12 @@
           "date": "2026-09-09",
           "change": "citation only, no clause moved — the hook liveness citation asserted `timeout` 'live'; #14478 renamed it to `timeoutMs` and left `timeout` as a 'dead' tombstone row, so the ref sent a runner to a contradiction. Now names the live key and the tombstone.",
           "ref": "#15839"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-03",
+          "change": "fixture roster only, no clause moved — the showcase gained a fifth hook, showcase_guard_task_reopen (beforeUpdate on showcase_task, throws a user-facing refusal), the fixture records-forms.script-action-hook-refusal-toast drives. Two knownGaps stated facts it made false ('no two showcase hooks share an object+event', 'the fixtures never throw'); both now name it and say why it does not close this item's ordering or beforeInsert abort-rollback clause.",
+          "ref": "#21596"
         }
       ]
     },
@@ -4286,6 +4292,98 @@
           "date": "2026-09-30",
           "change": "initial — planned. The docs/NORTH-STAR.md feature-map line names per-organization append as half of the shared-picklist feature, and the design of record's verification sentence names this behaviour, so the ledger holds it as a planned requirement rather than leaving it off. It carries no acceptance clauses: neither the overlay's schema nor its write door is designed yet, and a clause would be written against a design nobody has settled",
           "ref": "#19518"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.script-action-hook-refusal-toast",
+      "title": "A script action whose server-side hook refuses the write with a user-facing sentence answers a 4xx, the console shows exactly one error toast carrying that sentence, and the record is left unchanged",
+      "since": "v17.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the script action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — body writes { id, done: false } through ctx.api, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item only — the Task Detail page is kind:'full' and renders no record_header bar)",
+          "the refusal sentence, verbatim: 'A finished task cannot be reopened. Create a follow-up task instead.' (TASK_REOPEN_REFUSAL in the hooks file — re-read it there before the run, never from this line)",
+          "a seeded FINISHED task (done: true) — 'Audit current IA' or 'App wireframes' (examples/app-showcase/src/data/seed/index.ts) — which is the only kind of record the action is offered on",
+          "a console built at this repo's .objectui-sha (pnpm objectui:build), served by the same boot the run drives",
+          "a browser driver that can read the network log and the DOM of one page (Playwright with launchOptions.executablePath=/opt/pw-browsers/chromium on these containers — RUNNER environment facts)"
+        ],
+        "knownGaps": [
+          "the console half is pinned in the objectui repo, not here — objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts characterizes the console failure chain (a 500 or a 400 carrying the sentence yields exactly one error toast with that sentence) with fetch and the toast sink as doubles. It is not runnable from this checkout and it stubs the transport, so it is not this item's evidence; this item exists to observe the whole chain live, on a stock app.",
+          "the toaster auto-dismisses every toast after 4s (objectui ConsoleToaster toastOptions.duration 4000) and closes it with an exit animation that marks the node data-removed=\"true\" first — count inside that window, and exclude removed nodes, or a correct single toast reads as zero."
+        ]
+      },
+      "steps": [
+        "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin) with the console built at .objectui-sha; sign in through the form as the seeded admin",
+        "pick a finished task: GET /api/v1/data/showcase_task?where=... (or the list) and record its id, done, progress and modified timestamp — this is the before-image",
+        "open the showcase_task list in the console (/_console/apps/showcase_app/showcase_task); screenshot after render settles; open the finished task's row menu ('Open menu' on its row) and confirm 'Reopen' is offered there",
+        "start capturing the network log and, before clicking, count toast nodes: document.querySelectorAll('[data-sonner-toast]:not([data-removed=\"true\"])').length — the baseline (expected 0)",
+        "click 'Reopen' with a ref-targeted click (RUNNER automation self-check); wait for the response of POST /api/v1/actions/showcase_task/showcase_reopen_task (the request URL may carry the record id as a further path segment) — record its status and its JSON body",
+        "within 2s of that response landing (the 4s auto-dismiss window), screenshot, then read every live toast node: count, data-type attribute, textContent — and compute count minus baseline",
+        "tie the toast to the request: the request was the ONLY non-GET request between the baseline read and the toast read in the network log, and the toast text contains the same sentence as that response's error.message",
+        "re-read the task over the API: GET /api/v1/data/showcase_task/ID — compare done, progress and the modified timestamp against the before-image",
+        "repeat once on a fresh page load (RUNNER rule 2 — any fail is reproduced twice before it is recorded)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the refusal answers a 4xx on the action route — a guard that said no is a successful evaluation, never a 5xx server fault — and the response body carries the hook's sentence",
+          "oracle": "network",
+          "verify": "the captured response of POST /api/v1/actions/showcase_task/showcase_reopen_task has 400 <= status < 500 and its body's error.message contains TASK_REOPEN_REFUSAL verbatim",
+          "evidence": "the request line, the response status and the error envelope (code, message) as text"
+        },
+        {
+          "clause": "the console shows EXACTLY ONE new toast for that refusal, of type error, whose text contains the sentence — not zero (the objectui#9151 symptom), not two (a duplicated sink), and not a success toast",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms the page rendered, the live-toast count read within the auto-dismiss window minus the pre-click baseline is exactly 1; that node's data-type is 'error' and its textContent contains TASK_REOPEN_REFUSAL",
+          "evidence": "baseline count, post-response count, the node data-type and textContent, as text; a one-line description of the screenshot"
+        },
+        {
+          "clause": "the toast belongs to THIS request: it is the console reporting the refused action, not some other failure that happened to toast at the same moment",
+          "oracle": "network",
+          "verify": "the network log between the baseline read and the toast read holds exactly one non-GET request — the action POST — and the toast's sentence equals the one in that response's error.message",
+          "evidence": "the ordered list of non-GET requests in that window, with status"
+        },
+        {
+          "clause": "the record is left unchanged: the refused write did not land, neither partly nor through a second path",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_task/ID after the click returns done true, the same progress and the same modified timestamp as the before-image",
+          "evidence": "the before-image and the after re-read, side by side"
+        }
+      ],
+      "negative": [
+        "a 5xx on the action route is a FAIL of the status clause even when the body carries the sentence — the class #17265 fixed (PR #17679) must not regress",
+        "zero live toasts after a 4xx carrying the sentence is a FAIL of the toast clause — the objectui#9151 symptom; rule out a count taken after the 4s auto-dismiss before recording it",
+        "a toast that shows only the generic fallback ('… failed (HTTP nnn)') when the response body carried the sentence is a FAIL — the sentence is what the user must be told",
+        "two or more new toasts for one click is a FAIL — one refusal, one message"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "automation-input"
+      ],
+      "source": [
+        "examples/app-showcase/src/data/hooks/index.ts#GuardTaskReopenHook (the refusing beforeUpdate hook; the sentence is TASK_REOPEN_REFUSAL in the same file)",
+        "examples/app-showcase/src/ui/actions/index.ts#ReopenTaskAction (the script action whose ctx.api write the hook refuses)",
+        "examples/app-showcase/test/task-reopen-hook-refusal.test.ts (pins the fixture: the hook refuses with the sentence and leaves the row unchanged on the real engine, and the action writes the refused shape)",
+        "packages/runtime/src/sandbox/quickjs-runner.ts#sandboxRefusalMessage (a nested sandboxed hook refusal keeps its business message across the action VM hop, so the action route answers 4xx — #17265 / PR #17679)",
+        "packages/runtime/src/sandbox/nested-hook-refusal-is-a-rejection.test.ts (the wire half: 400 VALIDATION_ERROR with the sentence, unit-level)",
+        "objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts (objectui#9252 — the console failure chain characterized end to end with the transport stubbed)",
+        "objectui packages/app-shell/src/chrome/ConsoleToaster.tsx (sonner Toaster: richColors, duration 4000, toast nodes carry data-sonner-toast and data-type)",
+        "objectui#9151 (the zero-toast symptom this item re-observes on a current build); #21596 (this item)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-03",
+          "change": "initial — gives objectui#9151's re-observation a home: the status half was fixed (#17265 / PR #17679) and the console chain pinned correct with the transport stubbed (objectui#9252), but the symptom was never re-observed live on a current build. The showcase had no hook that refuses a write, so the fixture pair (showcase_guard_task_reopen + showcase_reopen_task) lands with it.",
+          "ref": "#21596"
         }
       ]
     }

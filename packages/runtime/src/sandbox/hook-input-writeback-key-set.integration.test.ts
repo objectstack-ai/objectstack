@@ -82,6 +82,8 @@ const TASK = {
 
 const STAMP = '2026-09-03T09:00:00.000Z';
 const EARLIER = '2026-01-01T00:00:00.000Z';
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 /**
@@ -222,7 +224,10 @@ describe('#14758 — the sandbox write-back carries the keys the body wrote', ()
       expect(open.status).toBe('open');
       expect(open.completed_at ?? null).toBeNull();
 
-      expect(noise.silentChannels()).toEqual([]);
+      // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+      // hold before any driver, so the declared refusal no longer occurs. The capture stays
+      // declared (a returning read is still withheld and counted) and this asserts nothing was.
+      expect(noise.tablesSeen()).toEqual([]);
     },
     60000,
   );
@@ -253,7 +258,10 @@ describe('#14758 — the sandbox write-back carries the keys the body wrote', ()
     expect(already.completed_at).toBe(EARLIER);
     expect(open.completed_at ?? null).toBeNull();
 
-    expect(noise.silentChannels()).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise.tablesSeen()).toEqual([]);
   }, 60000);
 
   it('a row-invariant sandboxed DELETE still propagates (the absence-from-dump leg)', async () => {
@@ -278,6 +286,9 @@ describe('#14758 — the sandbox write-back carries the keys the body wrote', ()
     expect(open.status).toBe('done');
     expect(already.status).toBe('done');
 
-    expect(noise.silentChannels()).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise.tablesSeen()).toEqual([]);
   }, 60000);
 });

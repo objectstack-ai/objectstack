@@ -60,6 +60,18 @@ export default defineConfig({
         find: /^@objectstack\/types$/,
         replacement: path.resolve(__dirname, '../../types/src/index.ts'),
       },
+      {
+        // [#21519] `crud-nodes.ts` serves a `get_record` read of the
+        // stored-metadata family through the data door's own functions, which
+        // `@objectstack/metadata-protocol` exports, and
+        // `get-record-stored-metadata-family.integration.test.ts` judges the
+        // node against that package's data door. Unaliased, the workspace link
+        // resolves to `dist/`, so the verdict on both the serve and its control
+        // would depend on build state rather than on the source in this
+        // checkout. Same anchored-regex rule as the entries above.
+        find: /^@objectstack\/metadata-protocol$/,
+        replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
+      },
     ],
   },
 });

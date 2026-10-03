@@ -54,16 +54,31 @@ describe('inferDriverTypeFromUrl', () => {
     expect(inferDriverTypeFromUrl('./app.sqlite')).toBe('sqlite');
   });
 
-  // #3276: the mingo in-memory engine has its own `memory://` URL scheme.
-  it('maps the memory:// (and mingo://) scheme to the mingo `memory` kind', () => {
-    expect(inferDriverTypeFromUrl('memory://')).toBe('memory');
-    expect(inferDriverTypeFromUrl('memory://ignored-host')).toBe('memory');
-    expect(inferDriverTypeFromUrl('mingo://')).toBe('memory');
-  });
+  // The in-memory (mingo) engine's schemes are REFUSED at inference: the engine
+  // is no longer a boot store. Asserted on the error's TYPE and on what it names
+  // (the URL and the two SQLite replacements), never on its prose.
+  it.each(['memory://', 'memory://ignored-host', 'mingo://', 'MINGO://x'])(
+    'refuses %s at inference, naming the SQLite replacements',
+    (url) => {
+      let err: unknown;
+      try {
+        inferDriverTypeFromUrl(url);
+      } catch (e) {
+        err = e;
+      }
+      expect(err, `inferDriverTypeFromUrl accepted ${url}`).toBeInstanceOf(UnsupportedDriverError);
+      const refusal = err as UnsupportedDriverError;
+      // Not a kind this resolver produces — the allowlist pin's oracle reads this.
+      expect(refusal.recognized).toBe(false);
+      expect(refusal.message).toContain(`"${url}"`);
+      expect(refusal.message).toContain('--fresh');
+      expect(refusal.message).toContain(':memory:');
+    },
+  );
 
   // The sqlite `:memory:` PSEUDO-FILE is SQLite's own in-memory mode — NOT the
-  // mingo engine. It must stay `sqlite`, distinct from the `memory://` scheme.
-  it('keeps sqlite `:memory:` mapped to sqlite (distinct from memory://)', () => {
+  // mingo engine. It stays `sqlite`, and it is the replacement the refusal names.
+  it('keeps sqlite `:memory:` mapped to sqlite (the replacement, distinct from memory://)', () => {
     expect(inferDriverTypeFromUrl(':memory:')).toBe('sqlite');
   });
 
@@ -76,40 +91,47 @@ describe('inferDriverTypeFromUrl', () => {
 
 describe('resolveDriverType', () => {
   it('lets an explicit driver win over URL inference (and normalizes case/space)', () => {
-    expect(resolveDriverType('memory', 'postgres://h/db')).toBe('memory');
-    expect(resolveDriverType('  MEMORY  ', undefined)).toBe('memory');
+    expect(resolveDriverType('sqlite', 'postgres://h/db')).toBe('sqlite');
+    expect(resolveDriverType('  SQLITE  ', undefined)).toBe('sqlite');
     expect(resolveDriverType('Postgres', 'mongodb://h/db')).toBe('postgres');
   });
 
   it('falls back to URL inference when no explicit driver is set', () => {
     expect(resolveDriverType(undefined, 'mongodb://h/db')).toBe('mongodb');
-    expect(resolveDriverType('', 'memory://')).toBe('memory');
+    expect(resolveDriverType('', ':memory:')).toBe('sqlite');
     expect(resolveDriverType('   ', undefined)).toBe('');
+    // …and inference's refusal reaches the caller through this function too.
+    expect(() => resolveDriverType('', 'memory://')).toThrow(UnsupportedDriverError);
   });
 });
 
 describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () => {
-  // ── #3276: the regression the memory branch exists to fix ──────────────────
-  // `memory` must declare the mingo InMemoryDriver — NOT fall through to the
-  // dev SQLite `:memory:` default. Remove the `memory` branch and this goes
-  // red: in dev it resolves to the sqlite dev-default, in prod to null.
-  it('declares the mingo memory driver for `memory` in DEV and PROD', () => {
-    for (const isDev of [true, false]) {
-      const r = resolveStorageDefinition('memory', { isDev });
-      expect(r).not.toBeNull();
-      expect(r!.driverId).toBe('memory');
-      expect(r!.label).toBe('InMemoryDriver');
-      expect(r!.trackName).toBe('MemoryDriver');
-      expect(r!.displayUrl).toBe('(in-memory)');
-      // Never provisions a telemetry sibling.
-      expect(r!.sqliteFilePath).toBeUndefined();
-    }
-  });
-
-  it('accepts the `mingo` and `in-memory` aliases', () => {
-    expect(resolveStorageDefinition('mingo', { isDev: false })!.driverId).toBe('memory');
-    expect(resolveStorageDefinition('in-memory', { isDev: false })!.driverId).toBe('memory');
-  });
+  // ── The retired in-memory engine ───────────────────────────────────────────
+  // #3276's lesson still holds — a `memory` selection must NOT fall through to the
+  // dev SQLite `:memory:` default in silence — but the answer is now a refusal,
+  // not the mingo driver: the engine is no longer a boot store. Delete the
+  // refusal and dev resolves the sqlite dev default (a silent different engine),
+  // prod resolves null; either way no `UnsupportedDriverError` is thrown.
+  it.each(['memory', 'mingo', 'in-memory', 'inmemory'])(
+    'refuses `%s` in DEV and PROD, naming the SQLite replacements instead of a typo list',
+    (spelling) => {
+      for (const isDev of [true, false]) {
+        let err: unknown;
+        try {
+          resolveStorageDefinition(spelling, { isDev });
+        } catch (e) {
+          err = e;
+        }
+        expect(err, `${spelling} (isDev=${isDev}) was not refused`).toBeInstanceOf(UnsupportedDriverError);
+        const refusal = err as UnsupportedDriverError;
+        expect(refusal.recognized).toBe(false);
+        expect(refusal.driverType).toBe(spelling);
+        expect(refusal.message).toContain('--fresh');
+        expect(refusal.message).toContain(':memory:');
+        expect(refusal.message).not.toContain('Supported drivers:');
+      }
+    },
+  );
 
   it('declares mongodb from the URL it was given', () => {
     const r = resolveStorageDefinition('mongodb', {

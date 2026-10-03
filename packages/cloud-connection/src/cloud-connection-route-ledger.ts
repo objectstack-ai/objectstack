@@ -223,7 +223,9 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         mountedIn: 'marketplace-install-local-plugin.ts',
         disposition: 'server-only',
         note:
-            'removes the cached manifest from this runtime\'s disk; the kernel must restart to fully unload, since '
+            'removes the cached manifest from this runtime\'s disk and runs the uninstall cleanups registered with the '
+            + 'protocol (the package\'s permission sets and their grants are revoked, each outcome reported as `cleanups`); '
+            + 'the kernel must restart to fully unload, since '
             + '`engine.registerApp` is additive only. A filesystem-mutating, restart-coupled operation local to one runtime '
             + 'is deliberately not SDK surface — the CLI and the Console Setup view drive it. Requires `manage_metadata`, '
             + 'never merely a signed-in session.',

@@ -14,9 +14,10 @@
  *
  * - `SharingConfigSchema` has a **live authoring door**. `FormViewSchema.sharing`
  *   carries it (`view.zod.ts`), `view` is a metadata-type root, and the runtime
- *   really reads it: `rest-server.ts` mounts the anonymous form endpoints only
- *   when `sharing.allowAnonymous === true` and a `sharing.publicLink` slug
- *   matches. Both example apps author it (`app-showcase` `inquiry.view.ts`,
+ *   really reads it: `rest-server.ts` serves the anonymous form endpoints only
+ *   when `sharing.enabled === true`, `sharing.allowAnonymous === true` and a
+ *   `sharing.publicLink` slug matches (`anonymousFormIntakeCandidates` in
+ *   `@objectstack/metadata-core`). Both example apps author it (`app-showcase` `inquiry.view.ts`,
  *   `app-crm` `lead.view.ts`). It is `strictObject` as of #4001 批 14.
  * - `EmbedConfigSchema` was **REMOVED** at #5015 (ADR-0049 enforce-or-remove) —
  *   see the block below where it stood.
@@ -75,8 +76,8 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
     shareUrl: 'publicLink',
     shareLink: 'publicLink',
     slug: 'publicLink',
-    // Anonymous access — the key `rest-server.ts` actually gates the public
-    // form routes on.
+    // Anonymous access — one of the two switches (with `enabled`) the public
+    // form routes in `rest-server.ts` gate on.
     anonymous: 'allowAnonymous',
     allowGuest: 'allowAnonymous',
     allowGuests: 'allowAnonymous',

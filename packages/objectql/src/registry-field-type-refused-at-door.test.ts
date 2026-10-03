@@ -29,6 +29,9 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+// [#21516] The rest of the stored-metadata family the repository writes through: the
+// engine refuses a name the registry does not resolve, so the harness registers it as a boot does.
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { hashSpec } from '@objectstack/metadata-core';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
@@ -257,6 +260,7 @@ async function boot(driver: unknown) {
     engine.registerDriver(driver as any, true);
     await engine.init();
     engine.registry.registerObject(sysMetadataObject as any);
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
     const protocol = new ObjectStackProtocolImplementation(engine as any, undefined, ENV);
     return { engine, protocol };
 }

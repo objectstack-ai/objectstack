@@ -864,33 +864,22 @@ describe('[#21255] per-aggregation filter — a plain { $field } across two comp
     });
   }
 
-  it('an object the registry does not declare is not judged — the card\'s query is answered, as written', async () => {
-    // The fail-open direction an `addDays` pair already takes for a
-    // registry-less host: no declaration, no class, no verdict.
-    //
-    // [#21242] What answers it is `@objectstack/formula`'s matcher, which no
-    // longer keeps a whole-day copy of the bare-day upper bound: a pair that
-    // reaches it without a seam is compared as written (ADR-0053 D-D1 item 5).
-    // None of the six ORDERS closes on its due day, so they count 3 either
-    // way. `o7` does, at 15:00: the deleted copy read its due day as "through
-    // that day" and counted it (4 of 7); as written, the instant's text sorts
-    // above the bare day, and it is not counted (3 of 7).
-    const ON_THE_DUE_DAY = {
-      id: 'o7', customer_id: 'c3', amount: 10, cap: 1, placed_on: '2026-01-05', due_on: '2026-01-05', grace: 0,
-      opened_at: '2026-01-05T08:00:00.000Z', closed_at: '2026-01-05T15:00:00.000Z', slot: '15:00:00', created_at: '2026-09-01T00:00:00.000Z',
-    };
+  it('an object the registry does not declare is not judged — [#21516] the engine refuses the object itself', async () => {
+    // [#21516] An in-process verb resolves its target only through the
+    // registry, and refuses a name it does not resolve with the data door's
+    // own `OBJECT_NOT_FOUND` before any filter door or read — so no class
+    // verdict is invented about the pair, and nothing is answered from a table
+    // reached by its raw name. The no-declaration reading of the pair (no
+    // class, compared as written, #21242) stays pinned where a caller can
+    // still reach it without a registry: the direct `applyInMemoryAggregation`
+    // case further down this file.
     for (const native of [true, false]) {
-      for (const [rows, expected] of [
-        [ORDERS, { opp_count: 6, picked: 3 }],
-        [[...ORDERS, ON_THE_DUE_DAY], { opp_count: 7, picked: 3 }],
-      ] as const) {
-        const { driver } = makeCountingDriver(rows, native);
-        const engine = new ObjectQL();
-        engine.registerDriver(driver, true);
-        await engine.init();
-        expect(await engine.aggregate('crm_order', withFilter({ closed_at: { $lte: { $field: 'due_on' } } })))
-          .toEqual([expected]);
-      }
+      const { driver } = makeCountingDriver(ORDERS, native);
+      const engine = new ObjectQL();
+      engine.registerDriver(driver, true);
+      await engine.init();
+      await expect(engine.aggregate('crm_order', withFilter({ closed_at: { $lte: { $field: 'due_on' } } })))
+        .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
     }
   });
 });

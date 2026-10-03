@@ -60,16 +60,20 @@ export function absoluteUrl(path: string): string {
  *
  * ## Provenance — how to re-encode it
  *
- * The master is `docs/screenshots/hero-cover-dark.png` (2400x1200, 406,703 B),
+ * The master is `docs/screenshots/hero-cover-dark.png` (2400x1200, 563,953 B),
  * which the README embeds directly from the repo and which is NOT served by this
- * site. This file is a lossy WebP derived from that master, and the derivation is
- * the whole reason it is small enough to sit above the fold:
+ * site. The master is itself a render of `docs/screenshots/hero-cover-dark.html`
+ * by `docs/screenshots/render-hero-cover.mjs` (the preinstalled Playwright
+ * Chromium), so a copy change is an edit to that template and one re-render —
+ * the script performs the derivation below as its second step. This file is a
+ * lossy WebP derived from that master, and the derivation is the whole reason it
+ * is small enough to sit above the fold:
  *
  *   sharp('docs/screenshots/hero-cover-dark.png')
- *     .webp({ quality: 80, effort: 6 })            // sharp 0.35.3 / libwebp 1.6.0
+ *     .webp({ quality: 80, effort: 6 })            // sharp 0.35.4 / libwebp 1.6.0
  *     .toFile('apps/docs/public/hero-cover-dark.webp')
  *
- * 83,272 B — 20.5% of the PNG. Re-encode from the master, never from this file:
+ * 85,472 B — 15.2% of the PNG. Re-encode from the master, never from this file:
  * a lossy re-encode of a lossy source compounds. And do not "restore" the PNG
  * alongside it — a `public/` holding both is how the next re-encode picks the
  * wrong one.
@@ -83,5 +87,5 @@ export const HERO_COVER = {
   url: '/hero-cover-dark.webp',
   width: 2400,
   height: 1200,
-  alt: 'ObjectStack — the metadata framework for AI-written apps',
+  alt: 'ObjectStack: the ontology is the software. One executable business ontology, written by AI, run by the runtime, operated by agents, owned by you.',
 } as const;

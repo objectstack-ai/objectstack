@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14428] `MongoDBDriver.update()` answers a missing id with `null`, not with
+ * [commit ca3fd4b1a] `MongoDBDriver.update()` answers a missing id with `null`, not with
  * a record it made up.
  *
  * # What was broken
@@ -13,7 +13,7 @@
  * `updateOne({ id })` matching nothing and `findOne({ id })` coming back `null`
  * still produced a row — the caller's own payload plus the `updated_at` this
  * driver had just stamped, under an id that names no document. Since #13878
- * (PR #14434) `IDataDriver.update()` declares `Promise[Record[string, unknown]
+ * (commit 93940d492) `IDataDriver.update()` declares `Promise[Record[string, unknown]
  * | null]`, so "a row for an id that does not exist" is no longer a way of
  * satisfying the declaration: it is a value the declaration distinguishes from.
  * Four of six shipped implementations already answered `null`; this one and
@@ -69,7 +69,7 @@
  *    only `node_modules`/`dist`, lists 43). vitest transpiles without
  *    typechecking, and the root `tsconfig.json` excludes `packages` entirely,
  *    so neither of those picks it up either. That exclusion is itself a filed
- *    defect (#14917), not a design.
+ *    defect (closed by commit a06faebbe), not a design.
  *  - **`pnpm check:type-check-debt` DOES compile it.** The ratchet's
  *    `--re-measure` leg generates a project that drops the test exclusion and
  *    runs `tsc` over this package with its tests un-hidden, then compares the

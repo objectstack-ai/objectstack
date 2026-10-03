@@ -44,6 +44,82 @@ const ADAPTERS: AdapterCase[] = [
  * parity) need the routes to exist. Pass false to exercise the
  * capability-absent posture: no mounts, shared 404.
  */
+/**
+ * [#21516] The objects core's authz resolver (`resolveUserAuthzGrants`) reads on
+ * every request. A deployment's auth and security plugins register them; this
+ * stack stubs the `auth` service instead, so they are spelled here with only the
+ * columns that resolver reads (no dependency edge onto either package, the
+ * precedent `trigger-record-change`'s integration fixture set) and registered
+ * AFTER boot, so no schema sync provisions them: the resolver reads missing
+ * tables and answers "no grants", exactly as it did when the engine still
+ * handed an unregistered name to the driver (which it now refuses).
+ */
+const authzResolverObjects = [
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_user',
+      label: 'User',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        email: { name: 'email', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_member',
+      label: 'Member',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+        role: { name: 'role', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_position',
+      label: 'User Position',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        position: { name: 'position', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_permission_set',
+      label: 'User Permission Set',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_position',
+      label: 'Position',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        name: { name: 'name', type: 'text' as const },
+        active: { name: 'active', type: 'boolean' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+] as const;
+
 async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean } = {}) {
     const kernel = new LiteKernel();
     kernel.use(new ObjectQLPlugin());
@@ -97,6 +173,7 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
     // insert fails with `no such table`, which the REST error mapper turns into
     // a 404 OBJECT_NOT_FOUND — a routing-shaped symptom for a DDL-shaped cause.
     await ql.syncObjectSchema('task');
+    for (const o of authzResolverObjects) ql.registry.registerObject(o.def as never, o.owner);
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     return { kernel, base: `http://127.0.0.1:${httpServer.getPort!()}` };

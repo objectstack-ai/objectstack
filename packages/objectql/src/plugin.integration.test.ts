@@ -5,6 +5,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '../src/plugin';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 
 describe('ObjectQLPlugin - Metadata Service Integration', () => {
   let kernel: ObjectKernel;
@@ -971,6 +972,28 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
   });
 
   describe('Cold-Start Metadata Restoration', () => {
+    // [#21516] A project kernel (environmentId set) gets the stored-metadata
+    // family from MetadataPlugin, which these cases do not compose. Register it
+    // the way that plugin does — through the manifest service, after the engine
+    // plugin's init — so the engine resolves `sys_metadata` and the reads below
+    // reach the driver. The engine refuses a name its registry does not hold.
+    const metadataFamilyRegistrar = {
+      name: 'test.metadata-family',
+      type: 'standard',
+      version: '1.0.0',
+      dependencies: ['com.objectstack.engine.objectql'],
+      init: async (ctx: any) => {
+        ctx.getService('manifest').register({
+          id: 'com.objectstack.metadata-objects',
+          name: 'Metadata Platform Objects',
+          version: '1.0.0',
+          type: 'plugin',
+          scope: 'system',
+          objects: [SysMetadataObject, SysMetadataHistoryObject, SysMetadataCommitObject, SysMetadataAuditObject],
+        });
+      },
+    };
+
     it('should restore metadata from sys_metadata via protocol.loadMetaFromDb on start', async () => {
       // Arrange — a driver whose find() returns persisted metadata records
       const findCalls: Array<{ object: string; query: any }> = [];
@@ -1102,6 +1125,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       const plugin = new ObjectQLPlugin({ environmentId: 'env_1' });
       await kernel.use(plugin);
+      await kernel.use(metadataFamilyRegistrar as any);
       await kernel.bootstrap();
 
       const metaReads = findCalls.filter((c) => c.object === 'sys_metadata');
@@ -1128,6 +1152,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       const plugin = new ObjectQLPlugin({ environmentId: 'env_1', hydrateMetadataFromDb: true });
       await kernel.use(plugin);
+      await kernel.use(metadataFamilyRegistrar as any);
       await kernel.bootstrap();
 
       expect(findCalls.find((c) => c.object === 'sys_metadata')).toBeDefined();

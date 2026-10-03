@@ -13,28 +13,21 @@ import {
     type ArtifactGrantBinding,
 } from './security/artifact-granted-permissions.js';
 import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
-import {
-    resolveTenancyPosture,
-    resolveScheduledWorkEnabled,
-    SCHEDULED_WORK_DISABLED_REASON,
-} from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { declareSeedSource } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
-import type { IJobService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import type { IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
-import { bindAppArtifactHandlers } from './app-artifact-handlers.js';
-import { toBoundaryJobSchedule } from './job-schedule.js';
-import type { JobHandlerContext } from './job-handler-context.js';
-import { countServerTiming, SEMCONV } from '@objectstack/observability';
-import { resolveMetrics } from './observability/observability-service-plugin.js';
+import { bindAppArtifactHandlers, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { countServerTiming } from '@objectstack/observability';
 
 /**
  * The write options every seed insert must use — the shared
@@ -1117,157 +1110,18 @@ export class AppPlugin implements Plugin {
         // ── Auto-register declarative Background Jobs ────────────────────
         // Jobs declared via `defineStack({ jobs })` are scheduled against the
         // running `IJobService` on `kernel:ready` (so the service plugin and
-        // ObjectQL engine have had a chance to register). Handler strings are
-        // resolved through `collectBundleFunctions(bundle)` — the same
-        // registry used by hooks/actions, keeping the surface uniform.
+        // ObjectQL engine have had a chance to register).
+        //
+        // [#21489] Through `scheduleAppArtifactJobs` — the binder's job half,
+        // which the install-local plugin also calls for an installed package on
+        // install and on rehydrate. This block used to BE that loop, resolving
+        // `fnMap[job.handler]` only: a job's sandboxed `body` was skipped at
+        // warn, and ignored when a `handler` stood beside it. The binder runs
+        // the body, and the body wins. See `./app-artifact-handlers.ts`.
         try {
-            const jobs: any[] = Array.isArray(this.collections.jobs)
-                ? this.collections.jobs
-                : Array.isArray((this.bundle.manifest || {}).jobs)
-                    ? (this.bundle.manifest as any).jobs
-                    : [];
-            if (jobs.length > 0) {
+            if (collectBundleJobs(this.bundle).length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    // [#17396] The DEPLOYMENT gate, ahead of the job service
-                    // probe. Every `defineJob` reaching this loop is
-                    // PACKAGE-AUTHORED — it arrived through `defineStack({ jobs })`
-                    // or a package bundle — which is exactly the boundary the
-                    // switch draws. ⛔ Platform-internal scheduled work is NOT
-                    // gated and does not pass through here: approvals
-                    // escalation, the lifecycle Reaper, the messaging dispatch
-                    // loop and membership backfill each schedule themselves
-                    // from their own service plugin, because they are part of
-                    // the runtime a deployment asked for rather than arbitrary
-                    // load a package put on its clock.
-                    //
-                    // `info`, not `warn`: this is the default state of every
-                    // deployment and the deployment declared it, so nothing is
-                    // wrong and nothing looks normal-but-broken. Said once per
-                    // app with the job count, rather than once per job — the
-                    // remedy is one variable, and repeating it N times is how a
-                    // line stops being read.
-                    if (!resolveScheduledWorkEnabled()) {
-                        ctx.logger.info(
-                            `[AppPlugin] declarative jobs NOT scheduled — ${SCHEDULED_WORK_DISABLED_REASON}`,
-                            { appId, jobCount: jobs.length },
-                        );
-                        return;
-                    }
-                    let svc: IJobService | undefined;
-                    try { svc = ctx.getService<IJobService>('job'); } catch { /* not installed */ }
-                    if (!svc || typeof svc.schedule !== 'function') {
-                        ctx.logger.warn('[AppPlugin] job service not registered — skipping declarative jobs', {
-                            appId, jobCount: jobs.length,
-                        });
-                        return;
-                    }
-                    const fnMap = collectBundleFunctions(this.bundle);
-                    const metrics = resolveMetrics(ctx);
-                    let ok = 0;
-                    let failed = 0;
-                    for (const job of jobs) {
-                        const jobName: string = job?.name;
-                        if (!jobName) {
-                            ctx.logger.warn('[AppPlugin] skipping job without name', { appId, job });
-                            continue;
-                        }
-                        if (job.enabled === false) {
-                            ctx.logger.debug('[AppPlugin] job disabled — skipping', { appId, job: jobName });
-                            continue;
-                        }
-                        const handler = fnMap[job.handler];
-                        if (typeof handler !== 'function') {
-                            ctx.logger.warn('[AppPlugin] job handler not found in bundle.functions — skipping', {
-                                appId, job: jobName, handler: job.handler,
-                            });
-                            continue;
-                        }
-                        try {
-                            await svc.schedule(
-                                jobName,
-                                // #4567: authoring tier → boundary tier. `job.schedule`
-                                // is the PARSED `Schedule`, whose cron `expression` is
-                                // the ADR expression envelope `{dialect,source}`;
-                                // `IJobService.schedule` (and croner behind it) take a
-                                // bare cron string. Same seam, same place, as the
-                                // retryPolicy/timeout threading just below.
-                                toBoundaryJobSchedule(job.schedule, jobName),
-                                // #14094: the handler is given DATA REACH. A job has no
-                                // graph — no node before it, none after — so unlike a
-                                // flow `script` node it cannot be a pure value-returner
-                                // whose I/O the surrounding graph performs. `ql` is the
-                                // same engine handle `defineStack({ onEnable })` gets, and
-                                // it is the only route that survives the ARTIFACT path:
-                                // an artifact carries no `onEnable` and `mergeRuntimeModule`
-                                // merges only `functions`, so the module-scope-global
-                                // escape is never bound on an artifact-served boot.
-                                // Additive — see `JobHandlerContext` for the full argument.
-                                async (jobCtx: any) => {
-                                    const jobContext: JobHandlerContext = {
-                                        ...jobCtx,
-                                        jobId: jobName,
-                                        // The RESOLVED view, not `this.bundle`:
-                                        // a handler reading `ctx.bundle.objects`
-                                        // on a multi-package option-B artifact
-                                        // would otherwise read `undefined` with
-                                        // nothing thrown (ADR-0130 D4, #15005).
-                                        // Identical reference on every bundle
-                                        // that carries no `packages[]`.
-                                        bundle: this.collections,
-                                        ql,
-                                        logger: ctx.logger,
-                                    };
-                                    // #14256: RETURN the handler's resolved
-                                    // value. `JobHandler` is
-                                    // `(context) => Promise<void | JobRunOutcome>`
-                                    // and all three shipped adapters map a
-                                    // resolved `{ outcome: 'degraded', reason }`
-                                    // onto a `sys_job_run.status` distinct from
-                                    // `success` (#6617/#5548). A block-bodied
-                                    // arrow that only awaited made this wrapper
-                                    // a `Promise<void>`, so the third outcome
-                                    // was unreachable from `defineJob`: a job
-                                    // that ran to completion while its work did
-                                    // not happen was recorded as `success` with
-                                    // `reason` dropped, and the three-outcome
-                                    // table in `content/docs/automation/jobs.mdx`
-                                    // was false on the declarative door.
-                                    // A handler that resolves `undefined` — every
-                                    // handler written before #6617 — still returns
-                                    // `undefined` here, which is the `success`
-                                    // branch exactly as before.
-                                    return await handler(jobContext);
-                                },
-                                // #3494: thread the authored retryPolicy/timeoutMs to the adapter
-                                (job.retryPolicy || job.timeoutMs)
-                                    ? { retryPolicy: job.retryPolicy, timeoutMs: job.timeoutMs }
-                                    : undefined,
-                            );
-                            ok++;
-                        } catch (err: any) {
-                            failed++;
-                            // #4567: a job that fails to schedule is a SILENT OUTAGE —
-                            // the app builds and boots green while the work never runs.
-                            // It gets error level plus its own counter, and deliberately
-                            // NOT the `warn` that "handler not found" / "job disabled"
-                            // use: those describe a job that was never going to run,
-                            // this one describes a job the author is owed.
-                            ctx.logger.error(
-                                '[AppPlugin] Background job FAILED TO SCHEDULE — it will never run',
-                                err as Error,
-                                { appId, job: jobName, schedule: job.schedule },
-                            );
-                            metrics.counter(SEMCONV.jobScheduleFailuresTotal, { app: appId, job: jobName });
-                        }
-                    }
-                    ctx.logger.info('[AppPlugin] Scheduled background jobs', { appId, count: ok, failed });
-                    if (failed > 0) {
-                        ctx.logger.error(
-                            '[AppPlugin] Some background jobs are declared but NOT scheduled',
-                            undefined,
-                            { appId, scheduled: ok, failed },
-                        );
-                    }
+                    await scheduleAppArtifactJobs(ctx, this.bundle, { appId, ql, source: 'AppPlugin' });
                 });
             }
         } catch (err: any) {
@@ -2154,6 +2008,20 @@ export function collectBundleHooks(bundle: any): any[] {
     push(stack?.hooks);
     push(stack?.manifest?.hooks);
     return out;
+}
+
+/**
+ * Collect declarative `Job` definitions from a bundle (#21489) — the resolved
+ * top-level `jobs` (ADR-0130 D4: every package body's too), else the legacy
+ * `manifest.jobs`. One list or the other, never a merge: the read `AppPlugin`
+ * always made, moved here so the binder's job half and the install-local job
+ * gate read the jobs the boot reads.
+ */
+export function collectBundleJobs(bundle: any): any[] {
+    const stack = resolveArtifactCollections(bundle) as any;
+    if (Array.isArray(stack?.jobs)) return stack.jobs;
+    const manifest = bundle?.manifest;
+    return Array.isArray(manifest?.jobs) ? manifest.jobs : [];
 }
 
 /**

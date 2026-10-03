@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13195] What `translateFilter` emits for `$exists`, and what MongoDB makes
+ * [commit 9dac1ae01] What `translateFilter` emits for `$exists`, and what MongoDB makes
  * of it on a row with NO VALUE — measured, not read.
  *
  * ## The ruling, and why this driver was thought to be the hard half
@@ -93,7 +93,7 @@ function matchMongoDoc(row: Record<string, unknown>, doc: Record<string, unknown
       if ((cond as Array<Record<string, unknown>>).some((b) => matchMongoDoc(row, b))) return false;
       continue;
     }
-    // [#13195] Modelled because the emitter now produces it: a lowered
+    // [commit 9dac1ae01] Modelled because the emitter now produces it: a lowered
     // `$exists` whose key is already taken by a sibling operator is promoted to
     // its own branch rather than merged over the sibling.
     if (field === '$and') {
@@ -203,7 +203,7 @@ describe('[#13195] `$exists` translation and its answer on a no-value row', () =
   });
 
   /**
-   * [#13195] `$exists` SHARING a field constraint with another operator.
+   * [commit 9dac1ae01] `$exists` SHARING a field constraint with another operator.
    *
    * Not a cell the card or the ruling names — it is a consequence of the
    * prescribed lowering, found by measuring it. `{$ne: null}` / `{$eq: null}`

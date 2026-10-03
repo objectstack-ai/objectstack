@@ -2,6 +2,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
+import { isMissingTableError } from '@objectstack/types';
 import {
   printHeader,
   printSuccess,
@@ -15,6 +16,14 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+
+/** The table this pre-flight inventories. Never written. */
+const SYS_ACCOUNT = 'sys_account';
+
+/** The driver read this pre-flight issues: `find` only, read-only by construction. */
+interface AccountTableDriver {
+  find(object: string, query: Record<string, unknown>): Promise<unknown>;
+}
 
 /**
  * `os migrate account-issuer` — the PLAN leg of the `sys_account.issuer`
@@ -125,20 +134,65 @@ export default class MigrateAccountIssuer extends Command {
       const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
         stack.kernel,
         'objectql',
-      );
+      ) as { getDriverForObject?: (object: string) => AccountTableDriver | undefined } | undefined;
 
       if (!flags.json) printStep('Scanning sys_account…');
-      const report = await probeAccountIdentityCollisions(engine as never, {
+
+      // The pre-flight reads the PHYSICAL `sys_account` table through the
+      // driver the engine routes that name to, not through the engine's
+      // `find`. This boot composes no `AuthPlugin`, so `sys_account` is not a
+      // registered object here, and the engine refuses a name its registry
+      // does not resolve (`OBJECT_NOT_FOUND`) before any driver is asked. That
+      // refusal is a fact about this boot's composition, never about the
+      // database: ⛔ reading it as "no rows" would report a table full of
+      // accounts as a clean pre-flight and authorise the drop. The table is
+      // read in its legacy shape, `issuer` included, which is the very column
+      // the registered schema no longer declares, so the driver (the path the
+      // engine leaves to host code) is the reader this inventory needs.
+      //
+      // [#21552] A database with no `sys_account` table holds no account, so no
+      // two rows collide: the probe reads it as no rows. The read is not
+      // avoided, measured: `sys_account` is not a registered object on this
+      // boot, so the held-back sync never lists it, and
+      // `stack.tableAbsent('sys_account')` answers false on every database.
+      // The driver's missing-table refusal is therefore recognised, with the
+      // shared predicate and for this command's own table only. ⛔ No other
+      // refused read is softened: it still throws the probe's refusal below
+      // and is never read as clean.
+      let noAccountTable = false;
+      const readView: Parameters<typeof probeAccountIdentityCollisions>[0] = {
+        find: async (object, query) => {
+          // No driver is not an empty table: the probe turns this into its
+          // refusal, never into a clean report.
+          const driver = engine?.getDriverForObject?.(object);
+          if (!driver || typeof driver.find !== 'function') {
+            throw new Error(`no driver serves ${object} on this stack`);
+          }
+          try {
+            return await driver.find(object, query);
+          } catch (error) {
+            if (object !== SYS_ACCOUNT || !isMissingTableError(error, object)) throw error;
+            noAccountTable = true;
+            return [];
+          }
+        },
+      };
+      const report = await probeAccountIdentityCollisions(readView, {
         ...(flags['max-records'] != null ? { max: flags['max-records'] } : {}),
       });
+      const noAccountTableLine = noAccountTable
+        ? 'sys_account has no table in this database yet, so no account is stored in it and it was read as no rows.'
+        : null;
 
       if (flags.json) {
+        if (noAccountTableLine) console.error(noAccountTableLine);
         await emitJson({ database: stack.dbLabel, ...report, duration: timer.elapsed() });
         if (!report.ok) this.exit(1);
         return;
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      if (noAccountTableLine) printInfo(noAccountTableLine);
       console.log('');
       console.log(formatAccountIdentityPreflightReport(report));
       console.log('');
