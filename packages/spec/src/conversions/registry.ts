@@ -14800,7 +14800,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: objectGridDefaultSortRemoved, order: 14 },
   { conversion: objectGridResizableColumnsRemoved, order: 57 },
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
-  { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 59 },
+  { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
   { conversion: pageAssignedProfilesRemoved, order: 31 },
   { conversion: pageComponentFilterRecordToRuleArray, order: 36 },

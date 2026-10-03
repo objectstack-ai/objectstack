@@ -5854,7 +5854,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'object-master-detail-form-detail-sort-field-retired',
-    order: 68,
+    order: 69,
     text:
       'It also retires an `object-master-detail-form` detail entry\'s `sortField` (#21589, ADR-0049 '
       + 'enforce-or-remove; the spec half of objectui#11070 round 9). The console stopped reading the '
