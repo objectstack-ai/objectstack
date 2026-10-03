@@ -930,7 +930,7 @@ describe('validateExpression (ADR-0032)', () => {
     });
 
     /**
-     * [#6290] The package must give ONE answer about what a root is.
+     * [commit e9b526597] The package must give ONE answer about what a root is.
      *
      * `introspectScope` is the roots list this package HANDS an author (and the
      * agent authoring tool); `firstUndeclaredReference` is the strict env that
@@ -955,7 +955,7 @@ describe('validateExpression (ADR-0032)', () => {
     });
 
     /**
-     * [#6290] The same drift, seen from `checkRoleCatalog`'s side: its four
+     * [commit e9b526597] The same drift, seen from `checkRoleCatalog`'s side: its four
      * position-membership regexes accept `current_user` / `user` / `ctx.user`
      * as the user subject, so a role-catalog verdict on a `current_user`
      * predicate was only ever reachable at sites that do not run the
