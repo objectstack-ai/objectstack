@@ -46,7 +46,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
+import type { ObjectQL } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
@@ -141,12 +143,12 @@ const PIN_APP: any = {
 };
 
 /** ② / ③ — host code registering action handlers, the way a plugin does. */
-const PIN_HANDLER_PLUGIN: any = {
+const PIN_HANDLER_PLUGIN: Plugin = {
   name: 'pin.reader21454.handler',
   version: '0.0.0',
   init: async () => {},
-  start: async (ctx: any) => {
-    const ql: any = ctx.getService('objectql');
+  start: async (ctx: PluginContext) => {
+    const ql = ctx.getService<ObjectQL>('objectql');
     const where = { type: 'datasource', name: DS_NAME };
     for (const [action, object] of [
       ['handler_engine_reads_family', 'sys_metadata'],
