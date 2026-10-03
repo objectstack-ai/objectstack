@@ -97,7 +97,7 @@
  * belongs in this table and the case that proves it belongs in this file.
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/12393 (this table)
- * @see https://github.com/objectstack-ai/objectstack/issues/12380 (the measured boundary set)
+ * @see commit 4045b954d (the measured boundary set)
  * @see https://github.com/objectstack-ai/objectstack/issues/9276 (the value class deliberately excluded)
  */
 

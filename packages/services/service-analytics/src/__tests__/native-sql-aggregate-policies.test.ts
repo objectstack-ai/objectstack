@@ -44,8 +44,11 @@
  *
  * The SQLite cell always runs; there, the fold is the policy that diverged. The
  * PostgreSQL cell runs where `OS_TEST_POSTGRES_URL` is set and is a named skip
- * otherwise; no CI step provisions that variable for this package, so the live
- * cell is red-capable and un-run in CI, and the PR that landed this file carries
+ * otherwise; CI provisions that variable for this package in the
+ * Temporal Conformance job's step
+ * "Run the non-SQL temporal backends under the skewed process zone"
+ * (`.github/workflows/ci.yml`), so the live cell is red-capable and runs in
+ * CI, and the PR that landed this file carries
  * its local PostgreSQL 16 run. The operand the PostgreSQL / MySQL cells rely on
  * is pinned per dialect in CI by `@objectstack/core`'s `aggregate-answer.test.ts`
  * and by `driver-sql`'s move proof. MySQL is not a cell here. The live cell owns

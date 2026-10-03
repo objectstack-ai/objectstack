@@ -672,7 +672,7 @@ export const PageHeaderProps = strictObject({
    * How many header actions render as inline buttons before the rest fold into
    * the overflow menu — desktop and mobile budgets (#4001 batch A).
    *
-   * Declared on the #5611/#5775/#6276 rule, for the same reason and by the same
+   * Declared on the #5611 / #5775 / commit 78f0be872 rule, for the same reason and by the same
    * evidence: the renderer has always read them and the schema had not caught
    * up. `containers.tsx:1358` resolves
    * `schema?.maxVisible ?? schema?.properties?.maxVisible` (and the `mobile*`
@@ -748,7 +748,7 @@ export const PageTabsProps = strictObject({
    * comment invites the override: *"Authors who want the strip even at length 1
    * can pass `properties.alwaysShowStrip: true`"* (`containers.tsx:637`, read as
    * `schema?.properties?.alwaysShowStrip === true`). Declared on the same
-   * #5611/#5775/#6276 rule as `page:header`'s action budget: the delivered,
+   * #5611 / #5775 / commit 78f0be872 rule as `page:header`'s action budget: the delivered,
    * invited shape is the contract, and a closed schema that rejected it would
    * be the declaration disagreeing with the renderer in the direction that
    * costs the author.
@@ -4636,7 +4636,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * equally true of `page:header`'s `icon`, which is REFUSED precisely because
    * no render path reads it. Vocabulary does not separate the two verdicts; a
    * read point does (#9397 closed premise-overtaken re-deriving one from
-   * scratch; #9881/#9972 recorded the accordion and tab items). This is the
+   * scratch; #9881 / commit 60e0f900a recorded the accordion and tab items). This is the
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against

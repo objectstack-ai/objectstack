@@ -698,8 +698,9 @@ export const DatasourceSchema = lazySchema(() => strictObject(
   // `MongoConfigSchema` (a config-level refinement sees only `config`;
   // `credentialsRef` sits on the datasource), so both run here, where both
   // halves are visible at once. They compose independently with the config
-  // gate above: a config also violating #8082/#8336/#9040 reports those
-  // issues too, each at its own path.
+  // gate above: a config also violating #8082/#8336, or the refusal of a
+  // credential in mongo's `options` passthrough (commit 24206416a), reports
+  // those issues too, each at its own path.
   //
   // The two arms split on the connect path's OWN branch test, not on key
   // presence: `buildMongoUrl` opens `if (explicit) return explicit;`, so a

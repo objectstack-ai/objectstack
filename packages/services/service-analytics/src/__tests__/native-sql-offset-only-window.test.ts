@@ -23,9 +23,11 @@
  *
  *   - **sqlite → EXECUTED** (better-sqlite3), every run: `LIMIT -1 OFFSET n`.
  *   - **postgres → EXECUTED** where `OS_TEST_POSTGRES_URL` is set, a named skip
- *     otherwise: `OFFSET n` alone, byte-identical to before. No CI step
- *     provisions that variable for this package, so the live cell is
- *     red-capable and un-run in CI; the PR that landed this file carries its
+ *     otherwise: `OFFSET n` alone, byte-identical to before. CI provisions
+ *     that variable for this package in the Temporal Conformance job's step
+ *     "Run the non-SQL temporal backends under the skewed process zone"
+ *     (`.github/workflows/ci.yml`), so the live cell is red-capable and runs
+ *     in CI; the PR that landed this file carries its
  *     local PostgreSQL 16 run.
  *   - **unknown (no `sqlDialect` hook) → EXECUTED** on both engines above,
  *     through a `NativeSQLStrategy` whose context names no dialect:

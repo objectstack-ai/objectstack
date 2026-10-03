@@ -1064,7 +1064,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the membership reading — the SQL family landed)
+ * @see commit e04a0aff2 (the membership reading, landed with the SQL family)
  * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the refusal whose prescription this spelling is)
  */
 /**
