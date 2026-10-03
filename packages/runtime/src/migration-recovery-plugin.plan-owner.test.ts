@@ -16,8 +16,8 @@
  *
  * So the pin boots the real chain — `ObjectQLPlugin` (and with it the
  * protocol assembly), `PlatformObjectsPlugin` (the journal object), this
- * plugin — over an in-memory driver holding the journal rows a crash inside
- * chunk 0 leaves behind, and reads what the scan said:
+ * plugin — over an in-memory SQLite database holding the journal rows a crash
+ * inside chunk 0 leaves behind, and reads what the scan said:
  *
  *  - the run is reported, by id, at boot;
  *  - it is described as RESUMABLE (`Resume with: …`), not as owned by "no
@@ -29,7 +29,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel, type MigrationPlanProvider, type PluginContext } from '@objectstack/core';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { RECORDED_BY_SENTINEL_PLAN_ID } from '@objectstack/metadata-protocol';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
@@ -89,7 +89,11 @@ describe('MigrationRecoveryPlugin on a real kernel — the owner registers befor
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
-    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new DriverPlugin(new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    })));
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new PlatformObjectsPlugin() as never);
     await kernel.use(new MigrationRecoveryPlugin());
