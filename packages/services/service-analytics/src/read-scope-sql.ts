@@ -1682,8 +1682,9 @@ function undefinedComparandError(field: string, path: string): Error {
       `predicate was meant ({ "${field}": null } or { "${field}": { "$null": true } }), or omit the key ` +
       `when the value is genuinely absent. The producer to fix is whoever BUILT this read scope — an ` +
       `admin-authored sharing rule / permission set, its CEL lowering, or the in-process code that ` +
-      `assembled the FilterCondition — never the caller of this query, who cannot author it (#6050 ` +
-      `ruling B, pushed down to this compiler by #6125).`,
+      `assembled the FilterCondition — never the caller of this query, who cannot author it. An ` +
+      `undefined comparand is refused rather than read as null, on the SQL drivers and on this door ` +
+      `alike.`,
   );
 }
 
@@ -1870,7 +1871,8 @@ function nonBooleanFlagComparandError(op: string, field: string, path: string): 
       `not a string, a number, null or undefined. The producer to fix is whoever BUILT this read ` +
       `scope — an admin-authored sharing rule / permission set, its CEL lowering, or the in-process ` +
       `code (a getReadScope option) that assembled the FilterCondition — never the caller of this ` +
-      `query, who cannot author it (#5347 / #5369, pushed down to this compiler by #6387).`,
+      `query, who cannot author it. A non-boolean comparand for any of the three is refused rather ` +
+      `than coerced, on every driver and on this door alike.`,
   );
 }
 
