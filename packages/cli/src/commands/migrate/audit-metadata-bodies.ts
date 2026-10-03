@@ -20,6 +20,7 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { absentTableReads } from '../../utils/absent-table-reads.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -179,15 +180,41 @@ export default class MigrateAuditMetadataBodies extends Command {
         ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
         : { info: (m: string) => printInfo(m), warn: (m: string) => printWarning(m) };
 
-      const report = await migrateStoredMetadataBodyCopies(engine, logger, { apply });
+      // [#21552] Not asked: the dry run's read-only boot measured which tables
+      // exist, and a table that does not exist holds no copy to rewrite. The
+      // rewrite reads through this view, which answers such a table with its
+      // true contents (no rows) without issuing the read. Read anyway, each
+      // audited table of a project whose database does not exist yet counted as
+      // a failed read and the dry run exited 1 over rows that do not exist.
+      // `--apply` booted plain, so there every table exists and every read is
+      // real; its writes go to the engine itself.
+      // ⚠️ `sys_activity` is the exception the boot cannot measure: it is
+      // rotation-managed, its base name a view over time-sharded tables, and the
+      // deferred sync lists a view as a table to create. It is read, and only
+      // the refusal of a table that is not there reads as no rows
+      // (`absentTableReads`). Believing the measurement would skip the very rows
+      // this command exists to reach.
+      // ⛔ Only a table that is MEASURED absent: any other refused read is
+      // still counted in `failures` and still exits non-zero.
+      const reads = absentTableReads(stack, (object) => engine.getObject(object));
+      const readView: Pick<IObjectQLEngine, 'find' | 'findOne' | 'update'> = {
+        find: (object, query, options) => reads.rows(object, () => engine.find(object, query, options)),
+        findOne: (object, query, options) =>
+          reads.absent(object) ? Promise.resolve(null) : engine.findOne(object, query, options),
+        update: (object, data, options) => engine.update(object, data, options),
+      };
+
+      const report = await migrateStoredMetadataBodyCopies(readView, logger, { apply });
 
       if (flags.json) {
+        reads.notice(true);
         await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
         if (report.failures > 0) this.exit(1);
         return;
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      reads.notice(false);
       console.log('');
       for (const [object, stats] of Object.entries(report.byObject)) {
         console.log(`  ${chalk.white(object)}: ${stats.scanned} scanned, ${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}`);

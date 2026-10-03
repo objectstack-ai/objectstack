@@ -2,6 +2,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
+import { isMissingTableError } from '@objectstack/types';
 import {
   printHeader,
   printSuccess,
@@ -128,17 +129,44 @@ export default class MigrateAccountIssuer extends Command {
       );
 
       if (!flags.json) printStep('Scanning sys_account…');
-      const report = await probeAccountIdentityCollisions(engine as never, {
+
+      // [#21552] A database with no `sys_account` table holds no account, so no
+      // two rows collide: the probe reads it as no rows. The read is not
+      // avoided, measured: this boot composes no `AuthPlugin`, so `sys_account`
+      // is not a registered object and the held-back sync never lists it, and
+      // `stack.tableAbsent('sys_account')` answers false on every database.
+      // The refusal is therefore recognised, with the shared predicate and for
+      // this command's own table only. ⛔ No other refused read is softened: it
+      // still throws the probe's refusal below and is never read as clean.
+      let noAccountTable = false;
+      const readEngine = engine as Parameters<typeof probeAccountIdentityCollisions>[0];
+      const readView: typeof readEngine = {
+        find: async (object, query, options) => {
+          try {
+            return await readEngine.find(object, query, options);
+          } catch (error) {
+            if (object !== 'sys_account' || !isMissingTableError(error, object)) throw error;
+            noAccountTable = true;
+            return [];
+          }
+        },
+      };
+      const report = await probeAccountIdentityCollisions(readView, {
         ...(flags['max-records'] != null ? { max: flags['max-records'] } : {}),
       });
+      const noAccountTableLine = noAccountTable
+        ? 'sys_account has no table in this database yet, so no account is stored in it and it was read as no rows.'
+        : null;
 
       if (flags.json) {
+        if (noAccountTableLine) console.error(noAccountTableLine);
         await emitJson({ database: stack.dbLabel, ...report, duration: timer.elapsed() });
         if (!report.ok) this.exit(1);
         return;
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      if (noAccountTableLine) printInfo(noAccountTableLine);
       console.log('');
       console.log(formatAccountIdentityPreflightReport(report));
       console.log('');

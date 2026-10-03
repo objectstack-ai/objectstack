@@ -69,13 +69,24 @@ function freshRows(): { secrets: Row[]; settings: Row[] } {
 interface Harness {
   secrets: Row[];
   writes: Array<{ where: Row; data: Row }>;
+  /** Every table a driver read was issued for, in order. */
+  reads: string[];
 }
 
-/** Wire the mocked boot to a fake engine over `rows`. */
-function wireBoot(rows: { secrets: Row[]; settings: Row[] }, opts: { conditionalWrite?: boolean } = {}): Harness {
-  const harness: Harness = { secrets: rows.secrets, writes: [] };
+/**
+ * Wire the mocked boot to a fake engine over `rows`.
+ *
+ * `absent` names the tables the boot MEASURED absent, which is what the stack's
+ * `tableAbsent` answers (`SchemaStack.tableAbsent`). The default is none: every
+ * table exists, as on a plain `--apply` boot, where nothing is deferred.
+ */
+function wireBoot(
+  rows: { secrets: Row[]; settings: Row[] },
+  opts: { conditionalWrite?: boolean; absent?: readonly string[] } = {},
+): Harness {
+  const harness: Harness = { secrets: rows.secrets, writes: [], reads: [] };
   const secretDriver: Record<string, unknown> = {
-    async find() { return harness.secrets.map((r) => ({ ...r })); },
+    async find() { harness.reads.push('sys_secret'); return harness.secrets.map((r) => ({ ...r })); },
   };
   if (opts.conditionalWrite !== false) {
     secretDriver.updateMany = async (_object: string, query: { where: Row }, data: Row) => {
@@ -94,13 +105,17 @@ function wireBoot(rows: { secrets: Row[]; settings: Row[] }, opts: { conditional
     listDatasourceDefs: () => [],
     getDriverForObject: (object: string) => {
       if (object === 'sys_secret') return secretDriver;
-      if (object === 'sys_setting') return { async find() { return rows.settings.map((r) => ({ ...r })); } };
-      if (object === 'sys_metadata') return { async find() { return []; } };
+      if (object === 'sys_setting') {
+        return { async find() { harness.reads.push('sys_setting'); return rows.settings.map((r) => ({ ...r })); } };
+      }
+      if (object === 'sys_metadata') return { async find() { harness.reads.push('sys_metadata'); return []; } };
       return undefined;
     },
   };
+  const absent = new Set(opts.absent ?? []);
   vi.mocked(bootSchemaStack).mockResolvedValue({
     kernel: { getService: (name: string) => (name === 'objectql' ? engine : undefined) },
+    tableAbsent: (objectName: string) => absent.has(objectName),
     shutdown: async () => {},
   } as never);
   return harness;
@@ -229,6 +244,29 @@ describe('os secret rewrap — guards that stop a run before any row is opened o
     expect(text).not.toContain(SECRET_ID);
     expect(text).not.toContain(String(h.secrets[0].ciphertext));
     expect(text).not.toContain(KEY_HEX);
+  }, 60_000);
+
+  it('a dry run over tables the boot measured absent reads none of them, and reports empty work', async () => {
+    const h = wireBoot(freshRows(), { absent: ['sys_secret', 'sys_setting', 'sys_metadata'] });
+    const { payload, exitCode } = await run(['--no-declared-datasources']);
+
+    // "Not asked": a table that does not exist holds nothing, so no read is issued.
+    expect(h.reads).toEqual([]);
+    expect(payload.mode).toBe('dry-run');
+    expect(payload.report.counts).toEqual({ total: 0, rewrap: 0, done: 0, left: 0, refused: 0, notWritten: 0 });
+    // The union is enumerated, not gapped: an absent table holds no reference.
+    for (const family of Object.values(payload.report.families) as Array<{ status: string }>) {
+      expect(family.status).toBe('enumerated');
+    }
+    expect(payload.report.refusal).toBeNull();
+    expect(exitCode).toBe(0);
+    expect(h.writes).toEqual([]);
+
+    // POSITIVE CONTROL: the same rows, tables present — they are read, and the row is planned.
+    const present = wireBoot(freshRows());
+    const ok = await run(['--no-declared-datasources']);
+    expect(present.reads).toContain('sys_secret');
+    expect(ok.payload.report.counts.total).toBe(1);
   }, 60_000);
 
   it('an unreadable --declared-datasources file is refused before the boot, never read as []', async () => {

@@ -341,7 +341,8 @@ const step17: MigrationStep = {
       'but because the authoring gate already rejects the spellings loudly; the chain and the ',
       'stored-row replay are the seams that accept them.\n\n',
       'Finishing the same datasource surface, the canonical driver id `mongo` is renamed to ',
-      '`mongodb` (#6345). The two spellings have both been accepted since #4410 and both still ',
+      '`mongodb`. The two spellings have both been accepted since `datasource.config` was first ',
+      'parsed against its driver\'s own contract, and both still ',
       'are, so no boot breaks and no data moves — what changed is which one is CANONICAL, and ',
       'that string is published as `DRIVER_CATALOG.id` and is what the Studio connection form ',
       'writes into `datasource.driver`. Every row written before the rename therefore carries ',
@@ -5177,7 +5178,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'connector-error-mapping-retired',
     order: 22,
     text:
-      'It also retires `connector.errorMapping` (#14676, ADR-0049 enforce-or-remove; triage '
+      'It also retires `connector.errorMapping` (ADR-0049 enforce-or-remove; triage '
       + 'ruling 2026-09-02): `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys) '
       + 'were authorable through `ConnectorSchema` — and, via `DeclarativeConnectorEntrySchema`, '
       + 'through `stack.connectors[]` and the `/meta/connector` door — and read by nothing: no '
@@ -5598,14 +5599,16 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 19,
     text:
       'Finally, it narrows the per-option `default` key OUT of the form-view options '
-      + 'vocabulary (#12868, ADR-0049 declared-but-unenforced; maintainer ruling 2026-08-28 '
-      + 'on the objectui#6263 analysis, disposition 甲): `SelectOptionSchema` serves two '
-      + 'surfaces and only the OBJECT-field face reads `default` (#7246 / PR #7388 — '
-      + '`applyFieldDefaults` falls back to the option marked `default: true`; that face, its '
-      + 'alias rows and its precedence pin are untouched). On a form-view field\'s option list '
+      + 'vocabulary (ADR-0049 declared-but-unenforced; maintainer ruling 2026-08-28 '
+      + 'on the console form renderer\'s analysis, disposition 甲): `SelectOptionSchema` serves '
+      + 'two surfaces and only the OBJECT-field face reads `default` (enforced there by a '
+      + 'maintainer ruling of 2026-08-10 — `applyFieldDefaults` falls back to the option marked '
+      + '`default: true`; that face, its alias rows and its precedence pin are untouched). On a '
+      + 'form-view field\'s option list '
       + 'the key parsed clean and nothing read it — the insert-path fallback consults the '
       + 'object definition\'s options, never a form view\'s, and no form renderer seeds a value '
-      + 'from it (measured on objectui#6263; the ruled census found ZERO authored occurrences '
+      + 'from it (measured against the console\'s form controls, none of which reads the key; '
+      + 'the ruled census found ZERO authored occurrences '
       + 'across the tree, the example apps and the published *.form.ts corpus). The FormView '
       + 'vocabulary\'s own option shape (`FormSelectOptionSchema`, ui/view.zod.ts) now refuses '
       + 'the key with the prescription; the mechanical conversion strips it from stored '
@@ -5700,8 +5703,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'mapping-lookup-params-retired',
     order: 13,
     text:
-      'It also retires the import mapping `lookup` transform\'s steering params (#10329, '
-      + 'ADR-0049 enforce-or-remove — the sub-walk half of 17.0.0\'s #4509 mapping cleanup): '
+      'It also retires the import mapping `lookup` transform\'s steering params (ADR-0049 '
+      + 'enforce-or-remove — the sub-walk half of the 17.0.0 mapping cleanup that retired '
+      + '`extractQuery` / `errorPolicy` / `batchSize`): '
       + '`fieldMapping[].params.object` / `.fromField` / `.toField` / `.autoCreate` declared a '
       + 'per-entry reference-resolution dialect the import path never implemented — `lookup` '
       + 'copies the cell through and resolution runs off the target field\'s own metadata — '
@@ -5715,10 +5719,11 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'memory-persistence-placeholder-refused',
     order: 1,
     text:
-      'Protocol 18 extends the #8336 unresolved-placeholder refusal to the memory '
+      'Protocol 18 extends the publish-time refusal of unresolved placeholders, which protocol '
+      + '17 applied to datasource connection config, to the memory '
       + 'driver\'s config-material persistence keys: `persistence.path` (file persistence '
       + 'and the `auto` override) and `persistence.key` (localStorage and the `auto` '
-      + 'override) refuse `${…}` placeholder syntax at publish (#8495). Nothing resolves a '
+      + 'override) refuse `${…}` placeholder syntax at publish. Nothing resolves a '
       + 'placeholder there — the driver would create a literal `./${DATA_DIR}/…` path or '
       + 'write under the literal localStorage key — the same authored-under-a-false-belief '
       + 'shape, one surface over. The memory driver\'s `initialData` stays deliberately '
@@ -5729,8 +5734,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'metadata-customization-protocol-retired',
     order: 20,
     text:
-      'It also retires the paper metadata-customization protocol whole (#13135, re-charter '
-      + 'of #12057; ADR-0049 enforce-or-remove, maintainer ruling 2026-08-29): '
+      'It also retires the paper metadata-customization protocol whole (ADR-0049 '
+      + 'enforce-or-remove, maintainer ruling 2026-08-29): '
       + '`kernel/metadata-customization.zod.ts` — the three-layer platform/user patch-overlay '
       + 'model with field-level change tracking and a 3-way-merge story — was exported, '
       + 'documented as the customization architecture, and implemented ONLY by an unreachable '
@@ -5960,20 +5965,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 16,
     text:
       'Finally, it retires nine of the eleven members of the plugin manifest\'s '
-      + '`contributes` block (#10724, ADR-0049 enforce-or-remove; triage graded 2026-08-21, '
+      + '`contributes` block (ADR-0049 enforce-or-remove; triage graded 2026-08-21, '
       + 'cloud census leg discharged clean 2026-08-24): `events`, `menus`, `themes`, '
       + '`translations`, `actions`, `drivers`, `fieldTypes`, `functions` and `commands`. '
-      + '#10627 measured — three repos, controlled — that the whole monorepo contains exactly '
-      + 'one non-test read of `manifest.contributes`, and it reads `kinds`; the other nine '
+      + 'A census of all three repos, with controls, measured that the whole monorepo '
+      + 'contains exactly one non-test read of `manifest.contributes`, and it reads `kinds`; '
+      + 'the other nine '
       + 'members parsed, entered the manifest, and changed nothing, while published docs and '
       + 'the schema\'s own JSDoc kept teaching them (`commands` documented Commander.js '
       + 'resolution the CLI dropped for oclif; `fieldTypes` advertised a registration seam '
       + 'that never existed). All nine are retiredKey tombstones mirroring `loading`; '
-      + '`kinds` survives (live reader) and `routes` is untouched pending its own fork '
-      + '(#10726). D3 semantic, no D2 conversion: a manifest is not a stack collection '
+      + '`kinds` survives (live reader), and `routes` was left to a ruling of its own, which '
+      + 'retired it as well (the `plugin-manifest-contributes-routes-retired` entry). D3 '
+      + 'semantic, no D2 conversion: a manifest is not a stack collection '
       + 'member, so a conversion would be a transform with no seam that ever runs. '
-      + 'On the surviving `kinds` bucket it also retires the `globs` sub-field (#11169, '
-      + 'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-24): the schema promised '
+      + 'On the surviving `kinds` bucket it also retires the `globs` sub-field (ADR-0049 '
+      + 'enforce-or-remove; maintainer ruling 2026-08-24): the schema promised '
       + 'that declaring `globs` enables file-type discovery, but discovery globs '
       + '`filePatterns` off the metadata type registry — which `contributes.kinds` does '
       + 'not extend, as `metadata-plugin.zod.ts` records outright — so an authored '
@@ -6017,8 +6024,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'stack-themes-carrier-retired',
     order: 11,
     text:
-      'Finally, it retires the stack `themes` carrier and `ThemeSchema` whole (#10485, '
-      + 'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-21, disposition B: 退役授权面): '
+      'Finally, it retires the stack `themes` carrier and `ThemeSchema` whole (ADR-0049 '
+      + 'enforce-or-remove; maintainer ruling 2026-08-21, disposition B: 退役授权面): '
       + 'the pipeline was live from the authoring gate through artifact ingest and stopped '
       + 'there — zero non-test readers of stored `theme` items, `theme` never a registered '
       + 'metadata type, no first-party app mounting the spec-aware provider, nothing '
@@ -6046,16 +6053,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 14,
     text:
       'Finally, it retires the component-translation copy key '
-      + '`pages.<name>.components.<id>.submitLabel` and its `submit` alias (#10926, ADR-0049; '
+      + '`pages.<name>.components.<id>.submitLabel` and its `submit` alias (ADR-0049; '
       + 'maintainer ruling 2026-08-22): the face is measured, not mirrored — each copy key '
       + 'exists because some component in `ComponentPropsMap` declares it — and '
-      + '`submitLabel`\'s only declarer was `element:form`, retired whole above (#9249), so '
+      + '`submitLabel`\'s only declarer was `element:form`, retired whole above, so '
       + 'the key had no declared component left to translate and the resolver overlay was '
       + 'its only reader. Retire won over re-anchor because the live form surface '
       + '(`object-form`) speaks `submitText` (`I18nLabelSchema`), localizable at its own '
       + 'authoring site; re-anchoring would have widened the face for one word. The '
       + 'mechanical conversion strips the key from stored bundles and items (pure lossless '
-      + 'delete — nothing read it since #9249), at the acknowledged cost of dropping the '
+      + 'delete — nothing read it once `element:form` was retired), at the acknowledged cost '
+      + 'of dropping the '
       + 'bespoke-component route for that one word.',
   },
   {
@@ -6298,8 +6306,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
  * could act on, so removing it is behaviour-preserving; retired from the
  * load path (the schema refuses live authors), replayed by `migrate meta`
  * and the stored-row rehydration seam. Semantic: the memory-driver
- * persistence placeholder refusal (#8495) — the #8336 parent adjudication
- * applied to the two config-material memory keys its deliberate
+ * persistence placeholder refusal (commit 4bfe1a539, PR #8666: `${…}` refused
+ * at publish in `persistence.path` / `persistence.key`) — the #8336 parent
+ * adjudication applied to the two config-material memory keys its deliberate
  * `initialData` exclusion never covered — the
  * `MetadataPluginConfig.additionalTypes` retirement (#8586, ADR-0049): the
  * inert plugin kind-declaration key, tombstoned on the 17.x line, with no D2
@@ -24932,7 +24941,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // The 2026-08-08 ADR-0049 sweep (#6486) adds twenty-three more across three
   // members (4 + 10 + 9), all route 3 and all whole-def: `system/http-server.zod.ts`'s
   // runtime vocabulary (#5295, D3 `http-server-runtime-vocabulary-retired`),
-  // `api/protocol.zod.ts`'s viewId-addressed view CRUD (#6239, D3
+  // `api/protocol.zod.ts`'s viewId-addressed view CRUD (commit f549a0d4a, D3
   // `view-management-protocol-retired`) and the whole L2 ETL layer (#6414, D3
   // `etl-pipeline-layer-retired`). None had a carrier key and none was ever
   // parsed outside its own unit tests, so again there is no tombstone and no D2
