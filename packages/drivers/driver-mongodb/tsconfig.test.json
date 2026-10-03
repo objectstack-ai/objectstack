@@ -1,6 +1,6 @@
-// The TEST-layer type-check program (#14917), adopting the mechanism #5286 set
+// The TEST-layer type-check program (commit a06faebbe), adopting the mechanism #5286 set
 // for `packages/spec` and #5449 generalised — the route `packages/objectql`
-// (#13676), `packages/runtime` (#14504) and `packages/core` (#14613) already
+// (#13676), `packages/runtime` (#14504) and `packages/core` (commit 81208086a) already
 // run. `tsconfig.json` beside this file stays exactly as it is: it is the BUILD
 // config, and its `**/*.test.ts` exclusion has a reason. This sibling puts the
 // excluded layer back in front of tsc, and `package.json`'s `typecheck` script
@@ -22,7 +22,7 @@
 // FALSE, and the correction on the card is right: a second program does compile
 // these files. `scripts/check-type-check-coverage.mjs`'s `remeasureProject`
 // extends this package's tsconfig, drops only the test glob, and compares the
-// result against its `TEST_DEBT` ledger. That is how CI caught PR #14914's
+// result against its `TEST_DEBT` ledger. That is how CI caught commit ca3fd4b1a's
 // three TS18047 errors, which this package's own `typecheck` could not see. So
 // the pins were not phantoms. What was true is narrower and is what this file
 // closes: the only program reading this layer was a DEBT RATCHET — an
