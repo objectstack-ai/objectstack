@@ -298,13 +298,16 @@ describe('#8738 — the declared-field door on update()', () => {
   // place, and a reverse verification that turned one of these red would mean
   // the door had grown an opinion it is not allowed to have.
   describe('where the door deliberately has NO opinion (reused from #8737)', () => {
-    it('a registry-less host gets no verdict — the driver stays the backstop', async () => {
+    it('a registry-less host gets no field verdict — [#21516] the object itself is refused, nothing is written', async () => {
       const { engine, writes } = await makeEngine({ registration: 'none', missingColumns: ['zzz_nonexistent_field'] });
 
-      const refusal = await refusalOf(() => engine.update('acct', { id: 'row-1', zzz_nonexistent_field: 'x' } as any));
+      const refusal: any = await refusalOf(() => engine.update('acct', { id: 'row-1', zzz_nonexistent_field: 'x' } as any));
 
-      expect(writes).toHaveLength(1);
-      expect(String(refusal?.message)).toContain('has no column named zzz_nonexistent_field');
+      // The engine refuses a name the registry does not resolve with the data
+      // door's own envelope before any field door runs: still no opinion about
+      // the field, and the driver is no longer reached by that raw name.
+      expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
+      expect(writes).toHaveLength(0);
     });
 
     it('an EMPTY field map gets no verdict — an absence is not a prohibition', async () => {

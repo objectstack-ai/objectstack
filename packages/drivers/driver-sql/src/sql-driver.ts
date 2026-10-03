@@ -7,7 +7,7 @@
  * Supports PostgreSQL, MySQL, SQLite, and other SQL databases.
  */
 
-import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
+import type { DateGranularityValue, DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
 // The ONE introspection contract (ADR-0015 / `ISchemaDiffService`). This
 // driver's introspection types are DERIVED from these rather than
 // re-declared next to them — see the `Introspection Types` region below.
@@ -6164,6 +6164,36 @@ export class SqlDriver implements IDataDriver {
     }
 
     return null;
+  }
+
+  /**
+   * [#21441] The date-bucket expression this dialect groups `field` by at
+   * `granularity` (the one {@link aggregate} runs), rendered as SQL text, or
+   * `null` where {@link buildDateBucketExpr} has none: a granularity this
+   * dialect buckets in memory (`week` on SQLite, see
+   * {@link dateGranularityCapabilities}), or a client this driver does not
+   * model.
+   *
+   * It is for callers that PRINT the statement an aggregate stands for rather
+   * than run it. `service-analytics`' ObjectQL face echoes a date-bucketed
+   * query as SQL (`/analytics/sql`). While it spelled the bucket itself it
+   * printed `date_trunc(…)` on every dialect: SQLite refuses that, and
+   * PostgreSQL answers a timestamp where this driver answers `2026-01`.
+   *
+   * Reading the expression from here keeps this driver the one source of its
+   * bucketing. The text is `buildDateBucketExpr`'s, unchanged, with each `??`
+   * rendered by knex (`Raw.toQuery`) through this dialect's own identifier
+   * quoting. The expression binds identifiers only, so the text carries no
+   * value placeholder. `objectName` goes in as the coercion key, as
+   * `aggregate` passes it, so a SQLite `Field.datetime` column that may still
+   * hold pre-canonical values renders the repair the GROUP BY runs (#3773).
+   *
+   * Read structurally by its caller, like {@link dialectName}. It is not a
+   * member of the `IDataDriver` contract.
+   */
+  public dateBucketSql(objectName: string, field: string, granularity: DateGranularityValue): string | null {
+    const bucket = this.buildDateBucketExpr(field, granularity, objectName);
+    return bucket ? this.knex.raw(bucket.sql, bucket.bindings).toQuery() : null;
   }
 
   /**

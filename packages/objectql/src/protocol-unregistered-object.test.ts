@@ -11,7 +11,8 @@
  *      repo was thrown by `cloneData`.
  *   ② the engine does not reject unregistered names: `resolveObjectName` falls
  *      back to `StorageNameMapping.resolveTableName({ name })`, i.e. the object
- *      name IS used as the table name.
+ *      name IS used as the table name. (Since #21516 the engine refuses such a
+ *      name too, with this gate's own `OBJECT_NOT_FOUND`; case B pins both.)
  *   ③ the 404 was therefore only ever a side effect of the DRIVER erroring on a
  *      missing table, recognised by string-matching that error in the REST layer.
  *
@@ -146,9 +147,12 @@ describe('#3770 — data-plane object-existence gate (real ObjectQL engine)', ()
             protocol.findData({ object: UNREGISTERED }),
         ).rejects.toMatchObject(OBJECT_NOT_FOUND);
 
-        // And the row really is reachable through the engine — i.e. the test
-        // fails for the right reason (the gate), not because storage was empty.
-        expect(await engine.find(UNREGISTERED, {})).toHaveLength(1);
+        // The row really is in storage — the test fails for the right reason
+        // (the gate), not because storage was empty…
+        expect(Array.from(stores.get(UNREGISTERED)!.values())).toHaveLength(1);
+        // …and [#21516] the engine's in-process verb refuses the same name with
+        // the same envelope, instead of reading that table by its raw name.
+        await expect(engine.find(UNREGISTERED, {})).rejects.toMatchObject(OBJECT_NOT_FOUND);
     });
 
     it('case A — an unregistered object with no physical table is 404 from the gate, not the driver', async () => {

@@ -1649,12 +1649,24 @@ export class SeedLoaderService implements ISeedLoaderService {
       // makes below — never a hand-rolled message test, so one vocabulary of
       // "benign driver error" serves every seam that needs one.
       //
+      // [#21516] The same absence in a composition that registers no
+      // `sys_organization` object at all (a single-tenant/lean runtime): the
+      // engine's in-process verbs now refuse an unresolved name with
+      // `OBJECT_NOT_FOUND` before any driver is asked, rather than reaching a
+      // table by that raw name. It is the not-provisioned case the missing-table
+      // arm already covers — no organization object here, so "no sole
+      // organization" is the truth and the historical NULL is right. Attributed
+      // on the error's own `object`, like the predicate above: a refusal naming
+      // a different object is not evidence about `sys_organization`.
+      //
       // Everything else (connection loss, a timeout, a permission denial, a
       // driver fault) means organizations may well exist and simply were not
       // seen. It propagates, envelope intact: the seed run fails loudly instead
       // of writing a batch of rows nobody will be able to see. No new error code
       // and no new result field — the caller receives the read's own failure.
-      if (!isMissingTableError(error, 'sys_organization')) throw error;
+      const refused = error as { code?: unknown; object?: unknown } | null | undefined;
+      const refusedThisObject = refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_organization';
+      if (!isMissingTableError(error, 'sys_organization') && !refusedThisObject) throw error;
     }
     return undefined;
   }

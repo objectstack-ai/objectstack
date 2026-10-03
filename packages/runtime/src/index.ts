@@ -62,8 +62,17 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // [#21321] The ONE binder of an app artifact's script-action bodies and body
 // hooks, under the owner `app:<appId>` — called by `AppPlugin.start` and by the
 // install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate.
-export { bindAppArtifactHandlers, appArtifactHandlerOwner } from './app-artifact-handlers.js';
-export type { AppArtifactHandlerBinding, AppArtifactHandlerBindingOptions } from './app-artifact-handlers.js';
+// [#21489] …and its job half: `scheduleAppArtifactJobs` schedules a package's
+// jobs (a `body` runs sandboxed on every door), and `collectJobsWithoutBody`
+// names the enabled jobs no JSON door can run, which install-local refuses.
+export { bindAppArtifactHandlers, appArtifactHandlerOwner, scheduleAppArtifactJobs, collectJobsWithoutBody } from './app-artifact-handlers.js';
+export type {
+    AppArtifactHandlerBinding,
+    AppArtifactHandlerBindingOptions,
+    AppArtifactJobScheduling,
+    AppArtifactJobSchedulingOptions,
+    JobWithoutBody,
+} from './app-artifact-handlers.js';
 // #14094 — what a DECLARATIVE job's handler is invoked with. A job has no graph,
 // so unlike a flow `script` node it is given data reach (`ql`) instead of being a
 // pure value-returner whose I/O the surrounding graph performs.

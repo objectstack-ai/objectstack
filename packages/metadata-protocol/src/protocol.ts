@@ -3,7 +3,7 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError } from '@objectstack/core';
 import { declaredUserMessage, readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
@@ -10371,21 +10371,24 @@ export class ObjectStackProtocolImplementation implements
      *
      * The REST API-exposure gate (`enforceApiAccess`, ADR-0049 / #1889) skips
      * objects it cannot find in metadata, and justified that with "the data
-     * path will 404 anyway". It would not. `engine.find` resolves an
-     * UNREGISTERED name straight to a physical table name
-     * (`resolveObjectName` → `StorageNameMapping.resolveTableName({ name })`),
-     * so the request only 404'd as a *side effect* of the driver complaining
-     * about a missing table (which the REST layer recognises by matching the
-     * driver's error string) — and did not 404 at all when a table with that
-     * name happened to exist: out-of-band DDL, a registration that failed
-     * after `syncObjectSchema` had already run, a registration race. In that
-     * window the exposure gate was silently skipped and the rows were served.
+     * path will 404 anyway". It would not. `engine.find` then resolved an
+     * UNREGISTERED name straight to a physical table name, so the request
+     * only 404'd as a *side effect* of the driver complaining about a missing
+     * table (which the REST layer recognises by matching the driver's error
+     * string) — and did not 404 at all when a table with that name happened
+     * to exist: out-of-band DDL, a registration that failed after
+     * `syncObjectSchema` had already run, a registration race. In that window
+     * the exposure gate was silently skipped and the rows were served.
      *
      * The gate lives HERE, at the protocol ingress, for the same reason
-     * `enforceApiAccess` does: this is the external API boundary. Internal
-     * callers (hooks, flows, migrations, raw ObjectQL) talk to the engine
-     * directly and are deliberately unaffected — `apiEnabled` and this check
-     * both control automatic API exposure, not data access.
+     * `enforceApiAccess` does: this is the external API boundary, and it
+     * answers before the query is parsed. `apiEnabled` controls automatic API
+     * exposure, not data access, and internal callers (hooks, flows,
+     * migrations, raw ObjectQL) are unaffected by it. The object-existence
+     * half is no longer the door's alone: the engine's in-process verbs now
+     * refuse a name the registry does not resolve with this same envelope
+     * (`objectNotFoundError`, `@objectstack/core`), so an in-process caller
+     * cannot read a table by a name this gate refuses.
      *
      * ## Tiering — mirrors the #3545 decision recorded in `api-exposure.ts`
      *
@@ -10474,11 +10477,9 @@ export class ObjectStackProtocolImplementation implements
             }
             return;
         }
-        const err: any = new Error(`Object '${object}' not found`);
-        err.code = 'OBJECT_NOT_FOUND';
-        err.status = 404;
-        err.object = object;
-        throw err;
+        // The one envelope, shared with the engine's in-process verbs, which
+        // refuse an unresolved name the same way (`objectNotFoundError`).
+        throw objectNotFoundError(object);
     }
 
     /**

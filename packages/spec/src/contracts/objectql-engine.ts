@@ -286,7 +286,9 @@ export interface IObjectQLEngine extends IDataEngine {
      *   middleware composes after admission (RLS, sharing, tenant scope).
      *   The judge sees the object's declared field map from the registry. For
      *   an object the registry does not know, the field-map doors answer
-     *   nothing and the schema-free doors still judge, as at execution.
+     *   nothing and the schema-free doors still judge. Execution refuses such
+     *   an object before admission (`OBJECT_NOT_FOUND`, 404): that answer is
+     *   about the object, not the filter, and is not this member's verdict.
      * - **The verdict is not redacted.** `message` is the refusing door's own
      *   text. A caller judging a filter whose content it must not disclose
      *   (a read-scope policy, the #5367 ruling) withholds the message itself.

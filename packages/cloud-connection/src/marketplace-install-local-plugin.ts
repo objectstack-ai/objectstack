@@ -27,6 +27,10 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
+ *            A package declaring an enabled job with no `body` answers
+ *            `VALIDATION_ERROR` (422) the same way: a job's function-name
+ *            `handler` is code no JSON door carries. The package's job bodies
+ *            are scheduled on install and on every rehydrate.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -36,12 +40,13 @@
  *            outright (#8976).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
- *          → removes the cached manifest, then runs the uninstall cleanups
- *            domain plugins registered with the protocol (#21490) — the
- *            package's permission sets and their grants go with it — and
- *            reports each outcome as `cleanups`. Kernel must be restarted to
- *            fully unload — `engine.registerApp` is additive only. We
- *            document this in the response message.
+ *          → removes the cached manifest, withdraws the package from the
+ *            running kernel through the registry's `uninstallPackage` — the
+ *            verb the protocol's own uninstall uses — so its objects answer
+ *            404 at once (#21576), then runs the uninstall cleanups domain
+ *            plugins registered with the protocol (#21490) — the package's
+ *            permission sets and their grants go with it — and reports each
+ *            outcome as `cleanups`, a refused withdrawal included.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -121,6 +126,13 @@ type UninstallCleanupRunner = {
 const UNINSTALL_CLEANUP_RUNNER = 'protocol.runUninstallCleanups';
 
 /**
+ * [#21576] The outcome name this door reports when the running kernel did not
+ * withdraw the uninstalled package — named for the registry verb, as the one
+ * above is named for the protocol's.
+ */
+const REGISTRY_WITHDRAWAL = 'registry.uninstallPackage';
+
+/**
  * [#8976] The capability every MUTATING install-local route demands.
  *
  * `manage_metadata` is ADR-0066 D1's authoring capability and the SAME key the
@@ -148,6 +160,47 @@ const UNINSTALL_CLEANUP_RUNNER = 'protocol.runUninstallCleanups';
  * doors give the same credential.
  */
 const INSTALL_LOCAL_CAPABILITY = 'manage_metadata';
+
+/**
+ * [#21489] The refusal of a package that declares an enabled job no JSON door
+ * can run: `VALIDATION_ERROR` / 422.
+ *
+ * The code is the standard catalog's input-validation member. The condition is
+ * that the install payload fails this door's acceptance rule — every enabled
+ * job carries a `body` — and the ledger's admission rule sends a generic
+ * validation condition to the standard member rather than to a registered
+ * synonym (`error-code-ledger.zod.ts`, "Registering a new code"). What the
+ * author does instead is the prescription the message carries.
+ * `PLUGIN_MANIFEST_INVALID` is deliberately not it: the manifest is valid —
+ * `os validate` passes it and `os start --artifact` runs it.
+ *
+ * The status is 422, not the 400 / 502 split this door uses for an invalid
+ * manifest: the package is well-formed and this door cannot process it, which
+ * holds whichever branch supplied it — a catalog package declaring a handler job
+ * is no upstream fault. 422 derives `VALIDATION_ERROR`
+ * (`standardErrorCodeForHttpStatus`), so code and status agree.
+ */
+const JOB_WITHOUT_BODY_REFUSAL_CODE = 'VALIDATION_ERROR';
+const JOB_WITHOUT_BODY_REFUSAL_STATUS = 422;
+
+/**
+ * The refusal sentence: which jobs, why this door cannot run them, and the two
+ * remedies — a `body` (every door), or an `--artifact` boot (which loads the
+ * runtime module a `handler` lives in). Names each job and the function its
+ * `handler` declares, so the author fixes them all in one pass.
+ */
+function describeJobsWithoutBody(manifestId: string, jobs: ReadonlyArray<{ name: string; handler?: string }>): string {
+    const list = jobs
+        .map((j) => `'${j.name}' (${j.handler !== undefined ? `handler '${j.handler}'` : 'no handler'})`)
+        .join(', ');
+    const one = jobs.length === 1;
+    return `Package ${manifestId} was not installed: ${one ? 'its enabled job' : `${jobs.length} of its enabled jobs`} `
+        + `${list} ${one ? 'has' : 'have'} no \`body\`, so this install door cannot run ${one ? 'it' : 'them'}. `
+        + "A job's `handler` names a `defineStack({ functions })` entry, which is code: it travels in the artifact's "
+        + 'runtime module, never in the package JSON this door installs, so the job would be installed and never run. '
+        + 'Give the job a `body` (sandboxed JS, the form hooks and actions use, which travels with the package and runs '
+        + 'on every door), or boot the artifact with `os start --artifact`, which loads its runtime module.';
+}
 
 /**
  * A ledger read failure in the thrower's own words (#5413 / #5426).
@@ -855,6 +908,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
+        // 1c. [#21489] ⭐ A JOB THIS DOOR CANNOT RUN IS REFUSED, not installed.
+        //     A job runs on a JSON door only through its sandboxed `body`; its
+        //     deprecated `handler` names a `defineStack({ functions })` entry,
+        //     which is code and travels only in the artifact's runtime module —
+        //     never in the package this door receives. Before this, such a
+        //     package installed with a 200 and its job was declared and never
+        //     scheduled, hot or after a restart, with nothing anywhere saying so.
+        //
+        //     Answered here, beside the id gate and ahead of the collision check,
+        //     the posture gate, the hot-register and the ledger write, so a
+        //     refused install leaves the runtime exactly as it found it and the
+        //     author can add the body and retry. Only an ENABLED job is judged:
+        //     a disabled one is never scheduled on any door. ⛔ Rehydrate is not
+        //     gated, for the id gate's reason: an entry an older build installed
+        //     still rehydrates (its handler-only job is reported, not run).
+        const withoutBody = await this.jobsWithoutBody(ctx, manifest, manifestId);
+        if (withoutBody.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: JOB_WITHOUT_BODY_REFUSAL_CODE,
+                    message: describeJobsWithoutBody(manifestId, withoutBody),
+                },
+            }, JOB_WITHOUT_BODY_REFUSAL_STATUS);
+        }
+
         // 2. Conflict check — refuse to overwrite user-authored apps
         const conflict = this.findConflict(ctx, manifestId);
         if (conflict === 'user-code') {
@@ -1122,20 +1201,110 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         } catch (err: any) {
             return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: err?.message ?? String(err) } }, 500);
         }
-        // [#21490] Only now — the ledger entry is gone, so the package will not
-        // come back at the next restart — revoke what its metadata granted.
-        // Never before: an uninstall whose ledger write failed above leaves the
-        // package installed, and it must keep its grants.
-        const cleanups = await this.runUninstallCleanups(ctx, manifestId, admission.userId);
-        ctx.logger?.info?.(`[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; ${cleanups.length} uninstall cleanup(s) ran; restart runtime to unload from running kernel)`);
+        // [#21576] Only now — the ledger entry is gone, so the package will not
+        // come back at the next restart — withdraw it from the running kernel,
+        // and then [#21490] revoke what its metadata granted. Never before: an
+        // uninstall whose ledger write failed above leaves the package
+        // installed, and it must stay registered and keep its grants.
+        //
+        // The withdrawal goes FIRST, with no `await` between it and the ledger
+        // removal, for the same reason `deletePackage` withdraws before it runs
+        // the cleanups: from the moment the uninstall is durable, nothing that
+        // reads "registered packages" can see this one again. The cleanups
+        // await the store row by row; were the package still registered while
+        // they ran, another request's hot install announcing
+        // `metadata:reloaded` in that window would re-project the very sets
+        // they had just selected and removed. The cleanups lose nothing by
+        // going second: `deletePackage` already runs every registered cleanup
+        // after its withdrawal, and the one registered today
+        // (`security.package-permissions`) selects by package id in the store,
+        // never through the registry.
+        const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
+        const cleanups = [
+            ...(withdrawal ? [withdrawal] : []),
+            ...await this.runUninstallCleanups(ctx, manifestId, admission.userId),
+        ];
+        ctx.logger?.info?.(
+            `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
+            + (withdrawal
+                ? 'the running kernel did NOT withdraw it, so it stays loaded until the next restart; '
+                : 'withdrawn from the running kernel; ')
+            + `${cleanups.length - (withdrawal ? 1 : 0)} uninstall cleanup(s) ran)`,
+        );
         return c.json({
             success: true,
             data: {
                 manifestId,
                 cleanups,
-                note: 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The app remains loaded in the running kernel until the next restart (the kernel API does not support unregistering apps in-place).',
+                note: withdrawal
+                    ? 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The running kernel did not withdraw the package, so it stays loaded until the next restart; that is the `registry.uninstallPackage` entry in `cleanups`.'
+                    : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
             },
         }, 200);
+    };
+
+    /**
+     * [#21576] Withdraw a package this door just removed from its ledger from
+     * the running kernel — through `SchemaRegistry.uninstallPackage`, the ONE
+     * verb the protocol's own uninstall (`deletePackage`) withdraws a package
+     * with, on the same registry: the `objectql` engine's, which is the engine
+     * the protocol is assembled over and the registry this door's install
+     * registers into (the `manifest` service's `registerApp`).
+     *
+     * Before this, the door left the package registered until the next
+     * restart, and every reader of "registered packages" kept answering as if
+     * it were installed. One of them re-created a ghost grant: another
+     * package's hot install announces `metadata:reloaded`, `plugin-security`
+     * re-runs its declared-permission seeding over every registered package,
+     * and the uninstalled package's permission set came back as a fresh
+     * `managed_by: package` row that outlived the restart as an orphan
+     * (ADR-0090: "No ghost grants"). Withdrawing the registration — not
+     * teaching that one reader to skip it — makes every such reader right.
+     *
+     * What the verb withdraws, all of it re-added by a later install of the
+     * same id (`registerApp`): the package's object contributions (so its
+     * objects answer 404 at once instead of after a restart), its namespace,
+     * every metadata item it shipped, its boot disable seed, and its package
+     * record. Its tables and rows are untouched.
+     *
+     * Never throws: the uninstall has already happened. Two answers:
+     *   - `undefined` — withdrawn, or nothing to withdraw: no `objectql`
+     *     engine, or a registry that does not hold the package (a cloud
+     *     install whose hot-register failed, a rehydrate that failed);
+     *   - one failed outcome named {@link REGISTRY_WITHDRAWAL}, when the
+     *     registry refused (ADR-0029: another package extends an object this
+     *     one owns) or could not be asked. It rides on `cleanups`, the way a
+     *     failed cleanup does, and the operator log says what it costs and
+     *     the remedy; the cause is logged, never put on the wire.
+     */
+    private withdrawFromRunningKernel = (
+        ctx: PluginContext,
+        manifestId: string,
+    ): UninstallCleanupOutcome | undefined => {
+        let ql: IObjectQLEngine | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine — nothing registered */ }
+        const registry = ql?.registry;
+        if (!registry) return undefined;
+        try {
+            if (registry.getPackage(manifestId) === undefined) return undefined;
+            registry.uninstallPackage(manifestId);
+            return undefined;
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but the running kernel did not withdraw it `
+                + `(${err?.message ?? err}) — it stays registered until the next restart: its objects keep answering, `
+                + 'and every reader of the registered packages still counts it, so a later hot install can re-project '
+                + 'its permission sets. The outcome is on the response (`cleanups`). Remedy: remove what blocks the '
+                + 'withdrawal (the cause in parentheses names it) and restart the runtime — the ledger entry is '
+                + 'already gone, so the restart does not bring the package back.',
+            );
+            return {
+                name: REGISTRY_WITHDRAWAL,
+                success: false,
+                removed: 0,
+                error: 'the running kernel did not withdraw the package — it stays loaded until the next restart',
+            };
+        }
     };
 
     /**
@@ -1523,6 +1692,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * (`app:<manifestId>`). Called on the install route and on the
      * `kernel:ready` rehydrate.
      *
+     * [#21489] …and schedule its jobs through `scheduleAppArtifactJobs`, the
+     * binder's job half and the call `AppPlugin` makes on `kernel:ready`: a job
+     * `body` runs sandboxed on its schedule, hot and after a restart. A
+     * handler-only job never reaches here on an install — the install route
+     * refuses it ({@link jobsWithoutBody}) — and on a rehydrate of an entry an
+     * older build installed it is reported at `warn` and not run.
+     *
      * Before this, `manifest.register` was the whole install: the package's
      * actions and hooks were DECLARED and never bound, so every door refused
      * its script actions ("No handler registered" over MCP, 404 over REST)
@@ -1534,7 +1710,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * dropped. ⛔ No second registration path lives here: a runtime without the
      * binder (an older build, or a suite that mocks `@objectstack/runtime`
      * without it) binds NOTHING and says so — the package's script actions then
-     * stay unrunnable, and `list_actions` does not advertise them.
+     * stay unrunnable, and `list_actions` does not advertise them. The same
+     * holds for the job half: no job is scheduled here by any other route.
      *
      * Resolved lazily through `@objectstack/runtime`, like every other runtime
      * helper this plugin calls. Never throws.
@@ -1543,22 +1720,62 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         let ql: IObjectQLEngine | undefined;
         try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
         if (!ql) {
-            ctx.logger?.warn?.(`[MarketplaceInstallLocal] no objectql engine — the script actions and body hooks of ${manifestId} are NOT bound`);
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] no objectql engine — the script actions, body hooks and jobs of ${manifestId} are NOT bound`);
             return;
         }
         let bind: typeof import('@objectstack/runtime')['bindAppArtifactHandlers'] | undefined;
+        let schedule: typeof import('@objectstack/runtime')['scheduleAppArtifactJobs'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
             if (typeof mod?.bindAppArtifactHandlers === 'function') bind = mod.bindAppArtifactHandlers;
+            if (typeof mod?.scheduleAppArtifactJobs === 'function') schedule = mod.scheduleAppArtifactJobs;
         } catch { /* reported below */ }
         if (!bind) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] this runtime has no bindAppArtifactHandlers — the script actions and body hooks of ${manifestId} are NOT bound: `
                 + 'every door refuses those actions and the hooks never fire. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
+        } else {
+            bind(ql, manifest, { appId: manifestId, logger: ctx.logger, source: 'MarketplaceInstallLocal' });
+        }
+        if (!schedule) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] this runtime has no scheduleAppArtifactJobs — the jobs of ${manifestId} are NOT scheduled. `
+                + 'Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+            );
             return;
         }
-        bind(ql, manifest, { appId: manifestId, logger: ctx.logger, source: 'MarketplaceInstallLocal' });
+        await schedule(ctx, manifest, { appId: manifestId, ql, source: 'MarketplaceInstallLocal' });
+    };
+
+    /**
+     * [#21489] The enabled jobs of `manifest` that carry no `body` — the jobs
+     * no JSON door can run, which the install route refuses. The judgement is
+     * the runtime binder's own (`collectJobsWithoutBody`, which reads the jobs
+     * the binder schedules), so the door and the binder cannot disagree about
+     * what this door can run.
+     *
+     * A runtime that predates the judgement judges nothing and says so: the
+     * install proceeds as it did before this gate existed.
+     */
+    private jobsWithoutBody = async (
+        ctx: PluginContext,
+        manifest: unknown,
+        manifestId: string,
+    ): Promise<ReadonlyArray<{ name: string; handler?: string }>> => {
+        let collect: typeof import('@objectstack/runtime')['collectJobsWithoutBody'] | undefined;
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.collectJobsWithoutBody === 'function') collect = mod.collectJobsWithoutBody;
+        } catch { /* reported below */ }
+        if (!collect) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] this runtime has no collectJobsWithoutBody — the jobs of ${manifestId} are not judged, `
+                + 'so a job with no `body` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+            );
+            return [];
+        }
+        return collect(manifest);
     };
 
     /**

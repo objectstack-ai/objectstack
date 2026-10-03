@@ -81,6 +81,8 @@ const ROLLUP_HOOK = {
  * the driver and the engine each log it on the way out. Withheld and asserted
  * below rather than muted; the module header explains why.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 describe('#1867 nested cross-object write — REAL SqlDriver (better-sqlite3, on-disk)', () => {
@@ -136,6 +138,9 @@ describe('#1867 nested cross-object write — REAL SqlDriver (better-sqlite3, on
     // there as a real failure; they are withheld now and asserted here. If the
     // probe stops running, or `sys_organization` starts resolving, the log goes
     // quiet AND this goes red — the failure a bare `console` mute would hide.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

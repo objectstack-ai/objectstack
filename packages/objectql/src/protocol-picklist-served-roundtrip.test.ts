@@ -16,6 +16,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
+// [#21516] The rest of the stored-metadata family the repository writes through: the
+// engine refuses a name the registry does not resolve, so the harness registers it as a boot does.
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 
 const sysMetadataObject = {
     name: 'sys_metadata',
@@ -155,6 +158,7 @@ describe('picklist — the protocol object read and the authoring door', () => {
         engine.registerDriver(makeStubDriver().driver, true);
         await engine.init();
         engine.registry.registerObject(sysMetadataObject);
+        for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
         engine.registerApp({
             id: 'com.test.lists', name: 'lists',
             picklists: [{ name: 'industry', label: 'Industry', options: [{ label: 'Tech', value: 'tech' }] }],

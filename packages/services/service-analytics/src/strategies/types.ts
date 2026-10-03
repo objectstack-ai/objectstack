@@ -161,6 +161,25 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    */
   sqlDialect?(objectName: string): string | undefined;
   /**
+   * [#21441] The date-bucket expression the driver backing `objectName`
+   * groups `field` by at `granularity`, as SQL text in that driver's dialect:
+   * `strftime('%Y-%m', …)` on SQLite, `to_char(… AT TIME ZONE 'UTC',
+   * 'YYYY-MM')` on PostgreSQL. `undefined` when the host cannot answer: no
+   * hook wired, a driver with no bucket expression (a non-SQL driver), or a
+   * granularity the driver buckets in memory (`week` on SQLite).
+   *
+   * `ObjectQLStrategy.generateSql` prints a date-bucketed dimension in this
+   * expression, so its echo runs on that dialect and answers the face's
+   * bucket keys. The service answers it from
+   * `AnalyticsServiceConfig.dateBucketSql`, which the plugin fills from the
+   * driver that EXECUTES the aggregate: the driver stays the single source of
+   * its bucketing, the posture `sqlDialect` takes. Declared HERE rather than
+   * on the spec's {@link StrategyContext} for the reason `declaredFieldType`
+   * is: nothing about it is an authorable surface, and a strategy that does
+   * not know the hook keeps the behaviour it had.
+   */
+  dateBucketSql?(objectName: string, field: string, granularity: string): string | undefined;
+  /**
    * [#19995] The ENGINE's own `where` admission verdict for `objectName`,
    * `IObjectQLEngine.judgeFilter` (#20157), or `undefined` when the host
    * cannot answer (no data engine wired, an engine without the member, or an

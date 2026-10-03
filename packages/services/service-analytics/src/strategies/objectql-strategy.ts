@@ -163,10 +163,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     // Build groupBy from dimensions, honouring `timeDimensions` granularity.
     // A date dimension with a granularity becomes a STRUCTURED groupBy item
-    // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (driver
-    // date_trunc or in-memory). Without this the ObjectQL path grouped raw
-    // timestamps (one bucket per row) and date-bucketed dataset widgets never
-    // matched their legacy `categoryGranularity` counterpart.
+    // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
+    // driver's own SQL expression, or in memory). Without this the ObjectQL
+    // path grouped raw timestamps (one bucket per row) and date-bucketed
+    // dataset widgets never matched their legacy `categoryGranularity`
+    // counterpart.
     type GroupByItem = string | { field: string; dateGranularity: string };
     const granByDim = new Map<string, string>();
     for (const td of query.timeDimensions ?? []) {
@@ -408,14 +409,23 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
-   * Render a REPRESENTATIVE SQL string for an ObjectQL aggregate query.
+   * Render the SQL statement an ObjectQL aggregate query stands for.
    *
    * This path executes through `engine.aggregate()`, not raw SQL, so the string
    * is documentation rather than the literal statement — but it must be an
    * honest account of what the query does, because dataset responses echo it
    * and authors read it to verify their widget options landed (#3588). It
-   * therefore renders date bucketing (`date_trunc`), the WHERE predicate,
-   * ordering, and the row window.
+   * therefore renders date bucketing, the WHERE predicate, ordering, and the
+   * row window.
+   *
+   * [#21441] A date bucket renders the expression the driver itself groups by
+   * for its dialect, through the `dateBucketSql` hook, so the echo runs there
+   * and answers the face's bucket keys. The bucket stays REPRESENTATIVE where
+   * the hook answers nothing: no hook, a driver with no bucket expression (a
+   * non-SQL driver), a granularity the driver buckets in memory (`week` on
+   * SQLite), or a non-UTC `timezone`, which the engine buckets in memory on
+   * that zone's calendar. There it prints `date_trunc('<granularity>', col)`,
+   * which SQLite refuses.
    *
    * Filter VALUES are rendered as `$n` placeholders and returned in `params`,
    * never inlined: the echoed statement travels to the browser, and a filter
@@ -478,9 +488,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const groupByParts: string[] = [];
     const params: unknown[] = [];
 
-    // Date-bucketed dimensions render as `date_trunc('<granularity>', col)` —
-    // the SQL shape the driver's own bucketing implements — so a `month` trend
-    // no longer reads as if it grouped by the raw column.
+    // Date-bucketed dimensions render as a bucket expression, so a `month`
+    // trend does not read as if it grouped by the raw column — see `dimExpr`
+    // below for which expression.
     const granByDim = new Map<string, string>();
     for (const td of query.timeDimensions ?? []) {
       if (td.granularity) granByDim.set(td.dimension, td.granularity);
@@ -515,6 +525,26 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
+    // [#21441] The bucket expression the driver itself groups by for its
+    // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on
+    // SQLite, `to_char(… AT TIME ZONE 'UTC', 'YYYY-MM')` on PostgreSQL. The
+    // echo then runs there and answers the face's bucket keys. It used to
+    // print `date_trunc('<granularity>', col)` on every dialect, calling that
+    // the driver's own bucketing: no driver buckets with it, SQLite refuses it
+    // (`no such function`), and PostgreSQL answers a timestamp where the face
+    // answers `2026-01`.
+    //
+    // Asked only for a UTC or unset `timezone`. The driver's expression is a
+    // UTC bucket, and a non-UTC zone makes the engine bucket in memory on that
+    // zone's calendar instead (ADR-0053 Phase 2, D2; `tzRequiresInMemory` in
+    // objectql's `engine.ts`), which no driver expression describes. Where
+    // nothing answers, the bucket keeps the representative `date_trunc`.
+    const zone = query.timezone;
+    const driverBucketSql = (col: string, granularity: string): string | undefined => {
+      if (zone && zone !== 'UTC') return undefined;
+      const answered = (ctx as DatasetScopedStrategyContext).dateBucketSql?.(tableName, col, granularity);
+      return typeof answered === 'string' && answered !== '' ? answered : undefined;
+    };
     const dimExpr = (dim: string): string => {
       const cd = crossByDim.get(dim);
       if (cd) {
@@ -525,7 +555,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
-      return gran ? `date_trunc('${gran}', ${col})` : col;
+      if (!gran) return col;
+      return driverBucketSql(col, gran) ?? `date_trunc('${gran}', ${col})`;
     };
 
     if (query.dimensions) {

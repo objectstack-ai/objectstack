@@ -267,7 +267,7 @@ export const JobSchema = lazySchema(() => strictObject({
       + 'Preferred over `handler`: when both are present `body` wins. '
       + 'It runs in the QuickJS sandbox with no module scope (no imports, no helpers or constants from the surrounding file): it reaches data only through `ctx.api` under its declared `capabilities` (`api.read` / `api.write` / `api.transaction`) and logs through `ctx.log` (`log`); the in-process handler context (`ql`, `logger`, `bundle`) does not exist there. '
       + "Its time limit is the job's `timeoutMs` (see there): long-running work declares a `timeoutMs` that covers it, or splits into bounded runs that each finish within it. "
-      + 'The runtime binder that schedules job bodies has not landed yet: until it does a job runs through `handler`, so keep `handler` beside `body`.',
+      + "Every door that brings an artifact in schedules a job's `body` — the boot, and `os package install` on install and on every restart — while a `handler` is code that travels only in the artifact's runtime module and runs only on a boot that loads it (a config, or `os start --artifact`); `os package install` therefore refuses an enabled job with no `body`.",
   ),
   retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 — state a count to opt in.'),
   // Renamed from `timeout` (#14478): the unit (milliseconds) lived only in the
@@ -312,8 +312,9 @@ export type JobParsed = z.infer<typeof JobSchema>;
  *     source: "const open = await ctx.api.object('task').find({ where: { status: 'open' } }); ctx.log.info('open tasks', { count: open.length });",
  *     capabilities: ['api.read', 'log'],
  *   },
- *   // Deprecated, kept beside `body` until the runtime binder runs job bodies:
- *   // must be registered in defineStack({ functions: { syncMetadata: () => ... } })
+ *   // Deprecated and optional beside `body`, which wins when both are present. It
+ *   // names a defineStack({ functions }) entry, which only a boot that loads the
+ *   // artifact's runtime module (a config, or `os start --artifact`) can run.
  *   handler: 'syncMetadata',
  * });
  * ```

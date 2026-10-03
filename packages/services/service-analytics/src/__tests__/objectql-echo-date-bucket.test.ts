@@ -1,0 +1,253 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#21441] The ObjectQL face echoes a date-bucketed dimension in the bucket
+ * expression the driver itself groups by, so the echo runs on that dialect and
+ * answers the face's rows.
+ *
+ * ## The shape this closes
+ *
+ * `ObjectQLStrategy.generateSql` printed `date_trunc('<granularity>', col)` on
+ * every dialect. Measured at `POST /api/v1/analytics/query` and
+ * `POST /api/v1/analytics/sql` on `main` `0bddffd55`, default composition (the
+ * native face declines a granularity, so every bucketed query lands here):
+ *
+ * | cell | the driver grouped by | that echo, run |
+ * |:--|:--|:--|
+ * | SQLite, month | `strftime('%Y-%m', …)` | `no such function: date_trunc` |
+ * | SQLite, quarter | `(strftime('%Y', …) \|\| '-Q' \|\| …)` | `no such function: date_trunc` |
+ * | PostgreSQL 16.14, month | `to_char((…)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')` | `2026-01-01T00:00:00.000Z` where the face answers `2026-01` |
+ *
+ * The rows were right. The echo now reads the bucket from the `dateBucketSql`
+ * hook, which the plugin fills from `SqlDriver.dateBucketSql`: the driver's
+ * own `buildDateBucketExpr`, rendered. No second bucketing table.
+ *
+ * ## The cells
+ *
+ *   - **sqlite** (better-sqlite3), every run. Month and quarter are grouped by
+ *     the driver; week is bucketed in memory (the driver declares no `week`).
+ *   - **postgres** where `OS_TEST_POSTGRES_URL` is set, a named skip otherwise.
+ *     Month, quarter and week are grouped by the driver. No CI step provisions
+ *     that variable for this package, so the live cell is red-capable and
+ *     un-run in CI.
+ *
+ * Where the hook answers nothing, the bucket keeps `date_trunc`: a granularity
+ * the driver buckets in memory, a non-UTC `timezone` (the engine buckets in
+ * memory on that zone's calendar), and a host that wires no hook.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import type { Cube } from '@objectstack/spec/data';
+import { DatasetSchema } from '@objectstack/spec/ui';
+import type { AnalyticsService } from '../analytics-service.js';
+import { AnalyticsServicePlugin } from '../plugin.js';
+import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
+import type { StrategyContext } from '../strategies/types.js';
+
+const DEAL = 'os21441_bucket_deal';
+
+const DEAL_OBJECT = {
+  name: DEAL,
+  label: 'Bucket echo deal',
+  fields: {
+    closed_on: { name: 'closed_on', type: 'date' as const },
+    closed_at: { name: 'closed_at', type: 'datetime' as const },
+    amount: { name: 'amount', type: 'number' as const },
+  },
+};
+
+// d2 closes at 20:00 UTC on 31 January, which is 1 February in Asia/Shanghai.
+const DEALS = [
+  { id: 'd1', closed_on: '2026-01-10', closed_at: '2026-01-10T10:00:00.000Z', amount: 20 },
+  { id: 'd2', closed_on: '2026-01-25', closed_at: '2026-01-31T20:00:00.000Z', amount: 7 },
+  { id: 'd3', closed_on: '2026-02-03', closed_at: '2026-02-03T08:00:00.000Z', amount: 1 },
+  { id: 'd4', closed_on: '2026-03-14', closed_at: '2026-03-14T12:00:00.000Z', amount: 10 },
+  { id: 'd5', closed_on: '2026-04-02', closed_at: '2026-04-02T00:30:00.000Z', amount: 5 },
+] as const;
+
+const CUBE = 'os21441_bucket_cube';
+const CUBES = [
+  {
+    name: CUBE,
+    title: 'Bucket echo cube',
+    sql: DEAL,
+    public: true,
+    measures: { amount_sum: { type: 'sum', sql: 'amount', label: 'Amount' } },
+    dimensions: {
+      closed_on: { type: 'time', sql: 'closed_on', label: 'Closed on' },
+      closed_at: { type: 'time', sql: 'closed_at', label: 'Closed at' },
+    },
+  },
+] as unknown as Cube[];
+
+/** A dataset whose measure carries its own `filter`, which the engine aggregates in memory. */
+const FILTERED = DatasetSchema.parse({
+  name: 'os21441_bucket_filtered',
+  label: 'Bucket echo filtered',
+  object: DEAL,
+  dimensions: [{ name: 'closed_on', label: 'Closed on', field: 'closed_on', type: 'date' }],
+  measures: [{ name: 'big_sum', label: 'Big', aggregate: 'sum', field: 'amount', filter: { amount: { $ne: 7 } } }],
+});
+
+const bucketed = (dim: string, granularity: string, extra: Record<string, unknown> = {}) => ({
+  cube: CUBE,
+  measures: ['amount_sum'],
+  timeDimensions: [{ dimension: dim, granularity }],
+  order: { [dim]: 'asc' },
+  ...extra,
+});
+
+interface Cell {
+  id: 'sqlite' | 'pg';
+  label: string;
+  env: string | null;
+  config: () => Record<string, unknown> | null;
+  /** The granularities the driver groups by in SQL; the rest it buckets in memory. */
+  driverGrouped: readonly string[];
+}
+
+const CELLS: readonly Cell[] = [
+  {
+    id: 'sqlite',
+    label: 'sqlite',
+    env: null,
+    config: () => ({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+    driverGrouped: ['month', 'quarter'],
+  },
+  {
+    id: 'pg',
+    label: 'live postgres',
+    env: 'OS_TEST_POSTGRES_URL',
+    config: () => (process.env.OS_TEST_POSTGRES_URL ? { client: 'pg', connection: process.env.OS_TEST_POSTGRES_URL } : null),
+    driverGrouped: ['month', 'quarter', 'week'],
+  },
+];
+
+const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } };
+
+type Row = Record<string, unknown>;
+
+/** Rows as tuples of the named columns, in arrival order; a numeric cell reads as a number on every dialect. */
+const tuples = (rows: unknown, columns: readonly string[]) =>
+  (rows as Row[]).map((row) => columns.map((c) => (typeof row[c] === 'number' || /^-?\d+(\.\d+)?$/.test(String(row[c])) ? Number(row[c]) : row[c])));
+
+/** The bucket expression an echo selects for `dim`: everything between `SELECT ` and ` AS "<dim>"`. */
+const selectedBucket = (sql: string, dim: string) => sql.slice('SELECT '.length, sql.indexOf(` AS "${dim}"`));
+
+for (const cell of CELLS) {
+  const config = cell.config();
+  describe.skipIf(!config)(
+    `[#21441] the ObjectQL face echoes a date bucket in the driver's own expression (${cell.label})${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    () => {
+      let driver: any;
+      let engine: ObjectQL;
+      let analytics: AnalyticsService;
+      /** Every statement the driver ran, in order. */
+      const driverRan: string[] = [];
+
+      const dropTables = async () => {
+        if (cell.id !== 'pg') return;
+        await driver?.execute(`drop table if exists ${DEAL}`).catch(() => {});
+      };
+
+      /** One `query()` and the statements the driver ran for it. */
+      const ask = async (query: Record<string, unknown>) => {
+        const before = driverRan.length;
+        const res = await analytics.query(query as any);
+        return { res, ran: driverRan.slice(before) };
+      };
+
+      /** Run an echo through the engine's raw-SQL bridge, as the native face runs its own statement. */
+      const run = async (sql: string, params: unknown[]) => {
+        const result = await (engine as any).execute(sql.replace(/\$(\d+)/g, '?'), { args: params, object: DEAL });
+        return Array.isArray(result) ? result : (result as { rows: Row[] }).rows;
+      };
+
+      beforeAll(async () => {
+        driver = new SqlDriver(config as any);
+        await dropTables();
+        engine = new ObjectQL({ logger: quiet } as any);
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject(DEAL_OBJECT as any);
+        await engine.syncSchemas();
+        for (const row of DEALS) await engine.insert(DEAL, { ...row } as any);
+        driver.knex.on('query', (q: { sql: string }) => { driverRan.push(q.sql); });
+
+        // The default composition: no `queryCapabilities` override.
+        const registered: Record<string, unknown> = {};
+        await new AnalyticsServicePlugin({ cubes: CUBES, debugSql: true } as any).init({
+          getService: (name: string) => (name === 'data' ? engine : registered[name]),
+          registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+          replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+          hook: () => {},
+          logger: quiet,
+        } as never);
+        analytics = registered.analytics as AnalyticsService;
+        analytics.registerDataset(FILTERED);
+      });
+
+      afterAll(async () => {
+        await dropTables();
+        try { await engine?.destroy(); } catch { /* noop */ }
+      });
+
+      for (const dim of ['closed_on', 'closed_at']) {
+        it.each(cell.driverGrouped)(`${dim}, %s: the echo selects and groups by the expression the driver ran, and it runs`, async (granularity) => {
+          const query = bucketed(dim, granularity);
+          const { res, ran } = await ask(query);
+          const echo = res.sql!;
+          // `generateSql` is the body `POST /analytics/sql` answers with.
+          const dryRun = await analytics.generateSql(query as any);
+          expect(dryRun.sql).toBe(echo);
+          expect(dryRun.params).toEqual([]);
+
+          const bucket = selectedBucket(echo, dim);
+          expect(bucket).not.toContain('date_trunc');
+          expect(echo).toContain(`GROUP BY ${bucket}`);
+          expect(ran, 'the driver grouped by that expression').toHaveLength(1);
+          expect(ran[0]).toContain(bucket);
+
+          expect(tuples(await run(echo, dryRun.params), [dim, 'amount_sum'])).toEqual(tuples(res.rows, [dim, 'amount_sum']));
+        });
+      }
+
+      it('a measure filter, which the engine aggregates in memory: the echo keeps the driver expression and runs with its params', async () => {
+        const query = { cube: FILTERED.name, measures: ['big_sum'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }], order: { closed_on: 'asc' } };
+        const { res, ran } = await ask(query);
+        expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
+        expect(tuples(res.rows, ['closed_on', 'big_sum'])).toEqual([['2026-01', 20], ['2026-02', 1], ['2026-03', 10], ['2026-04', 5]]);
+        const dryRun = await analytics.generateSql(query as any);
+        expect(dryRun.sql).toBe(res.sql);
+        expect(selectedBucket(dryRun.sql, 'closed_on')).not.toContain('date_trunc');
+        expect(tuples(await run(dryRun.sql, dryRun.params), ['closed_on', 'big_sum'])).toEqual(tuples(res.rows, ['closed_on', 'big_sum']));
+      });
+
+      it.each(['month', 'quarter', 'week'].filter((g) => !cell.driverGrouped.includes(g)))(
+        'FALLBACK: %s, which the driver buckets in memory, keeps `date_trunc`',
+        async (granularity) => {
+          const { res, ran } = await ask(bucketed('closed_on', granularity));
+          expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
+          expect(selectedBucket(res.sql!, 'closed_on')).toBe(`date_trunc('${granularity}', closed_on)`);
+        },
+      );
+
+      it('FALLBACK: a non-UTC timezone buckets in memory on that zone\'s calendar, and the echo keeps `date_trunc`', async () => {
+        const { res, ran } = await ask(bucketed('closed_at', 'month', { timezone: 'Asia/Shanghai' }));
+        expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
+        expect(tuples(res.rows, ['closed_at', 'amount_sum'])).toEqual([['2026-01', 20], ['2026-02', 8], ['2026-03', 10], ['2026-04', 5]]);
+        expect(selectedBucket(res.sql!, 'closed_at')).toBe("date_trunc('month', closed_at)");
+      });
+    },
+  );
+}
+
+describe('[#21441] FALLBACK: a host that wires no dateBucketSql hook', () => {
+  it('echoes the bucket as `date_trunc`', async () => {
+    const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
+    const { sql } = await new ObjectQLStrategy().generateSql(bucketed('closed_on', 'month') as any, ctx);
+    expect(selectedBucket(sql, 'closed_on')).toBe("date_trunc('month', closed_on)");
+  });
+});

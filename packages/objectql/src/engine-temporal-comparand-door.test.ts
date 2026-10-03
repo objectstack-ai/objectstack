@@ -370,9 +370,12 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
   it('invents no verdict on an object whose field map it cannot see', async () => {
     // A registry-less host must not refuse a filter on a field it cannot type —
     // the same early return the neighbouring gates make.
+    // [#21516] The engine now refuses the OBJECT first, with the data door's
+    // own `OBJECT_NOT_FOUND`, so the temporal door still invents no verdict
+    // about `created_date`: the answer is about the object, never this door's.
     await expect(
       engine.find('unregistered_object', { where: { created_date: { $gte: 'last_30_days' } } }),
-    ).resolves.toBeDefined();
+    ).rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
   });
 });
 

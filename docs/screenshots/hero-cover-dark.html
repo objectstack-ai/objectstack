@@ -1,0 +1,275 @@
+<!doctype html>
+<!--
+  hero-cover-dark.html — the design source of the README hero cover.
+
+  Renders at exactly 2400 x 1200. The committed master
+  `docs/screenshots/hero-cover-dark.png` is a screenshot of this page, and
+  `apps/docs/public/hero-cover-dark.webp` (the docs site's og:image and video
+  poster) is derived from that PNG — see the provenance block on `HERO_COVER` in
+  `apps/docs/lib/site.ts`. The next copy change is an edit here plus one
+  re-render; nothing is hand-painted.
+
+  Re-render both files (the preinstalled Playwright Chromium, never
+  `playwright install`; sharp resolves from the docs app's Next dependency):
+
+    node docs/screenshots/render-hero-cover.mjs
+
+  Preview without touching the committed files:
+
+    node docs/screenshots/render-hero-cover.mjs --out /tmp/hero-preview
+
+  The equivalent of the webp step by hand, from the PNG master and never from a
+  previous webp (a lossy re-encode of a lossy source compounds):
+
+    sharp('docs/screenshots/hero-cover-dark.png')
+      .webp({ quality: 80, effort: 6 })
+      .toFile('apps/docs/public/hero-cover-dark.webp')
+
+  Typography is Inter and IBM Plex Mono from Google Fonts; the render script
+  refuses to write the committed files when those fonts did not load, so an
+  offline render cannot silently ship the system fallback.
+
+  Copy on this page is fixed by the positioning card: the slogan, the
+  descriptor and the four promises are quoted verbatim from README.md and must
+  change together with it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ObjectStack — hero cover</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=block" rel="stylesheet">
+<style>
+  :root {
+    --bg: #08080f;
+    --bg-2: #0d0e18;
+    --grid: rgba(148, 163, 230, 0.075);
+    --fg: #f5f6fa;
+    --fg-2: #c7cad6;
+    --fg-3: #9598ab;
+    --indigo: #818cf8;
+    --violet: #a78bfa;
+    --purple: #bd84fc;
+    --card: #12131f;
+    --card-2: #191920;
+    --line: #2a2a30;
+    --amber: #f5a623;
+    --dash-bg: #f4f5f8;
+    --dash-card: #ffffff;
+    --dash-line: #e6e8ee;
+    --dash-fg: #1f2433;
+    --dash-fg-2: #6b7085;
+    --kpi-blue: #2f5fd6;
+    --kpi-green: #1a9c6e;
+    --kpi-orange: #e8752a;
+    --font-sans: Inter, 'Liberation Sans', 'DejaVu Sans', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Liberation Mono', 'DejaVu Sans Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 2400px; height: 1200px; overflow: hidden; }
+  body {
+    position: relative;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+  .backdrop {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(1100px 760px at 0% 0%, rgba(99, 102, 241, 0.30), transparent 70%),
+      radial-gradient(900px 600px at 100% 0%, rgba(99, 102, 241, 0.10), transparent 70%),
+      linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 55%, #090b11 100%);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, var(--grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+    background-size: 80px 80px;
+    background-position: 32px 32px;
+    -webkit-mask-image: radial-gradient(ellipse 85% 75% at 45% 40%, black 30%, transparent 100%);
+            mask-image: radial-gradient(ellipse 85% 75% at 45% 40%, black 30%, transparent 100%);
+  }
+
+  /* ── left column ───────────────────────────────────────── */
+  .left { position: absolute; left: 112px; top: 0; width: 1040px; height: 1200px; }
+  .brand { position: absolute; top: 236px; left: 0; display: flex; align-items: center; gap: 18px; }
+  .brand svg { width: 56px; height: 56px; }
+  .brand span { font-size: 44px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); }
+  h1 {
+    position: absolute; top: 330px; left: -6px;
+    font-size: 128px; line-height: 1.02; font-weight: 800; letter-spacing: -0.038em;
+    color: var(--fg); white-space: nowrap;
+  }
+  h1 .accent {
+    display: block;
+    background: linear-gradient(90deg, var(--indigo) 0%, var(--violet) 55%, var(--purple) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    padding-right: 0.08em; /* keeps the period's clip box clear of the gradient edge */
+  }
+  .sub { position: absolute; left: 0; width: 1040px; font-weight: 400; letter-spacing: -0.012em; }
+  .sub-1 { top: 598px; font-size: 40px; color: var(--fg-2); }
+  .sub-1 b { font-weight: 600; color: var(--fg); }
+  .sub-2 { top: 658px; font-size: 36px; line-height: 1.32; color: var(--fg-3); }
+  .cmd {
+    position: absolute; top: 798px; left: 0; display: inline-flex; align-items: center; gap: 18px;
+    padding: 0 30px; height: 72px; border-radius: 14px;
+    background: var(--card-2); border: 1.5px solid var(--line);
+    font-family: var(--font-mono); font-size: 29px; color: var(--fg-2);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+  .cmd .prompt { color: var(--indigo); }
+  .chips { position: absolute; top: 912px; left: 0; display: flex; gap: 14px; white-space: nowrap; }
+  .chip {
+    display: inline-flex; align-items: center; height: 56px; padding: 0 24px; border-radius: 12px;
+    background: #19191f; border: 1.5px solid var(--line);
+    font-size: 24px; font-weight: 500; letter-spacing: -0.01em; color: var(--fg-2);
+  }
+  .chip.licence {
+    font-family: var(--font-mono); font-size: 23px; font-weight: 500; color: var(--indigo);
+    border-color: rgba(129, 140, 248, 0.55); background: rgba(129, 140, 248, 0.08);
+  }
+
+  /* ── right column ──────────────────────────────────────── */
+  .code {
+    position: absolute; left: 1190px; top: 130px; width: 598px; height: 462px;
+    border-radius: 18px; background: var(--card); border: 1.5px solid var(--line);
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5); padding: 32px 34px;
+    font-family: var(--font-mono); font-size: 26px; line-height: 40px; color: var(--fg-2); z-index: 3;
+  }
+  .code .file { font-size: 20px; letter-spacing: 0.14em; color: var(--fg-3); margin-bottom: 14px; }
+  .code pre { font: inherit; white-space: pre; }
+  .code .s { color: var(--indigo); }
+  .code .fn { color: var(--amber); }
+  .code .pn { color: var(--fg-3); }
+  .pill {
+    position: absolute; left: 1205px; top: 611px; height: 60px; padding: 0 30px; border-radius: 30px;
+    display: inline-flex; align-items: center; gap: 12px; z-index: 3;
+    background: linear-gradient(90deg, #6d6cf5 0%, #9b6cf6 100%);
+    font-size: 25px; font-weight: 700; letter-spacing: -0.01em; color: #fff;
+    box-shadow: 0 12px 30px rgba(99, 102, 241, 0.45);
+  }
+  .dash {
+    position: absolute; left: 1442px; top: 456px; width: 1120px; height: 720px;
+    border-radius: 20px 0 0 20px; background: var(--dash-bg);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55); overflow: hidden; z-index: 2;
+    color: var(--dash-fg); font-family: var(--font-sans);
+  }
+  .dash .bar {
+    height: 46px; border-bottom: 1px solid var(--dash-line); background: #fff;
+    display: flex; align-items: center; justify-content: flex-start; padding: 0 0 0 352px;
+    font-size: 15px; color: var(--dash-fg-2);
+  }
+  .dash .bar .sel { border: 1px solid var(--dash-line); border-radius: 6px; padding: 4px 10px; }
+  .dash .body { padding: 22px 0 0 20px; display: grid; grid-template-columns: 322px 322px 322px 322px; gap: 20px; }
+  .kpi, .panel { background: var(--dash-card); border: 1px solid var(--dash-line); border-radius: 10px; padding: 18px 20px; }
+  .kpi .t { font-size: 15px; font-weight: 600; }
+  .kpi .d { font-size: 11px; color: var(--dash-fg-2); margin-top: 4px; }
+  .kpi .v { font-size: 30px; font-weight: 700; margin-top: 34px; letter-spacing: -0.02em; }
+  .kpi .l { font-size: 11px; color: var(--dash-fg-2); margin-top: 2px; }
+  .blue { color: var(--kpi-blue); } .green { color: var(--kpi-green); } .orange { color: var(--kpi-orange); }
+  .panel { grid-column: span 2; height: 440px; }
+  .panel .t { font-size: 15px; font-weight: 600; }
+  .panel .d { font-size: 11px; color: var(--dash-fg-2); margin-top: 4px; }
+  .panel svg { display: block; margin-top: 22px; width: 100%; height: 340px; }
+  .wide { grid-column: span 2; }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<div class="grid"></div>
+
+<div class="left">
+  <div class="brand" aria-label="ObjectStack">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#818cf8" />
+          <stop offset="100%" stop-color="#c084fc" />
+        </linearGradient>
+      </defs>
+      <path d="M12 22.5L2 17.5L12 12.5L22 17.5L12 22.5Z" fill="url(#logo-gradient)" fill-opacity="0.6" />
+      <path d="M12 17.5L2 12.5L12 7.5L22 12.5L12 17.5Z" fill="url(#logo-gradient)" fill-opacity="0.8" />
+      <path d="M12 12.5L2 7.5L12 2.5L22 7.5L12 12.5Z" fill="url(#logo-gradient)" fill-opacity="1" />
+    </svg>
+    <span>ObjectStack</span>
+  </div>
+
+  <h1>The ontology<span class="accent">is the software.</span></h1>
+
+  <p class="sub sub-1"><b>One executable business ontology.</b></p>
+  <p class="sub sub-2">AI writes it, the runtime runs it, agents operate it, you own it.</p>
+
+  <div class="cmd"><span class="prompt">$</span><span>npm create objectstack@latest</span></div>
+
+  <div class="chips">
+    <span class="chip">Executable</span>
+    <span class="chip">AI-writable</span>
+    <span class="chip">Agent-operable</span>
+    <span class="chip">You own it</span>
+    <span class="chip licence">Apache-2.0</span>
+  </div>
+</div>
+
+<div class="code">
+  <div class="file">TICKET.OBJECT.TS</div>
+<pre>ObjectSchema.create({
+  name: <span class="s">'support_ticket'</span>,
+  fields: {
+    subject: Field.<span class="fn">text</span>(),
+    status:  Field.<span class="fn">select</span>([<span class="pn">…</span>]),
+    owner:   Field.<span class="fn">lookup</span>(<span class="s">'user'</span>),
+  },
+  sharingModel: <span class="s">'private'</span>,
+})</pre>
+</div>
+
+<div class="pill">one definition <span aria-hidden="true">→</span></div>
+
+<div class="dash" aria-hidden="true">
+  <div class="bar"><span class="sel">All ⌄</span></div>
+  <div class="body">
+    <div class="kpi"><div class="t">Closed Won (QTD)</div><div class="d">Revenue closed this quarter</div><div class="v blue">2,510,000</div><div class="l">Total Amount</div></div>
+    <div class="kpi"><div class="t">Open Opportunities</div><div class="d">Active deals in flight</div><div class="v orange">5</div><div class="l">Opportunities</div></div>
+    <div class="kpi"><div class="t">Win Rate (12M)</div><div class="d">Deals won as a share of all deals settled</div><div class="v green">62%</div><div class="l">Win Rate</div></div>
+    <div class="kpi"><div class="t">Deals Won (12M)</div><div class="d">The numerator of the win rate</div><div class="v blue">8</div><div class="l">Won Deals</div></div>
+    <div class="panel">
+      <div class="t">Pipeline by Stage</div><div class="d">Open opportunity value at each sales stage</div>
+      <svg viewBox="0 0 600 340">
+        <rect x="40" y="22" width="520" height="44" rx="5" fill="#2f5fd6"/>
+        <rect x="90" y="86" width="420" height="44" rx="5" fill="#4b7be0"/>
+        <rect x="140" y="150" width="320" height="44" rx="5" fill="#6d94ea"/>
+        <rect x="190" y="214" width="220" height="44" rx="5" fill="#1a9c6e"/>
+        <rect x="235" y="278" width="130" height="44" rx="5" fill="#30b68a"/>
+        <g font-size="15" font-weight="500" fill="#fff" text-anchor="middle" font-family="Inter">
+          <text x="300" y="49">Qualification</text>
+          <text x="300" y="113">Needs Analysis</text>
+          <text x="300" y="177">Proposal</text>
+          <text x="300" y="241">Negotiation</text>
+          <text x="300" y="305">Closed</text>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="t">Monthly Revenue Trend</div><div class="d">Closed-won revenue, last 12 months</div>
+      <svg viewBox="0 0 600 220">
+        <g stroke="#e6e8ee" stroke-width="1">
+          <line x1="60" y1="30" x2="580" y2="30"/><line x1="60" y1="80" x2="580" y2="80"/>
+          <line x1="60" y1="130" x2="580" y2="130"/><line x1="60" y1="180" x2="580" y2="180"/>
+        </g>
+        <g font-size="11" fill="#6b7085" font-family="Inter" text-anchor="end">
+          <text x="52" y="34">300,000</text><text x="52" y="84">200,000</text><text x="52" y="134">100,000</text><text x="52" y="184">0</text>
+        </g>
+        <polyline fill="none" stroke="#2f5fd6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"
+          points="60,150 105,140 150,155 195,120 240,128 285,100 330,110 375,84 420,92 465,66 510,74 555,48"/>
+        <polygon fill="#2f5fd6" fill-opacity="0.10"
+          points="60,150 105,140 150,155 195,120 240,128 285,100 330,110 375,84 420,92 465,66 510,74 555,48 555,180 60,180"/>
+      </svg>
+    </div>
+  </div>
+</div>
+</body>
+</html>

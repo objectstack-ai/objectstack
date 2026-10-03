@@ -246,17 +246,22 @@ describe('#9261 the benign causes still answer the empty probe', () => {
     expect((failure as Error).message).toContain("No driver available for object 'dispatch_order'");
   });
 
-  it('an object missing from the REGISTRY never reaches the catch on a tolerant driver', async () => {
-    // Pinned so the next author does not write a predicate against a case that
-    // cannot occur: the read succeeds and returns `[]` through the NORMAL path.
+  it('an object missing from the REGISTRY is the lean-install case: unstamped, and the driver is never asked', async () => {
+    // [#21516] An in-process verb now refuses a name the registry does not
+    // resolve (`OBJECT_NOT_FOUND`) instead of reading a table by that raw name,
+    // so the probe asks the REGISTRY first: no organization object, no
+    // organization to derive. Same answer as before — the write proceeds
+    // unstamped — reached without a driver read, so a tolerant driver's `[]`
+    // and a strict driver's missing table are no longer what answers it.
     const { engine, observed } = await makeEngine({
       registerOrganizationObject: false,
-      organizationFind: () => [],
+      organizationFind: () => { throw new Error('the probe must not read an unregistered organization object'); },
     });
     await systemInsert(engine, 'unregistered organization object');
+    expect(lastWrite(observed, 'dispatch_order')?.method).toBe('create');
     expect(lastWrite(observed, 'dispatch_order')?.options?.tenantId).toBeUndefined();
-    // The control: the read really did happen (it is not the structural branch).
-    expect(observed.filter((c) => c.object === 'sys_organization' && c.method === 'find')).toHaveLength(1);
+    // The witness of the new mechanism: no read of the organization object at all.
+    expect(observed.filter((c) => c.object === 'sys_organization' && c.method === 'find')).toHaveLength(0);
   });
 
   it('a healthy probe is unchanged — one organization is still stamped, and memoised', async () => {

@@ -1,0 +1,100 @@
+---
+title: Business ontology — the executable definition the runtime runs
+navTitle: Business Ontology
+description: "What ObjectStack means by business ontology: the executable definition the runtime runs, its projections, what it is not, and how AI writes and uses it."
+---
+
+**The ontology is the software.** One executable business ontology. AI writes it, the
+runtime runs it, agents operate it, you own it. This page is the authority on what that
+word means here; the [glossary entry](/docs/getting-started/glossary#business-ontology)
+is the short form.
+
+## What the ontology is
+
+The ontology is the definition of your business that the runtime executes: authored as
+typed metadata in `objectstack.config.ts`, compiled into the `objectstack.json` artifact.
+Its core is six kinds of thing:
+
+| Core | What it declares |
+| :--- | :--- |
+| **Objects and fields** | The entities of the business and their typed attributes — validation, formulas, defaults, files |
+| **Relations** | Lookups and master-detail links between objects |
+| **Actions** | The operations a user or an agent may invoke on a record, and the conditions under which they show |
+| **Permissions** | Who may read, create, edit and delete what — RBAC, row-level and field-level security, sharing |
+| **Flows** | The business processes — DAG flows, record triggers, scheduled jobs, approvals, workflows |
+| **Agent and tool definitions** | The AI agents the app ships with, the tools they may call, and the skills that shape them |
+
+It is one definition, open and versioned. It lives in your repository as ordinary
+TypeScript, is reviewable as a diff, and is specified and licensed Apache-2.0 — not a
+graph held inside a vendor's system and reachable only through that vendor's console.
+The runtime derives everything else from it.
+
+## What the projections are
+
+Views, dashboards, apps, and translations are **projections** of the ontology — authored
+in metadata too, validated by the same gate, but not part of the ontology. A list view
+projects an object's fields and permissions onto a grid; a dashboard projects queries over
+objects onto charts; an app groups objects, views and actions into a navigable product; a
+translation projects every label into a locale. Change the core and the projections
+follow; remove a projection and the business it showed is unchanged. The distinction
+bounds what an agent must hold to reason about the business: the core, not every screen.
+
+## What it is not
+
+- **Not a knowledge ontology.** OWL, RDF and knowledge graphs *describe* a domain, carry
+  class inheritance and axioms, and are *reasoned over* by an inference engine.
+  ObjectStack has no object inheritance, no axioms and no reasoner: the definition is
+  *validated* — by Zod schemas and `os validate` — and then *run*. The `abstract` key was
+  removed from the spec for exactly that reason (ADR-0049).
+- **Not the industry's semantic layer.** A semantic layer is a read-only mapping over
+  existing systems: it describes the business but does not run it. ObjectStack's ontology
+  *is* the system — the database, API, UI and agent tools are derived from it. Federating
+  an external datasource is possible, read-only by default and early; see
+  [External Datasources](/docs/data-modeling/external-datasources). These docs also use
+  *semantic layer* in a narrower sense, for the analytics `dataset` layer that reports and
+  dashboards bind to; see [Analytics & Datasets](/docs/data-modeling/analytics).
+- **Not a formal ontology in the philosophical sense.** It makes no claim about what
+  exists in general. It is one business's application, defined precisely enough to run.
+
+## How the runtime executes it
+
+```text
+objectstack.config.ts -> objectstack.json -> ObjectStack runtime -> database · REST / realtime API · UI · MCP server
+```
+
+From the compiled artifact the runtime **derives** the database schema on an
+interchangeable driver, a generated REST and realtime API, server-driven UI for the
+Console, and an MCP server — and it **enforces** the definition on every call. RBAC,
+row-level and field-level security, sharing, and audit apply to a REST request, a Console
+click and an agent's tool call alike. Nothing is reasoned over at runtime: what runs is
+what was validated.
+
+Code does not disappear — it moves into the runtime. Hooks, action bodies, and the CEL
+expressions in formulas, predicates and policies run inside the runtime's permission and
+audit fence; constrained JSX in pages is parsed into a server-driven UI tree, never
+executed as code. None of it is scattered across a codebase the ontology would then have
+to describe. [Protocol Architecture](/docs/concepts/architecture) covers the layers;
+[Metadata-Driven Development](/docs/concepts/metadata-driven) shows what one definition
+derives.
+
+## How AI writes it and uses it
+
+**Writing it.** The scaffolder installs the AI skills bundle and writes an `AGENTS.md`, so
+a coding agent starts with the protocol's rules loaded rather than generic priors. The
+agent writes the definition as typed metadata; strict TypeScript and Zod reject shape
+errors in the editor, and `os validate` rejects metadata that type-checks but would fail
+silently at runtime — dangling bindings, bad CEL predicates, a missing security posture —
+as located, corrective text the agent reads and fixes itself. You approve a small,
+readable diff in the Console. The loop end to end is
+[Build with Claude Code](/docs/getting-started/build-with-claude-code); why it is fast
+and safe is [How AI Development Works](/docs/getting-started/how-ai-development-works).
+
+**Using it.** The running app is an MCP server, on by default: every object is a tool,
+every exposed action is a tool, permissions decide what an agent may call, and audit
+records what it did. An agent operates the app through the same typed, permission-aware
+surface as a human — never raw SQL or scraped UI. See
+[Connect an MCP Client](/docs/ai/connect-mcp).
+
+Size is what makes both halves work. An app whose definition fits in one context window
+is one an agent can read whole, reason about whole, and refactor whole — apps small
+enough for AI to hold whole.

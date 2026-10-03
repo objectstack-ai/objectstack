@@ -908,7 +908,8 @@ describe('a plan runs no app lifecycle hook (#21054)', () => {
         "  ctx.hook('kernel:bootstrapped', async () => {",
         "    appendFileSync(LOG, 'app|kernel:bootstrapped\\n');",
         `    for (const object of ${JSON.stringify(PROBE_TABLES)}) {`,
-        "      try { await ctx.ql.find(object, { where: { name: 'x' }, limit: 1, context: SYS }); } catch { /* answered */ }",
+        "      try { await ctx.ql.find(object, { where: { name: 'x' }, limit: 1, context: SYS }); appendFileSync(LOG, `app|read|${object}|ok\\n`); }",
+        "      catch (e: any) { appendFileSync(LOG, `app|read|${object}|${e && e.code}\\n`); }",
         '    }',
         '  });',
         '};',
@@ -963,9 +964,15 @@ describe('a plan runs no app lifecycle hook (#21054)', () => {
       expect(log).toContain('app|onEnable');
       expect(log).toContain('app|kernel:bootstrapped');
       expect(log).toContain('host|kernel:bootstrapped');
+      // [#21516] The engine now refuses a name its registry does not hold
+      // before any driver, so a read of an object this boot never declared is
+      // answered `OBJECT_NOT_FOUND` and no driver line is printed. The witness
+      // that the hooks' reads were ISSUED — what the plan legs below prove
+      // absent — is therefore each read's recorded answer, not a driver line.
       for (const table of PROBE_TABLES) {
-        expect(captured.lines.some((l) => l.includes(`'${table}'`))).toBe(true);
+        expect(log).toContain(`app|read|${table}|OBJECT_NOT_FOUND`);
       }
+      expect(captured.lines.filter((l) => PROBE_TABLES.some((t) => l.includes(`'${t}'`)))).toEqual([]);
     } finally {
       captured.restore();
       await stack.shutdown();

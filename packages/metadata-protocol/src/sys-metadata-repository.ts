@@ -2087,6 +2087,17 @@ export class SysMetadataRepository implements MetadataRepository {
     // [commit 4cda78c9b] Both callers read `this.historyTable`, so a failure naming any
     // other relation is not evidence that THIS one is empty.
     if (isMissingTableError(error, this.historyTable)) return 1;
+    // [#21516] The same emptiness in a composition that does not register the
+    // history object at all (a lean embedding, a bare-kernel test): the
+    // engine's in-process verbs now refuse an unresolved name with
+    // `OBJECT_NOT_FOUND` before any driver is asked, rather than reaching a
+    // table by that raw name. It is the not-provisioned case the missing-table
+    // arm above already covers — there is no history object here, so no
+    // lineage to collide with and 1 really is the next number. Attributed on
+    // the error's own `object`, like the relation check above: a refusal
+    // naming a different object is not evidence about `this.historyTable`.
+    const refused = error as { code?: unknown; object?: unknown } | null | undefined;
+    if (refused?.code === 'OBJECT_NOT_FOUND' && refused.object === this.historyTable) return 1;
 
     if (!this.historyCounterFailureReported) {
       this.historyCounterFailureReported = true;

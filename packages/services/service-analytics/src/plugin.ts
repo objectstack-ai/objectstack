@@ -98,6 +98,16 @@ type TemporalDriverSurface = Pick<
 type DialectNamingDriver = { readonly dialectName?: unknown };
 
 /**
+ * [#21441] The slice of a SQL driver that renders its OWN date-bucket
+ * expression, `SqlDriver.dateBucketSql`. Read structurally, as
+ * {@link DialectNamingDriver} is and for the same reason: bucketing SQL is a
+ * property of the SQL driver family, not of every driver.
+ */
+type DateBucketingDriver = {
+  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+};
+
+/**
  * Re-parse a bridge-supplied aggregation `method` as the engine contract's
  * `AggregationFunction` before it is forwarded as `function`, refusing
  * anything else.
@@ -1216,6 +1226,30 @@ export class AnalyticsServicePlugin implements Plugin {
     };
 
     /**
+     * [#21441] The expression the driver that owns the object groups a
+     * date-bucketed dimension by, as SQL text: what `ObjectQLStrategy.generateSql`
+     * echoes for the bucket. Asked of the DRIVER through the same
+     * `getDriverForObject` seam `sqlDialect` uses, so the driver stays the
+     * single source of its bucketing and no second table lives here.
+     *
+     * `undefined` on every tier that cannot answer: no data engine, a driver
+     * without the member (memory, mongo), a granularity the driver buckets in
+     * memory (it answers `null`), a throw. `undefined` keeps the echo's
+     * representative `date_trunc(…)`.
+     */
+    const dateBucketSql = (objectName: string, field: string, granularity: string): string | undefined => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName) as DateBucketingDriver | undefined;
+        if (typeof driver?.dateBucketSql !== 'function') return undefined;
+        const rendered = driver.dateBucketSql(objectName, field, granularity);
+        return typeof rendered === 'string' && rendered !== '' ? rendered : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    /**
      * [#21080] The data engine's answer to "is a middleware registered for
      * this object?" (`IObjectQLEngine.hasObjectMiddleware`), resolved per call
      * like every bridge above, so plugin order does not matter.
@@ -1339,6 +1373,9 @@ export class AnalyticsServicePlugin implements Plugin {
       getObjectDatasource: (objectName: string) => dataEngine()?.resolveEffectiveDatasource?.(objectName),
       // [#15684] The executing driver's own dialect — see `sqlDialect` above.
       sqlDialect,
+      // [#21441] The executing driver's own bucket expression — see
+      // `dateBucketSql` above.
+      dateBucketSql,
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,

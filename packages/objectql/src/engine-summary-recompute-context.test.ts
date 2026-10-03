@@ -364,6 +364,10 @@ describe('[#7673] the elevation does not widen what the caller may do', () => {
 
     // The stand-in gate is grant-by-object, so narrow the child grant away for
     // this one probe by asking for an operation the member never held either.
+    // [#21516] The probe object is REGISTERED, so the answer is the permission
+    // gate's: the engine refuses a name its registry does not hold before any
+    // middleware runs, which would pin the wrong refusal.
+    engine.registry.registerObject({ name: 'other_object_without_grant', fields: { x: { type: 'number' } } } as any);
     const caught = await engine
       .insert('other_object_without_grant', { x: 1 }, { context: stranger } as any)
       .then(() => null, (e: any) => e);
