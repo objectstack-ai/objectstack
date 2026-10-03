@@ -3,8 +3,9 @@
 
 /**
  * release-pending-publish -- WHICH commit a release publishes, WHICH push queues
- * its approval prompt, and WHICH waiting prompts are no longer a release
- * (ADR-0125 D1, as amended 2026-09-29).
+ * its approval prompt, WHICH waiting prompts are no longer a release
+ * (ADR-0125 D1, as amended 2026-09-29), and WHETHER a version's publish is in
+ * flight, so the Releases backfill does not write beside it.
  *
  *   node scripts/release-pending-publish.mjs select --event push --head SHA --before SHA
  *   node scripts/release-pending-publish.mjs select --event workflow_dispatch --head SHA
@@ -12,6 +13,7 @@
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --version VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --json
  *   node scripts/release-pending-publish.mjs sweep --workflow release.yml [--dry-run]
+ *   node scripts/release-pending-publish.mjs in-flight --version VERSION --version-commit SHA --head SHA --workflow release.yml
  *   node scripts/release-pending-publish.mjs --self-test
  *
  * ## The measured failure (#20613)
@@ -132,6 +134,39 @@
  *
  * `--dry-run` reports what `sweep` would cancel and refuses any non-GET request
  * at the HTTP layer, so it is safe to point at the live repository.
+ *
+ * `in-flight` -- the Releases backfill's guard. `release-integrity` backfills
+ * the GitHub Releases of a version whose whole fixed group is on npm, and npm
+ * settles BEFORE the publish job reaches its own "Create GitHub Releases"
+ * step. So a landing audited in that window used to write the same Releases
+ * the publish job was writing. Measured on 17.6.0: the publish job of run
+ * 36955885276 created its Releases 03:03:47Z -> 03:05:42Z, the backfill of run
+ * 36958423332 (a later landing) started writing them at 03:04:37Z, and five
+ * tags got two Release objects each. The two writers are in different runs,
+ * so no `needs:` edge can order them; this read is the guard.
+ *
+ * It answers `in-flight` or `clear` for ONE version. In flight means another
+ * run of this workflow holds a job named `Publish VERSION to npm (awaiting
+ * approval)` whose status is neither `completed` nor `waiting` (a job GitHub
+ * holds at the `release` environment has run no step, and runs none before a
+ * human approves it; an approved one is `queued`, then `in_progress`). A status
+ * this script does not know is in flight. The runs read are the union of two
+ * readings, because the run-list status filter is not trusted alone (see
+ * `collectWaitingRuns`): the runs the `in_progress` and `queued` filters list,
+ * which is where a dispatch (repair-lane) publish is found, and the push run
+ * at the version commit or the first-parent commits after it, which is where
+ * the push-lane publish runs. Each candidate is then read directly, with its
+ * jobs. Any answer it cannot read -- a non-200, a malformed body, a filter
+ * counting more runs than it listed, a version-commit walk that disagrees with
+ * the audit -- answers `in-flight` with reason `unreadable`, so nothing is
+ * backfilled off a guess and the next landing reads again. A push run it
+ * cannot find is not unreadable: the filters still speak for it, and a guard
+ * that blocked on it would block the repair of that version for good.
+ *
+ * It skips writes and refuses nothing: the audit leaves `releases-missing`
+ * unset, says why, and stays green. Read-only by construction: it runs over
+ * the `--dry-run` HTTP layer, so a non-GET cannot leave it. Permission:
+ * `actions: read`.
  *
  * ## Why the pins live here, not in the workflow
  *
@@ -724,6 +759,125 @@ async function sweep({ workflow, dryRun }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Is this version's publish in flight? (the Releases backfill's guard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The publish job statuses that are NOT in flight: `completed` (it ran) and
+ * `waiting` (held at the `release` environment, no step run). Every other
+ * status, named here or not, is in flight.
+ */
+export const PUBLISH_SETTLED_JOB_STATUSES = Object.freeze(['completed', 'waiting']);
+
+/** The run-list filters read for a publish in flight. */
+export const IN_FLIGHT_RUN_FILTERS = Object.freeze(['in_progress', 'queued']);
+
+/**
+ * Judge the runs read for one version -- pure. Each run is `{ id, event,
+ * status, jobs }`; `jobs` may be null only for a completed run. A run that is
+ * not completed and was not read past its status answers `unreadable`.
+ */
+export function judgePublishInFlight({ version, runs, currentRunId }) {
+  const name = `Publish ${version} to npm (awaiting approval)`;
+  const inFlight = [];
+  for (const run of runs) {
+    const id = String(run.id);
+    if (id === String(currentRunId) || run.status === 'completed') continue;
+    if (!Array.isArray(run.jobs)) {
+      return { state: 'in-flight', reason: 'unreadable', detail: `run ${id} is ${run.status} and its jobs were not read`, inFlight };
+    }
+    for (const job of run.jobs) {
+      if (job.name === name && !PUBLISH_SETTLED_JOB_STATUSES.includes(job.status)) {
+        inFlight.push({ run: id, event: run.event, status: job.status });
+      }
+    }
+  }
+  if (inFlight.length > 0) {
+    const where = inFlight.map((f) => `run ${f.run} (${f.event}, job ${f.status})`).join(', ');
+    return { state: 'in-flight', reason: 'publish-in-flight', detail: `"${name}" is in flight in ${where}`, inFlight };
+  }
+  return { state: 'clear', reason: 'none-in-flight', detail: `no other run holds "${name}" in flight`, inFlight };
+}
+
+/**
+ * The runs `judgePublishInFlight` needs, read through `http`; throws on any
+ * answer it cannot read. `tips` is the version commit followed by the
+ * first-parent commits after it (`versionCommitsOf`), where the push run that
+ * carried it is found.
+ */
+export async function collectPublishRuns({ http, repo, workflow, tips, currentRunId = '' }) {
+  const listPath = `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`;
+  const listed = (page, what) => {
+    if (!page || !Array.isArray(page.workflow_runs)) throw new Error(`${what} answered no workflow_runs list`);
+    return page.workflow_runs;
+  };
+  const ids = new Set();
+  const filters = [];
+  for (const status of IN_FLIGHT_RUN_FILTERS) {
+    const what = `listing ${workflow}'s ${status} runs`;
+    const page = expectOk(await http('GET', `${listPath}?status=${status}&per_page=100&exclude_pull_requests=true`), what);
+    const runs = listed(page, what);
+    if (typeof page.total_count !== 'number' || page.total_count > runs.length) {
+      throw new Error(`${what}: total_count ${page.total_count} but ${runs.length} listed, so the rest are unread`);
+    }
+    for (const r of runs) ids.add(String(r.id));
+    filters.push(`${status} [${runs.map((r) => r.id).join(', ')}]`);
+  }
+  let pushRuns = [];
+  for (const sha of tips) {
+    const what = `listing ${workflow}'s runs at ${sha}`;
+    const page = expectOk(await http('GET', `${listPath}?head_sha=${sha}&per_page=100&exclude_pull_requests=true`), what);
+    pushRuns = listed(page, what).filter((r) => r.event === 'push').map((r) => String(r.id));
+    if (pushRuns.length > 0) break;
+  }
+  for (const id of pushRuns) ids.add(id);
+
+  const runs = [];
+  for (const id of ids) {
+    if (id === String(currentRunId)) continue;
+    const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}`), `reading run ${id}`);
+    const run = { id: String(r.id), event: r.event, status: r.status, jobs: null };
+    if (r.status !== 'completed') {
+      const what = `listing run ${id}'s jobs`;
+      const jobs = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`), what);
+      if (!jobs || !Array.isArray(jobs.jobs)) throw new Error(`${what} answered no jobs list`);
+      run.jobs = jobs.jobs.map((j) => ({ name: j.name, status: j.status }));
+    }
+    runs.push(run);
+  }
+  const readings =
+    `filters ${filters.join('; ')}; push run at the version commit ${pushRuns.join('+') || 'NOT FOUND'} ` +
+    `(${tips.length} commit(s) walked); direct: ${runs.map((r) => `${r.id} ${r.status}`).join(', ') || 'none'}`;
+  return { runs, pushRuns, readings };
+}
+
+/**
+ * The guard's whole answer for one version, never a throw: whatever cannot be
+ * read answers `in-flight` with reason `unreadable`, so the caller backfills
+ * nothing off a guess. `walk` yields the version commits of the head
+ * (`versionCommitsOf`); the first must be the one the caller names.
+ */
+export async function publishInFlight({ http, repo, workflow, version, versionCommit, walk, currentRunId = '' }) {
+  try {
+    const first = walk.next().value;
+    if (!first || first.versionCommit !== versionCommit || first.version !== version) {
+      throw new Error(
+        `the version-commit walk names ${first ? `${first.versionCommit} (${first.version})` : 'nothing'}, ` +
+          `the caller ${versionCommit} (${version}): two readers of one history disagree`,
+      );
+    }
+    const read = await collectPublishRuns({ http, repo, workflow, tips: first.tips, currentRunId });
+    const verdict = judgePublishInFlight({ version, runs: read.runs, currentRunId });
+    if (read.pushRuns.length === 0 && verdict.state === 'clear') {
+      verdict.detail += `; no push run of ${workflow} was found at the version commit, so the run-list filters alone speak for it`;
+    }
+    return { version, ...verdict, readings: read.readings };
+  } catch (err) {
+    return { version, state: 'in-flight', reason: 'unreadable', detail: err instanceof Error ? err.message : String(err), inFlight: [], readings: '' };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Self-test
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -757,8 +911,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the commit that added it -> the newest add, a rename included, never a landing after the version commit': 3,
   'a shallow clone or an unresolvable version commit -> refused, never a boundary commit or an empty answer': 2,
   'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
+  "a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight": 12,
 });
-const SELF_TEST_BATTERY_FLOOR = 20;
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 async function selfTest() {
   let failed = 0;
@@ -1231,6 +1386,133 @@ async function selfTest() {
   }
   check(refused, 'a probe answering non-200 -> the read throws (a red job), never a partial answer');
 
+  battery("a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight");
+  {
+    const job = (version, status) => ({ name: `Publish ${version} to npm (awaiting approval)`, status });
+    const integrity = { name: 'Release integrity (audit + no-mint backfill)', status: 'completed' };
+    const judge = (runs) => judgePublishInFlight({ version: '17.6.0', runs, currentRunId: 900 });
+    const flying = judge([{ id: 36955885276, event: 'push', status: 'in_progress', jobs: [integrity, job('17.6.0', 'in_progress')] }]);
+    check(
+      flying.state === 'in-flight' && flying.reason === 'publish-in-flight' && /run 36955885276 \(push, job in_progress\)/.test(flying.detail),
+      'the 17.6.0 window: another run\'s "Publish 17.6.0" job is in_progress -> in flight, naming that run',
+    );
+    check(
+      judge([{ id: 1, event: 'workflow_dispatch', status: 'in_progress', jobs: [job('17.6.0', 'queued')] }]).state === 'in-flight' &&
+        judge([{ id: 2, event: 'push', status: 'in_progress', jobs: [job('17.6.0', 'some_new_status')] }]).state === 'in-flight',
+      'an approved job still waiting for a runner (queued) -> in flight, and a status this script does not know -> in flight',
+    );
+    check(
+      judge([
+        { id: 3, event: 'push', status: 'waiting', jobs: [integrity, job('17.6.0', 'waiting')] },
+        { id: 4, event: 'push', status: 'in_progress', jobs: [job('17.6.0', 'completed'), { name: 'Docker image / Build & push', status: 'in_progress' }] },
+        { id: 5, event: 'push', status: 'completed', jobs: null },
+      ]).state === 'clear',
+      'held at the release environment (waiting), finished in a run still running, or in a completed run -> clear',
+    );
+    check(
+      judge([
+        { id: 900, event: 'push', status: 'in_progress', jobs: [job('17.6.0', 'in_progress')] },
+        { id: 6, event: 'push', status: 'in_progress', jobs: [job('17.7.0', 'in_progress')] },
+        { id: 7, event: 'push', status: 'in_progress', jobs: [{ name: 'Publish ${{ needs.release-integrity.outputs.cli-version }} to npm (awaiting approval)', status: 'queued' }] },
+      ]).state === 'clear',
+      'the calling run, another version\'s publish, and an unevaluated job name -> clear',
+    );
+    check(
+      judge([{ id: 8, event: 'push', status: 'in_progress', jobs: null }]).reason === 'unreadable',
+      'a run still running whose jobs were never read -> unreadable, never clear',
+    );
+
+    const flightWith = async ({ filters = {}, totals = {}, tips = {}, direct = {}, fail = null, walk } = {}) => {
+      const calls = [];
+      const http = async (method, path) => {
+        calls.push(`${method} ${path}`);
+        if (fail && fail.test(path)) return { status: 502, body: 'bad gateway' };
+        const u = new URL(path, 'https://api.invalid');
+        let m;
+        if (u.pathname.endsWith('/actions/workflows/release.yml/runs')) {
+          const status = u.searchParams.get('status');
+          if (status) {
+            const runs = filters[status] ?? [];
+            return { status: 200, body: { total_count: totals[status] ?? runs.length, workflow_runs: runs } };
+          }
+          return { status: 200, body: { total_count: 0, workflow_runs: tips[u.searchParams.get('head_sha')] ?? [] } };
+        }
+        if ((m = /\/actions\/runs\/(\d+)$/.exec(u.pathname))) return { status: 200, body: direct[m[1]] };
+        if ((m = /\/actions\/runs\/(\d+)\/jobs$/.exec(u.pathname))) return { status: 200, body: { jobs: direct[m[1]].jobs ?? [] } };
+        return { status: 404, body: null };
+      };
+      const answer = await publishInFlight({
+        http,
+        repo: 'o/r',
+        workflow: 'release.yml',
+        version: '17.6.0',
+        versionCommit: 'c'.repeat(40),
+        walk: walk ?? [{ versionCommit: 'c'.repeat(40), version: '17.6.0', tips: ['c'.repeat(40), 'dcc5ef4c', 't2'] }].values(),
+        currentRunId: 36958423332,
+      });
+      return { answer, calls };
+    };
+    const runAt = (id, event, status, jobs) => ({ id, event, status, head_sha: 'x', jobs });
+
+    // The 17.6.0 race, as the runs answered it: the audit of 36958423332 at
+    // 03:04Z, the publish of 36955885276 (pushed at dcc5ef4c) still running.
+    const window = await flightWith({
+      tips: { dcc5ef4c: [runAt(36955885276, 'push', 'in_progress')] },
+      direct: { 36955885276: runAt(36955885276, 'push', 'in_progress', [integrity, job('17.6.0', 'in_progress')]) },
+    });
+    check(
+      window.answer.state === 'in-flight' && window.answer.reason === 'publish-in-flight' &&
+        /push run at the version commit 36955885276/.test(window.answer.readings),
+      'the status filters list nothing, and the push run at the version commit holds the publish in flight -> in flight',
+    );
+    const dispatched = await flightWith({
+      filters: { in_progress: [runAt(77, 'workflow_dispatch', 'in_progress')] },
+      direct: { 77: runAt(77, 'workflow_dispatch', 'in_progress', [job('17.6.0', 'in_progress')]) },
+    });
+    check(dispatched.answer.state === 'in-flight', 'a repair-lane publish, which only the in_progress filter lists -> in flight');
+    const quietFlight = await flightWith({
+      filters: { in_progress: [runAt(36958423332, 'push', 'in_progress')] },
+      tips: { [`${'c'.repeat(40)}`]: [runAt(55, 'push', 'completed')] },
+      direct: { 55: runAt(55, 'push', 'completed') },
+    });
+    check(
+      quietFlight.answer.state === 'clear' && !quietFlight.calls.some((c) => /\/(55|36958423332)\/jobs/.test(c)) &&
+        !quietFlight.calls.some((c) => /runs\/36958423332$/.test(c)) && quietFlight.calls.every((c) => c.startsWith('GET ')),
+      'nothing in flight -> clear; the completed push run\'s jobs and the calling run are never read; every request is a GET',
+    );
+    const lostPush = await flightWith();
+    check(
+      lostPush.answer.state === 'clear' && /no push run of release\.yml was found/.test(lostPush.answer.detail),
+      'no push run found at the version commit -> clear on the filters, and the answer says so (never a permanent block)',
+    );
+    const unread = await Promise.all([
+      flightWith({ fail: /status=queued/ }),
+      flightWith({ totals: { in_progress: 150 } }),
+      flightWith({ tips: { dcc5ef4c: [runAt(36955885276, 'push', 'in_progress')] }, direct: { 36955885276: runAt(36955885276, 'push', 'in_progress') }, fail: /\/jobs/ }),
+    ]);
+    check(
+      unread.every((u) => u.answer.state === 'in-flight' && u.answer.reason === 'unreadable') &&
+        /answered HTTP 502/.test(unread[0].answer.detail) && /total_count 150 but 0 listed/.test(unread[1].answer.detail),
+      'a filter answering non-200, a filter counting more runs than it listed, or jobs answering non-200 -> unreadable, so in flight',
+    );
+    const disagree = await Promise.all([
+      flightWith({ walk: [{ versionCommit: 'd'.repeat(40), version: '17.6.0', tips: [] }].values() }),
+      flightWith({ walk: (function* shallow() { throw new Error('refusing to list version commits in a shallow clone'); })() }),
+    ]);
+    check(
+      disagree.every((d) => d.answer.reason === 'unreadable' && d.calls.length === 0) &&
+        /two readers of one history disagree/.test(disagree[0].answer.detail) && /shallow clone/.test(disagree[1].answer.detail),
+      'a walk naming another version commit, or one refusing a shallow clone -> unreadable before any request',
+    );
+    let readOnly = false;
+    try {
+      await makeHttp({ apiUrl: 'https://api.invalid', token: 'x', dryRun: true })('POST', '/repos/o/r/actions/runs/1/cancel');
+    } catch (err) {
+      readOnly = /--dry-run refuses POST/.test(String(err && err.message));
+    }
+    check(readOnly, 'the HTTP layer in-flight runs over refuses a non-GET before it is sent');
+  }
+
   battery('an event with no release predicate -> refused');
   check(
     throws(() => decidePending({ event: 'schedule', range: { state: 'in-push' }, npm: 'absent' }), /no release predicate/),
@@ -1374,7 +1656,28 @@ async function main(argv) {
     await sweep({ workflow: flag(rest, '--workflow') || 'release.yml', dryRun: rest.includes('--dry-run') });
     return;
   }
-  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, sweep or --self-test`);
+  if (mode === 'in-flight') {
+    const version = flag(rest, '--version');
+    const versionCommit = flag(rest, '--version-commit');
+    const head = flag(rest, '--head');
+    const workflow = flag(rest, '--workflow');
+    if (!version || !versionCommit || !head || !workflow) throw new Error('in-flight needs --version, --version-commit, --head and --workflow');
+    if (!VERSION_SHAPE.test(version)) throw new Error(`--version is not a version: ${version}`);
+    if (!FULL_SHA.test(versionCommit)) throw new Error(`--version-commit is not a full sha: ${versionCommit}`);
+    const result = await publishInFlight({
+      // `dryRun: true` is the read-only guarantee: the HTTP layer refuses any non-GET.
+      http: makeHttp({ apiUrl: process.env.GITHUB_API_URL || 'https://api.github.com', token: requireEnv('GITHUB_TOKEN'), dryRun: true }),
+      repo: requireEnv('GITHUB_REPOSITORY'),
+      workflow,
+      version,
+      versionCommit,
+      walk: versionCommitsOf({ cwd: process.cwd(), head }),
+      currentRunId: process.env.GITHUB_RUN_ID || '',
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, sweep, in-flight or --self-test`);
 }
 
 if (isEntrypoint(import.meta.url)) {
