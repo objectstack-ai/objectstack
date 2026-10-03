@@ -77,10 +77,10 @@ const result = BatchProgressSchema.parse(data);
 | **name** | `string` | ✅ | Queue name (snake_case) |
 | **concurrency** | `integer` | optional (default: `5`) | Max concurrent task executions |
 | **rateLimit** | `{ max: integer; durationMs: integer }` | optional | Rate limit configuration |
-| **defaultRetryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Default retry policy for tasks |
+| **defaultRetryPolicy** | `{ maxRetries?: integer; backoffStrategy?: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs?: integer; maxDelayMs?: integer; … }` | optional | Default retry policy for tasks |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name |
 | **priority** | `integer` | optional (default: `0`) | Queue priority (lower = higher priority) |
-| **autoScale** | `{ enabled: boolean; minWorkers: integer; maxWorkers: integer; scaleUpThreshold: integer; … }` | optional | Auto-scaling configuration |
+| **autoScale** | `{ enabled?: boolean; minWorkers?: integer; maxWorkers?: integer; scaleUpThreshold?: integer; … }` | optional | Auto-scaling configuration |
 
 ### Nested Shape: `QueueConfig.rateLimit`
 
@@ -124,7 +124,7 @@ const result = BatchProgressSchema.parse(data);
 | **payload** | `any` | ✅ | Task payload data |
 | **queue** | `string` | optional (default: `"default"`) | Queue name |
 | **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Task priority level |
-| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Retry policy configuration |
+| **retryPolicy** | `{ maxRetries?: integer; backoffStrategy?: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs?: integer; maxDelayMs?: integer; … }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | optional | Task timeout in milliseconds |
 | **scheduledAt** | `string` | optional | ISO 8601 datetime to execute task |
 | **attempts** | `integer` | optional (default: `0`) | Number of execution attempts |

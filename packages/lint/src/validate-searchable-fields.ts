@@ -353,7 +353,7 @@ export function checkSearchableFieldList(
             : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
           `Clients echo this declaration verbatim as the '$searchFields' ` +
           `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
-          `search (#4254), not just a quietly narrowed one.` +
+          `search, not just a quietly narrowed one.` +
           (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
       });
       continue;
@@ -411,12 +411,12 @@ export function checkSearchableFieldList(
           `'${vtype}' field: its value is computed on read and never stored, so no ` +
           `driver materializes a column for 'search' to scan and the entry can never ` +
           `match. It reads as search coverage and delivers none — the runtime used to ` +
-          `admit it verbatim because the declaration named it (#6674).`,
+          `admit it verbatim because the declaration named it.`,
         hint:
           `Mirror the computed value onto a stored text field on "${objectName}" and ` +
           `declare that instead, or drop "${name}". At runtime the ingress gate now ` +
           `refuses this entry with 400 INVALID_FIELD, the same answer a stale entry ` +
-          `gets (#4254).`,
+          `gets.`,
       });
       continue;
     }
@@ -440,7 +440,7 @@ export function checkSearchableFieldList(
           `searchableFields (${resolution.declaredList.join(', ')}) — the set 'search' ` +
           `scans. Clients echo this declaration verbatim as the '$searchFields' ` +
           `override, and the runtime refuses an entry outside the allowed set: every ` +
-          `toolbar search on this list returns 400 INVALID_FIELD (#4254).`,
+          `toolbar search on this list returns 400 INVALID_FIELD.`,
         hint:
           `Add "${name}" to ${objectName}.searchableFields, or drop it from this ` +
           `view — a view narrows the object's searchable set, never widens it ` +
@@ -473,7 +473,7 @@ export function checkSearchableFieldList(
         `columns (${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}). ` +
         `Clients echo this declaration verbatim as the '$searchFields' override, and ` +
         `the runtime refuses it: every toolbar search on this list returns ` +
-        `400 INVALID_FIELD (#4254).`,
+        `400 INVALID_FIELD.`,
       hint:
         (isReference
           ? `A ${meta?.type} column stores only the referenced record's id, so it ` +

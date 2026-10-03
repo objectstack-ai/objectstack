@@ -87,11 +87,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-// FILE_SHARDED_PACKAGES and SLICE_ENV are read only inside functions: this
-// import is circular (the partitioner imports samplesFromSummary from here), so
-// a top-level read would meet an uninitialised binding when the partitioner is
-// the entry point.
-import { countTestFiles, FILE_SHARDED_PACKAGES, SLICE_ENV } from './partition-test-shards.mjs';
+// FILE_SHARDED_PACKAGES, PREVIOUS_FILE_SHARDED_PACKAGES and SLICE_ENV are read
+// only inside functions: this import is circular (the partitioner imports
+// samplesFromSummary from here), so a top-level read would meet an
+// uninitialised binding when the partitioner is the entry point.
+import {
+  countTestFiles,
+  FILE_SHARDED_PACKAGES,
+  PREVIOUS_FILE_SHARDED_PACKAGES,
+  SLICE_ENV,
+} from './partition-test-shards.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -159,24 +164,34 @@ export function sliceOfCliArguments(args) {
 // `OS_TEST_SHARD=` with nothing after it when the value is empty.
 //
 // So the digest is matched against every slice the partitioner CAN emit for
-// that package, and nothing else: `k/n` for 1 <= k <= n, where n is
-// FILE_SHARDED_PACKAGES[package] from partition-test-shards.mjs. The bound is
-// that map -- n candidates for a package it slices (2 for @objectstack/cli
-// today), none for one it does not.
+// that package, or emitted under the map it replaced, and nothing else: `k/n`
+// for 1 <= k <= n, for n = FILE_SHARDED_PACKAGES[package] and n =
+// PREVIOUS_FILE_SHARDED_PACKAGES[package] from partition-test-shards.mjs. The
+// bound is those two closed maps -- n candidates per map that slices the
+// package, none for one that does not. The previous map is what lets a run
+// made before a map change still be read (its header says why it exists and
+// when it decodes nothing); a decoded slice is then summed within its run, so
+// an incomplete set still contributes nothing.
 //
 // ⛔ A digest that matches no candidate is REFUSED, never read as a whole
 // package. That is the #16173 direction exactly: one slice's window recorded as
 // the package's whole cost, a number that reads right and is n times too small.
-// It happens when FILE_SHARDED_PACKAGES changed since the run that wrote the
-// summary, or when the variable was set by hand to a slice the partitioner does
-// not emit; either way the remedy is a summary from a run under the current map.
+// It happens when the map changed twice within a summary's lifetime, or when
+// the variable was set by hand to a slice the partitioner does not emit; either
+// way the remedy is a summary from a run under the current map.
 //
 // An empty value is not a slice: the package's vitest config hands vitest an
 // empty `shard`, which it ignores, and the package runs whole. A task with no
 // `environmentVariables` record at all carries no evidence either way and is
 // read as carrying no env slice -- turbo 2.10.10 writes one on every task, and
 // the self-test fixtures predate it.
-export function sliceOfEnvironment(environmentVariables, name, label, sliced = FILE_SHARDED_PACKAGES) {
+export function sliceOfEnvironment(
+  environmentVariables,
+  name,
+  label,
+  sliced = FILE_SHARDED_PACKAGES,
+  previous = PREVIOUS_FILE_SHARDED_PACKAGES
+) {
   const configured = environmentVariables?.configured;
   if (configured === undefined || configured === null) return null;
   if (!Array.isArray(configured)) {
@@ -187,28 +202,35 @@ export function sliceOfEnvironment(environmentVariables, name, label, sliced = F
   if (entry === undefined) return null;
   const digest = entry.slice(prefix.length);
   if (digest === '') return null;
-  const count = Object.hasOwn(sliced, name) ? sliced[name] : 1;
+  const counts = [];
+  for (const map of [sliced, previous]) {
+    const n = Object.hasOwn(map, name) ? map[name] : 1;
+    if (n > 1 && !counts.includes(n)) counts.push(n);
+  }
   const candidates = [];
-  for (let index = 1; count > 1 && index <= count; index++) {
-    const spec = `${index}/${count}`;
-    if (createHash('sha256').update(spec).digest('hex') === digest) return { index, count };
-    candidates.push(spec);
+  for (const count of counts) {
+    for (let index = 1; index <= count; index++) {
+      const spec = `${index}/${count}`;
+      if (createHash('sha256').update(spec).digest('hex') === digest) return { index, count };
+      candidates.push(spec);
+    }
   }
   throw new Error(
     `${label}: ${name} ran with ${SLICE_ENV} set (digest ${digest.slice(0, 16)}…), and that digest ` +
-      `matches no slice the partitioner can emit for it (${candidates.length ? candidates.join(', ') : 'none: FILE_SHARDED_PACKAGES does not slice it'}). ` +
+      'matches no slice the partitioner can emit for it, or emitted under the map it replaced ' +
+      `(${candidates.length ? candidates.join(', ') : 'none: neither FILE_SHARDED_PACKAGES nor PREVIOUS_FILE_SHARDED_PACKAGES slices it'}). ` +
       'Refusing to read the window as a whole-package sample: it is one slice of the suite, and ' +
-      'recording it as the whole cost is the #16173 defect. If FILE_SHARDED_PACKAGES changed since ' +
-      'this run, refresh from a run made under the current map.'
+      'recording it as the whole cost is the #16173 defect. If FILE_SHARDED_PACKAGES changed more ' +
+      'than once since this run, refresh from a run made under the current map.'
   );
 }
 
 // The slice one measured leg ran as, from either carrier. Both present and
 // disagreeing is not a reading to pick from: vitest would have run the CLI's,
 // but no workflow here sets both, so it is refused rather than resolved.
-function sliceOfLeg(leg, name, label, sliced) {
+function sliceOfLeg(leg, name, label, sliced, previous) {
   const fromArgs = sliceOfCliArguments(leg.cliArguments);
-  const fromEnv = sliceOfEnvironment(leg.environmentVariables, name, label, sliced);
+  const fromEnv = sliceOfEnvironment(leg.environmentVariables, name, label, sliced, previous);
   if (fromArgs && fromEnv && (fromArgs.index !== fromEnv.index || fromArgs.count !== fromEnv.count)) {
     throw new Error(
       `${label}: ${name} carries two different slices -- --shard=${fromArgs.index}/${fromArgs.count} ` +
@@ -250,7 +272,12 @@ const SAMPLED_TASKS = ['test', 'test:repo'];
 // Recording one leg's seconds alone (because the other was cached or failed)
 // would write a partial suite's cost as the package's whole cost, a reading
 // worse than today's undercount by #16466's own defect this card fixes.
-export function samplesFromSummary(parsed, label, sliced = FILE_SHARDED_PACKAGES) {
+export function samplesFromSummary(
+  parsed,
+  label,
+  sliced = FILE_SHARDED_PACKAGES,
+  previous = PREVIOUS_FILE_SHARDED_PACKAGES
+) {
   const tasks = parsed?.tasks;
   if (!Array.isArray(tasks)) {
     throw new Error(
@@ -313,7 +340,7 @@ export function samplesFromSummary(parsed, label, sliced = FILE_SHARDED_PACKAGES
       seconds += leg.seconds;
       // A passthrough slice (`cliArguments`, the nightly tiers) or an
       // `OS_TEST_SHARD` one (Test Core, #19278) -- see sliceOfEnvironment().
-      slice ??= sliceOfLeg(leg, name, label, sliced);
+      slice ??= sliceOfLeg(leg, name, label, sliced, previous);
     }
     samples.set(name, seconds);
     if (slice) slices.set(name, slice);
@@ -559,7 +586,7 @@ export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = n
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
   'measure-test-shard-timings self-test': 56,
-  'env-carried slices (#19278)': 10,
+  'env-carried slices (#19278)': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1156,7 +1183,7 @@ function selfTest() {
   // carrier, an empty value, an unrelated variable -- and pin what the digest
   // path must NOT read. Each case was ablated against the code it pins.
   // `sliced` stands in for FILE_SHARDED_PACKAGES so the fixtures keep the short
-  // names above, and one case reads the REAL map.
+  // names above; one case reads the REAL maps, and one crosses a map change.
   battery('env-carried slices (#19278)');
   const digestOf = (value) => createHash('sha256').update(value).digest('hex');
   const envTask = (pkg, start, end, value, extra = {}) => ({
@@ -1181,12 +1208,72 @@ function selfTest() {
     if (r.samples.get('cli') !== 118.073) throw new Error('env slice: the slice window was not kept as the sample');
   });
   check(() => {
-    // The REAL map, the real package name, a digest of the form turbo writes.
-    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
-    const r = samplesFromSummary(summary([envTask('@objectstack/cli', 0, 1000, `${n}/${n}`)]), 'f');
-    const s = r.slices.get('@objectstack/cli');
-    if (!s || s.index !== n || s.count !== n) {
-      throw new Error(`env slice: the live FILE_SHARDED_PACKAGES did not resolve ${n}/${n} (got ${JSON.stringify(s ?? null)})`);
+    // The REAL maps, a real package name, digests of the form turbo writes: the
+    // defaults ARE the partitioner's live FILE_SHARDED_PACKAGES and
+    // PREVIOUS_FILE_SHARDED_PACKAGES. Written for whatever state those maps are
+    // in -- every count either names for the CLI must decode its own last
+    // slice, and a count neither names must be refused listing exactly their
+    // candidates -- so it reds when a default stops being its live map.
+    const name = '@objectstack/cli';
+    const counts = [];
+    for (const map of [FILE_SHARDED_PACKAGES, PREVIOUS_FILE_SHARDED_PACKAGES]) {
+      const n = Object.hasOwn(map, name) ? map[name] : 1;
+      if (n > 1 && !counts.includes(n)) counts.push(n);
+    }
+    for (const n of counts) {
+      const s = samplesFromSummary(summary([envTask(name, 0, 1000, `${n}/${n}`)]), 'f').slices.get(name);
+      if (!s || s.index !== n || s.count !== n) {
+        throw new Error(`env slice: the live maps did not resolve ${name} ${n}/${n} (got ${JSON.stringify(s ?? null)})`);
+      }
+    }
+    const stranger = Math.max(1, ...counts) + 1;
+    let message = '';
+    try {
+      samplesFromSummary(summary([envTask(name, 0, 1000, `1/${stranger}`)]), 'f');
+    } catch (e) {
+      message = e.message;
+    }
+    const listed =
+      counts.flatMap((n) => Array.from({ length: n }, (_, i) => `${i + 1}/${n}`)).join(', ') ||
+      'none: neither FILE_SHARDED_PACKAGES nor PREVIOUS_FILE_SHARDED_PACKAGES slices it';
+    if (!message.includes(`(${listed})`)) {
+      throw new Error(
+        `env slice: a ${name} digest of 1/${stranger}, a count neither live map names, was not refused ` +
+          `listing (${listed}) (got ${JSON.stringify(message || 'no throw')})`
+      );
+    }
+  });
+  check(() => {
+    // ACROSS A MAP CHANGE: a run made before it, under a map that cut `cli` in
+    // two, read by a generator whose current map slices nothing. Both halves
+    // decode against the previous map and are summed WITHIN the run to the
+    // whole cost -- the reading the refresh lane needs while every retained
+    // run predates the change -- and a count neither map names is still
+    // refused. Without the previous map both halves are refused and the run
+    // measures nothing.
+    const none = Object.freeze({});
+    const was2 = Object.freeze({ cli: 2 });
+    const legA = samplesFromSummary(summary([envTask('cli', 0, 300_000, '1/2')]), 'a', none, was2);
+    const legB = samplesFromSummary(summary([envTask('cli', 0, 433_330, '2/2')]), 'b', none, was2);
+    const set = buildDataset({
+      perSummary: [{ ...legA, run: 'r' }, { ...legB, run: 'r' }],
+      fileCounts: new Map([['cli', 300]]),
+      provenance: {},
+    });
+    if (set.packages.cli !== 733.33 || set.skippedIncompleteSlices.length !== 0) {
+      throw new Error(
+        `env slice: a pre-change run's two halves did not assemble to 733.33s (got ${set.packages.cli}; ` +
+          `incomplete ${JSON.stringify(set.skippedIncompleteSlices)})`
+      );
+    }
+    let message = '';
+    try {
+      samplesFromSummary(summary([envTask('cli', 0, 1000, '1/3')]), 'c', none, was2);
+    } catch (e) {
+      message = e.message;
+    }
+    if (!message.includes('(1/2, 2/2)')) {
+      throw new Error(`env slice: a digest neither map names was not refused (got ${JSON.stringify(message || 'no throw')})`);
     }
   });
   check(() => {

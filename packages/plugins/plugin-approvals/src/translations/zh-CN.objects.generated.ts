@@ -253,7 +253,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       actor_id: {
-        label: "执行人"
+        label: "执行人",
+        help: "执行此操作的用户。为空表示未记录人员：系统发起的操作，或在开始记录决定人之前写入的决定（此类决定仍会显示其所代表的槽位）。"
+      },
+      acted_as: {
+        label: "代表槽位",
+        help: "执行此操作时所代表的待审批槽位，按该槽位存储的写法记录：用户 ID、邮箱或岗位地址。若操作并非经由槽位放行（如提交人自己的操作、系统操作和管理员越权操作），则为空。"
       },
       comment: {
         label: "评论"

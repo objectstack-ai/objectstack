@@ -18,6 +18,11 @@ export default defineConfig({
     // entry for the same reason `errors` has one: objectql's ADR-0076 lean
     // entry needs the pure function, not the manager, the loaders or their deps.
     'src/view-container.ts',
+    // `@objectstack/metadata/view-container-name` — the divergent container
+    // `name` refusal every door that files a container calls (#21412). Its
+    // own entry, not the leaf above: it needs `@objectstack/spec`, which the
+    // leaf deliberately does not import.
+    'src/view-container-name.ts',
   ],
   splitting: false,
   sourcemap: true,

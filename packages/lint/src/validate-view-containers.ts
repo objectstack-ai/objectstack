@@ -130,7 +130,8 @@ export function validateViewContainers(stack: Record<string, unknown>): ViewCont
         message:
           'A ViewItem record is not a view container: the stack `views:` collection carries '
           + 'containers only — `viewKind` belongs to a single VIEW, not to the container. The '
-          + 'registration loop refuses this entry (#5320).',
+          + 'registration loop refuses this entry too: the stack schema, this rule and the loop hold '
+          + '`views:` to one container-only contract.',
         hint: 'Wrap it in a defineView container: defineView({ list: { type, data, columns, ... }, '
           + 'listViews: { ... } }) — or author the standalone view through the metadata door '
           + '(Studio / `PUT /api/v1/meta/view`). Machine-assembled manifests carry it under '

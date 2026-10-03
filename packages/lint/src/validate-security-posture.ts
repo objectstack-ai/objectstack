@@ -461,7 +461,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           message:
             `custom object "${objName}" declares no sharingModel (OWD). The runtime fails ` +
             `CLOSED to 'private' (ADR-0090 D1), but the baseline must be an authored decision, ` +
-            `not an accident — this is the exact shape of the leave_request incident (objectui#2348).`,
+            `not an accident — this is the exact shape of the leave_request incident, where an object ` +
+            `with no sharingModel let an ordinary read/write grant read and edit every other user's records.`,
           hint:
             `Declare sharingModel explicitly: 'private' (owner + shares; recommended default), ` +
             `'public_read', 'public_read_write', or 'controlled_by_parent' (master-detail children).`,
@@ -523,7 +524,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           `can derive access from. ADR-0055 resolves the master through a required master_detail, then ` +
           `any master_detail, then a required lookup — each of which must also name a reference target — ` +
           `and this object matches none of the three. At runtime every read is DENIED and every write is ` +
-          `refused with 422 INVALID_METADATA (#7474), so the object is unusable rather than merely locked down.`,
+          `refused with 422 INVALID_METADATA, as a metadata defect rather than a permission denial, so the ` +
+          `object is unusable rather than merely locked down.`,
         hint:
           `Add the master relation this object is derived from, e.g. fields.parent: ` +
           `{ type: 'master_detail', reference: '<master_object>', required: true }. If the object has no ` +

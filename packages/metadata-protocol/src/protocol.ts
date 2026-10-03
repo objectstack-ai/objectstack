@@ -94,6 +94,10 @@ import {
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+// [#21412] The divergent view-container `name` refusal — the one judge the
+// boot loop, `os validate` and the artifact/HMR loader call too; this door
+// passes the name it files the row under. See `saveMetaItem`.
+import { savedViewContainerNameRefusal } from '@objectstack/metadata/view-container-name';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -1218,7 +1222,10 @@ export { stripReadDecorations };
  * into a record risks producing an invalid record (e.g. a non-`<object>.<key>`
  * name). Structural validity is enforced separately by the view metadata schema
  * during the spec-validation step. No-op for non-view types and bodies that
- * already carry a `name`.
+ * already carry a `name`. [#21412] A CONTAINER's authored `name` reaches this
+ * function only when it equals `saveName`: `saveMetaItem` refuses a
+ * disagreeing one first, through `savedViewContainerNameRefusal`, so keeping
+ * the authored `name` can no longer file a container under a second key.
  *
  * When `baseline` is provided (the registry entry this overlay will shadow),
  * missing identity fields — `viewKind`, `object`, `label` — are inherited onto
@@ -17713,6 +17720,22 @@ export class ObjectStackProtocolImplementation implements
         // (#2555 — a console personalization PUT sends only the raw config).
         // See {@link normalizeViewMetadata}.
         {
+            // [#21412] FIRST, before the stamp below can keep an authored
+            // `name`: a view CONTAINER whose own `name` disagrees with the name
+            // this door files the row under is refused, `VALIDATION_ERROR` /
+            // 400, through the one judge the source registrars call. Accepted,
+            // it was stored under the row name and registered under the
+            // body's (`hydrateOverlayIntoRegistry` keys by `body.name`), so one
+            // document answered under two names. The key here is the save
+            // name, not the derived binding: this door keeps a container saved
+            // under a name other than its object (#13407, #21334), and the
+            // body it stamps for one must pass when sent back. A body with no
+            // `name` passes and is stamped below. Containers only — the
+            // every-type half is #21470.
+            if (singularType === 'view') {
+                const nameRefusal = savedViewContainerNameRefusal(request.item, request.name);
+                if (nameRefusal) throw nameRefusal;
+            }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
                 && typeof this.engine.registry?.getItem === 'function') {

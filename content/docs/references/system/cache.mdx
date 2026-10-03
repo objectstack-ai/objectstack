@@ -53,9 +53,9 @@ Cache avalanche/stampede prevention configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **jitterTtl** | `{ enabled: boolean; maxJitterSeconds: number }` | optional | TTL jitter to prevent simultaneous expiration |
-| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutSeconds: number }` | optional | Circuit breaker for backend protection |
-| **lockout** | `{ enabled: boolean; lockTimeoutMs: number }` | optional | Lock-based stampede prevention |
+| **jitterTtl** | `{ enabled?: boolean; maxJitterSeconds?: number }` | optional | TTL jitter to prevent simultaneous expiration |
+| **circuitBreaker** | `{ enabled?: boolean; failureThreshold?: number; resetTimeoutSeconds?: number }` | optional | Circuit breaker for backend protection |
+| **lockout** | `{ enabled?: boolean; lockTimeoutMs?: number }` | optional | Lock-based stampede prevention |
 
 ### Nested Shape: `CacheAvalanchePrevention.jitterTtl`
 
@@ -92,7 +92,7 @@ Top-level application cache configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable application-level caching |
-| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttlSeconds: number; … }[]` | ✅ | Ordered cache tier hierarchy |
+| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttlSeconds?: number; … }[]` | ✅ | Ordered cache tier hierarchy |
 | **invalidation** | `{ trigger: Enum<'create' \| 'update' \| 'delete' \| 'manual'>; scope: Enum<'key' \| 'pattern' \| 'tag' \| 'all'>; pattern?: string; tags?: string[] }[]` | ✅ | Cache invalidation rules |
 | **prefetch** | `boolean` | optional (default: `false`) | Enable cache prefetching |
 | **compression** | `boolean` | optional (default: `false`) | Enable data compression in cache |
@@ -214,14 +214,14 @@ Distributed cache configuration with consistency and avalanche prevention
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable application-level caching |
-| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttlSeconds: number; … }[]` | ✅ | Ordered cache tier hierarchy |
+| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttlSeconds?: number; … }[]` | ✅ | Ordered cache tier hierarchy |
 | **invalidation** | `{ trigger: Enum<'create' \| 'update' \| 'delete' \| 'manual'>; scope: Enum<'key' \| 'pattern' \| 'tag' \| 'all'>; pattern?: string; tags?: string[] }[]` | ✅ | Cache invalidation rules |
 | **prefetch** | `boolean` | optional (default: `false`) | Enable cache prefetching |
 | **compression** | `boolean` | optional (default: `false`) | Enable data compression in cache |
 | **encryption** | `boolean` | optional (default: `false`) | Enable encryption for cached data |
 | **consistency** | `Enum<'write_through' \| 'write_behind' \| 'write_around' \| 'refresh_ahead'>` | optional | Distributed cache consistency strategy |
 | **avalanchePrevention** | `{ jitterTtl?: object; circuitBreaker?: object; lockout?: object }` | optional | Cache avalanche and stampede prevention |
-| **warmup** | `{ enabled: boolean; strategy: Enum<'eager' \| 'lazy'>; patterns?: string[]; concurrency: number }` | optional | Cache warmup strategy |
+| **warmup** | `{ enabled?: boolean; strategy?: Enum<'eager' \| 'lazy'>; patterns?: string[]; concurrency?: number }` | optional | Cache warmup strategy |
 
 ### Nested Shape: `DistributedCacheConfig.tiers[number]`
 
@@ -252,9 +252,9 @@ Rule defining when and how cached entries are invalidated
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **jitterTtl** | `{ enabled: boolean; maxJitterSeconds: number }` | optional | TTL jitter to prevent simultaneous expiration |
-| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutSeconds: number }` | optional | Circuit breaker for backend protection |
-| **lockout** | `{ enabled: boolean; lockTimeoutMs: number }` | optional | Lock-based stampede prevention |
+| **jitterTtl** | `{ enabled?: boolean; maxJitterSeconds?: number }` | optional | TTL jitter to prevent simultaneous expiration |
+| **circuitBreaker** | `{ enabled?: boolean; failureThreshold?: number; resetTimeoutSeconds?: number }` | optional | Circuit breaker for backend protection |
+| **lockout** | `{ enabled?: boolean; lockTimeoutMs?: number }` | optional | Lock-based stampede prevention |
 
 ### Nested Shape: `DistributedCacheConfig.warmup`
 

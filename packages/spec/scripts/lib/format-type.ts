@@ -308,6 +308,41 @@ function isNeverNode(prop: any): boolean {
 }
 
 /**
+ * Does this property node carry a `default` keyword? `'default' in` is the
+ * test, never truthiness: `null`, `false`, `0` and `""` are real defaults an
+ * author gets by omitting the key.
+ */
+export function carriesDefault(prop: any): boolean {
+  return prop !== null && typeof prop === 'object' && Object.prototype.hasOwnProperty.call(prop, 'default');
+}
+
+/**
+ * May an author omit this member? The ONE answer a reference page gives, in
+ * every position that states optionality: the Required column
+ * (`renderRequiredCell` in `schema-section.ts`) and the `key?:` marker of a
+ * `{ … }` shape summary below.
+ *
+ * #8703's rule. `build-schemas.ts` emits each published document in ONE io
+ * mode — OUTPUT (post-parse) by default, INPUT only when the output projection
+ * throws, which one `.transform` anywhere in the document causes. The two modes
+ * disagree about a `.default()` member's `required` entry: output lists it (the
+ * parse always produces it), input does not (the author may leave it out).
+ * Both keep its `default`. So `default` decides and `required` only breaks the
+ * tie for a member that has none.
+ *
+ * Reading `required` alone here made a def's face a property of the DOCUMENT
+ * it was emitted inside, not of the def (#21466): one shared def rendered
+ * `order:` inside an output-mode document and `order?:` inside an input-mode
+ * one, on the same page, and a member gaining a `.transform` flipped every
+ * defaulted key the whole document reaches. Measured before this answer was
+ * shared: 1398 exports project in both modes, 215 of them rendered
+ * differently, and all 483 differing lines were this marker.
+ */
+export function isAuthorOmittable(prop: any, required: boolean): boolean {
+  return !required || carriesDefault(prop);
+}
+
+/**
  * One JSON Schema literal value — a `const`, or a single member of an `enum` —
  * rendered as the TypeScript literal an author would have to type.
  *
@@ -1077,7 +1112,9 @@ function renderType(prop: any, ctx: TypeContext | undefined, depth: number): str
       if (depth >= SHAPE_DEPTH_LIMIT) return 'object';
       const shown = keys.slice(0, INLINE_KEY_LIMIT).map(k => {
         const child = prop.properties[k];
-        const optional = (prop.required || []).includes(k) ? '' : '?';
+        // `default` decides, `required` breaks the tie — the Required column's
+        // answer, so the marker cannot depend on the emitting io mode (#21466).
+        const optional = isAuthorOmittable(child, (prop.required || []).includes(k)) ? '?' : '';
         // Everything below this point is a SUMMARY of the child, not the
         // child's own row, so a long enum reached from here is elided (#5340).
         // The flag is set once, here, and inherited by every branch underneath

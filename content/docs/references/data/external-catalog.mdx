@@ -49,7 +49,7 @@ const result = ExternalCatalogSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **remoteSchema** | `string` | optional | Remote schema/database qualifier |
 | **remoteName** | `string` | ✅ | Remote table/view name |
-| **columns** | `{ name: string; sqlType: string; nullable: boolean; primaryKey: boolean; … }[]` | ✅ | Remote columns |
+| **columns** | `{ name: string; sqlType: string; nullable: boolean; primaryKey?: boolean; … }[]` | ✅ | Remote columns |
 | **indexes** | `{ name: string; columns: string[]; unique: boolean }[]` | optional | Remote indexes, when introspectable |
 | **rowCountEstimate** | `number` | optional | Approximate row count |
 
@@ -79,7 +79,7 @@ const result = ExternalCatalogSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **remoteSchema** | `string` | optional | Remote schema/database qualifier |
 | **remoteName** | `string` | ✅ | Remote table/view name |
-| **columns** | `{ name: string; sqlType: string; nullable: boolean; primaryKey: boolean; … }[]` | ✅ | Remote columns |
+| **columns** | `{ name: string; sqlType: string; nullable: boolean; primaryKey?: boolean; … }[]` | ✅ | Remote columns |
 | **indexes** | `{ name: string; columns: string[]; unique: boolean }[]` | optional | Remote indexes, when introspectable |
 | **rowCountEstimate** | `number` | optional | Approximate row count |
 

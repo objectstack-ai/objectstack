@@ -678,7 +678,7 @@ Upload artifact request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **artifact** | `{ formatVersion: string; packageId: string; version: string; format: Enum<'tgz' \| 'zip'>; … }` | ✅ | Package artifact metadata |
+| **artifact** | `{ formatVersion?: string; packageId: string; version: string; format?: Enum<'tgz' \| 'zip'>; … }` | ✅ | Package artifact metadata |
 | **sha256** | `string` | optional | SHA256 checksum of the uploaded file |
 | **token** | `string` | optional | Publisher authentication token |
 | **releaseNotes** | `string` | optional | Release notes for this version |
@@ -696,8 +696,8 @@ Upload artifact request
 | **builtWith** | `string` | optional | Build tool identifier (e.g. "os-cli@3.2.0") |
 | **files** | `{ path: string; size: integer; category?: Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| …> }[]` | optional | List of files contained in the artifact |
 | **metadataCategories** | `Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| …>[]` | optional | Metadata categories included in this artifact |
-| **checksums** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; files: Record<string, string> }` | optional | SHA256 checksums for artifact integrity verification |
-| **signature** | `{ algorithm: Enum<'RSA-SHA256' \| 'RSA-SHA384' \| 'RSA-SHA512' \| 'ECDSA-SHA256'>; publicKeyRef: string; signature: string; signedAt?: string; … }` | optional | Digital signature for artifact authenticity verification |
+| **checksums** | `{ algorithm?: Enum<'sha256' \| 'sha384' \| 'sha512'>; files: Record<string, string> }` | optional | SHA256 checksums for artifact integrity verification |
+| **signature** | `{ algorithm?: Enum<'RSA-SHA256' \| 'RSA-SHA384' \| 'RSA-SHA512' \| 'ECDSA-SHA256'>; publicKeyRef: string; signature: string; signedAt?: string; … }` | optional | Digital signature for artifact authenticity verification |
 
 
 ---
@@ -743,7 +743,7 @@ Upload artifact response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Whether the upload succeeded |
-| **artifactRef** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference in the registry |
+| **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference in the registry |
 | **submissionId** | `string` | optional | Marketplace submission ID for review tracking |
 | **message** | `string` | optional | Upload status message |
 

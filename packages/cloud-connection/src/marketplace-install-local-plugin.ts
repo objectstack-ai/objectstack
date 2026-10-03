@@ -972,6 +972,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             } catch { /* non-fatal — entry already on disk */ }
         }
 
+        // 6. [#21322] Re-run the boot's `kernel:ready` sweeps for a package that
+        //    arrived after them — LAST, after the seed, because that is where
+        //    the boot runs them: a record-change flow bound before the seed
+        //    would fire on every seeded row, which no boot does.
+        await this.announceHotInstall(ctx, manifestId);
+
         return c.json({
             success: true,
             data: {
@@ -1439,6 +1445,54 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return;
         }
         bind(ql, manifest, { appId: manifestId, logger: ctx.logger, source: 'MarketplaceInstallLocal' });
+    };
+
+    /**
+     * [#21322] Announce a HOT install to the running kernel as
+     * `metadata:reloaded` — the platform's one post-boot re-sync signal, which
+     * a Studio package publish, a per-item publish and an artifact reload
+     * already announce — so the consumers that read a package only at
+     * `kernel:ready` re-run that same read for this one:
+     *
+     *   - `service-automation` re-syncs its flows from the protocol
+     *     (`resyncFlowsFromProtocol`, the `kernel:ready` bind's own
+     *     `registerFlow`), so the package's record-change flows fire;
+     *   - `plugin-security` re-runs its declared-permission seeding (the
+     *     `kernel:ready` pass's own `bootstrapDeclaredPermissions`), so the
+     *     package's permission sets are projected into `sys_permission_set`
+     *     and can be granted.
+     *
+     * Before this, a hot install left both until the next restart: the
+     * restart's rehydrate registers the package ahead of those sweeps, a hot
+     * install registers it after them, and nothing re-ran them. ⛔ Nothing here
+     * binds a flow or writes a permission-set row itself — that would be the
+     * install-only second path the boot never takes. The rehydrate does NOT
+     * call this: it runs inside `kernel:ready`, ahead of the very sweeps this
+     * re-runs, which is why a restart already reads correctly.
+     *
+     * `changed` names the app the install registered (`app/<manifestId>`, the
+     * type and key `registerApp` files it under). Never throws: the package is
+     * registered and persisted either way, so a failed re-sync is a FUNCTIONAL
+     * degradation — said once at `warn`, with the restart that repairs it, the
+     * level the publish door's announce failure uses.
+     */
+    private announceHotInstall = async (ctx: PluginContext, manifestId: string): Promise<void> => {
+        if (typeof ctx.trigger !== 'function') {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] this kernel context cannot announce metadata:reloaded — the record-change flows `
+                + `and permission sets of ${manifestId} take effect only after a restart.`,
+            );
+            return;
+        }
+        try {
+            await ctx.trigger('metadata:reloaded', { changed: [`app/${manifestId}`] });
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId} is installed, but the metadata:reloaded re-sync FAILED — its `
+                + 'record-change flows may not fire and its permission sets may be missing from sys_permission_set '
+                + `until the runtime restarts (the restart re-reads every installed package). Cause: ${err?.message ?? err}`,
+            );
+        }
     };
 
     /**
