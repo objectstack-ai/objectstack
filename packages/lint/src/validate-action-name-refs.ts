@@ -180,18 +180,18 @@ function indexObjectActions(stack: AnyRec): Map<string, Map<string, AnyRec>> {
   return index;
 }
 
-/** Where an action name IS defined in the stack: `object "x"` per owner, or `a global action`. */
+/** Where an action name IS defined in the stack: `on object "x"` per owner, or `as a global action`. */
 function actionOwners(stack: AnyRec, name: string): string[] {
   const owners = new Set<string>();
   for (const obj of recordsOf(stack.objects)) {
     if (recordsOf(obj.actions).some((a) => a.name === name)) {
-      owners.add(`object "${strName(obj.name) ?? '?'}"`);
+      owners.add(`on object "${strName(obj.name) ?? '?'}"`);
     }
   }
   for (const action of recordsOf(stack.actions)) {
     if (action.name !== name) continue;
     const owner = strName(action.objectName);
-    owners.add(owner ? `object "${owner}"` : 'a global action');
+    owners.add(owner ? `on object "${owner}"` : 'as a global action');
   }
   return [...owners].sort();
 }
@@ -379,7 +379,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             `Related-list actions names action "${id}", which is not an action of the related object ` +
             `"${child}"` +
             (owners.length > 0
-              ? ` (it is defined in this stack on ${owners.join(', ')}, which this list never reads)`
+              ? ` (it is defined in this stack ${owners.join(' and ')}, which this list never reads)`
               : ' (no action in this stack defines it)') +
             ". The list resolves each id against its related object's own actions only — not the " +
             "page's object, not a global action — so it draws no button for this one, only a refusal " +
