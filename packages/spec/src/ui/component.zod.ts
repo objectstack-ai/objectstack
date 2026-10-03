@@ -3879,6 +3879,20 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * the measured shape here. In the same change `resizableColumns` — read only
  * as `schema.resizable ?? schema.resizableColumns` (:5361) — retires to a
  * tombstone naming `resizable`.
+ *
+ * [#21464] Six list members, re-measured at the same pin `89cad75d55` and
+ * typed the same way — each was `z.unknown()` (an array of it for the three
+ * lists), so a value of the wrong shape passed the component-props gate and
+ * the grid dropped or substituted it in silence: `fields` (:1946 — field
+ * NAMES on the draw path, `objectSchema.fields[fieldName]` at :3969 / :4012),
+ * `selection` (`.type`, :4799-4812), `selectable` (:4813-4815, handed to the
+ * table's `selectable` at :5333), `rowActions` (`string[]`, :1834-1835) and
+ * `bulkActions` / `batchActions` (`batchActions ?? bulkActions`, :4763, each
+ * entry a NAME `resolveBulkActions` folds; a non-string entry is skipped). The
+ * three a list view also declares take the list view's own members by
+ * reference; `fields` and `selectable` have no list-view counterpart and
+ * declare the measured shape here; `batchActions` takes `bulkActions`'s def.
+ * `columns` stays `z.unknown()`, held for a ruling — see the member.
  */
 export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid`',
@@ -3922,10 +3936,37 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    */
   emptyState: EmptyStateSchema.optional()
     .describe('What the grid draws instead of an empty table: `{ title, message, icon }` — the list view\'s own empty-state shape'),
+  /**
+   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The by-reference
+   * candidate is the list view's own `columns` member
+   * (`ListViewSchema.shape.columns`: all field-name strings, or all strict
+   * `ListColumn` entries), and the draw path matches it: `normalizeColumns`
+   * (`ObjectGrid.tsx:819` at the pin `89cad75d55`, read at `:2158`) decides
+   * by the FIRST entry, and only an entry with a non-empty string `field`
+   * draws a column. But the grid also reads `options` off an authored column:
+   * the group-header formatter (`:2997-3001`) takes the column whose `field`
+   * is the grouping field and draws the group-header labels from
+   * `colOverride?.options || objectDefField?.options`, the column's list
+   * winning — and objectui's own `gridGroupingMembers-8071` test pins that as
+   * behaviour. `ListColumn` declares no `options`, so the by-reference shape
+   * would refuse a value the grid draws. The renderer-side read is carded as
+   * objectstack-ai/objectui#11544; the member is typed once that is ruled.
+   * (A column `editable` key, by contrast, is read nowhere off an authored
+   * column.)
+   */
   columns: z.array(z.unknown()).optional()
     .describe('Columns: field names or column definition objects'),
-  fields: z.array(z.unknown()).optional()
-    .describe('Field list fallback used when `columns` is absent'),
+  /**
+   * [#21464] Field NAMES. No list-view schema declares this member, so the
+   * shape is the one the grid reads (`ObjectGrid.tsx:1946` at the pin
+   * `89cad75d55`): when `columns` is absent the draw path looks each entry up
+   * as `objectSchema.fields[fieldName]` (`:3969`, `:4012`), so an object
+   * entry named no field and drew no column. The projection reads object
+   * entries too (`:2587`), but only for the host hand-off `ListView` makes,
+   * which is not authored here. Column decoration belongs on `columns`.
+   */
+  fields: z.array(z.string()).optional()
+    .describe('Field-name fallback the grid reads when `columns` is absent — bare field names (`[\'name\', \'amount\']`); write column decoration such as `label` or `width` on `columns`'),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form,
    * `[{ field, operator, value }, ...]`, the one filter orthography every
@@ -4167,11 +4208,56 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    */
   rowColor: RowColorConfigSchema.optional()
     .describe('Row colour by field value — `{ field, colors }`, the same block a list view\'s `rowColor` declares'),
-  selection: z.unknown().optional().describe('Selection config ({ type: none | single | multiple })'),
-  selectable: z.unknown().optional().describe('Legacy selection shorthand, read only when `selection` is absent. Prefer `selection`'),
-  rowActions: z.array(z.unknown()).optional().describe('Per-row action names'),
-  bulkActions: z.array(z.unknown()).optional().describe('Bulk action names shown on selection'),
-  batchActions: z.array(z.unknown()).optional().describe('Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`)'),
+  /**
+   * [#21464] The list view's own `selection` member, by reference
+   * (`SelectionConfigSchema`): the grid reads `selection.type`
+   * (`ObjectGrid.tsx:4799-4812` at the pin `89cad75d55`) — `none` is off,
+   * `single` and `multiple` are the two modes. ⚠️ An object with no `type`
+   * turns selection ON at that read (objectui#9837, ruling A-prime: presence
+   * enables), while the shared schema's own `type` default is `none`; that
+   * default reaches only a PARSED document, never the bag the grid reads, and
+   * it is the list view's declaration either way — objectui#9837 holds the
+   * question.
+   */
+  selection: ListViewSchema.shape.selection
+    .describe('Selection config `{ type }` — `none`, `single` or `multiple`, the same block a list view\'s `selection` declares'),
+  /**
+   * [#21464] The legacy shorthand, read only when `selection` is absent
+   * (`ObjectGrid.tsx:4813-4815` at the pin `89cad75d55`) and handed on as the
+   * table's `selectable` (`:5333`), which `resolveSelectionMode`
+   * (`components/src/renderers/complex/data-table.tsx:644`) reads as
+   * `single`, off for a falsy value, and multiple for anything else — so the
+   * shape is the read's own declaration, `boolean | 'single' | 'multiple'`.
+   * Typed, not retired: retiring the second spelling is its own decision.
+   */
+  selectable: z.union([z.boolean(), z.enum(['single', 'multiple'])]).optional()
+    .describe('Legacy selection shorthand, read only when `selection` is absent — `true` (multiple), `false` (off), `\'single\'` or `\'multiple\'`. Prefer `selection`'),
+  /**
+   * [#21464] The list view's own `rowActions` member, by reference: action
+   * NAMES (`ObjectGrid.tsx:1834-1835` at the pin `89cad75d55` reads a
+   * `string[]`; `edit` and `delete` select the row menu's generic entries,
+   * any other name resolves against the object's actions).
+   */
+  rowActions: ListViewSchema.shape.rowActions
+    .describe('Per-row action names — `edit` / `delete` select the generic entries, any other name resolves against the object\'s actions; the same list a list view\'s `rowActions` declares'),
+  /**
+   * [#21464] The list view's own `bulkActions` member, by reference: action
+   * NAMES, which `resolveBulkActions` folds against the object's actions
+   * (`ObjectGrid.tsx:4763` at the pin `89cad75d55`). An object entry such as
+   * `{ name }` is the def vocabulary, which belongs on `bulkActionDefs`; the
+   * fold skipped it in silence.
+   */
+  bulkActions: ListViewSchema.shape.bulkActions
+    .describe('Bulk action names shown on selection — the same list a list view\'s `bulkActions` declares; a full def goes on `bulkActionDefs`'),
+  /**
+   * [#21464] The alternate spelling of `bulkActions`, read FIRST
+   * (`batchActions ?? bulkActions`, `ObjectGrid.tsx:4763` at the pin
+   * `89cad75d55`), so it takes `bulkActions`'s def: one capability, one
+   * accept set. The list view declares only `bulkActions`; this second
+   * spelling is typed here, not retired — retiring it is its own decision.
+   */
+  batchActions: ListViewSchema.shape.bulkActions
+    .describe('Alternate spelling of `bulkActions` that the renderer reads FIRST (`batchActions ?? bulkActions`) — the same action-name list. Prefer `bulkActions`'),
   /**
    * [#21445] The list view's own bulk-action def, {@link BulkActionDefSchema},
    * by identity — the element `ListViewSchema.bulkActionDefs` declares. The
@@ -4286,11 +4372,14 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
 /**
- * ADR-0122: the parsed state differs from the authored state on exactly one
- * key — `data` carries `ViewDataSchema` (the ui#6207 convergence), whose own
- * input ≠ infer. So `object-grid` leaves the type-alias convention pin's
- * default-free family (the Iso839 line deleted with this alias), taking the
- * `RecordAlertPropsParsed` route its comment prescribes.
+ * ADR-0122: the parsed state differs from the authored state. It first did on
+ * one key — `data` carries `ViewDataSchema` (the ui#6207 convergence), whose
+ * own input ≠ infer — and that is what took `object-grid` out of the
+ * type-alias convention pin's default-free family (the Iso839 line deleted
+ * with this alias), on the `RecordAlertPropsParsed` route its comment
+ * prescribes. The list view's own members taken by reference since carry
+ * their defaults too (#21445, #21464: `navigation`'s four and
+ * `selection.type`).
  */
 export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
 
@@ -4445,6 +4534,51 @@ export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
 export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
 
 /**
+ * [#21464] One `object-kanban` swimlane — the members the board reads off a
+ * lane at the `.objectui-sha` pin `89cad75d55`, and nothing else. No list-view
+ * schema declares a lane, so the shape is the read's own:
+ *
+ * - `id` (string) — the bucketing key: a record whose `groupBy` value equals
+ *   it lands in this lane (`plugin-kanban/src/index.tsx:129-149`,
+ *   `bucketCardsIntoColumns`); `title` (string) — the heading, localized
+ *   against the `groupBy` picklist (`ObjectKanban.tsx:1168-1188`);
+ * - `cards` — a STATIC board's own cards, kept ahead of the bucketed records
+ *   (`index.tsx:152-158`); `limit` — the WIP count at which the lane warns
+ *   (`KanbanImpl.tsx:540`, `:591`); `className` — the lane's styling channel
+ *   (`:568`); `collapsed` — the lane's initial collapsed state (`:742`).
+ *
+ * A card is a record row: `id` and `title` are typed (the two members the
+ * board identifies and heads a card by), and the rest of the card is that
+ * row's own values, passed on as the board's `data` rows are. Module-private,
+ * as {@link GridAggregationSchema} is.
+ */
+const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
+  surface: 'this `object-kanban` lane',
+  history:
+    'Until this shape was declared, `columns` was `z.array(z.unknown())`: a lane with no `title`, '
+    + 'a card with no `title` or a mis-spelled lane key passed, and the board drew a lane with no '
+    + 'heading, a card with no title, or ignored the key.',
+  guidance: {
+    color:
+      '`color` is not a lane member: no board reads it. Style a lane through its `className` '
+      + '(for example `className: \'border-t-2 border-blue-500\'`).',
+  },
+}, {
+  id: z.string().describe('Lane id — the `groupBy` value whose records land in this lane (matched as a string)'),
+  title: z.string().describe('Lane heading, localized against the `groupBy` picklist\'s option labels'),
+  cards: z.array(z.looseObject({
+    id: z.string().describe('Card id'),
+    title: z.string().describe('Card title'),
+  })).optional()
+    .describe('A static board\'s own cards, drawn ahead of the records bucketed into this lane — each `{ id, title, … }`, the rest of the card being the record row\'s own values'),
+  limit: z.number().int().positive().optional()
+    .describe('WIP limit — the card count at which the lane warns; never reaches the query'),
+  className: z.string().optional().describe('CSS class names applied to the lane'),
+  collapsed: z.boolean().optional()
+    .describe('Whether the lane first renders collapsed — a title spine with its cards withheld, which the viewer can reopen'),
+}));
+
+/**
  * `object-kanban` (objectui `plugin-kanban/src/ObjectKanban.tsx` +
  * `KanbanRenderer` in `plugin-kanban/src/index.tsx` @ `eb7f586b` — the board
  * forwards the authored bag on). Read points: `objectName`/`groupBy`
@@ -4511,8 +4645,20 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   objectName: z.string().optional()
     .describe('Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   groupBy: z.string().optional().describe('Field whose values become the board columns'),
-  columns: z.array(z.unknown()).optional()
-    .describe('Swimlane definitions ({ id, title } per `groupBy` value, or bare value strings) — NOT a field projection'),
+  /**
+   * [#21464] Swimlanes: all bare value strings, or all lane objects
+   * ({@link ObjectKanbanLaneSchema}) — two array shapes, not one array of
+   * either, because the board dispatches on the FIRST entry
+   * (`ObjectKanban.tsx:1177-1188` at the pin `89cad75d55`): an object-first
+   * mix sends each string down the object branch, a string-first mix is
+   * ignored whole. The string arm draws only on a board with no `groupBy`
+   * (`:1179-1186`), each value titling its own lane.
+   */
+  columns: z.union([
+    z.array(z.string()),
+    z.array(ObjectKanbanLaneSchema),
+  ]).optional()
+    .describe('Swimlane definitions — all lane objects `{ id, title, cards?, limit?, className?, collapsed? }` (one per `groupBy` value), or all bare value strings (drawn only on a board with no `groupBy`). NOT a field projection; one spelling per list'),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (#15449; the family
@@ -4961,8 +5107,17 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
 }, {
   objectName: z.string().optional()
     .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
-  calendar: z.unknown().optional()
-    .describe('Calendar field config: { startDateField, endDateField?, titleField?, colorField?, allDayField? }'),
+  /**
+   * [#21464] The list view's own `calendar` member, by reference
+   * (`CalendarConfigSchema`): `getCalendarConfig`
+   * (`plugin-calendar/src/ObjectCalendar.tsx:294-297` at the pin
+   * `89cad75d55`) returns this block as the config and reads exactly its five
+   * bindings (`:857`, `:1056`, `:1141`), so a block without `startDateField`
+   * placed no event, and a key outside the five — the retired `dateField` /
+   * `endField` aliases among them — was never read.
+   */
+  calendar: ListViewSchema.shape.calendar
+    .describe('Calendar field config `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter

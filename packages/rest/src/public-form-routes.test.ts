@@ -49,7 +49,7 @@ function formView(sections: any[] | undefined) {
     config: {
       data: { object: 'ticket' },
       sections,
-      sharing: { allowAnonymous: true, publicLink: '/forms/test' },
+      sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/test' },
     },
   };
 }

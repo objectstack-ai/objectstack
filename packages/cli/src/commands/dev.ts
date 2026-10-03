@@ -17,6 +17,14 @@ import {
   formatMtimeGap,
 } from '../utils/dev-restart.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+// THE artifact precedence, written once (#21501) — shared with `start`, and
+// with the `serve` child this command spawns. ⛔ No rung of it is restated here.
+import {
+  CONVENTIONAL_ARTIFACT_RELATIVE_PATH,
+  cwdConfigJoinsBoot,
+  isRemoteArtifact,
+  resolveArtifactBootSource,
+} from '../utils/artifact-precedence.js';
 import { artifactObjectNames } from '../utils/stack-collections.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 // The ONE port contract, shared with `start` and with the `serve` child this
@@ -178,10 +186,12 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
 /**
  * Whether this `os dev` boot runs the watch-recompile loop (#20681).
  *
- * Off when the operator passed `--no-watch`, when `--artifact` was given (there
- * is no source to watch), or when the cwd has no `objectstack.config.ts`. The
- * one decision both the loop and the stale-artifact remedy line read, exported
- * so `dev-no-watch.pin.test.ts` can drive it with what oclif actually parsed.
+ * Off when the operator passed `--no-watch`, when the boot serves an artifact
+ * `os dev` does not build — `--artifact`, or the reference `OS_ARTIFACT_URL`
+ * (#21501) — since a rebuild would change nothing that is served, or when the
+ * cwd has no `objectstack.config.ts`. The one decision both the loop and the
+ * stale-artifact remedy line read, exported so `dev-no-watch.pin.test.ts` can
+ * drive it with what oclif actually parsed.
  */
 export function devWatchActive(opts: { watch: boolean; artifact?: string; configExists: boolean }): boolean {
   return opts.watch && !opts.artifact && opts.configExists;
@@ -242,7 +252,7 @@ export default class Dev extends Command {
     // source to compile from. All flags override the matching env var.
     artifact: Flags.string({
       char: 'a',
-      description: 'Path or http(s):// URL to a compiled objectstack.json (skips auto-compile; overrides $OS_ARTIFACT_PATH)',
+      description: 'Path or http(s):// URL to a compiled objectstack.json (skips auto-compile; overrides $OS_ARTIFACT_URL, $OS_ARTIFACT_PATH and a cwd objectstack.config.ts)',
     }),
     'environment-id': Flags.string({
       description: 'Environment identifier (overrides $OS_ENVIRONMENT_ID, default env_local)',
@@ -325,21 +335,47 @@ export default class Dev extends Command {
     // local config — semantically the same as `os start` but with the
     // dev conveniences (NODE_ENV=development, dev-fallback AUTH_SECRET,
     // --ui default-on, dev-mode error formatting).
-    const isUrl = !!flags.artifact && /^https?:\/\//i.test(flags.artifact);
-    const inferredArtifact = flags.artifact
-      ?? process.env.OS_ARTIFACT_PATH
-      ?? path.resolve(process.cwd(), 'dist/objectstack.json');
-    const artifactPath = isUrl ? flags.artifact! : path.resolve(process.cwd(), inferredArtifact);
-    const useArtifactDirect = !!flags.artifact || !configExists;
+    //
+    // Resolved through THE precedence (`utils/artifact-precedence.ts`, #21501),
+    // the one `start` resolves through — `dev` used to carry its own copy with
+    // no `OS_ARTIFACT_URL` rung, so the reference beat `--artifact` in the
+    // child. The answer is printed, handed down and served as one value: the
+    // `serve` child boots it even beside a cwd `objectstack.config.ts`.
+    const bootSource = resolveArtifactBootSource({ flag: flags.artifact, env: process.env, cwd: process.cwd() });
+    // `OS_ARTIFACT_URL` drives the boot: the child resolves it, as under `start`.
+    const artifactUrl = bootSource.kind === 'reference' ? bootSource.url : undefined;
+    // The artifact this boot serves — or, when no artifact rung answered, the
+    // conventional path the cwd config compiles to (the precedence's last rung).
+    const artifactPath = bootSource.kind === 'resolved'
+      ? bootSource.path
+      : path.resolve(process.cwd(), CONVENTIONAL_ARTIFACT_RELATIVE_PATH);
+    // An artifact this command does not build from the cwd sources: the flag,
+    // the reference, or a remote `OS_ARTIFACT_PATH`. Nothing is compiled into
+    // it, watched for it, or judged stale against it.
+    const pinnedArtifact = flags.artifact ?? artifactUrl
+      ?? (isRemoteArtifact(artifactPath) ? artifactPath : undefined);
+    // Where THIS command compiles the cwd config: the artifact it builds, which
+    // is `<cwd>/dist/objectstack.json` or the operator's local
+    // `OS_ARTIFACT_PATH` (#21501, as triage ruled). That file is the config's
+    // own compiled output wherever it lives, so the config joins the boot that
+    // serves it, and the child is told the path so it recognises it too.
+    const configCompiledTo = pinnedArtifact || !configExists ? undefined : artifactPath;
 
     if (packageName === 'all' && (configExists || flags.artifact)) {
-      if (configExists && !flags.artifact) {
+      // `Config:` only when the cwd config takes part in this boot — the same
+      // predicate the `serve` child loads it by (#21501).
+      const configJoins = cwdConfigJoinsBoot({
+        configExists,
+        configPath,
+        artifact: artifactUrl ? { kind: 'reference' } : { kind: 'path', path: artifactPath, configCompiledTo },
+      });
+      if (configJoins) {
         printKV('Config', configPath, '📂');
       }
 
-      // Auto-compile only when we have a config AND no explicit artifact.
-      // Explicit `--artifact` means "use this, don't rebuild".
-      const needsCompile = !flags.artifact && (flags.compile || !fs.existsSync(artifactPath));
+      // Auto-compile only when we have a config AND the boot's artifact is one
+      // this command builds. A pinned artifact means "use this, don't rebuild".
+      const needsCompile = !pinnedArtifact && (flags.compile || !fs.existsSync(artifactPath));
       if (needsCompile) {
         if (!configExists) {
           printError('No objectstack.config.ts and no --artifact given — nothing to start.');
@@ -403,8 +439,8 @@ export default class Dev extends Command {
       // and dev still printed `Plugins: 38 loaded` until a manual build.
       // Warn loudly and name the remedy; never gate the boot (per triage:
       // remove the silence, not the start).
-      const watchActive = devWatchActive({ watch: flags.watch, artifact: flags.artifact, configExists });
-      if (!needsCompile && !flags.artifact && configExists) {
+      const watchActive = devWatchActive({ watch: flags.watch, artifact: pinnedArtifact, configExists });
+      if (!needsCompile && !pinnedArtifact && configExists) {
         const stale = assessArtifactStaleness({
           artifactPath,
           configPath,
@@ -523,7 +559,9 @@ export default class Dev extends Command {
         databaseDriverFlag: flags['database-driver'],
         env: process.env,
         cwd: process.cwd(),
-        artifactPath,
+        // The reference's bytes are the child's to fetch; a local file the
+        // reference outranks must not choose this boot's datasource (as `start`).
+        artifactPath: artifactUrl ? undefined : artifactPath,
       });
       if (resolvedDb.notice) {
         // Legacy-file compat-read — one loud line naming the file being read
@@ -535,17 +573,20 @@ export default class Dev extends Command {
         fs.mkdirSync(path.dirname(resolvedDb.url.replace(/^file:/, '')), { recursive: true });
       }
       const effectiveDb = resolvedDb.url;
-      // `dev` always has a resolved artifact by this point (it compiled one, or
-      // was handed one with `--artifact`, or is pointing at the canonical
-      // `<cwd>/dist/objectstack.json`), so the decision is unconditionally
-      // `resolved` — exactly as unconditional as the `OS_ARTIFACT_PATH` write
-      // it replaces. What changed is the channel: the resolved path travels on
-      // the CLI's own `OS_INTERNAL_ARTIFACT_PATH`, so an `OS_ARTIFACT_PATH`
-      // seen by a downstream `objectstack.config.ts` means an operator set it.
-      // The operator's own value is inherited verbatim, and `dev`'s ladder
-      // above still honours it on the rung it has always occupied.
+      // `dev` has a resolved artifact by this point (it compiled one, or was
+      // handed one, or is pointing at the canonical
+      // `<cwd>/dist/objectstack.json`) — UNLESS `OS_ARTIFACT_URL` drives the
+      // boot, in which case it resolves nothing and the child resolves the
+      // reference, exactly as under `start` (#21501). The resolved path
+      // travels on the CLI's own `OS_INTERNAL_ARTIFACT_PATH`, so an
+      // `OS_ARTIFACT_PATH` seen by a downstream `objectstack.config.ts` means
+      // an operator set it; a `resolved` answer also removes an outranked
+      // `OS_ARTIFACT_URL` (`--artifact` over env).
       const localEnv: NodeJS.ProcessEnv = {
-        ...childEnvWithResolvedArtifact(process.env, { kind: 'resolved', path: artifactPath }),
+        ...childEnvWithResolvedArtifact(
+          process.env,
+          artifactUrl ? { kind: 'reference' } : { kind: 'resolved', path: artifactPath, configCompiledTo },
+        ),
         OS_ENVIRONMENT_ID: environmentId,
         OS_SEED_ADMIN: seedAdmin ? '1' : '0',
         ...(seedAdmin && flags['admin-email'] ? { OS_SEED_ADMIN_EMAIL: flags['admin-email'] } : {}),
@@ -558,7 +599,14 @@ export default class Dev extends Command {
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
       printKV('Environment ID', environmentId, '🎯');
-      printKV('Artifact', isUrl ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
+      if (artifactUrl) {
+        // Redacted: the reference may be a pre-signed URL whose query string IS
+        // the credential — the same row `start` prints for it.
+        const { redactArtifactUrl } = await import('@objectstack/runtime');
+        printKV('Artifact', `${redactArtifactUrl(artifactUrl)} (OS_ARTIFACT_URL)`, '📦');
+      } else {
+        printKV('Artifact', isRemoteArtifact(artifactPath) ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
+      }
       printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
 
       const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
@@ -721,7 +769,8 @@ export default class Dev extends Command {
       //
       // Skipped when:
       //   - --no-watch (user opted out)
-      //   - --artifact was passed (no source to watch)
+      //   - the boot serves a pinned artifact — --artifact or OS_ARTIFACT_URL
+      //     (no source of it to watch)
       //   - the environment has no objectstack.config.ts
       if (watchActive) {
         this.startWatchRecompile({

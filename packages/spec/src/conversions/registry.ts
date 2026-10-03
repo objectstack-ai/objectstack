@@ -6548,7 +6548,7 @@ const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
   surface: 'object.fields.*.scale / object.fields.*.precision',
   summary:
     "malformed field 'scale'/'precision' declarations (non-integer or negative) are removed — "
-    + 'they were silently unenforced; the schema now refuses them at authoring (#8321)',
+    + 'they were silently unenforced; the schema now refuses them at authoring',
   apply(stack, emit) {
     const MALFORMED_KEYS = ['scale', 'precision'] as const;
     const stripMalformed = (input: Dict, collection: string): Dict =>
@@ -6656,8 +6656,9 @@ const recordChatterPositionVocabulary: MetadataConversion = {
   surface: 'page.component.record:chatter.position / page.component.record:discussion.position',
   summary:
     "record:chatter / record:discussion 'position' respelled to the renderer's vocabulary — "
-    + "'sidebar' → 'right', 'inline' → 'bottom', 'drawer' → 'right' (#8762 — the renderer "
-    + 'compares only bottom/right/left; the old set fell through every branch)',
+    + "'sidebar' → 'right', 'inline' → 'bottom', 'drawer' → 'right' (one vocabulary, the "
+    + "renderer's, rather than a mapping layer between two: the renderer compares only "
+    + 'bottom/right/left, and the old set fell through every branch)',
   apply(stack, emit) {
     const POSITION_REWRITE: Readonly<Record<string, string>> = {
       sidebar: 'right',
@@ -6774,9 +6775,9 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
   surface:
     'page.component.element:text_input.targetVariable / page.component.element:record_picker.targetVariable',
   summary:
-    "text-input/record-picker component prop 'targetVariable' removed (#9198 — a declarative "
-    + 'hint nothing read; the live binding resolves from the page variable whose `source` names '
-    + 'the component id)',
+    "text-input/record-picker component prop 'targetVariable' removed (retired under ADR-0049 "
+    + 'enforce-or-remove as a declarative hint nothing read; the live binding resolves from the '
+    + 'page variable whose `source` names the component id)',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:text_input' && component.type !== RECORD_PICKER_COMPONENT_TYPE) {
@@ -7021,8 +7022,9 @@ const elementFilterRemoved: MetadataConversion = {
     + 'page.component.element:filter.targetVariable / page.component.element:filter.layout / '
     + 'page.component.element:filter.showSearch / page.component.element:filter.aria',
   summary:
-    "the whole 'element:filter' element retired (#9220 — no renderer for it ever shipped in "
-    + 'any repo, so every key was a capability claim nothing kept; list surfaces own their '
+    "the whole 'element:filter' element retired (ADR-0049 enforce-or-remove at element grain, "
+    + 'not key by key — no renderer for it ever shipped in any repo, so every key was a '
+    + 'capability claim nothing kept; list surfaces own their '
     + "filtering via a view's userFilters / the list filter builder). All six props are "
     + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
     + 'the prescription to delete the component',
@@ -7174,8 +7176,9 @@ const elementFormRemoved: MetadataConversion = {
     + 'page.component.element:form.mode / page.component.element:form.submitLabel / '
     + 'page.component.element:form.onSubmit / page.component.element:form.aria',
   summary:
-    "the whole 'element:form' element retired (#9249 — no renderer for it ever shipped in "
-    + 'any repo, so every key was a capability claim nothing kept; use the object-bound '
+    "the whole 'element:form' element retired (ADR-0049 enforce-or-remove at element grain, "
+    + 'not key by key — no renderer for it ever shipped in any repo, so every key was a '
+    + 'capability claim nothing kept; use the object-bound '
     + "'object-form' block instead — rendered and designer-publishable). All six props are "
     + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
     + 'the prescription to delete the component',
@@ -7353,7 +7356,8 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
   surface: 'stack.translations[].<locale>.settings / translation.settings',
   summary:
     "translation group 'settings' removed from both application-authored faces, the per-app bundle "
-    + 'entry (#15178) and the registered translation item (#19620). It is keyed by '
+    + 'entry and the registered translation item: settings copy belongs to the platform, and the two '
+    + 'authoring doors of one application translation type accept one shape. It is keyed by '
     + 'SettingsManifest.namespace and only platform code declares a manifest. A per-app bundle entry '
     + "could only fill gaps the platform's own bundle left in the one merged served tree, and was "
     + 'overwritten wherever both defined the key; a stored item OVERRODE the platform copy, because the '
@@ -7607,7 +7611,8 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
   surface: 'translation.pages.components.submitLabel',
   summary:
     "translation component-copy key 'submitLabel' removed (retired rather than re-anchored — its "
-    + "only declared carrier, 'element:form', retired whole in #9249, so the resolver no longer "
+    + "only declared carrier, 'element:form', retired whole because no renderer for it ever "
+    + 'shipped, so the resolver no longer '
     + "overlays it and a stored string was read by nothing; the live form surface's submit copy "
     + "is 'object-form''s 'submitText', localized at its own authoring site, and re-anchoring the "
     + 'key there would only have added a second place to translate one word)',
@@ -7779,9 +7784,11 @@ const fieldColumnListsCanonicalized: MetadataConversion = {
   retiredAfter: '17.0.0',
   surface: 'field.inlineColumns[].field / field.relatedListColumns[] object entries',
   summary:
-    "inline-grid column entries respelled 'field' → 'name' (objectui#3951's name-keyed GridColumn) "
-    + 'and related-list column objects folded to their child field-name string (#9227 — both lists '
-    + 'were z.any(); a mis-keyed column published clean and rendered blank cells)',
+    "inline-grid column entries respelled 'field' → 'name' (the declared spelling wins, and the grid "
+    + "renderer now reads 'name' too) and related-list column objects folded to their child "
+    + 'field-name string (both lists were z.any(), so a mis-keyed column published clean and '
+    + 'rendered blank cells; inline columns now take a strict name-keyed shape and related-list '
+    + 'columns plain field names, so a mis-keyed column is refused at publish)',
   apply(stack, emit) {
     const convertFieldDef = (def: Dict, path: string): Dict => {
       let next: Dict = def;
@@ -7906,7 +7913,7 @@ const metricFiltersRemoved: MetadataConversion = {
   retiredAfter: '17.1.0',
   surface: 'analyticsCubes[].measures.<metric>.filters',
   summary:
-    "cube metric key 'filters' removed (#10414, ADR-0049 — no strategy ever read it: the "
+    "cube metric key 'filters' removed (ADR-0049 — no strategy ever read it: the "
     + 'authored raw-SQL condition was parsed and dropped, and the query returned the '
     + "unfiltered aggregate. Filter at query time with `where`, or use an ADR-0021 dataset "
     + "measure's structured `filter`; a metric's own `sql` is a column reference)",
@@ -8101,7 +8108,7 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].dimensions.<dim>.granularities',
   summary:
-    "cube dimension granularities 'second' / 'minute' / 'hour' removed (#17296, ADR-0049 — no "
+    "cube dimension granularities 'second' / 'minute' / 'hour' removed (ADR-0049 — no "
     + 'backend bucketed them and none could advertise them: `supports.queryDateGranularity` is a '
     + 'record over `DateGranularity`, which declares day, week, month, quarter, year. Offer the '
     + 'coarsest interval that still answers the question)',
@@ -8234,7 +8241,7 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].joins.<alias>.sql / analyticsCubes[].joins.<alias>.relationship',
   summary:
-    "cube join keys 'sql' and 'relationship' removed (#18612, ADR-0049 — neither was ever read: "
+    "cube join keys 'sql' and 'relationship' removed (ADR-0049 — neither was ever read: "
     + 'both strategies synthesise the ON clause as a foreign-key equality, so an authored join '
     + 'condition was REPLACED under a 200 and a declared cardinality changed no SQL. Keep '
     + '`joins.<alias>.name` alone; the record KEY is the foreign-key field on the base object)',
@@ -8499,7 +8506,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
   retiredAfter: '17.1.0',
   surface: 'page.component.record:highlights.fields[].icon',
   summary:
-    "record:highlights highlight-field key 'icon' removed (#10054, ADR-0049 — no render path: "
+    "record:highlights highlight-field key 'icon' removed (ADR-0049 — no render path: "
     + 'the highlight chip has no icon slot, the register hook carries field names only, and the '
     + 'Studio designer publishes the field list as plain strings, so an authored icon was '
     + 'accepted and drawn by nothing)',
@@ -8756,9 +8763,10 @@ const pageComponentResponsiveRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'page.components[].responsive',
   summary:
-    "page component key 'responsive' removed (#11027 — no renderer ever applied per-component "
-    + 'breakpoint layout overrides, and the shared ResponsiveConfig shape leaves with its last '
-    + 'carrier; use responsiveStyles (ADR-0065) for breakpoint behaviour that IS applied)',
+    "page component key 'responsive' removed (ADR-0049 enforce-or-remove — no renderer ever "
+    + 'applied per-component breakpoint layout overrides, and the shared ResponsiveConfig shape '
+    + 'leaves with its last carrier; use responsiveStyles (ADR-0065) for breakpoint behaviour '
+    + 'that IS applied)',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) =>
       stripKeys(component, ['responsive'], emit, path));
@@ -8857,9 +8865,9 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'page.component.object-grid.defaultSort',
   summary:
-    "object-grid component prop 'defaultSort' removed (#11805 — the legacy single-sort second "
-    + "spelling of 'sort', read only when 'sort' was absent; the pair moves to sort: [{ field, "
-    + 'order }], the array shape every read path honours)',
+    "object-grid component prop 'defaultSort' removed (retired under ADR-0049 enforce-or-remove "
+    + "as the legacy single-sort second spelling of 'sort', read only when 'sort' was absent; the "
+    + 'pair moves to sort: [{ field, order }], the array shape every read path honours)',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'object-grid') return component;
@@ -9044,9 +9052,9 @@ const objectGridResizableColumnsRemoved: MetadataConversion = {
   retiredAfter: '17.6.0',
   surface: 'page.component.object-grid.resizableColumns',
   summary:
-    "object-grid component prop 'resizableColumns' removed (#21445 — the legacy second spelling of "
-    + "'resizable', read only when 'resizable' was absent; the value moves to 'resizable' when that "
-    + 'is absent, and is deleted when it is present)',
+    "object-grid component prop 'resizableColumns' removed (the legacy second spelling of "
+    + "'resizable', read only when 'resizable' was absent, retires at once so 'resizable' is the one "
+    + "spelling; the value moves to 'resizable' when that is absent, and is deleted when it is present)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'object-grid') return component;
@@ -9247,7 +9255,8 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'page.component.object-kanban.quickAdd',
   summary:
-    "object-kanban component prop 'quickAdd' removed (#17260 — the affordance is gated on a "
+    "object-kanban component prop 'quickAdd' removed (retired from the board under ADR-0049 "
+    + 'enforce-or-remove — the affordance is gated on a '
     + "host-supplied 'onQuickAdd' function no producer puts on an object-kanban node, so the key "
     + "was accepted and dropped; delete the key — object-kanban offers no quick-add control)",
   apply(stack, emit) {
@@ -9631,10 +9640,11 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'permission.objects.<object>.allowRestore / permission.objects.<object>.allowPurge',
   summary:
-    "object-permission keys 'allowRestore' and 'allowPurge' removed (#12497, ADR-0049 — the "
+    "object-permission keys 'allowRestore' and 'allowPurge' removed (ADR-0049 — the "
     + '`restore`/`purge` operations they claimed to gate have never existed, so granting the '
     + 'bits delivered nothing; dispatched destructive lifecycle verbs stay denied fail-closed. '
-    + 'The keys return with the M2 lifecycle initiative, #1883)',
+    + 'The keys return with the M2 lifecycle initiative, which builds undelete and purge together '
+    + 'with the permission bits that gate them)',
   apply(stack, emit) {
     return mapCollection(stack, 'permissions', (ps, path) => {
       const objects = (ps as { objects?: unknown }).objects;
@@ -9950,8 +9960,9 @@ const fieldReferenceToAlias: MetadataConversion = {
   surface: 'field.reference_to',
   summary:
     "field key 'reference_to' → 'reference' (the legacy objectql runtime dialect for a "
-    + "lookup/master_detail target; stored rows must serve the canonical spelling before "
-    + "objectui deletes its `reference ?? reference_to` fallback arms — ui#6837 half 1)",
+    + "lookup/master_detail target; normalising to the protocol is the server's job and the "
+    + 'renderer only executes the protocol, so stored rows must serve the canonical spelling '
+    + 'before objectui deletes its `reference ?? reference_to` fallback arms)',
   apply(stack, emit) {
     const withObjects = mapObjectFieldsKey(stack, 'objects', 'reference_to', 'reference', emit);
     return mapObjectFieldsKey(withObjects, 'objectExtensions', 'reference_to', 'reference', emit);
@@ -10369,7 +10380,7 @@ const hookTimeoutToTimeoutMs: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.3.0',
   surface: 'hook.timeout',
-  summary: "hook key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  summary: "hook key 'timeout' → 'timeoutMs' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapCollection(stack, 'hooks', (hook, path) => {
       const renamed = renameKey(hook, 'timeout', 'timeoutMs');
@@ -10410,7 +10421,7 @@ const jobTimeoutToTimeoutMs: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.3.0',
   surface: 'job.timeout',
-  summary: "job key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  summary: "job key 'timeout' → 'timeoutMs' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapCollection(stack, 'jobs', (job, path) => {
       const renamed = renameKey(job, 'timeout', 'timeoutMs');
@@ -11014,7 +11025,7 @@ const apiEndpointCacheTtlToCacheTtlSeconds: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.3.0',
   surface: 'apis[].cacheTtl',
-  summary: "api endpoint key 'cacheTtl' \u2192 'cacheTtlSeconds' (#14478 \u2014 the unit lived only in the description; the value, seconds, is unchanged, and the key stays GET-only)",
+  summary: "api endpoint key 'cacheTtl' \u2192 'cacheTtlSeconds' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, seconds, is unchanged, and the key stays GET-only)",
   apply(stack, emit) {
     return mapCollection(stack, 'apis', (endpoint, path) => {
       const renamed = renameKey(endpoint, 'cacheTtl', 'cacheTtlSeconds');
@@ -11083,7 +11094,7 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.3.0',
   surface: 'dashboard.refreshInterval',
-  summary: "dashboard key 'refreshInterval' → 'refreshIntervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged)",
+  summary: "dashboard key 'refreshInterval' → 'refreshIntervalSeconds' (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, seconds, is unchanged)",
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (dashboard, path) => {
       const renamed = renameKey(dashboard, 'refreshInterval', 'refreshIntervalSeconds');
@@ -11444,7 +11455,7 @@ const memoryPersistenceAutoSaveIntervalToMs: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.3.0',
   surface: 'datasource.config.persistence.autoSaveInterval',
-  summary: "memory datasource key 'config.persistence.autoSaveInterval' → 'autoSaveIntervalMs', on both the file and auto arms (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  summary: "memory datasource key 'config.persistence.autoSaveInterval' → 'autoSaveIntervalMs', on both the file and auto arms (a duration key carries its unit in its name, and this one's unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       if (resolveDriverId(ds.driver) !== 'memory') return ds;
@@ -11668,7 +11679,7 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.3.0',
   surface: 'datasource.config.timeout (turso)',
-  summary: "turso datasource key 'config.timeout' → 'config.timeoutMs' (#14478 — the unit lived only in the description and a .meta() title no parse reads; the value, milliseconds, is unchanged)",
+  summary: "turso datasource key 'config.timeout' → 'config.timeoutMs' (a duration key carries its unit in its name, and this one's unit lived only in the description and a .meta() title no parse reads; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       if (resolveDriverId(ds.driver) !== 'turso') return ds;
@@ -11758,9 +11769,9 @@ const viewPageMountRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: "view.list / view.listViews.* — the list-view type 'page' and its pageName binding",
   summary:
-    "list-view type 'page' and its `pageName` binding removed (#17063 — the delegating render half "
-    + 'was never built, so a page view fell through to the grid branch and drew an empty table; '
-    + 'ADR-0049 enforce-or-remove)',
+    "list-view type 'page' and its `pageName` binding removed (retired rather than finished: the "
+    + 'delegating render half was never built, so a page view fell through to the grid branch and '
+    + 'drew an empty table; ADR-0049 enforce-or-remove)',
   apply(stack, emit) {
     const stripMount = (payload: Dict, path: string): Dict => {
       const hasPageType = payload.type === 'page';
@@ -11863,9 +11874,9 @@ const listViewSortStringClauseToArray: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'view.list.sort / view.listViews.*.sort — the bare string sort clause',
   summary:
-    'the bare string list-view `sort` clause becomes the `{ field, order }[]` array (#17053 — '
-    + 'one sort orthography platform-wide, so the schema stops minting documents its own '
-    + 'consumer refuses; objectui#8221 decision batch #77 option B)',
+    'the bare string list-view `sort` clause becomes the `{ field, order }[]` array (one sort '
+    + 'orthography platform-wide, the array: objectui already refuses the string, so the schema '
+    + 'stops minting documents its own consumer refuses)',
   apply(stack, emit) {
     /** `'a desc, b'` -> `[{field:'a',order:'desc'},{field:'b',order:'asc'}]`, or `null`. */
     const lower = (clause: string): Array<{ field: string; order: 'asc' | 'desc' }> | null => {
@@ -12363,7 +12374,7 @@ const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'object.tenancy.organizationField',
   summary:
-    'object `tenancy.organizationField` removed (#19054, ADR-0049 — the stamp-only column '
+    'object `tenancy.organizationField` removed (ADR-0049 — the stamp-only column '
     + 'declaration was authorable by every application and declared exactly once in the whole '
     + 'protocol, on the platform\'s own credential table; the divergence moves to a '
     + 'platform-internal table in @objectstack/metadata-core and stops being a knob)',
@@ -12473,7 +12484,7 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'view.owner / view.hidden — on the view item record ({ name, object, viewKind, config })',
   summary:
-    "view item keys 'owner'/'hidden' removed (#20085, ADR-0049 — declared on the view item record "
+    "view item keys 'owner'/'hidden' removed (ADR-0049 — declared on the view item record "
     + 'and stored verbatim, read by nothing: no view switcher ever filtered on `hidden`, and no '
     + 'per-user scope ever read `owner`, so a view marked as one user\'s was listed for everyone)',
   apply(stack, emit) {
@@ -12617,8 +12628,9 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'view.owner / view.hidden — on a flattened view overlay ({ name, object, viewKind, …, no config })',
   summary:
-    "flattened view overlay keys 'owner'/'hidden' removed (#20230, ADR-0049 — the view item's pair on "
-    + 'the overlay door: declared, accepted by the write door and stored verbatim, read by nothing, so a '
+    "flattened view overlay keys 'owner'/'hidden' removed (ADR-0049 — the view item's pair on "
+    + 'the overlay door, retired the same way: declared, accepted by the write door and stored '
+    + 'verbatim, read by nothing, so a '
     + '`hidden: true` overlay hid no view and an `owner` scoped none)',
   apply(stack, emit) {
     const stripFromOverlay = (view: Dict, path: string): Dict => {
@@ -13211,7 +13223,9 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     + 'filter carrying `$and` / `$or` / `$not` or any part with no lossless rule spelling is '
     + 'left exactly as stored — reported as a TODO, which `os migrate meta '
     + '--stored` lists — and is not the form its door declares (one filter '
-    + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
+    + 'orthography platform-wide, the rule array; the migration converts only what maps '
+    + 'losslessly and names the rest, because flattening a combinator would silently change '
+    + 'what a page selects)',
   apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
       const block = describeBlock(component);
@@ -13460,8 +13474,8 @@ const reportJoinedChartRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'report.blocks[].chart / report.chart on a joined report',
   summary:
-    "a joined report's 'chart' removed from its blocks and refused on the container (#20161 — "
-    + 'ADR-0049 enforce-or-remove: the joined renderer draws each block as a table and never read '
+    "a joined report's 'chart' removed from its blocks and refused on the container (ADR-0049 "
+    + 'enforce-or-remove: the joined renderer draws each block as a table and never read '
     + 'either, so the chart parsed and nothing was plotted; a non-joined report keeps its live '
     + "'chart')",
   apply(stack, emit) {
@@ -13725,7 +13739,7 @@ const formLayoutInlineGridToVertical: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'page.component.object-form.layout / view.form.layout / view.formViews.*.layout',
   summary:
-    "form 'layout' arms 'inline' and 'grid' rewritten to 'vertical' (#20221, ADR-0049 — no renderer "
+    "form 'layout' arms 'inline' and 'grid' rewritten to 'vertical' (ADR-0049 — no renderer "
     + "ever gave either a behaviour of its own: every form presentation folded both to 'vertical'. "
     + "Multi-column is 'columns', honoured under either layout, and is left untouched)",
   apply(stack, emit) {
@@ -13881,7 +13895,7 @@ const currencyConfigPrecisionRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'object.fields.*.currencyConfig.precision',
   summary:
-    "currency field key 'currencyConfig.precision' removed (#19992, ADR-0049 — no renderer or "
+    "currency field key 'currencyConfig.precision' removed (ADR-0049 — no renderer or "
     + 'runtime ever read it: an amount\'s decimal places are its currency\'s ISO 4217 minor unit, '
     + 'derived from the currency itself. Its ISO 4217 contradiction check and the default `2` '
     + 'baked into parse output went with it; the field-level `precision` is a total digit count '
@@ -13985,7 +13999,7 @@ const permissionRlsTagsRemoved: MetadataConversion = {
   retiredAfter: '17.4.0',
   surface: 'permission.rowLevelSecurity[].tags',
   summary:
-    "RLS-policy key 'tags' removed (#20321, ADR-0049 — nothing ever read a policy's tags and no "
+    "RLS-policy key 'tags' removed (ADR-0049 — nothing ever read a policy's tags and no "
     + 'mainstream platform tags a row-level policy; dropping it changes no access decision)',
   apply(stack, emit) {
     return mapCollection(stack, 'permissions', (ps, path) => {
@@ -14125,7 +14139,8 @@ const flowDecisionModeInclusiveExplicit: MetadataConversion = {
   surface: 'flow.nodes[].config.mode (decision)',
   summary:
     "edge-branched decision with two or more conditioned out-edges and no `mode`: `mode: 'inclusive'` written "
-    + 'explicitly (#15429 — the traversal became exclusive, first match in declaration order; the key keeps the '
+    + 'explicitly (the traversal became exclusive, first match in declaration order, as mainstream engines '
+    + 'treat a decision, and taking every true edge must now be declared; the key keeps the '
     + 'every-true-edge behaviour those nodes had, and the author deletes it where the branches partition)',
   apply(stack, emit) {
     return mapCollection(stack, 'flows', (flow, path) => rewriteDecisionModesInGraph(flow, path, emit, 0));

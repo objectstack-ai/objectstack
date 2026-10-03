@@ -15,8 +15,10 @@
 //     `404 FORM_NOT_FOUND`;
 //   - no `showcase_inquiry` row is written by the refused submit.
 //
-// Both sides are pinned: republishing at the same scope restores both doors,
-// and after the organization republish the row lands in that organization.
+// The form is withdrawn by either declared switch: `allowAnonymous: false`, or
+// `enabled: false` (absent reads as the schema default, false). Both sides are
+// pinned: republishing at the same scope restores both doors, and after the
+// organization republish the row lands in that organization.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -57,10 +59,17 @@ describe('showcase: withdrawing the public contact form closes every intake door
     return { get: get.status, getCode: getBody.code, submit: submit.status, submitCode: submitBody.code, landed };
   };
 
-  /** Save the form with `allowAnonymous` set, at the admin's current session scope. */
-  const save = async (allowAnonymous: boolean): Promise<string> => {
+  /**
+   * Save the form at the admin's current session scope, with `allowAnonymous`
+   * set (a boolean) or with these `sharing` keys replaced (`undefined` deletes one).
+   */
+  const save = async (change: boolean | Record<string, unknown>): Promise<string> => {
     const body = structuredClone(published);
-    body.config.sharing.allowAnonymous = allowAnonymous;
+    const patch = typeof change === 'boolean' ? { allowAnonymous: change } : change;
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) delete body.config.sharing[k];
+      else body.config.sharing[k] = v;
+    }
     const res = await stack.apiAs(admin, 'PUT', VIEW, body);
     const json = (await res.json()) as { message?: string };
     expect(res.status, JSON.stringify(json)).toBe(200);
@@ -104,6 +113,27 @@ describe('showcase: withdrawing the public contact form closes every intake door
     expect(closed.landed).toHaveLength(0);
 
     expect(await save(true)).toMatch(/env-wide/);
+    const open = await probe();
+    expect([open.get, open.submit]).toEqual([200, 201]);
+    expect(open.landed).toHaveLength(1);
+  });
+
+  it('withdrawn env-wide through `sharing.enabled: false` alone: both doors answer 404 FORM_NOT_FOUND and nothing lands', async () => {
+    expect(published.config.sharing.enabled).toBe(true);
+    expect(await save({ enabled: false, allowAnonymous: true })).toMatch(/env-wide/);
+    const closed = await probe();
+    expect([closed.get, closed.getCode, closed.submit, closed.submitCode])
+      .toEqual([404, 'FORM_NOT_FOUND', 404, 'FORM_NOT_FOUND']);
+    expect(closed.landed).toHaveLength(0);
+
+    // `enabled` absent reads as the schema default (false): still closed.
+    expect(await save({ enabled: undefined, allowAnonymous: true })).toMatch(/env-wide/);
+    const absent = await probe();
+    expect([absent.get, absent.getCode, absent.submit, absent.submitCode])
+      .toEqual([404, 'FORM_NOT_FOUND', 404, 'FORM_NOT_FOUND']);
+    expect(absent.landed).toHaveLength(0);
+
+    expect(await save({ enabled: true, allowAnonymous: true })).toMatch(/env-wide/);
     const open = await probe();
     expect([open.get, open.submit]).toEqual([200, 201]);
     expect(open.landed).toHaveLength(1);
