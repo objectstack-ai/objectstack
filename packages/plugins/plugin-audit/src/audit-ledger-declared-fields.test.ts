@@ -74,17 +74,20 @@ function makeSqlShapedStore() {
     return t;
   };
   const copy = <T,>(r: T): T => (r == null ? r : JSON.parse(JSON.stringify(r)));
-  const run = (o: string, where?: Row): Row[] =>
-    Array.from(tableFor(o).values())
-      .filter((r) => Object.entries(where ?? {}).every(([k, v]) => k.startsWith('$') || (r[k] ?? null) === (v ?? null)))
-      .map(copy);
+  const run = (o: string, where?: Row, limit?: number): Row[] => {
+    const rows = Array.from(tableFor(o).values())
+      .filter((r) => Object.entries(where ?? {}).every(([k, v]) => k.startsWith('$') || (r[k] ?? null) === (v ?? null)));
+    // The caller's bound, after the filter, by presence.
+    const page = typeof limit === 'number' ? rows.slice(0, limit) : rows;
+    return page.map(copy);
+  };
   let seq = 0;
   const driver: any = {
     name: 'store-sql-shaped', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
-    async find(o: string, ast?: { where?: Row }) { return run(o, ast?.where); },
-    async findOne(o: string, ast?: { where?: Row }) { return run(o, ast?.where)[0] ?? null; },
+    async find(o: string, ast?: { where?: Row; limit?: number }) { return run(o, ast?.where, ast?.limit); },
+    async findOne(o: string, ast?: { where?: Row; limit?: number }) { return run(o, ast?.where, ast?.limit)[0] ?? null; },
     async create(o: string, data: Row) {
       seq += 1;
       const retired = o === CONTACT ? Object.fromEntries(RETIRED.map((c) => [c, null])) : {};

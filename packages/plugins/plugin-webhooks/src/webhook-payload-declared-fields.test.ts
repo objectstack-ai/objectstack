@@ -58,10 +58,13 @@ function makeSqlShapedStore() {
         if (!t) { t = new Map<string, Row>(); tables.set(o, t); }
         return t;
     };
-    const run = (o: string, where?: Row): Row[] =>
-        Array.from(tableFor(o).values())
-            .filter((r) => Object.entries(where ?? {}).every(([k, v]) => k.startsWith('$') || (r[k] ?? null) === (v ?? null)))
-            .map((r) => ({ ...r }));
+    const run = (o: string, where?: Row, limit?: number): Row[] => {
+        const rows = Array.from(tableFor(o).values())
+            .filter((r) => Object.entries(where ?? {}).every(([k, v]) => k.startsWith('$') || (r[k] ?? null) === (v ?? null)));
+        // The caller's bound, after the filter, by presence.
+        const page = typeof limit === 'number' ? rows.slice(0, limit) : rows;
+        return page.map((r) => ({ ...r }));
+    };
     let seq = 0;
     const driver = {
         name: 'store-sql-shaped', version: '0.0.0', supports: {},
@@ -69,8 +72,8 @@ function makeSqlShapedStore() {
         async disconnect(): Promise<void> {},
         async checkHealth(): Promise<boolean> { return true; },
         async execute(): Promise<null> { return null; },
-        async find(o: string, ast?: { where?: Row }): Promise<Row[]> { return run(o, ast?.where); },
-        async findOne(o: string, ast?: { where?: Row }): Promise<Row | null> { return run(o, ast?.where)[0] ?? null; },
+        async find(o: string, ast?: { where?: Row; limit?: number }): Promise<Row[]> { return run(o, ast?.where, ast?.limit); },
+        async findOne(o: string, ast?: { where?: Row; limit?: number }): Promise<Row | null> { return run(o, ast?.where, ast?.limit)[0] ?? null; },
         async create(o: string, data: Row): Promise<Row> {
             seq += 1;
             const retired = o === CONTACT ? Object.fromEntries(RETIRED.map((c) => [c, null])) : {};
