@@ -22,20 +22,32 @@
  *      - a membership call (`includes`, `indexOf`, `has`, `some`, `find`,
  *        `filter`, …) on a receiver whose text names a pending slate
  *        (`/pending/i` — `pending`, `pendingApprovers`, `pending_approvers`);
- *      - a slot column (`approver`, `actor_id`, `pending_approvers`) set in a
+ *      - a slot column (`approver`, `acted_as`, `pending_approvers`) set in a
  *        query predicate — an object literal under a `where` / `filter`
  *        property or variable, or an assignment to `where.<column>`;
  *      - a declarative filter row naming a slot column (`field:
  *        'pending_approvers'` under a `filter` in object metadata).
  *    Every collected site must be classified in `SLOT_SITES`, by its enclosing
  *    function and its exact source text. A NEW site — a fresh
- *    `pending.includes(actorId)`, a `where: { actor_id: uid }` — is
+ *    `pending.includes(actorId)`, a `where: { acted_as: uid }` — is
  *    unclassified and fails with its location; a classified site that changed
  *    text or disappeared fails too, so the ledger cannot rot. Classifying a
  *    site is a review act: a reader that compares a slot with a CALLER takes
  *    its addresses from `approver-address.ts` and is listed as a `reader`; a
  *    site that compares a slot with another SLOT (a hand-off target, a token's
  *    bound slot) is `slot-vs-slot` with its reason.
+ *
+ * 3. THE PERSON COLUMN (#21411). `sys_approval_action.actor_id` is a
+ *    `sys_user` lookup and holds the PERSON who acted; the slot an action took
+ *    is `acted_as`. The two used to be one column, and every slot reader
+ *    compared slots against `actor_id`. So every read of `actor_id` in this
+ *    package — a property access, or the column in a query predicate — is
+ *    classified in `PERSON_SITES` with its count, and the only predicate that
+ *    compares it with anything compares it with the caller's USER ID. A slot
+ *    reader rewritten back onto `actor_id` (the tally's `a.actor_id`, a probe's
+ *    `actor_id: acting`) is unclassified and fails with its location. The rule,
+ *    in one line: slots are compared only with `acted_as`, and `actor_id` only
+ *    with a caller's user id.
  *
  * What it does not see: a comparison spelled with none of those shapes (a
  * hand-written loop over a slate with `===`). The shapes are the ones every
@@ -82,9 +94,9 @@ const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
     role: 'reader',
     why: 'the same filter, several addresses',
   },
-  'approval-service.ts · visibleRequestIds · actor_id: acting.length === 1 ? acting[0] : { $in: acting }': {
+  'approval-service.ts · visibleRequestIds · acted_as: acting.length === 1 ? acting[0] : { $in: acting }': {
     role: 'reader',
-    why: 'already-acted probe: `acting` is actingAddresses(caller), the current-approver probe\'s set',
+    why: 'already-acted probe, slot half: `acting` is actingAddresses(caller), the current-approver probe\'s set',
   },
   'approval-service.ts · reassign · pending.includes(to)': {
     role: 'slot-vs-slot',
@@ -120,7 +132,56 @@ const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
 
 const MEMBERSHIP = new Set(['includes', 'indexOf', 'lastIndexOf', 'has', 'some', 'every', 'find', 'findIndex', 'filter']);
 const SLATE = /pending/i;
-const SLOT_COLUMNS = new Set(['approver', 'actor_id', 'pending_approvers']);
+const SLOT_COLUMNS = new Set(['approver', 'acted_as', 'pending_approvers']);
+
+/** The person column of `sys_approval_action` (#21411). */
+const PERSON_COLUMN = 'actor_id';
+
+type PersonRole = 'caller-user-id' | 'display' | 'migration';
+
+/**
+ * Every read of `actor_id` in this package, keyed `<file> · <enclosing
+ * function> · <source text>`, with how many times that exact text occurs
+ * there. `caller-user-id` is the one comparison allowed: the column against
+ * the caller's user id. Nothing compares it with a slot.
+ */
+const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; why: string }>> = {
+  'approval-service.ts · visibleRequestIds · actor_id: uid': {
+    count: 1,
+    role: 'caller-user-id',
+    why: 'already-acted probe, person half: did the CALLER act on it (`uid` is the resolved caller\'s user id)',
+  },
+  'approval-service.ts · rowFromAction · row.actor_id': {
+    count: 1,
+    role: 'display',
+    why: 'the action-log DTO carries the person as stored',
+  },
+  'approval-service.ts · listActions · a.actor_id': {
+    count: 3,
+    role: 'display',
+    why: 'resolves the person\'s display name for the action log',
+  },
+  'action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: \':\' }': {
+    count: 1,
+    role: 'migration',
+    why: 'the boot-time repair finds rows whose actor_id still holds a type:value slot literal — a shape scan, no identity',
+  },
+  "action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: '@' }": {
+    count: 1,
+    role: 'migration',
+    why: 'the same scan, for an email slot left in actor_id',
+  },
+  'action-slot-backfill.ts · backfillActionSlots · actor_id: { $nin: [...RESERVED_MACHINE_ACTORS] }': {
+    count: 1,
+    role: 'migration',
+    why: 'the same scan leaves the reserved machine sentinels alone',
+  },
+  'action-slot-backfill.ts · backfillActionSlots · row.actor_id': {
+    count: 2,
+    role: 'migration',
+    why: 'the value the repair moves to acted_as (pass 1) or copies there (pass 2)',
+  },
+};
 const PREDICATE_NAMES = new Set(['where', 'filter']);
 
 function sourceFiles(dir: string): string[] {
@@ -243,11 +304,48 @@ describe('approver-address — the readers of the equivalence, and no comparison
     expect(new Set(sites).size).toBe(sites.length);
   });
 
+  it('actor_id is compared only with a caller\'s user id, and every read of it is classified — a slot reader moved back onto it fails with its location (#21411)', () => {
+    const counts = new Map<string, number>();
+    let predicates = 0;
+    for (const path of sourceFiles(HERE)) {
+      const sf = parse(path);
+      const file = relative(HERE, path);
+      const visit = (node: ts.Node): void => {
+        const isPredicate = ts.isPropertyAssignment(node) && node.name.getText(sf) === PERSON_COLUMN && inPredicate(node, sf);
+        const isRead = ts.isPropertyAccessExpression(node) && node.name.text === PERSON_COLUMN;
+        if (isPredicate || isRead) {
+          const key = `${file} · ${enclosingFunction(node, sf)} · ${node.getText(sf).replace(/\s+/g, ' ')}`;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+          if (isPredicate) predicates++;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+    }
+    // The scan saw the column at all — not a pass over nothing.
+    expect(predicates).toBeGreaterThan(0);
+    const unclassified = [...counts.keys()].filter((k) => !(k in PERSON_SITES));
+    expect(
+      unclassified,
+      'actor_id is the PERSON: compare a slot with acted_as (and list the site in SLOT_SITES), or — for a read of '
+      + 'the person — classify it in PERSON_SITES with its reason',
+    ).toEqual([]);
+    const drifted = Object.entries(PERSON_SITES)
+      .filter(([k, v]) => counts.get(k) !== v.count)
+      .map(([k, v]) => `${k}: expected ${v.count}, found ${counts.get(k) ?? 0}`);
+    expect(drifted, 'a classified actor_id site changed, moved or disappeared: re-classify it').toEqual([]);
+    // The one comparison is with the caller's user id, and with nothing else.
+    const comparisons = Object.entries(PERSON_SITES).filter(([, v]) => v.role === 'caller-user-id').map(([k]) => k);
+    expect(comparisons).toEqual(['approval-service.ts · visibleRequestIds · actor_id: uid']);
+    const service = parse(join(HERE, SERVICE));
+    expect(method(service, 'visibleRequestIds').getText(service)).toMatch(/const uid = who\.userId;/);
+  });
+
   it('the detector catches the shapes it names (a planted user-id comparison in each shape)', () => {
     const planted = ts.createSourceFile('planted.ts', [
       'class S {',
       '  a(pending: string[], uid: string) { return pending.includes(uid); }',
-      '  b(engine: any, uid: string) { return engine.find("x", { where: { actor_id: uid } }); }',
+      '  b(engine: any, uid: string) { return engine.find("x", { where: { acted_as: uid } }); }',
       '  c(uid: string) { const where: any = {}; where.approver = uid; return where; }',
       '}',
       'export const V = { filter: [{ field: "pending_approvers", operator: "contains", value: "{current_user_id}" }] };',

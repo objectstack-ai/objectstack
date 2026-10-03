@@ -37,8 +37,8 @@ const result = DocumentSchema.parse(data);
 | **tags** | `string[]` | optional | Document tags |
 | **versioning** | `{ enabled: boolean; versions: object[]; majorVersion: number; minorVersion: number }` | optional | Version control |
 | **template** | `{ id: string; name: string; description?: string; fileUrl: string; … }` | optional | Document template |
-| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: object[] }` | optional | E-signature config |
-| **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: integer }` | optional | Access control |
+| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled?: boolean; signers: object[] }` | optional | E-signature config |
+| **access** | `{ isPublic?: boolean; sharedWith?: string[]; expiresAt?: integer }` | optional | Access control |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 
 ### Nested Shape: `Document.versioning`
@@ -59,7 +59,7 @@ const result = DocumentSchema.parse(data);
 | **description** | `string` | optional | Template description |
 | **fileUrl** | `string` | ✅ | Template file URL |
 | **fileType** | `string` | ✅ | File MIME type |
-| **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required: boolean }[]` | ✅ | Template placeholders |
+| **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required?: boolean }[]` | ✅ | Template placeholders |
 
 ### Nested Shape: `Document.eSignature`
 
@@ -93,7 +93,7 @@ const result = DocumentSchema.parse(data);
 | **description** | `string` | optional | Template description |
 | **fileUrl** | `string` | ✅ | Template file URL |
 | **fileType** | `string` | ✅ | File MIME type |
-| **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required: boolean }[]` | ✅ | Template placeholders |
+| **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required?: boolean }[]` | ✅ | Template placeholders |
 
 ### Nested Shape: `DocumentTemplate.placeholders[number]`
 

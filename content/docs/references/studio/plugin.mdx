@@ -185,11 +185,11 @@ const result = ActionContributionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **metadataViewers** | `{ id: string; metadataTypes: string[]; label: string; priority: number; … }[]` | optional (default: `[]`) |  |
+| **metadataViewers** | `{ id: string; metadataTypes: string[]; label: string; priority?: number; … }[]` | optional (default: `[]`) |  |
 | **sidebarGroups** | `{ key: string; label: string; icon?: string; metadataTypes: string[]; … }[]` | optional (default: `[]`) |  |
 | **actions** | `{ id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]` | optional (default: `[]`) |  |
 | **metadataIcons** | `{ metadataType: string; label: string; icon: string }[]` | optional (default: `[]`) |  |
-| **panels** | `{ id: string; label: string; icon?: string; location: Enum<'bottom' \| 'right' \| 'modal'> }[]` | optional (default: `[]`) |  |
+| **panels** | `{ id: string; label: string; icon?: string; location?: Enum<'bottom' \| 'right' \| 'modal'> }[]` | optional (default: `[]`) |  |
 | **commands** | `{ id: string; label: string; shortcut?: string; icon?: string }[]` | optional (default: `[]`) |  |
 
 ### Nested Shape: `StudioPluginContributions.metadataViewers[number]`
@@ -262,7 +262,7 @@ const result = ActionContributionSchema.parse(data);
 | **version** | `string` | optional (default: `"0.0.1"`) | Plugin version |
 | **description** | `string` | optional | Plugin description |
 | **author** | `string` | optional | Author |
-| **contributes** | `{ metadataViewers: object[]; sidebarGroups: object[]; actions: object[]; metadataIcons: object[]; … }` | optional (has default) |  |
+| **contributes** | `{ metadataViewers?: object[]; sidebarGroups?: object[]; actions?: object[]; metadataIcons?: object[]; … }` | optional (has default) |  |
 
 
 ---

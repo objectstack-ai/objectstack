@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 229 |
-| Object name statically decidable | 152 |
+| Write call sites | 231 |
+| Object name statically decidable | 154 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 151 |
+| Against a tenancy-enabled object | 153 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 145 |
+| Threading a tenant context | 147 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 34 |
-| Threading a decidably elevated context | 110 |
+| Threading a decidably elevated context | 112 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-02 at `c41817b12`.
+Measured on 2026-10-02 at `b668cf134`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 599 |
-| engine-shaped types recognised | 66 |
+| tracked non-test sources scanned | 602 |
+| engine-shaped types recognised | 67 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 150 |
+| same-named calls subtracted as non-engine | 152 |
 
 ## Every site
 
@@ -105,6 +105,7 @@ Measured on 2026-10-02 at `c41817b12`.
 |---|---|---|---|---|---:|
 | `packages/plugins/organizations/src/claim-org-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/organizations/src/claim-orphan-org-rows.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-approvals/src/action-slot-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 14 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |

@@ -28,15 +28,15 @@ const result = EventBusConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **persistence** | `{ enabled: boolean; retentionDays: integer; filter?: any; storage: Enum<'database' \| 'file' \| 's3' \| 'custom'> }` | optional | Event persistence configuration |
-| **queue** | `{ name: string; concurrency: integer; retryPolicy?: object; deadLetterQueue?: string; … }` | optional | Event queue configuration |
-| **eventSourcing** | `{ enabled: boolean; snapshotInterval: integer; snapshotRetention: integer; retentionDays: integer; … }` | optional | Event sourcing configuration |
-| **replay** | `{ enabled: boolean }` | optional | Event replay configuration |
-| **webhooks** | `{ id?: string; eventPattern: string; url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>; … }[]` | optional | Webhook configurations |
-| **messageQueue** | `{ provider: Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>; topic: string; eventPattern: string; partitionKey?: string; … }` | optional | Message queue integration |
-| **realtime** | `{ enabled: boolean; protocol: Enum<'websocket' \| 'sse' \| 'long-polling'>; eventPattern: string; userFilter: boolean; … }` | optional | Real-time notification configuration |
-| **eventTypes** | `{ name: string; version: string; schema?: any; description?: string; … }[]` | optional | Event type definitions |
-| **handlers** | `{ id?: string; eventName: string; handler: any; priority: integer; … }[]` | optional | Global event handlers |
+| **persistence** | `{ enabled?: boolean; retentionDays: integer; filter?: any; storage?: Enum<'database' \| 'file' \| 's3' \| 'custom'> }` | optional | Event persistence configuration |
+| **queue** | `{ name?: string; concurrency?: integer; retryPolicy?: object; deadLetterQueue?: string; … }` | optional | Event queue configuration |
+| **eventSourcing** | `{ enabled?: boolean; snapshotInterval?: integer; snapshotRetention?: integer; retentionDays?: integer; … }` | optional | Event sourcing configuration |
+| **replay** | `{ enabled?: boolean }` | optional | Event replay configuration |
+| **webhooks** | `{ id?: string; eventPattern: string; url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>; … }[]` | optional | Webhook configurations |
+| **messageQueue** | `{ provider: Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>; topic: string; eventPattern?: string; partitionKey?: string; … }` | optional | Message queue integration |
+| **realtime** | `{ enabled?: boolean; protocol?: Enum<'websocket' \| 'sse' \| 'long-polling'>; eventPattern?: string; userFilter?: boolean; … }` | optional | Real-time notification configuration |
+| **eventTypes** | `{ name: string; version?: string; schema?: any; description?: string; … }[]` | optional | Event type definitions |
+| **handlers** | `{ id?: string; eventName: string; handler: any; priority?: integer; … }[]` | optional | Global event handlers |
 
 ### Nested Shape: `EventBusConfig.persistence`
 
@@ -54,7 +54,7 @@ const result = EventBusConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional (default: `"events"`) | Event queue name |
 | **concurrency** | `integer` | optional (default: `10`) | Max concurrent event handlers |
-| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Default retry policy for events |
+| **retryPolicy** | `{ maxRetries?: integer; backoffStrategy?: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs?: integer; maxDelayMs?: integer }` | optional | Default retry policy for events |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name for failed events |
 | **priorityEnabled** | `boolean` | optional (default: `true`) | Process events based on priority |
 
@@ -68,7 +68,7 @@ const result = EventBusConfigSchema.parse(data);
 | **retentionDays** | `integer` | optional (default: `365`) | Days to retain events |
 | **retention** | `never` | optional | [REMOVED] `EventSourcingConfig.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. The neighbouring `snapshotRetention` is a COUNT of snapshots, not a duration, so it keeps its name. |
 | **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
-| **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
+| **storage** | `{ type?: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
 
 ### Nested Shape: `EventBusConfig.replay`
 
@@ -86,7 +86,7 @@ const result = EventBusConfigSchema.parse(data);
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>` | optional (default: `"POST"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | HTTP headers |
 | **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
-| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy |
+| **retryPolicy** | `{ maxRetries?: integer; backoffStrategy?: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs?: integer; maxDelayMs?: integer }` | optional | Retry policy |
 | **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **transform** | `any` | optional | Transform event before sending |
 | **enabled** | `boolean` | optional (default: `true`) | Whether webhook is enabled |
@@ -115,7 +115,7 @@ const result = EventBusConfigSchema.parse(data);
 | **userFilter** | `boolean` | optional (default: `true`) | Filter events by user |
 | **tenantFilter** | `boolean` | optional (default: `true`) | Filter events by tenant |
 | **channels** | `{ name: string; eventPattern: string; filter?: any }[]` | optional | Named channels for event broadcasting |
-| **rateLimit** | `{ maxEventsPerSecond: integer; windowMs: integer }` | optional | Rate limiting configuration |
+| **rateLimit** | `{ maxEventsPerSecond: integer; windowMs?: integer }` | optional | Rate limiting configuration |
 
 ### Nested Shape: `EventBusConfig.eventTypes[number]`
 
@@ -137,7 +137,7 @@ const result = EventBusConfigSchema.parse(data);
 | **handler** | `any` | ✅ | Handler function |
 | **priority** | `integer` | optional (default: `0`) | Execution priority (lower numbers execute first) |
 | **async** | `boolean` | optional (default: `true`) | Execute in background (true) or block (false) |
-| **retry** | `{ maxRetries: integer; backoffMs: integer; backoffMultiplier: number }` | optional | Retry policy for failed handlers |
+| **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy for failed handlers |
 | **timeoutMs** | `integer` | optional | Handler timeout in milliseconds |
 | **filter** | `any` | optional | Optional filter to determine if handler should execute |
 

@@ -81,6 +81,39 @@ describe('[#16657] a real raw-exec refusal still yields the dialect text to an o
     expect(operatorText).not.toMatch(/refused to run a raw statement/);
   });
 
+  it('[#21418] the helper answers the cut text: a value bound into the refused statement does not survive', async () => {
+    // The producer leg of `@objectstack/types`' sentinel cases: a REAL refusal,
+    // the value bound through knex, and a statement opening with a verb the
+    // shared leak predicate does not list over a diagnostic it does not
+    // recognise — so only the helper's knowledge that the raw path SENT a
+    // statement cuts it. On better-sqlite3 knex inlines the bound value into
+    // the statement it prefixes to the dialect's words.
+    const SENTINEL = 'SENTINEL-21418-BOUND-VALUE';
+    const lines: string[] = [];
+    const recording = new QuietSqlDriver();
+    (recording as unknown as { logger: unknown }).logger = { warn: (line: string) => void lines.push(line) };
+    try {
+      const thrown = (await faultOf(() =>
+        recording.execute('with s as (select ? as v) select translate(v) from s', [SENTINEL]),
+      )) as Error;
+
+      // Non-vacuity: the cause the helper reads really carries the value.
+      expect(String((thrown as { cause?: { message?: unknown } }).cause?.message)).toContain(SENTINEL);
+
+      const operatorText = operatorFacingErrorText(thrown);
+      expect(operatorText).not.toContain(SENTINEL);
+      expect(operatorText).toContain('no such function: translate');
+
+      // One cutter, one rule: the record an operator reads later is the very
+      // text the driver's own raw-terminal line wrote for this fault.
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toContain(SENTINEL);
+      expect(lines[0].endsWith(`: ${operatorText}`)).toBe(true);
+    } finally {
+      await recording.disconnect();
+    }
+  });
+
   it('an UNDECLARED throw from the same seam is returned on its own message channel', async () => {
     // The control that proves the pin above reads the declaration and not the
     // shape of any error the seam happens to produce.

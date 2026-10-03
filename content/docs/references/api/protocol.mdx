@@ -402,7 +402,7 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
 | **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Batch operation options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Batch operation options |
 
 
 ---
@@ -628,7 +628,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Delete options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Delete options |
 | **object** | `string` | ✅ | Object name |
 
 ### Nested Shape: `DeleteManyDataRequest.options`
@@ -1097,7 +1097,7 @@ Enable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objects** | `Record<string, { allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }>` | ✅ | Effective object permissions keyed by object name |
+| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | Effective object permissions keyed by object name |
 | **systemPermissions** | `string[]` | ✅ | Effective system-level permissions |
 
 ### Nested Shape: `GetEffectivePermissionsResponse.objects[string]`
@@ -1170,7 +1170,7 @@ Enable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **locales** | `{ code: string; label: string; isDefault: boolean }[]` | ✅ | Available locales |
+| **locales** | `{ code: string; label: string; isDefault?: boolean }[]` | ✅ | Available locales |
 
 ### Nested Shape: `GetLocalesResponse.locales[number]`
 
@@ -1244,7 +1244,7 @@ Enable package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | optional | Metadata payload (omitted for 304 Not Modified) |
-| **etag** | `{ value: string; weak: boolean }` | optional | ETag for this resource version |
+| **etag** | `{ value: string; weak?: boolean }` | optional | ETag for this resource version |
 | **lastModified** | `string` | optional | Last modification timestamp |
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
@@ -1446,7 +1446,7 @@ Enable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **preferences** | `{ email: boolean; push: boolean; inApp: boolean; digest: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Current notification preferences |
+| **preferences** | `{ email?: boolean; push?: boolean; inApp?: boolean; digest?: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Current notification preferences |
 
 ### Nested Shape: `GetNotificationPreferencesResponse.preferences`
 
@@ -1456,7 +1456,7 @@ Enable package response
 | **push** | `boolean` | optional (default: `true`) | Receive push notifications |
 | **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
 | **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
-| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
+| **channels** | `Record<string, { enabled?: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 
 ---
@@ -1479,8 +1479,8 @@ Enable package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **permissions** | `{ allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }` | ✅ | Object-level permissions |
-| **fieldPermissions** | `Record<string, { readable: boolean; editable: boolean }>` | optional | Field-level permissions keyed by field name |
+| **permissions** | `{ allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }` | ✅ | Object-level permissions |
+| **fieldPermissions** | `Record<string, { readable?: boolean; editable?: boolean }>` | optional | Field-level permissions keyed by field name |
 
 ### Nested Shape: `GetObjectPermissionsResponse.permissions`
 
@@ -2263,7 +2263,7 @@ Installed package with runtime lifecycle state
 | **push** | `boolean` | optional (default: `true`) | Receive push notifications |
 | **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
 | **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
-| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
+| **channels** | `Record<string, { enabled?: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 ### Nested Shape: `NotificationPreferences.channels[string]`
 
@@ -2833,7 +2833,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Update options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Update options |
 | **object** | `string` | ✅ | Object name |
 
 ### Nested Shape: `UpdateManyDataRequest.records[number]`
@@ -2923,7 +2923,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **push** | `boolean` | optional (default: `true`) | Receive push notifications |
 | **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
 | **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
-| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
+| **channels** | `Record<string, { enabled?: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 
 ---
@@ -2934,7 +2934,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **preferences** | `{ email: boolean; push: boolean; inApp: boolean; digest: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Updated notification preferences |
+| **preferences** | `{ email?: boolean; push?: boolean; inApp?: boolean; digest?: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Updated notification preferences |
 
 ### Nested Shape: `UpdateNotificationPreferencesResponse.preferences`
 
@@ -2944,7 +2944,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **push** | `boolean` | optional (default: `true`) | Receive push notifications |
 | **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
 | **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
-| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
+| **channels** | `Record<string, { enabled?: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 
 ---

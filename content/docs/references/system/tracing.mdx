@@ -42,7 +42,7 @@ OpenTelemetry compatibility configuration
 | **sdkVersion** | `string` | optional | OTel SDK version |
 | **exporter** | `{ type: Enum<'otlp_http' \| 'otlp_grpc' \| 'jaeger' \| 'zipkin' \| 'console' \| 'datadog' \| …>; endpoint?: string; protocol?: string; headers?: Record<string, string>; … }` | ✅ | Exporter configuration |
 | **resource** | `{ serviceName: string; serviceVersion?: string; serviceInstanceId?: string; serviceNamespace?: string; … }` | ✅ | Resource attributes |
-| **instrumentation** | `{ autoInstrumentation: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
+| **instrumentation** | `{ autoInstrumentation?: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
 | **semanticConventionsVersion** | `string` | optional | Semantic conventions version |
 
 ### Nested Shape: `OpenTelemetryCompatibility.exporter`
@@ -56,7 +56,7 @@ OpenTelemetry compatibility configuration
 | **timeoutMs** | `integer` | optional (default: `10000`) | Exporter request timeout in milliseconds |
 | **timeout** | `never` | optional | [REMOVED] `OpenTelemetryCompatibility.exporter.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no describe at all, so the reference-page reader got a bare 10000 and could not tell it from 10000 seconds. Rename the key to `timeoutMs`; the value (milliseconds) and the 10000 default are unchanged. |
 | **compression** | `Enum<'none' \| 'gzip'>` | optional (default: `"none"`) |  |
-| **batch** | `{ maxBatchSize: integer; maxQueueSize: integer; exportTimeoutMs: integer; scheduledDelayMs: integer }` | optional |  |
+| **batch** | `{ maxBatchSize?: integer; maxQueueSize?: integer; exportTimeoutMs?: integer; scheduledDelayMs?: integer }` | optional |  |
 
 ### Nested Shape: `OpenTelemetryCompatibility.resource`
 
@@ -139,7 +139,7 @@ OpenTelemetry span
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ traceId: string; spanId: string; traceFlags: integer; traceState?: object; … }` | ✅ | Trace context |
+| **context** | `{ traceId: string; spanId: string; traceFlags?: integer; traceState?: object; … }` | ✅ | Trace context |
 | **name** | `string` | ✅ | Span name |
 | **kind** | `Enum<'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'>` | optional (default: `"internal"`) | Span kind |
 | **startTime** | `string` | ✅ | Span start time |
@@ -188,7 +188,7 @@ Span link
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ traceId: string; spanId: string; traceFlags: integer; traceState?: object; … }` | ✅ | Linked trace context |
+| **context** | `{ traceId: string; spanId: string; traceFlags?: integer; traceState?: object; … }` | ✅ | Linked trace context |
 | **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional | Link attributes |
 
 ### Nested Shape: `Span.instrumentationLibrary`
@@ -295,7 +295,7 @@ Span link
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ traceId: string; spanId: string; traceFlags: integer; traceState?: object; … }` | ✅ | Linked trace context |
+| **context** | `{ traceId: string; spanId: string; traceFlags?: integer; traceState?: object; … }` | ✅ | Linked trace context |
 | **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional | Link attributes |
 
 ### Nested Shape: `SpanLink.context`
@@ -363,7 +363,7 @@ Trace context propagation
 | **extract** | `boolean` | optional (default: `true`) |  |
 | **inject** | `boolean` | optional (default: `true`) |  |
 | **headers** | `{ traceId?: string; spanId?: string; traceFlags?: string; traceState?: string }` | optional |  |
-| **baggage** | `{ enabled: boolean; maxSize: integer; allowedKeys?: string[] }` | optional |  |
+| **baggage** | `{ enabled?: boolean; maxSize?: integer; allowedKeys?: string[] }` | optional |  |
 
 
 ---
@@ -405,7 +405,7 @@ Trace sampling configuration
 | **type** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>` | ✅ | Sampling strategy |
 | **ratio** | `number` | optional | Sample ratio (0-1) |
 | **rateLimit** | `number` | optional | Traces per second |
-| **parentBased** | `{ whenParentSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio: number }` | optional |  |
+| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio?: number }` | optional |  |
 | **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> }[]` | optional |  |
 | **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional (default: `[]`) |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
@@ -464,12 +464,12 @@ Tracing configuration
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 | **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional (default: `{"type":"always_on","rules":[]}`) | Trace sampling configuration |
-| **propagation** | `{ formats: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract: boolean; inject: boolean; headers?: object; … }` | optional (default: `{"formats":["w3c"],"extract":true,"inject":true}`) | Trace context propagation |
+| **propagation** | `{ formats?: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract?: boolean; inject?: boolean; headers?: object; … }` | optional (default: `{"formats":["w3c"],"extract":true,"inject":true}`) | Trace context propagation |
 | **openTelemetry** | `{ sdkVersion?: string; exporter: object; resource: object; instrumentation?: object; … }` | optional | OpenTelemetry compatibility configuration |
-| **spanLimits** | `{ maxAttributes: integer; maxEvents: integer; maxLinks: integer; maxAttributeValueLength: integer }` | optional |  |
+| **spanLimits** | `{ maxAttributes?: integer; maxEvents?: integer; maxLinks?: integer; maxAttributeValueLength?: integer }` | optional |  |
 | **traceIdGenerator** | `Enum<'random' \| 'uuid' \| 'custom'>` | optional (default: `"random"`) |  |
 | **customTraceIdGeneratorId** | `string` | optional | Custom generator identifier |
-| **performance** | `{ asyncExport: boolean; exportIntervalMs: integer }` | optional |  |
+| **performance** | `{ asyncExport?: boolean; exportIntervalMs?: integer }` | optional |  |
 
 ### Nested Shape: `TracingConfig.sampling`
 
@@ -478,7 +478,7 @@ Tracing configuration
 | **type** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>` | ✅ | Sampling strategy |
 | **ratio** | `number` | optional | Sample ratio (0-1) |
 | **rateLimit** | `number` | optional | Traces per second |
-| **parentBased** | `{ whenParentSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio: number }` | optional |  |
+| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio?: number }` | optional |  |
 | **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> }[]` | optional |  |
 | **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional (default: `[]`) |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
@@ -490,7 +490,7 @@ Tracing configuration
 | **sdkVersion** | `string` | optional | OTel SDK version |
 | **exporter** | `{ type: Enum<'otlp_http' \| 'otlp_grpc' \| 'jaeger' \| 'zipkin' \| 'console' \| 'datadog' \| …>; endpoint?: string; protocol?: string; headers?: Record<string, string>; … }` | ✅ | Exporter configuration |
 | **resource** | `{ serviceName: string; serviceVersion?: string; serviceInstanceId?: string; serviceNamespace?: string; … }` | ✅ | Resource attributes |
-| **instrumentation** | `{ autoInstrumentation: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
+| **instrumentation** | `{ autoInstrumentation?: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
 | **semanticConventionsVersion** | `string` | optional | Semantic conventions version |
 
 ### Nested Shape: `TracingConfig.performance`

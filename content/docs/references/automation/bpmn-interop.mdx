@@ -73,7 +73,7 @@ Options for exporting an ObjectStack flow as BPMN 2.0 XML
 | **version** | `Enum<'2.0' \| '2.0.2'>` | optional (default: `"2.0"`) | Target BPMN specification version |
 | **includeLayout** | `boolean` | optional (default: `true`) | Include BPMN DI layout data from canvas positions |
 | **includeExtensions** | `boolean` | optional (default: `false`) | Include ObjectStack extensions in BPMN extensionElements |
-| **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional: boolean; notes?: string }[]` | optional | Custom element mappings for export |
+| **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional?: boolean; notes?: string }[]` | optional | Custom element mappings for export |
 | **prettyPrint** | `boolean` | optional (default: `true`) | Pretty-print XML output with indentation |
 | **namespacePrefix** | `string` | optional (default: `"bpmn"`) | XML namespace prefix for BPMN elements |
 
@@ -100,7 +100,7 @@ Options for importing BPMN 2.0 XML into an ObjectStack flow
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **unmappedStrategy** | `Enum<'skip' \| 'warn' \| 'error' \| 'comment'>` | optional (default: `"warn"`) | How to handle unmapped BPMN elements |
-| **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional: boolean; notes?: string }[]` | optional | Custom element mappings to override or extend defaults |
+| **customMappings** | `{ bpmnType: string; flowNodeAction: string; bidirectional?: boolean; notes?: string }[]` | optional | Custom element mappings to override or extend defaults |
 | **importLayout** | `boolean` | optional (default: `true`) | Import BPMN DI layout positions into canvas node coordinates |
 | **importDocumentation** | `boolean` | optional (default: `true`) | Import BPMN documentation elements as node descriptions |
 | **flowName** | `string` | optional | Override flow name (defaults to BPMN process name) |

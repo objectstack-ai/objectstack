@@ -9,8 +9,9 @@
  * Since #16019 the raw-SQL seam every probe and backfill here runs through
  * declares its own fault — `DATABASE_ERROR` / 500, a composed message that
  * discloses neither the statement nor the diagnostic, and the dialect error
- * whole under a non-enumerable `cause`. The driver prints the dialect text to
- * its warn sink one line earlier, so a live console lost nothing. Every record
+ * whole under a non-enumerable `cause`. The driver prints the dialect's
+ * diagnostic to its warn sink one line earlier, with the statement and its
+ * bound values cut (#21385), so a live console lost nothing. Every record
  * this package STORES did: `detail` and `error` fields began carrying *"the
  * database refused to run a raw statement"*, and the reader of a customer
  * install's backfill record a week later has no console line to fall back on.
@@ -68,6 +69,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { inspect } from 'node:util';
+import { redactStatementFromMessage } from '@objectstack/types';
 
 import { collectRuntimeIndexPreflight } from './runtime-index-preflight.js';
 import { probeThenReplaceIndex, type IndexExec } from './partial-index-probe.js';
@@ -77,17 +80,27 @@ import {
     ORGANIZATION_TABLE,
     SEQUENCES_TABLE,
 } from './seed-tenancy-backfill.js';
+import { readTablePresence } from './read-probe.js';
 import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 /** `rawStatementFaultError`'s composed message, verbatim (`sql-driver.ts`). */
 const COMPOSED =
     'The database refused to run a raw statement. The driver could not attribute the failure ' +
     'to any part of the request, so no verdict about the statement is claimed here. The ' +
-    "backend's own diagnostic and the statement were written to the server log for an " +
-    'operator to read.';
+    "backend's own diagnostic was written to the server log for an operator to read, with " +
+    'the statement and its bound values cut.';
 
 /** knex 3.3.0 + better-sqlite3: `<formatted statement> - <engine diagnostic>`. */
 const DIALECT_TEXT = 'select "foo" from "sys_metadata" - no such column: foo';
+
+/**
+ * [#21418] What every record below stores for {@link DIALECT_TEXT}: the helper's
+ * answer, which is THE driver-fault cut's, under the rule the driver's own raw
+ * terminal writes its log line by. Spelled as the cutter's answer rather than
+ * as a string, so these cases pin that each site stores the helper's text and
+ * never pin the cutter's marker wording.
+ */
+const RECORDED = redactStatementFromMessage(DIALECT_TEXT, { statementSent: true });
 
 /** The envelope the raw terminal composes, cause carrier and all. */
 function rawStatementFault(dialect = DIALECT_TEXT): Error {
@@ -139,7 +152,8 @@ describe('[#16657] runtime-index-preflight — the per-probe detail', () => {
         expect(results.length).toBeGreaterThan(0);
         for (const probe of results) {
             expect(probe.status).toBe('unreadable');
-            expect(probe.detail).toBe(DIALECT_TEXT);
+            expect(probe.detail).toBe(RECORDED);
+            expect(probe.detail).toContain('no such column: foo');
             expect(probe.detail).not.toContain('refused to run a raw statement');
         }
     });
@@ -183,7 +197,7 @@ describe('[#16657] partial-index-probe — the detail both callers report', () =
         const outcome = await probeThenReplaceIndex(exec, options);
 
         expect(outcome.failedAt).toBe('probe');
-        expect(outcome.detail).toBe(DIALECT_TEXT);
+        expect(outcome.detail).toBe(RECORDED);
     });
 
     it('a refused REPLACE build reports the dialect text', async () => {
@@ -195,7 +209,7 @@ describe('[#16657] partial-index-probe — the detail both callers report', () =
         const outcome = await probeThenReplaceIndex(exec, options);
 
         expect(outcome.failedAt).toBe('replace');
-        expect(outcome.detail).toBe(DIALECT_TEXT);
+        expect(outcome.detail).toBe(RECORDED);
     });
 
     it('the VERDICT is still taken from the error object, not the text', async () => {
@@ -264,7 +278,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         });
 
         expect(result.status).toBe('absent');
-        expect(result.detail).toBe(DIALECT_TEXT);
+        expect(result.detail).toBe(RECORDED);
         expect(result.detail).not.toContain('refused to run a raw statement');
     });
 
@@ -277,8 +291,8 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
 
         expect(result.status).toBe('skipped-ambiguous-organization');
         const line = log.warn.find((w) => w.message.includes('probe FAILED'));
-        expect(line?.message).toContain(DIALECT_TEXT);
-        expect(line?.meta?.organizationProbeError).toBe(DIALECT_TEXT);
+        expect(line?.message).toContain(RECORDED);
+        expect(line?.meta?.organizationProbeError).toBe(RECORDED);
     });
 
     it('[#17167] an EMPTY channel at the organization probe is recorded empty, and still FAILED', async () => {
@@ -341,7 +355,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         );
 
         const line = log.warn.find((w) => w.message.includes('already-minted duplicates'));
-        expect(line?.meta?.error).toBe(DIALECT_TEXT);
+        expect(line?.meta?.error).toBe(RECORDED);
     });
 
     it('[stamp] the warn meta carries the dialect text', async () => {
@@ -357,7 +371,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         );
 
         const line = log.warn.find((w) => w.message.includes('could not stamp'));
-        expect(line?.meta?.error).toBe(DIALECT_TEXT);
+        expect(line?.meta?.error).toBe(RECORDED);
     });
 
     it('[counter merge] the warn meta carries the dialect text', async () => {
@@ -378,7 +392,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         );
 
         const line = log.warn.find((w) => w.message.includes('could not merge the counter'));
-        expect(line?.meta?.error).toBe(DIALECT_TEXT);
+        expect(line?.meta?.error).toBe(RECORDED);
     });
 
     it('an UNDECLARED refusal reads its own message channel at every site', async () => {
@@ -397,5 +411,267 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
 
         const line = log.warn.find((w) => w.message.includes('already-minted duplicates'));
         expect(line?.meta?.error).toBe('connection terminated unexpectedly');
+    });
+});
+
+/**
+ * [#21418] The family's fourth position, pinned at every site in this package
+ * that writes `operatorFacingErrorText`'s answer: a synthetic sentinel bound
+ * into a raw statement reaches none of the carriers the site writes — the
+ * result it returns, a log line's message or its meta — while the dialect's
+ * diagnostic and the verdict the site takes from the error object survive.
+ *
+ * The cut is the helper's, by construction; no site here cuts anything itself,
+ * and none needs to. These cases pin that each site writes nothing BUT the
+ * helper's answer, so a site that one day embeds `cause.message` (or the
+ * statement it sent) beside it reddens here.
+ *
+ * Two shapes of fault, matching the census on #21418:
+ *  - where the site binds a VALUE itself (the backfill's stamp and counter
+ *    merge bind the organization id), the fixture composes the dialect text
+ *    from the statement and parameters the site really sent, inlined as knex
+ *    prints them on SQLite and MySQL, and the sentinel IS that organization id;
+ *  - where the site binds identifiers only, the raw path's `cause` carries the
+ *    sentinel in a synthetic bound statement, and — at the unique-index probe —
+ *    in MySQL's value-bearing duplicate-entry diagnostic, the shape a unique
+ *    index built over duplicate stored rows raises.
+ */
+describe('[#21418] a bound sentinel reaches no carrier at any site in this package', () => {
+    const SENTINEL = 'SENTINEL-21418-BOUND-VALUE';
+
+    /** knex's message for a refused raw statement: values inlined, then the dialect's words. */
+    function knexDump(sql: string, params: readonly unknown[] = [], diagnostic: string): string {
+        let i = 0;
+        const inlined = sql.replace(/\?/g, () => `'${String(params[i++])}'`);
+        return `${inlined} - ${diagnostic}`;
+    }
+
+    /** The identifier-only sites' fault: the sentinel bound into a statement on the raw path. */
+    const BOUND_DIALECT_TEXT = knexDump(
+        'select "v" from "sys_setting" where "v" = ?',
+        [SENTINEL],
+        'no such column: v',
+    );
+
+    /** Every text a recorded log call carries, meta rendered the way a logger would. */
+    function logged(log: ReturnType<typeof createLogger>): string {
+        return log.warn.map((w) => `${w.message} ${inspect(w.meta, { depth: 8 })}`).join('\n');
+    }
+
+    it('[the fixture] the raw path really carries the sentinel on the cause the helper reads', () => {
+        const thrown = rawStatementFault(BOUND_DIALECT_TEXT);
+        expect((thrown as { cause?: Error }).cause?.message).toContain(SENTINEL);
+        expect(thrown.message).not.toContain(SENTINEL);
+    });
+
+    it('read-probe — the catalog arm and the fallback arm both report cut text', async () => {
+        const exec = async () => {
+            throw rawStatementFault(BOUND_DIALECT_TEXT);
+        };
+
+        const catalog = await readTablePresence(exec, {
+            table: SEQUENCES_TABLE,
+            client: 'better-sqlite3',
+            fallbackSql: `SELECT 1 FROM ${SEQUENCES_TABLE} WHERE 1 = 0`,
+        });
+        // No catalog arm for an unknown client: the caller's own probe runs.
+        const fallback = await readTablePresence(exec, {
+            table: SEQUENCES_TABLE,
+            client: 'no-such-client',
+            fallbackSql: `SELECT 1 FROM ${SEQUENCES_TABLE} WHERE 1 = 0`,
+        });
+
+        for (const [arm, result] of [['catalog', catalog], ['fallback', fallback]] as const) {
+            expect(result.verdict, arm).toBe('unreadable');
+            expect(result.probe, arm).toBe(arm);
+            expect(inspect(result), arm).not.toContain(SENTINEL);
+            expect(result.detail, arm).toContain('no such column: v');
+        }
+    });
+
+    it('runtime-index-preflight — the per-probe detail and the dead-seam fan-out', async () => {
+        const perProbe = await collectRuntimeIndexPreflight(async (sql: string) => {
+            if (sql.includes('HAVING')) throw rawStatementFault(BOUND_DIALECT_TEXT);
+            return [];
+        });
+        const deadSeam = await collectRuntimeIndexPreflight(async () => {
+            throw rawStatementFault(BOUND_DIALECT_TEXT);
+        });
+
+        for (const results of [perProbe, deadSeam]) {
+            expect(results.length).toBeGreaterThan(0);
+            expect(inspect(results, { depth: 8 })).not.toContain(SENTINEL);
+            for (const probe of results) {
+                expect(probe.status).toBe('unreadable');
+                expect(probe.detail).toContain('no such column: v');
+            }
+        }
+    });
+
+    it('partial-index-probe — both legs, the verdict still read off the error object', async () => {
+        // MySQL raises this when a UNIQUE index is built over duplicate stored
+        // rows: the conflicting value sits in the dialect's own diagnostic.
+        const duplicate = (sql: string): Error => {
+            const err = rawStatementFault(
+                knexDump(sql, [], `Duplicate entry '${SENTINEL}' for key 't.idx_real'`),
+            );
+            Object.assign((err as unknown as { cause: object }).cause, { code: 'ER_DUP_ENTRY', errno: 1062 });
+            return err;
+        };
+        const options = {
+            indexName: 'idx_real',
+            probeIndexName: 'idx_probe',
+            buildSql: (name: string) => `CREATE UNIQUE INDEX ${name} ON t (a) WHERE b IS NULL`,
+        };
+
+        const atProbe = await probeThenReplaceIndex(async (sql: string) => {
+            if (sql.startsWith('CREATE')) throw duplicate(sql);
+            return [];
+        }, options);
+        const atReplace = await probeThenReplaceIndex(async (sql: string) => {
+            if (sql.startsWith(`CREATE UNIQUE INDEX ${options.indexName}`)) throw duplicate(sql);
+            return [];
+        }, options);
+
+        expect(atProbe.failedAt).toBe('probe');
+        expect(atProbe.status).toBe('conflict');
+        expect(atReplace.failedAt).toBe('replace');
+        for (const outcome of [atProbe, atReplace]) {
+            expect(inspect(outcome)).not.toContain(SENTINEL);
+            expect(outcome.detail).toContain("for key 't.idx_real'");
+        }
+    });
+
+    describe('seed-tenancy-backfill — all five sites', () => {
+        /**
+         * The backfill's own fixture shape (see the `[#16657]` block above),
+         * with the organization the probe finds BEING the sentinel, so the
+         * stamp and the counter merge bind it themselves, and every refusal
+         * composed from the statement and parameters actually sent.
+         *
+         * ⚠️ The run's receipt names the organization it adopted, on purpose
+         * and not through the helper: `organizationId` is a declared field of
+         * the result (and of the `info` line a repair writes, which this
+         * logger does not record). So the scan below reads the result WITHOUT
+         * that one field, and pins the field's value separately, rather than
+         * calling a declared receipt a leak.
+         */
+        function sentinelExec(refuse: (sql: string) => boolean) {
+            return async (sql: string, params?: unknown[]): Promise<unknown> => {
+                if (refuse(sql)) {
+                    throw rawStatementFault(knexDump(sql, params, 'database table is locked'));
+                }
+                if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
+                if (sql.includes('WHERE 1 = 0')) return [];
+                if (sql.includes('LEFT JOIN')) {
+                    return [
+                        {
+                            object: 'crm_case',
+                            field: 'case_number',
+                            global_last_value: 38,
+                            organization_last_value: 1,
+                        },
+                    ];
+                }
+                if (sql.includes(ORGANIZATION_TABLE)) return [{ id: SENTINEL }];
+                if (sql.includes('rows_holding')) return [];
+                return [];
+            };
+        }
+
+        /** The site's own fault really carried the sentinel: the non-vacuity leg. */
+        function boundBy(refuse: (sql: string) => boolean) {
+            const seen: string[] = [];
+            const exec = sentinelExec(refuse);
+            return {
+                seen,
+                exec: async (sql: string, params?: unknown[]) => {
+                    try {
+                        return await exec(sql, params);
+                    } catch (e) {
+                        seen.push(String((e as { cause?: Error }).cause?.message));
+                        throw e;
+                    }
+                },
+            };
+        }
+
+        const SITES: Array<[site: string, refuse: (sql: string) => boolean, line: string, binds: boolean]> = [
+            ['split probe → result `detail`', (sql) => sql.includes('LEFT JOIN'), '', false],
+            ['organization probe → warn message and meta', (sql) => sql.includes(ORGANIZATION_TABLE), 'probe FAILED', false],
+            ['collision probe → warn meta', (sql) => sql.includes('rows_holding'), 'already-minted duplicates', false],
+            [
+                'stamp → warn meta',
+                (sql) => sql.startsWith('UPDATE') && !sql.includes(SEQUENCES_TABLE),
+                'could not stamp',
+                true,
+            ],
+            [
+                'counter merge → warn meta',
+                (sql) =>
+                    sql === buildGlobalCounterProbeSql(true, 'better-sqlite3') ||
+                    sql === buildGlobalCounterProbeSql(false, 'better-sqlite3'),
+                'could not merge the counter',
+                false,
+            ],
+        ];
+
+        for (const [site, refuse, line, binds] of SITES) {
+            it(site, async () => {
+                const log = createLogger();
+                const fixture = boundBy(refuse);
+                // The sites that bind nothing of their own are handed the
+                // synthetic bound statement; the stamp binds the sentinel itself.
+                const exec = binds
+                    ? fixture.exec
+                    : async (sql: string, params?: unknown[]) => {
+                          if (refuse(sql)) {
+                              fixture.seen.push(BOUND_DIALECT_TEXT);
+                              throw rawStatementFault(BOUND_DIALECT_TEXT);
+                          }
+                          return fixture.exec(sql, params);
+                      };
+
+                const result = await backfillSeedTenancy({ exec, client: 'better-sqlite3' }, log.logger);
+
+                expect(fixture.seen.length, 'the site was never refused').toBeGreaterThan(0);
+                expect(fixture.seen.every((m) => m.includes(SENTINEL))).toBe(true);
+                const { organizationId, ...carriers } = result as typeof result & { organizationId?: string };
+                expect([undefined, SENTINEL]).toContain(organizationId);
+                expect(inspect(carriers, { depth: 8 })).not.toContain(SENTINEL);
+                expect(logged(log)).not.toContain(SENTINEL);
+                if (line === '') {
+                    expect(result.status).toBe('absent');
+                    expect(result.detail).toContain('no such column: v');
+                } else {
+                    const warned = log.warn.find((w) => w.message.includes(line));
+                    expect(warned, `no warn line for ${site}`).toBeDefined();
+                    expect(inspect(warned?.meta, { depth: 8 })).toContain(
+                        binds ? 'database table is locked' : 'no such column: v',
+                    );
+                }
+            });
+        }
+
+        it('the presence probe → warn meta and result `detail`, where read-probe\'s answer is logged', async () => {
+            const log = createLogger();
+            const result = await backfillSeedTenancy(
+                {
+                    exec: async (sql: string) => {
+                        if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) {
+                            throw rawStatementFault(BOUND_DIALECT_TEXT);
+                        }
+                        return [];
+                    },
+                    client: 'better-sqlite3',
+                },
+                log.logger,
+            );
+
+            expect(result.status).toBe('unreadable');
+            expect(inspect(result, { depth: 8 })).not.toContain(SENTINEL);
+            expect(logged(log)).not.toContain(SENTINEL);
+            expect(result.detail).toContain('no such column: v');
+        });
     });
 });

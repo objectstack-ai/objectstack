@@ -619,7 +619,7 @@ describe('lintLegacyOrganizationComposites — S6 respelling nudge (ADR-0120 D5c
     expect(issues[0].rule).toBe(RULE);
     expect(issues[0].severity).toBe('warning'); // advisory forever — zero forced drift
     expect(issues[0].path).toBe('objects[0].indexes[0]');
-    expect(issues[0].message).toContain('#5030');
+    expect(issues[0].message).toContain("on every row whose 'organization_id' is NULL it enforces nothing");
     expect(issues[0].message).toContain('NULL-distinct');
     expect(issues[0].fix).toContain("unique: 'organization'");
     // The respelling keeps `fields` — the driver makes the LISTED column

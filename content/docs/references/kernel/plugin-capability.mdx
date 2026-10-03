@@ -79,7 +79,7 @@ Level of protocol conformance
 | **protocol** | `{ id: string; label: string; version: object; specification?: string; … }` | ✅ |  |
 | **conformance** | `Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>` | optional (default: `"full"`) | Level of protocol conformance |
 | **implementedFeatures** | `string[]` | optional | List of implemented feature names |
-| **features** | `{ name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
+| **features** | `{ name: string; enabled?: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
 | **metadata** | `Record<string, any>` | optional |  |
 | **certified** | `boolean` | optional (default: `false`) | Has passed official conformance tests |
 | **certificationDate** | `string` | optional |  |
@@ -113,11 +113,11 @@ Level of protocol conformance
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **implements** | `{ protocol: object; conformance: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: object[]; … }[]` | optional | List of protocols this plugin conforms to |
+| **implements** | `{ protocol: object; conformance?: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: object[]; … }[]` | optional | List of protocols this plugin conforms to |
 | **provides** | `{ id: string; name: string; description?: string; version: object; … }[]` | optional | Services/APIs this plugin offers to others |
-| **requires** | `{ pluginId: string; version: string; optional: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
+| **requires** | `{ pluginId: string; version: string; optional?: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
 | **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
-| **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority: integer }[]` | optional | Extensions contributed to other plugins |
+| **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority?: integer }[]` | optional | Extensions contributed to other plugins |
 
 ### Nested Shape: `PluginCapabilityManifest.implements[number]`
 
@@ -126,7 +126,7 @@ Level of protocol conformance
 | **protocol** | `{ id: string; label: string; version: object; specification?: string; … }` | ✅ |  |
 | **conformance** | `Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>` | optional (default: `"full"`) | Level of protocol conformance |
 | **implementedFeatures** | `string[]` | optional | List of implemented feature names |
-| **features** | `{ name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
+| **features** | `{ name: string; enabled?: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
 | **metadata** | `Record<string, any>` | optional |  |
 | **certified** | `boolean` | optional (default: `false`) | Has passed official conformance tests |
 | **certificationDate** | `string` | optional |  |
@@ -211,7 +211,7 @@ Level of protocol conformance
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Method name |
 | **description** | `string` | optional |  |
-| **parameters** | `{ name: string; type: string; required: boolean; description?: string }[]` | optional |  |
+| **parameters** | `{ name: string; type: string; required?: boolean; description?: string }[]` | optional |  |
 | **returnType** | `string` | optional | Return value type |
 | **async** | `boolean` | optional (default: `false`) | Whether method returns a Promise |
 

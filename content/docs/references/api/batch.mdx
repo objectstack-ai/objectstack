@@ -43,7 +43,7 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | Enable batch operations |
 | **maxRecordsPerBatch** | `integer` | optional (default: `200`) | Maximum records per batch |
-| **defaultOptions** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Default batch options |
+| **defaultOptions** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Default batch options |
 
 ### Nested Shape: `BatchConfig.defaultOptions`
 
@@ -144,7 +144,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
 | **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Batch operation options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Batch operation options |
 
 ### Nested Shape: `BatchUpdateRequest.records[number]`
 
@@ -254,7 +254,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operations** | `{ object: string; action: Enum<'create' \| 'update' \| 'delete'>; id?: string; data?: Record<string, any> }[]` | ✅ | Ordered operations executed in one transaction |
+| **operations** | `{ object: string; action?: Enum<'create' \| 'update' \| 'delete'>; id?: string; data?: Record<string, any> }[]` | ✅ | Ordered operations executed in one transaction |
 | **atomic** | `boolean` | optional (default: `true`) | Always true — the cross-object batch is all-or-nothing |
 
 ### Nested Shape: `CrossObjectBatchRequest.operations[number]`
@@ -299,7 +299,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Delete options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Delete options |
 
 ### Nested Shape: `DeleteManyRequest.options`
 
@@ -332,7 +332,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Update options |
+| **options** | `{ atomic?: boolean; returnRecords?: boolean; continueOnError?: boolean }` | optional | Update options |
 
 ### Nested Shape: `UpdateManyRequest.records[number]`
 

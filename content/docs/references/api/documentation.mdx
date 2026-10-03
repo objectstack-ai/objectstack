@@ -62,7 +62,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | API version |
 | **date** | `string` | ✅ | Release date |
-| **changes** | `{ added: string[]; changed: string[]; deprecated: string[]; removed: string[]; … }` | ✅ | Version changes |
+| **changes** | `{ added?: string[]; changed?: string[]; deprecated?: string[]; removed?: string[]; … }` | ✅ | Version changes |
 | **migrationGuide** | `string` | optional | Migration guide URL or text |
 
 ### Nested Shape: `ApiChangelogEntry.changes`
@@ -90,10 +90,10 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **version** | `string` | ✅ | API version |
 | **description** | `string` | optional | API description |
 | **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | optional (default: `[]`) | API server URLs |
-| **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>; path: string; theme: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut: boolean; … }` | optional | Testing UI configuration |
+| **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>; path?: string; theme?: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut?: boolean; … }` | optional | Testing UI configuration |
 | **generateOpenApi** | `boolean` | optional (default: `true`) | Generate OpenAPI 3.0 specification |
 | **generateTestCollections** | `boolean` | optional (default: `true`) | Generate API test collections |
-| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: object[]; … }[]` | optional (default: `[]`) | Predefined test collections |
+| **testCollections** | `{ name: string; description?: string; variables?: Record<string, any>; requests: object[]; … }[]` | optional (default: `[]`) | Predefined test collections |
 | **changelog** | `{ version: string; date: string; changes: object; migrationGuide?: string }[]` | optional (default: `[]`) | API version changelog |
 | **codeTemplates** | `{ language: string; name: string; template: string; variables?: string[] }[]` | optional (default: `[]`) | Code generation templates |
 | **termsOfService** | `string` | optional | Terms of service URL |
@@ -126,7 +126,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **syntaxHighlighting** | `boolean` | optional (default: `true`) | Enable syntax highlighting |
 | **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
 | **customJsUrl** | `string` | optional | Custom JavaScript URL |
-| **layout** | `{ showExtensions: boolean; showCommonExtensions: boolean; deepLinking: boolean; displayOperationId: boolean; … }` | optional | Layout configuration |
+| **layout** | `{ showExtensions?: boolean; showCommonExtensions?: boolean; deepLinking?: boolean; displayOperationId?: boolean; … }` | optional | Layout configuration |
 
 ### Nested Shape: `ApiDocumentationConfig.testCollections[number]`
 
@@ -144,7 +144,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | API version |
 | **date** | `string` | ✅ | Release date |
-| **changes** | `{ added: string[]; changed: string[]; deprecated: string[]; removed: string[]; … }` | ✅ | Version changes |
+| **changes** | `{ added?: string[]; changed?: string[]; deprecated?: string[]; removed?: string[]; … }` | ✅ | Version changes |
 | **migrationGuide** | `string` | optional | Migration guide URL or text |
 
 ### Nested Shape: `ApiDocumentationConfig.codeTemplates[number]`
@@ -237,7 +237,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **syntaxHighlighting** | `boolean` | optional (default: `true`) | Enable syntax highlighting |
 | **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
 | **customJsUrl** | `string` | optional | Custom JavaScript URL |
-| **layout** | `{ showExtensions: boolean; showCommonExtensions: boolean; deepLinking: boolean; displayOperationId: boolean; … }` | optional | Layout configuration |
+| **layout** | `{ showExtensions?: boolean; showCommonExtensions?: boolean; deepLinking?: boolean; displayOperationId?: boolean; … }` | optional | Layout configuration |
 
 ### Nested Shape: `ApiTestingUiConfig.layout`
 
@@ -291,8 +291,8 @@ const result = ApiChangelogEntrySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **openApiSpec** | `{ openapi: string; info: object; servers: object[]; paths: Record<string, any>; … }` | optional | Generated OpenAPI specification |
-| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: object[]; … }[]` | optional | Generated test collections |
+| **openApiSpec** | `{ openapi?: string; info: object; servers?: object[]; paths: Record<string, any>; … }` | optional | Generated OpenAPI specification |
+| **testCollections** | `{ name: string; description?: string; variables?: Record<string, any>; requests: object[]; … }[]` | optional | Generated test collections |
 | **markdown** | `string` | optional | Generated markdown documentation |
 | **html** | `string` | optional | Generated HTML documentation |
 | **generatedAt** | `string` | ✅ | Generation timestamp |

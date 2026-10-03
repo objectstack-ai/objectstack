@@ -105,7 +105,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **allowed** | `boolean` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge' \| 'export'>` | ✅ |  |
-| **principal** | `{ userId: string \| null; positions: string[]; permissionSets: string[]; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>; … }` | ✅ |  |
+| **principal** | `{ userId: string \| null; positions?: string[]; permissionSets?: string[]; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>; … }` | ✅ |  |
 | **layers** | `{ layer: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>; kernelTier?: Enum<'layer_0_tenant' \| 'layer_1_business'>; verdict: Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>; detail: string; … }[]` | ✅ |  |
 | **readFilter** | `any` | optional | The composed row filter the caller would be served with — the machine artifact behind the prose (null = unrestricted). Two shapes mean zero rows — `{ id: "__deny_all__" }` and the fail-closed RLS denial (`__rls_deny__` plus a colon and a UUID-shaped suffix, which can also ride inside an $and composite) — so a consumer pattern-matching this payload alone must match both; the decision itself is allowed plus the rls layer verdict. |
 | **record** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …> }` | optional | Row-level verdict for the specific record; set only for singular record-grained requests. |
@@ -131,7 +131,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
 | **detail** | `string` | ✅ |  |
 | **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired' \| 'deactivated'> }[]` | optional (default: `[]`) |  |
-| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules?: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
 
 ### Nested Shape: `ExplainDecision.record`
 
@@ -163,7 +163,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
 | **detail** | `string` | ✅ |  |
 | **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired' \| 'deactivated'> }[]` | optional (default: `[]`) |  |
-| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules?: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
 
 ### Nested Shape: `ExplainLayer.record`
 
