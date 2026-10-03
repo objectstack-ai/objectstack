@@ -185,6 +185,17 @@ describe('flow get_record serves the stored-metadata family the way the data doo
     expect(door.checksum, 'control: the door serves the hash keyed').toMatch(KEYED);
   }
 
+  it('control: the data door serves both tables with the body projected and the hash keyed', async () => {
+    for (const object of ['sys_metadata', 'sys_metadata_history']) {
+      const row = await doorRow(object);
+      const text = JSON.stringify(row);
+      expect(text.includes(SENTINEL), `${object}: the door served the stored credential`).toBe(false);
+      expect(text.includes(STORED_HASH), `${object}: the door served the stored hash`).toBe(false);
+      expect(row.checksum).toMatch(KEYED);
+      expect(JSON.parse(row.metadata).config.url).toBe(DS_URL);
+    }
+  });
+
   for (const runAs of ['system', 'user'] as const) {
     for (const branch of ['one', 'list'] as const) {
       it(`runAs:'${runAs}', ${branch === 'one' ? 'findOne' : 'find'} branch: the output and the written record carry the projected body and the door's keyed hash`, async () => {
