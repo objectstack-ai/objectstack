@@ -4,17 +4,25 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)
 [![Docs](https://img.shields.io/badge/docs-objectstack.ai-0a0a0a.svg)](https://objectstack.ai/docs)
 
-> ## Apps small enough for AI to hold whole.
+> ## The ontology is the software.
+>
+> **One executable business ontology.** AI writes it, the runtime runs it, agents
+> operate it, you own it.
+>
+> 本体即软件。一份可执行的业务本体。AI 写，运行时跑，Agent 用，归你所有。
 >
 > ObjectStack turns the whole app — data model, UI, workflows, permissions —
-> into typed metadata that fits in a single context window. Agents read it
-> whole, reason it whole, refactor it whole.
+> into typed metadata that fits in a single context window: apps small enough
+> for AI to hold whole. Agents read it whole, reason it whole, refactor it whole.
 >
 > That metadata is your **business ontology** — an open, versioned definition of
-> your objects, permissions, and flows that you own, not code scattered across a
-> framework. Strict TypeScript, Zod schemas, and a validation gate catch the
-> agent's mistakes at authoring time; the runtime derives the database, REST API,
-> UI, and MCP server, and enforces permissions and audit on every call.
+> your objects, relations, actions, permissions, flows, and agent and tool
+> definitions that you own, not code scattered across a framework. It is
+> executable, not a knowledge-representation ontology: no inheritance, no
+> axioms, no reasoner. Strict TypeScript, Zod schemas, and a validation gate
+> catch the agent's mistakes at authoring time; the runtime derives the
+> database, REST API, UI, and MCP server, and enforces permissions and audit on
+> every call.
 
 `Fits in an agent's context` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0
 
@@ -152,7 +160,7 @@ The reason this works is the same reason TypeScript was the right host language:
 **an agent's errors become located, corrective text it can read and fix itself**,
 in seconds — instead of a silent runtime failure nobody traces back.
 
-The other half is size. The bundled example CRM — [`examples/app-crm`](./examples/app-crm):
+The other half is size: apps small enough for AI to hold whole. The bundled example CRM — [`examples/app-crm`](./examples/app-crm):
 objects, views, a dashboard, a lead-conversion flow, permission sets, actions,
 translations — is small enough for an agent to load end-to-end, reason about
 every dependency, and refactor across data, API, UI, and permissions in one
@@ -163,9 +171,18 @@ hoping. Measure it yourself:
 find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
 ```
 
-> Your objects, permissions, and flows are your business ontology — and the
+> The ontology is the software. Your objects, relations, actions, permissions,
+> flows, and agent and tool definitions are your business ontology — and the
 > definition layer of the AI era should be an open protocol you own.
 > [Read why](https://www.objectos.ai/en/blog/ai-ontology-open-protocol/).
+>
+> What that does and does not mean: the ontology is *executable*, so it is
+> validated rather than reasoned over — there is no object inheritance, no
+> axioms and no reasoner. It is not a semantic layer over your existing systems
+> (federating an external datasource is read-only by default and early). Views,
+> dashboards, apps, and translations are projections of the ontology, not part
+> of it. And code does not disappear: it moves into the runtime — hooks, action
+> bodies, CEL, and constrained JSX.
 
 ## Your app is AI-operable, for free
 
