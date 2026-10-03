@@ -24,7 +24,7 @@ import type {
     RealtimeEventHandler,
     RealtimeEventPayload,
 } from '@objectstack/spec/contracts';
-import { AutoEnqueuer } from './auto-enqueuer.js';
+import { AutoEnqueuer, type HttpEnqueueFn } from './auto-enqueuer.js';
 
 type Row = Record<string, unknown>;
 
@@ -122,9 +122,11 @@ async function boot() {
     const realtime = new FakeRealtime();
     engine.setRealtimeService(realtime);
     const delivered: Array<{ label?: string; payload: Row }> = [];
-    const enqueuer = new AutoEnqueuer(engine as never, realtime, async (input: any) => {
-        delivered.push({ label: input.label, payload: input.payload });
-    });
+    const enqueue: HttpEnqueueFn = async (input) => {
+        delivered.push({ label: input.label, payload: input.payload as Row });
+        return `delivery_${delivered.length}`;
+    };
+    const enqueuer = new AutoEnqueuer(engine as never, realtime, enqueue);
     await enqueuer.start();
     return { engine, enqueuer, delivered };
 }
