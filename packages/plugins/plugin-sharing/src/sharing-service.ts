@@ -309,7 +309,7 @@ export interface SharingSecurityProbe {
 const RECORD_SHARE_SWEEP_SUBJECT = {
   table: 'sys_record_share',
   noun: 'share',
-  issue: '#5103',
+  issue: 'every share on a deleted record goes, whatever its source, so a reused record id cannot inherit it',
 } as const;
 
 /**
@@ -734,8 +734,9 @@ export class SharingService implements ISharingService {
   ): SharingWriteVerdict {
     this.logger?.error?.(
       `[sharing] the ${verb} gate could not resolve a verdict for '${object}' record `
-      + `'${recordId}' (user ${context?.userId ?? 'unknown'}) — DENYING (fail-closed, #6428): `
-      + 'a failed lookup is a refusal, never an abstention',
+      + `'${recordId}' (user ${context?.userId ?? 'unknown'}) — DENYING (fail-closed): `
+      + 'a failed lookup is a refusal, never an abstention, because an abstention would hand the row '
+      + 'to the other write authorities, which may admit it',
       err instanceof Error ? err : new Error(String(err)),
     );
     return 'deny';
@@ -954,7 +955,8 @@ export class SharingService implements ISharingService {
       this.logger?.warn?.(
         `[sharing] the authored-row-write probe for '${object}' record '${recordId}' `
         + `(${operation}, user ${context?.userId ?? 'unknown'}) could not be resolved — `
-        + 'ABSTAINING, so the existing refusal stands (fail-closed, #5493)',
+        + 'ABSTAINING, so the existing refusal stands (fail-closed: only an app-authored row-level '
+        + 'policy that positively admits this row may lift the sharing refusal)',
         err instanceof Error ? err : new Error(String(err)),
       );
       return 'abstain';
@@ -1833,7 +1835,8 @@ export class SharingService implements ISharingService {
       this.logger?.warn?.(
         '[sharing] hierarchy scope NOT widened: an organization wall is in force but the caller ' +
           'context carries no active organization — failing closed to owner-only. ' +
-          '"No org" is not "every org" (IHierarchyScopeResolver.resolveOwnerIds, #5973); ' +
+          '"No org" is not "every org": the IHierarchyScopeResolver.resolveOwnerIds contract makes a ' +
+          'resolver fail closed on a missing organization; ' +
           'the same rule walls Layer 0 (ADR-0095 D1 / ADR-0105 D1).',
         { userId: me, scope },
       );
