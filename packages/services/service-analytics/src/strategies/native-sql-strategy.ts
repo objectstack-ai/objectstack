@@ -1034,9 +1034,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       `[native-sql-strategy] ${hit.source} carries a field reference ` +
       `{ "$field": "${hit.ref}" } under "${hit.op}" on "${hit.field}", which this strategy does not ` +
       `compile into a column-to-column comparison — it would BIND the reference object as the ` +
-      `comparison's value and answer a wrong row set silently (#7598). \`canHandle\` declines such a ` +
+      `comparison's value and answer a wrong row set silently. \`canHandle\` declines such a ` +
       `query so it routes to the ObjectQL/engine path, whose driver compiles it and enforces the ` +
-      `#5222 rulings with metadata it owns; reaching this throw means the decline and this emitter ` +
+      `cross-field rules (declared same-table columns only, never the tenant-isolation column, one ` +
+      `comparison class) with metadata it owns, so those rules are enforced in one place, next to ` +
+      `the metadata they read; reaching this throw means the decline and this emitter ` +
       `stopped agreeing, which is our bug and must never degrade to a silent answer.`,
     );
   }
