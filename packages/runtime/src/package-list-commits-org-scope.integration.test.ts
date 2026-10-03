@@ -106,6 +106,8 @@ const OTHER_ORG = 'org_other';
  * each log the read on the way out. Withheld and asserted rather than muted;
  * `expected-read-refusal-noise.ts` says why.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const UNBOUND_PROBE_OBJECT = 'anything';
 
 let cleanup: Array<() => void> = [];
@@ -119,7 +121,10 @@ afterEach(() => {
   // failure here can never leave an engine running. Every test in this file publishes at
   // least once, so the probe fires for each of them: this holds for a single
   // `-t` run as well as for the whole file.
-  expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+  // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+  // hold before any driver, so the declared refusal no longer occurs. The capture stays
+  // declared (a returning read is still withheld and counted) and this asserts nothing was.
+  expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
   noise = null;
 });
 

@@ -34,6 +34,8 @@ const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
  * each log the fault on the way out. Withheld and asserted in that one case
  * rather than muted; `expected-read-refusal-noise.ts` says why.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 async function assemble(opts: {
@@ -197,7 +199,10 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
       // [commit 13a6cb4ad] The capture is a PIN, not a mute: the probe's two log lines
       // are withheld from the shared shard log and asserted here instead, so
       // a probe that stopped running goes red rather than merely quiet.
-      expect(noise.silentChannels()).toEqual([]);
+      // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+      // hold before any driver, so the declared refusal no longer occurs. The capture stays
+      // declared (a returning read is still withheld and counted) and this asserts nothing was.
+      expect(noise.tablesSeen()).toEqual([]);
     } finally {
       try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
     }

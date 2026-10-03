@@ -158,6 +158,15 @@ async function probeRead(
     await kernel.use(new ObjectQLPlugin());
     await kernel.bootstrap();
     capture.captureEngine(kernel.getService<unknown>('objectql'));
+    // [#21516] The engine refuses a name its registry does not hold before any
+    // driver, so the probe object is REGISTERED — after boot, so no schema sync
+    // provisions it. The read then reaches the driver and the table is absent:
+    // the real refusal whose two channels this file measures.
+    kernel.getService<{ registry: { registerObject(o: unknown): void } }>('objectql').registry.registerObject({
+      name: table,
+      label: table,
+      fields: { title: { name: 'title', type: 'text' } },
+    });
 
     const data = kernel.getService<{ find(o: string): Promise<unknown[]> }>('data');
     try {

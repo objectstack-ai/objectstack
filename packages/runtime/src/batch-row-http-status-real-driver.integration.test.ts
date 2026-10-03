@@ -86,11 +86,16 @@ const CHILD = {
  * make that test red for a reason that has nothing to do with it.
  * `expected-read-refusal-noise.ts` says why this withholds instead of muting.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 /** [commit 13a6cb4ad] The capture is a PIN, not a mute — this is the assertion half. */
 const expectExpectedNoiseWithheld = (noise: ExpectedReadRefusalCapture | null): void => {
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
 };
 
 describe('[#8570] a batch row carries the status its producer DECLARED — real driver', () => {
