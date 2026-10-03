@@ -30,6 +30,13 @@
  *   `NavigationConfigSchema`, by identity, and refuses an off-shape value with
  *   the code AND the path; its ADR-0087 D3 entry is registered.
  *
+ * Later stages pin the members they type in their own file, beside this one:
+ * the list family (`object-grid` `fields` / `selection` / `selectable` /
+ * `rowActions` / `bulkActions` / `batchActions`, `object-kanban` `columns`,
+ * `object-calendar` `calendar`) in
+ * `component-list-family-typed-members.pin.test.ts`. The family's ninth,
+ * `object-grid` `columns`, is held below.
+ *
  * ## The STAGED reason is debt, not a verdict
  *
  * A `staged` member IS read with a fixed shape at the `.objectui-sha` pin; its
@@ -118,7 +125,6 @@ function unknownMembers(schema: unknown): UnknownMember[] {
 const STAGES = {
   'object-metric': 'the metric tile\'s four config blocks; the dashboard widget\'s `compareTo` and the chart\'s `aggregate` / `drillDown` are the by-reference candidates, and `trend` has no spec declaration, so it is typed to the renderer\'s read',
   'object-form': 'the form and master-detail form rows; `FormViewSchema` (`sections`, `submitBehavior`) is the by-reference candidate',
-  'list-family': 'the grid, kanban and calendar list members; `ListViewSchema` (`columns`, `selection`, `rowActions`, `bulkActions`, `calendar`) is the by-reference candidate',
   'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, and `UIActionSchema`, an objectui interface that borrows some members from the spec `Action`); the spec declares each first, contract-first, then the row takes it',
   'held-for-decision': 'a by-reference shape exists, but measured writers author values it refuses — the narrowing waits for a ruling',
 } as const;
@@ -137,8 +143,6 @@ type Reason =
   | { readonly kind: 'any-value'; readonly why: string }
   /** A deliberately open bag: the declared members are typed, the rest pass through. */
   | { readonly kind: 'open-bag'; readonly why: string }
-  /** No reader at the pin, and not visibly forwarded — an open question, not a verdict. */
-  | { readonly kind: 'no-reader'; readonly why: string }
   /** Read with a fixed shape at the pin (`reader`); typing it is a named later stage. */
   | { readonly kind: 'staged'; readonly stage: Stage; readonly reader: string };
 
@@ -203,6 +207,9 @@ on(['object-kanban', 'object-timeline'], ['data[]'], RECORDS);
 on(['object-calendar'], ['data[]', 'staticData[]'], RECORDS);
 on(['object-form', 'object-master-detail-form'], ['initialValues{}', 'initialData{}'], RECORDS);
 on(['object-grid'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].default'], RECORDS);
+// A static board's card is a record row: `id` and `title` are typed, the rest
+// is the row's own values (`plugin-kanban/src/index.tsx:155`, kept verbatim).
+on(['object-kanban'], ['columns[].cards[].*'], RECORDS);
 on(['object-grid'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
 
 // The rest, one line each.
@@ -228,14 +235,6 @@ on(['object-form'], ['submitBehavior'], staged('object-form', 'plugin-form/src/O
 on(['object-form'], ['navigateOnSuccess'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:1373, :1412-1424'));
 on(['object-form'], ['mobile'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:1857'));
 on(['object-master-detail-form'], ['sections[]', 'fields[]'], staged('object-form', 'plugin-form/src/MasterDetailForm.tsx:1692-1693, into the parent form'));
-on(['object-grid'], ['columns[]'], staged('list-family', 'plugin-grid/src/ObjectGrid.tsx:2158 (`normalizeColumns`, `string | ListColumn`)'));
-on(['object-grid'], ['fields[]'], staged('list-family', 'plugin-grid/src/ObjectGrid.tsx:1946'));
-on(['object-grid'], ['selection'], staged('list-family', 'plugin-grid/src/ObjectGrid.tsx:4799-4810 (`.type`)'));
-on(['object-grid'], ['selectable'], staged('list-family', 'plugin-grid/src/ObjectGrid.tsx:4813-4815'));
-on(['object-grid'], ['rowActions[]'], staged('list-family', 'plugin-grid/src/ObjectGrid.tsx:1834-1835 (`string[]`)'));
-on(['object-grid'], ['bulkActions[]', 'batchActions[]'], staged('list-family', 'plugin-grid/src/ObjectGrid.tsx:4763 (`batchActions ?? bulkActions`)'));
-on(['object-kanban'], ['columns[]'], staged('list-family', 'plugin-kanban/src/KanbanBoardCore.tsx:95'));
-on(['object-calendar'], ['calendar'], staged('list-family', 'plugin-calendar/src/ObjectCalendar.tsx:296-297 (`ObjectCalendarConfig`)'));
 on(['object-gantt'], ['markers[]'], staged('objectui-held', 'plugin-gantt/src/ObjectGantt.tsx:2497 (`GanttMarker`)'));
 on(['object-timeline'], ['items[]'], staged('objectui-held', 'plugin-timeline/src/ObjectTimeline.tsx:587'));
 on(['object-timeline'], ['mapping'], staged('objectui-held', 'plugin-timeline/src/ObjectTimeline.tsx:551, :576-579'));
@@ -248,6 +247,14 @@ on(['action:menu'], ['actions[]{}'], staged('objectui-held', 'components/src/ren
 // `types/src/__tests__/kanban-conditional-formatting.test.ts:29-52`), so the
 // narrowing is reported for a ruling instead of shipped.
 on(['object-kanban'], ['conditionalFormatting'], staged('held-for-decision', 'plugin-kanban/src/KanbanBoardCore.tsx:114, evaluated at KanbanImpl.tsx:179 (`resolveConditionalFormatting`)'));
+// The list view's own `columns` is the by-reference shape, and the draw path
+// matches it — but the grid's group-header formatter also reads `options` off
+// an authored column (`colOverride?.options || objectDefField?.options`, the
+// column winning) and draws the group labels from it, which objectui pins as
+// behaviour (`plugin-grid/src/__tests__/gridGroupingMembers-8071.test.tsx:260-301`).
+// `ListColumn` declares no `options`, so the narrowing would refuse a value the
+// grid draws: held until objectstack-ai/objectui#11544 is ruled.
+on(['object-grid'], ['columns[]'], staged('held-for-decision', 'plugin-grid/src/ObjectGrid.tsx:2158 (`normalizeColumns`), `columns[].options` drawn by the group-header formatter at :2997-3001'));
 
 /** Every `z.unknown()` member of every row, keyed as the ledger keys it. */
 function census(): Map<string, UnknownMember> {

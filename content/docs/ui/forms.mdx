@@ -20,7 +20,7 @@ Both modes:
 - Honor `?prefill_<field>=<value>` URL params
 - Honor `submitBehavior` (thank-you / redirect / continue / next-record) — with **mode-aware defaults** when it is omitted (see [§8](#8-submitbehavior--what-happens-after-submit))
 
-A **public form** is the Salesforce *Web-to-Lead* style embeddable form — declare a `FormView` with `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires the anonymous REST endpoints automatically.
+A **public form** is the Salesforce *Web-to-Lead* style embeddable form — declare a `FormView` with `sharing.enabled: true` and `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires the anonymous REST endpoints automatically. Clearing either switch withdraws the form from every anonymous endpoint.
 
 ## Architecture at a glance
 
@@ -86,7 +86,7 @@ export default defineView({
         },
       ],
       sharing: {
-        enabled: true,
+        enabled: true,                // ← required (the schema default is false)
         allowAnonymous: true,         // ← required
         publicLink: '/forms/contact-us', // ← the slug ":contact-us" wires this view to the public route
       },
@@ -99,7 +99,7 @@ export default defineView({
 > - The slug in `publicLink` (`contact-us`) becomes the `:slug` segment in the REST URL.
 > - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
 > - A form whose sections declare **no** fields collects nothing, so the submit is **refused** (`400 VALIDATION_ERROR`) rather than accepting whatever the caller sent (#6920). Its `GET /forms/:slug` publishes no schema either (#6601) — declare the fields and both planes come alive together.
-> - Multiple form views per object are fine — only the one(s) with `sharing.allowAnonymous === true` are exposed.
+> - Multiple form views per object are fine — only the one(s) with `sharing.enabled === true` and `sharing.allowAnonymous === true` are exposed.
 
 ## 2. (Optional) Create the `guest_portal` permission set
 
@@ -230,7 +230,7 @@ Errors:
 | `400 VALIDATION_ERROR` | the form's sections declare **no** fields, so it collects nothing — wire the fields and resubmit (#6920) |
 | `400 VALIDATION_FAILED` | object schema validators fail (`required`, `format`, `length`, …) |
 | `403 PERMISSION_DENIED` | the resolved profile does not allow create on the target object |
-| `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
+| `404 FORM_NOT_FOUND` | slug not registered on any view whose form has `sharing.enabled: true` and `sharing.allowAnonymous: true` |
 | `5xx` (generic) | driver / hook threw — submit errors are mapped by `mapDataError`; there is no dedicated `FORM_SUBMIT_FAILED` code |
 
 The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` if form resolution itself throws.

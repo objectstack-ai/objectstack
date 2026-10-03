@@ -38,7 +38,6 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
-import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -90,6 +89,9 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
+    // The one rule for which forms a `view` body opens to anonymous intake —
+    // the same rule the anonymous form doors in `@objectstack/rest` serve by.
+    anonymousFormIntakeSlugs,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in

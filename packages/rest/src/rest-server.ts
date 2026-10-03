@@ -71,6 +71,9 @@ import {
     // transports — never a REST-local restatement.
     metaWriteCapabilityVerdict,
     type MetaWriteCapabilityVerdict,
+    // Which form candidates the anonymous form doors serve — the one rule the
+    // metadata protocol also judges organization-scoped `view` writes by.
+    anonymousFormIntakeCandidates,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -10517,8 +10520,10 @@ export class RestServer {
      * Register public (anonymous) form endpoints.
      *
      * Public forms are opt-in: a `FormView` becomes accessible to anonymous
-     * visitors only when `sharing.allowAnonymous === true` AND a
-     * `sharing.publicLink` slug is configured. Two routes are registered:
+     * visitors only when `sharing.enabled === true`, `sharing.allowAnonymous
+     * === true` AND a `sharing.publicLink` slug is configured
+     * (`anonymousFormIntakeCandidates`, `@objectstack/metadata-core`). Two
+     * routes are registered:
      *
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
@@ -10536,48 +10541,24 @@ export class RestServer {
      *
      * The matched FormView's parent ViewSchema is found by scanning
      * `protocol.getMetaItems({ type: 'view' })`. For each entry we inspect
-     * `form.sharing` and every entry in `formViews`; the first FormView
-     * whose `sharing.publicLink` matches `/forms/:slug` (or just `:slug`)
-     * wins. The response carries the matched form view under `form` and
+     * `form.sharing`, every entry in `formViews` and a flattened form item's
+     * `config.sharing`; the first open FormView whose `sharing.publicLink`
+     * matches `/forms/:slug` (or just `:slug`) wins. The response carries the matched form view under `form` and
      * the inferred target object, matching what the frontend's
      * `mapViewSpecToEmbeddableConfig` expects.
      */
     private registerFormEndpoints(basePath: string): void {
         const isScoped = basePath.includes('/environments/:environmentId');
 
-        const slugMatchesPublicLink = (publicLink: string | undefined, slug: string): boolean => {
-            if (!publicLink || typeof publicLink !== 'string') return false;
-            // Accept `/forms/:slug`, `forms/:slug`, or a bare slug.
-            const normalized = publicLink.replace(/^\/+/, '').replace(/^forms\//, '');
-            return normalized === slug;
-        };
-
+        // Which form candidates are open to anonymous intake is ONE rule,
+        // shared with the write-time judgement in `@objectstack/metadata-protocol`
+        // (`anonymousFormIntakeCandidates`): `sharing.enabled === true`,
+        // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
         const findPublicFormView = (views: any[], slug: string): { view: any; form: any; object: string } | null => {
             for (const view of views ?? []) {
                 if (!view || typeof view !== 'object') continue;
-                const candidates: Array<{ form: any; key?: string }> = [];
-                // Authoring/nested shape (defineView): { form, formViews: { key: {...} } }.
-                if (view.form && view.form.sharing) candidates.push({ form: view.form });
-                const formViews = view.formViews;
-                if (formViews && typeof formViews === 'object') {
-                    for (const [key, fv] of Object.entries(formViews)) {
-                        if (fv && typeof fv === 'object' && (fv as any).sharing) {
-                            candidates.push({ form: fv as any, key });
-                        }
-                    }
-                }
-                // Flattened registered shape (getMetaItems → one item per view:
-                // { name, object, viewKind:'form', config:{ data, sections, sharing } }).
-                // A form view carries its sharing under `config`; without this branch
-                // public-form resolution silently fails for the standard view metadata.
-                if (view.viewKind === 'form' && view.config && typeof view.config === 'object'
-                    && (view.config as any).sharing) {
-                    candidates.push({ form: view.config, key: view.name });
-                }
-                for (const c of candidates) {
-                    const sharing = c.form?.sharing;
-                    if (!sharing || sharing.allowAnonymous !== true) continue;
-                    if (!slugMatchesPublicLink(sharing.publicLink, slug)) continue;
+                for (const c of anonymousFormIntakeCandidates(view)) {
+                    if (c.slug !== slug) continue;
                     const objectName =
                         c.form?.data?.object ??
                         view?.list?.data?.object ??

@@ -13,9 +13,16 @@
  *
  * The plumbing now travels on `OS_INTERNAL_ARTIFACT_PATH`
  * (`utils/internal-artifact-channel.ts`). This file pins both halves of the
- * property, plus the two behaviours that had to survive the move: the
- * resolution ladder, and `start`'s deliberate refusal to declare an empty boot
- * acceptable when a reference is driving the boot.
+ * property, plus the behaviours that had to survive the move: the resolution
+ * ladder, and `start`'s deliberate refusal to declare an empty boot acceptable
+ * when a reference is driving the boot.
+ *
+ * #21501 — the ladder is now ONE resolver every door asks
+ * (`utils/artifact-precedence.ts`): `start` and `dev` resolve through it, and
+ * its last rung (does the cwd `objectstack.config.ts` take part?) is the one
+ * predicate both the supervisors' `Config:` row and the `serve` child read.
+ * The ladder pins below drive that resolver; the boots that prove the child
+ * obeys it live in `test/artifact-flag-precedence.integration.test.ts`.
  *
  * Two kinds of assertion here, and both are needed:
  *
@@ -37,10 +44,16 @@ import path from 'path';
 import ts from 'typescript';
 import {
   INTERNAL_ARTIFACT_PATH_ENV,
+  INTERNAL_CONFIG_OUTPUT_PATH_ENV,
   childEnvWithResolvedArtifact,
   readInternalArtifactPath,
+  readInternalConfigOutputPath,
 } from '../utils/internal-artifact-channel.js';
-import { resolveArtifactSource } from './start.js';
+import {
+  cwdConfigJoinsBoot,
+  isConfigCompiledArtifact,
+  resolveArtifactBootSource,
+} from '../utils/artifact-precedence.js';
 
 const ARTIFACT = '/srv/app/objectstack.json';
 
@@ -99,6 +112,42 @@ describe('the child `serve` env — OS_ARTIFACT_PATH means an operator set it', 
     }
   });
 
+  it('a `resolved` answer REMOVES an outranked OS_ARTIFACT_URL; a reference keeps it (#21501)', () => {
+    // Through the one ladder a supervisor resolves an artifact while the
+    // reference is set only on the rung above it — `--artifact`. Leaving the
+    // reference in the child env let `serve` read it first: measured,
+    // `OS_ARTIFACT_URL=file://…/BRAVO.json os dev -a ALPHA.json` served BRAVO.
+    const parentEnv = { OS_ARTIFACT_URL: 'https://cdn.example.com/ref.json' };
+    expect(childEnvWithResolvedArtifact(parentEnv, { kind: 'resolved', path: ARTIFACT }).OS_ARTIFACT_URL)
+      .toBeUndefined();
+    for (const decision of [{ kind: 'reference' }, { kind: 'empty' }] as const) {
+      expect(childEnvWithResolvedArtifact(parentEnv, decision).OS_ARTIFACT_URL)
+        .toBe('https://cdn.example.com/ref.json');
+    }
+  });
+
+  it('carries where the parent compiles the cwd config only when the decision says so — and owns that variable too', () => {
+    const named = '/srv/app/build/named.json';
+    const withTarget = childEnvWithResolvedArtifact({}, { kind: 'resolved', path: named, configCompiledTo: named });
+    expect(withTarget[INTERNAL_CONFIG_OUTPUT_PATH_ENV]).toBe(named);
+    expect(readInternalConfigOutputPath(withTarget)).toBe(named);
+
+    // An inherited copy never speaks for a decision the parent did not make.
+    const parentEnv = { [INTERNAL_CONFIG_OUTPUT_PATH_ENV]: '/stale/inherited.json' };
+    for (const decision of [
+      { kind: 'resolved', path: ARTIFACT },
+      { kind: 'reference' },
+      { kind: 'empty' },
+    ] as const) {
+      const childEnv = childEnvWithResolvedArtifact(parentEnv, decision);
+      expect(
+        Object.prototype.hasOwnProperty.call(childEnv, INTERNAL_CONFIG_OUTPUT_PATH_ENV),
+        `decision ${decision.kind} declared no compile path, so the variable must be absent`,
+      ).toBe(false);
+    }
+    expect(readInternalConfigOutputPath({ [INTERNAL_CONFIG_OUTPUT_PATH_ENV]: '  ' })).toBeUndefined();
+  });
+
   it('reads a blank channel value as no decision at all', () => {
     expect(readInternalArtifactPath({})).toBeUndefined();
     expect(readInternalArtifactPath({ [INTERNAL_ARTIFACT_PATH_ENV]: '' })).toBeUndefined();
@@ -140,7 +189,7 @@ describe('OS_BOOT_EMPTY — the artifact-reference refusal survives the move', (
   });
 });
 
-describe('resolveArtifactSource — the resolution ladder is unchanged', () => {
+describe('resolveArtifactBootSource — THE ladder, written once (#21501)', () => {
   let cwd: string;
   let home: string;
 
@@ -150,6 +199,8 @@ describe('resolveArtifactSource — the resolution ladder is unchanged', () => {
     writeFileSync(abs, '{}');
     return abs;
   };
+  const resolvedPath = (r: ReturnType<typeof resolveArtifactBootSource>) =>
+    (r.kind === 'resolved' ? r.path : undefined);
 
   beforeEach(() => {
     cwd = mkdtempSync(path.join(tmpdir(), 'os-artifact-cwd-'));
@@ -161,55 +212,143 @@ describe('resolveArtifactSource — the resolution ladder is unchanged', () => {
     }
   });
 
-  it('rung 1: --artifact wins over everything, including an operator OS_ARTIFACT_PATH', () => {
+  it('rung 1: --artifact wins over everything, an operator OS_ARTIFACT_PATH and OS_ARTIFACT_URL included', () => {
     const flagFile = write(cwd, 'build/pinned.json');
     write(cwd, 'dist/objectstack.json');
     write(home, 'dist/objectstack.json');
 
-    const r = resolveArtifactSource('build/pinned.json', home, {
+    const r = resolveArtifactBootSource({
+      flag: 'build/pinned.json',
       cwd,
-      env: { OS_ARTIFACT_PATH: '/from/env.json' },
+      homeDir: home,
+      env: { OS_ARTIFACT_PATH: '/from/env.json', OS_ARTIFACT_URL: 'https://cdn.example.com/ref.json' },
     });
-    expect(r?.path).toBe(flagFile);
+    expect(r).toMatchObject({ kind: 'resolved', rung: 'flag', path: flagFile });
   });
 
   it('rung 1: --artifact passes an http(s) URL through untouched', () => {
     const url = 'https://cdn.example.com/app.json';
-    expect(resolveArtifactSource(url, home, { cwd, env: {} })?.path).toBe(url);
+    expect(resolvedPath(resolveArtifactBootSource({ flag: url, cwd, homeDir: home, env: {} }))).toBe(url);
   });
 
-  it('rung 2: $OS_ARTIFACT_PATH wins over both auto-detected locations', () => {
+  it('rung 1: a named --artifact is not existence-checked — a missing one is the child\'s loud refusal', () => {
+    expect(resolveArtifactBootSource({ flag: 'nope.json', cwd, env: {} }))
+      .toMatchObject({ kind: 'resolved', rung: 'flag', path: path.join(cwd, 'nope.json') });
+  });
+
+  it('rung 2a: OS_ARTIFACT_URL is a reference — resolved by the child, never here — and outranks OS_ARTIFACT_PATH', () => {
+    write(cwd, 'dist/objectstack.json');
+    const r = resolveArtifactBootSource({
+      cwd,
+      homeDir: home,
+      env: { OS_ARTIFACT_URL: '  https://cdn.example.com/ref.json  ', OS_ARTIFACT_PATH: 'custom/app.json' },
+    });
+    expect(r).toEqual({ kind: 'reference', url: 'https://cdn.example.com/ref.json' });
+  });
+
+  it('rung 2a: a blank OS_ARTIFACT_URL reads as unset', () => {
+    const cwdArtifact = write(cwd, 'dist/objectstack.json');
+    expect(resolvedPath(resolveArtifactBootSource({ cwd, env: { OS_ARTIFACT_URL: '   ' } }))).toBe(cwdArtifact);
+  });
+
+  it('rung 2b: $OS_ARTIFACT_PATH wins over both auto-detected locations', () => {
     write(cwd, 'dist/objectstack.json');
     write(home, 'dist/objectstack.json');
 
-    const r = resolveArtifactSource(undefined, home, {
-      cwd,
-      env: { OS_ARTIFACT_PATH: 'custom/app.json' },
-    });
-    // Anchored on the cwd, exactly as before — the ladder resolves it; the
-    // variable itself is inherited by the child untouched.
-    expect(r?.path).toBe(path.join(cwd, 'custom/app.json'));
+    const r = resolveArtifactBootSource({ cwd, homeDir: home, env: { OS_ARTIFACT_PATH: 'custom/app.json' } });
+    // Anchored on the cwd — the ladder resolves it; the variable itself is
+    // inherited by the child untouched.
+    expect(r).toMatchObject({ kind: 'resolved', rung: 'env-path', path: path.join(cwd, 'custom/app.json') });
   });
 
-  it('rung 2: $OS_ARTIFACT_PATH may itself be an http(s) URL', () => {
+  it('rung 2b: $OS_ARTIFACT_PATH may itself be an http(s) URL', () => {
     const url = 'https://cdn.example.com/env.json';
-    expect(resolveArtifactSource(undefined, home, { cwd, env: { OS_ARTIFACT_PATH: url } })?.path)
+    expect(resolvedPath(resolveArtifactBootSource({ cwd, homeDir: home, env: { OS_ARTIFACT_PATH: url } })))
       .toBe(url);
   });
 
   it('rung 3: <cwd>/dist/objectstack.json wins over <home>/dist', () => {
     const cwdArtifact = write(cwd, 'dist/objectstack.json');
     write(home, 'dist/objectstack.json');
-    expect(resolveArtifactSource(undefined, home, { cwd, env: {} })?.path).toBe(cwdArtifact);
+    expect(resolveArtifactBootSource({ cwd, homeDir: home, env: {} }))
+      .toMatchObject({ kind: 'resolved', rung: 'cwd-dist', path: cwdArtifact });
   });
 
-  it('rung 4: <home>/dist/objectstack.json is the last resort', () => {
+  it('rung 4: <home>/dist/objectstack.json is the last artifact rung — and only for a door that passes a home', () => {
     const homeArtifact = write(home, 'dist/objectstack.json');
-    expect(resolveArtifactSource(undefined, home, { cwd, env: {} })?.path).toBe(homeArtifact);
+    expect(resolveArtifactBootSource({ cwd, homeDir: home, env: {} }))
+      .toMatchObject({ kind: 'resolved', rung: 'home-dist', path: homeArtifact });
+    // `os dev` passes no home: its home is per-run state, never an artifact source.
+    expect(resolveArtifactBootSource({ cwd, env: {} })).toEqual({ kind: 'unresolved' });
   });
 
-  it('rung 5: nothing reachable resolves to undefined', () => {
-    expect(resolveArtifactSource(undefined, home, { cwd, env: {} })).toBeUndefined();
+  it('rung 5: nothing reachable is `unresolved` — what is left is the cwd config', () => {
+    expect(resolveArtifactBootSource({ cwd, homeDir: home, env: {} })).toEqual({ kind: 'unresolved' });
+  });
+});
+
+describe('cwdConfigJoinsBoot — the last rung, one predicate for both ends (#21501)', () => {
+  const projectDir = path.join(tmpdir(), 'os-project');
+  const configPath = path.join(projectDir, 'objectstack.config.ts');
+  const ownArtifact = path.join(projectDir, 'dist', 'objectstack.json');
+
+  it('a config takes part when nothing above it answered', () => {
+    expect(cwdConfigJoinsBoot({ configExists: true, configPath, artifact: { kind: 'none' } })).toBe(true);
+  });
+
+  it('a config takes part when the artifact IS its own compiled output — however the path is spelled', () => {
+    expect(cwdConfigJoinsBoot({ configExists: true, configPath, artifact: { kind: 'path', path: ownArtifact } }))
+      .toBe(true);
+    expect(isConfigCompiledArtifact(path.join(projectDir, 'dist', '.', 'objectstack.json'), configPath)).toBe(true);
+  });
+
+  it('a config does NOT take part beside any other named artifact — leg 1 and leg 2 of the card', () => {
+    for (const other of [
+      path.join(projectDir, 'build', 'pinned.json'),
+      path.join(tmpdir(), 'elsewhere', 'objectstack.json'),
+      path.join(projectDir, '.objectstack', 'dist', 'objectstack.json'),
+      'https://cdn.example.com/objectstack.json',
+    ]) {
+      expect(
+        cwdConfigJoinsBoot({ configExists: true, configPath, artifact: { kind: 'path', path: other } }),
+        `${other} must boot alone, not under the cwd config`,
+      ).toBe(false);
+    }
+  });
+
+  it('a config takes part when the artifact is where THIS command compiled it — a named path (os dev under OS_ARTIFACT_PATH)', () => {
+    const named = path.join(projectDir, 'build', 'named.json');
+    expect(cwdConfigJoinsBoot({
+      configExists: true,
+      configPath,
+      artifact: { kind: 'path', path: named, configCompiledTo: named },
+    })).toBe(true);
+    expect(isConfigCompiledArtifact(named, configPath, path.join(projectDir, 'build', '.', 'named.json'))).toBe(true);
+    // Declaring a compile path does not make a DIFFERENT artifact the config's own,
+    expect(cwdConfigJoinsBoot({
+      configExists: true,
+      configPath,
+      artifact: { kind: 'path', path: path.join(tmpdir(), 'elsewhere.json'), configCompiledTo: named },
+    })).toBe(false);
+    // and a URL is never a place a config was compiled to.
+    expect(isConfigCompiledArtifact('https://cdn.example.com/a.json', configPath, 'https://cdn.example.com/a.json'))
+      .toBe(false);
+    // The conventional path stays the config's own output beside a declared one.
+    expect(isConfigCompiledArtifact(ownArtifact, configPath, named)).toBe(true);
+  });
+
+  it('a config does NOT take part under a reference (OS_ARTIFACT_URL)', () => {
+    expect(cwdConfigJoinsBoot({ configExists: true, configPath, artifact: { kind: 'reference' } })).toBe(false);
+  });
+
+  it('no config never takes part', () => {
+    for (const artifact of [
+      { kind: 'none' },
+      { kind: 'reference' },
+      { kind: 'path', path: ownArtifact },
+    ] as const) {
+      expect(cwdConfigJoinsBoot({ configExists: false, configPath, artifact })).toBe(false);
+    }
   });
 });
 
@@ -309,5 +448,64 @@ describe('structural: the supervisors never write the operator knob', () => {
     // ...and the text scan this replaced reports the same specimen clean.
     const textScanned = specimen.replace(/\/\*[\s\S]*?\*\//g, '');
     expect(/OS_ARTIFACT_PATH\s*:/.test(textScanned)).toBe(false);
+  });
+});
+
+describe('structural: the supervisors carry no private copy of the ladder (#21501)', () => {
+  /**
+   * `start` and `dev` each used to read the operator's artifact variables
+   * themselves, in their own order — and `dev`'s order had no
+   * `OS_ARTIFACT_URL` rung, which is how `--artifact` came to lose to the
+   * reference. Every rung is now read in `utils/artifact-precedence.ts` alone.
+   * A READ of either variable reappearing in a supervisor is a second copy of
+   * the order starting to grow, so it is refused here by the AST (strings and
+   * comments that merely NAME the variables stay free).
+   */
+  const ARTIFACT_VARS = new Set(['OS_ARTIFACT_PATH', 'OS_ARTIFACT_URL']);
+
+  const artifactVarReadsIn = (file: string, src: string): string[] => {
+    const sourceFile = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+    const hits: string[] = [];
+    const at = (node: ts.Node) =>
+      `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1}`;
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAccessExpression(node) && ARTIFACT_VARS.has(node.name.text)) {
+        hits.push(`${at(node)} ${node.getText(sourceFile)}`);
+      }
+      if (
+        ts.isElementAccessExpression(node)
+        && ts.isStringLiteral(node.argumentExpression)
+        && ARTIFACT_VARS.has(node.argumentExpression.text)
+      ) {
+        hits.push(`${at(node)} ${node.getText(sourceFile)}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    return hits;
+  };
+  const artifactVarReads = (file: string): string[] =>
+    artifactVarReadsIn(file, readFileSync(new URL(`./${file}`, import.meta.url), 'utf8'));
+
+  for (const file of ['start.ts', 'dev.ts']) {
+    it(`${file} reads neither artifact variable itself — it asks resolveArtifactBootSource`, () => {
+      expect(
+        artifactVarReads(file),
+        `${file} must resolve the artifact through utils/artifact-precedence.ts, never by reading `
+        + 'OS_ARTIFACT_PATH / OS_ARTIFACT_URL itself: a second reading is a second copy of the order.',
+      ).toEqual([]);
+    });
+  }
+
+  it('the detector sees both spellings of a read — and not a name inside a string', () => {
+    const specimen = [
+      'const a = process.env.OS_ARTIFACT_URL;',
+      "const b = env['OS_ARTIFACT_PATH'];",
+      "printKV('Artifact', `${x} (OS_ARTIFACT_URL)`); // OS_ARTIFACT_PATH in a comment",
+    ].join('\n');
+    expect(artifactVarReadsIn('specimen.ts', specimen)).toEqual([
+      'specimen.ts:1 process.env.OS_ARTIFACT_URL',
+      "specimen.ts:2 env['OS_ARTIFACT_PATH']",
+    ]);
   });
 });

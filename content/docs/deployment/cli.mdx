@@ -181,7 +181,7 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 
 | Flag | Env equivalent | Purpose |
 |---|---|---|
-| `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
+| `-a, --artifact <path\|url>` | `OS_ARTIFACT_URL` / `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
 | `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` |
 | `--database-auth-token <t>` | `OS_DATABASE_AUTH_TOKEN` | libsql/Turso token |

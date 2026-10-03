@@ -81,8 +81,9 @@ export const RESERVED_COMPONENT_TYPE_NAMESPACES: ReadonlySet<string> = new Set(
  * measured string-arm registrations that DID get a row — `element:metadata_viewer`,
  * `record:line_items`, the plugin console widgets, the `object-*` blocks — plus
  * every type the vocabulary RETIRED by name, whose row is kept on purpose so the
- * readers that dispatch on it keep recognising the name: `user:profile`, and the
- * retired-with-tombstones `element:filter` / `element:form`), and the
+ * readers that dispatch on it keep recognising the name: `user:profile`,
+ * `ai:chat_window`, and the retired-with-tombstones `element:filter` /
+ * `element:form`), and the
  * string-arm ledger above.
  *
  * KNOWN is not the same as WRITABLE. A retired type stays known here — that is

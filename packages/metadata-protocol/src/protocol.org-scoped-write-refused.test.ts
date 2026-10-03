@@ -604,6 +604,18 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
         expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
     });
 
+    it('walled: an org-scoped withdrawal through `sharing.enabled` alone is refused the same way', async () => {
+        const { protocol, rows } = makeTenancyProtocol(null);
+        await publishEnvWide(protocol);
+        const body = FORM_VIEW(true);
+        body.config.sharing.enabled = false;
+
+        await expect(protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: body, organizationId: 'org_a',
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+    });
+
     it('walled: an org-scoped draft of the withdrawal is refused too', async () => {
         const { protocol, rows } = makeTenancyProtocol(null);
         await publishEnvWide(protocol);

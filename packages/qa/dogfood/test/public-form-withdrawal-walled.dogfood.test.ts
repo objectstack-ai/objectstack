@@ -203,4 +203,30 @@ describe('walled posture: withdrawing a public form from anonymous intake', () =
     expect([open.get, open.submit]).toEqual([200, 201]);
     expect(open.landed).toHaveLength(1);
   });
+
+  it('withdrawn through `sharing.enabled: false` alone: refused org-scoped; env-wide both doors 404 and nothing lands', async () => {
+    const withEnabled = (enabled: boolean): Record<string, any> => {
+      const body = withAnonymous(true);
+      body.config.sharing.enabled = enabled;
+      return body;
+    };
+    await setActive(orgId);
+    const refused = await put(withEnabled(false));
+    expect(refused.status, JSON.stringify(refused.json)).toBe(403);
+    expect(JSON.stringify(refused.json)).toMatch(/NOT_OVERRIDABLE/);
+
+    await setActive(null);
+    const off = await put(withEnabled(false));
+    expect(off.status, JSON.stringify(off.json)).toBe(200);
+    const closed = await probe();
+    expect([closed.get, closed.getCode, closed.submit, closed.submitCode])
+      .toEqual([404, 'FORM_NOT_FOUND', 404, 'FORM_NOT_FOUND']);
+    expect(closed.landed).toHaveLength(0);
+
+    const on = await put(withEnabled(true));
+    expect(on.status, JSON.stringify(on.json)).toBe(200);
+    const open = await probe();
+    expect([open.get, open.submit]).toEqual([200, 201]);
+    expect(open.landed).toHaveLength(1);
+  });
 });
