@@ -1106,7 +1106,7 @@ Sort field and direction pair
 | **title** | `string \| Record<string, string>` | optional | Drill-down panel title; defaults to the metric label |
 | **icon** | `string` | optional | Lucide icon name drawn in the metric tile header, inside the `colorVariant`-tinted square. Read on this component — `ObjectMetricWidget` forwards it to `MetricWidget`, which resolves it with `getLazyIcon` (the `LazyIcon` module: kebab-case or PascalCase, degrading to the `Database` glyph on an unknown name). |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Icon container color variant |
-| **aggregate** | `any` | optional | Aggregation config (`{ field, function, groupBy? }`) run against the object |
+| **aggregate** | `{ field?: string; function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; groupBy?: string \| object }` | optional | Aggregation run against the object: `{ field?, function, groupBy? }` — `function` one of count / sum / avg / min / max / count_distinct (`field` needed for all but count), `groupBy` a field name or a `{ field, dateGranularity }` node, absent for one number over every row |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **format** | `string` | optional | Number format pattern (e.g. '0,0', '$0,0', '0%') |
 | **currency** | `string` | optional | ISO currency code (e.g. 'USD') — enables currency formatting |
@@ -1115,9 +1115,17 @@ Sort field and direction pair
 | **invert** | `boolean` | optional | Display `1 - value` for opposite-signal gauges (compliance/uptime) |
 | **variant** | `Enum<'card' \| 'bare'>` | optional | Layout variant |
 | **fallbackValue** | `string \| number` | optional | Static value shown when no data source is available |
-| **trend** | `any` | optional | Static trend info (`{ value, label, direction }`) |
+| **trend** | `{ value: number; label?: string \| Record<string, string>; direction?: Enum<'up' \| 'down' \| 'neutral'> }` | optional | Static trend badge `{ value, label?, direction? }` — `value` painted as a percentage, `direction` up / down / neutral. A `compareTo`-derived trend replaces it |
 | **drillDown** | `any` | optional | Click-through drill config — opens the underlying records |
 | **compareTo** | `any` | optional | Period-over-period comparison (`{ kind: 'previousPeriod' \| 'previousYear' }`) |
+
+### Nested Shape: `ObjectMetricProps.aggregate`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | optional | Field to aggregate — required for every function but `count`, which counts rows |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | Aggregation function — `count`, `sum`, `avg`, `min`, `max` or `count_distinct` |
+| **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }` | optional | Field the rows are grouped by, or a `{ field, dateGranularity }` date-bucket node. Omit it for the one number over every row (`_all`) |
 
 ### Nested Shape: `ObjectMetricProps.filter[number]`
 
@@ -1128,6 +1136,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectMetricProps.trend`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `number` | ✅ | The change shown on the badge, painted as a percentage (`12` reads `12%`) |
+| **label** | `string \| Record<string, string>` | optional | Badge caption — a string or an inline locale map. The tile-level `description` outranks it in the one caption slot they share |
+| **direction** | `Enum<'up' \| 'down' \| 'neutral'>` | optional | Arrow beside the value; omit it for no arrow |
 
 
 ---
