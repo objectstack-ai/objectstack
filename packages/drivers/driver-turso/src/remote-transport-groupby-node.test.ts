@@ -243,7 +243,7 @@ async function localDriver(): Promise<SqlDriver> {
  * server is needed.
  */
 function unmodeledDriver(): SqlDriver {
-  return new SqlDriver({ client: 'mssql', connection: { server: '127.0.0.1' } });
+  return new SqlDriver({ client: 'mssql' });
 }
 
 describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {

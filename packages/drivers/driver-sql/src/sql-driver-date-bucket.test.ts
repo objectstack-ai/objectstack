@@ -160,7 +160,7 @@ describe('SqlDriver date bucket (dateGranularity)', () => {
      * the statement is built, so no server is needed.
      */
     it('refuses a granularity on a client with no bucket expression, with NOT_IMPLEMENTED / 501', async () => {
-      const unmodeled = new SqlDriver({ client: 'mssql', connection: { server: '127.0.0.1' } });
+      const unmodeled = new SqlDriver({ client: 'mssql' });
       try {
         expect(unmodeled.supports.queryDateGranularity).toEqual({});
         const err = await unmodeled
