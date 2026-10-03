@@ -126,12 +126,6 @@ function makeHarness(rows: StoredRow[]) {
         );
     };
     const engine: any = {
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
-            if (table !== 'sys_metadata') return [];
-            const where = opts?.where ?? {};
-            finds.push({ ...where });
-            return matching(where);
-        },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
             if (table !== 'sys_metadata') return undefined;
             const where = opts?.where ?? {};
@@ -149,6 +143,12 @@ function makeHarness(rows: StoredRow[]) {
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
         },
+    };
+    engine.find = async (table: string, opts?: { where?: Record<string, unknown> }) => {
+        if (table !== 'sys_metadata') return [];
+        const where = opts?.where ?? {};
+        finds.push({ ...where });
+        return matching(where);
     };
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
     return { protocol, findOnes, finds };
