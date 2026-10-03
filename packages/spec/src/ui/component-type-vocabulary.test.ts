@@ -126,6 +126,23 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
     expect(hasReservedComponentNamespace('user:profile')).toBe(false);
     expect(isKnownComponentType('user:profile')).toBe(true);
   });
+
+  /**
+   * #21504 — `ai:chat_window` is retired BY NAME the `user:profile` way: out
+   * of the enum, KNOWN through its kept `ComponentPropsMap` row, and out of the
+   * typo candidates so no suggester renames an author into it. Unlike
+   * `user:profile`, its namespace STAYS reserved — `ai:suggestion` still
+   * populates `ai:` — so the namespace list above is unchanged and the
+   * `component-type-unknown` rule keeps claiming `ai:`.
+   */
+  it('ai:chat_window is known through its kept row, not a candidate, and `ai:` stays reserved (#21504)', () => {
+    expect(PageComponentType.options).not.toContain('ai:chat_window');
+    expect(isKnownComponentType('ai:chat_window')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).not.toContain('ai:chat_window');
+    expect(hasReservedComponentNamespace('ai:chat_window')).toBe(true);
+    // Lit control: the kept member of the same namespace is a candidate.
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('ai:suggestion');
+  });
 });
 
 describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {

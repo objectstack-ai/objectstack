@@ -1287,14 +1287,15 @@ describe('ComponentPropsMap', () => {
   });
 
   it('should contain AI components', () => {
+    // `ai:chat_window`'s row is KEPT as a refusal door (#21504) — see the
+    // describe below; it no longer parses any bag.
     expect(ComponentPropsMap['ai:chat_window']).toBeDefined();
     expect(ComponentPropsMap['ai:suggestion']).toBeDefined();
   });
 
-  it('should parse ai:chat_window with default', () => {
-    const result = ComponentPropsMap['ai:chat_window'].parse({});
-    expect(result.mode).toBe('float');
-  });
+  // `should parse ai:chat_window with default` LEFT at #21504 — the row
+  // refuses every bag now; its flipped twin is the first pin of the
+  // `ai:chat_window is retired` describe below.
 
   it('should parse ai:suggestion with optional context', () => {
     const result = ComponentPropsMap['ai:suggestion'].parse({});
@@ -1438,6 +1439,119 @@ describe('ComponentPropsMap', () => {
 
     it('the open string arm stays open — only the retired NAME is refused', () => {
       for (const type of ['custom.widget', 'mcp:connect-agent', 'object-grid', 'user:avatar']) {
+        expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
+      }
+    });
+  });
+
+  // #21504 — triage ruling 5963897014: retire `ai:chat_window` under ADR-0049
+  // enforce-or-remove, refused BY NAME, the `user:profile` precedent above.
+  // Zero producers measured, and objectui registers no renderer on purpose —
+  // the console's floating chat overlay is the AI chat entry point. Same pin
+  // shape as that describe: `code` + `path` + `params` + the prescription's
+  // first sentence at each door, never a bare `toThrow()`, which greens on any
+  // error. The control is `ai:suggestion`, the member of the same namespace the
+  // ruling keeps (it has a placeholder renderer — a different class).
+  describe('ai:chat_window is retired, refused by name (#21504)', () => {
+    const FIRST_SENTENCE =
+      /^`ai:chat_window` was removed in @objectstack\/spec 17 \(ADR-0049\) — no renderer for it ever shipped: the console leaves it unregistered on purpose, so a page that placed one validated clean and then drew "Unknown component type" in front of an end user, and its `mode`, `agentId`, `context` and `aria` props configured nothing\./;
+    // The supported entry point is NAMED, and the fix is imperative.
+    const ENTRY_POINT = 'the floating chat overlay the console mounts on every page is the supported entry point';
+    const FIX = 'Delete the `ai:chat_window` component node';
+    // `check:doc-authoring` (maintainer ruling 2026-08-12): a prescription
+    // printed at the customer carries no citation-shaped issue id.
+    const ISSUE_ID = /#\d{3,}/;
+
+    it('the map carries the prescription: the overlay named, the fix imperative, no tracker number', () => {
+      const guidance = RETIRED_PAGE_COMPONENT_TYPES.get('ai:chat_window');
+      expect(guidance).toBeTypeOf('string');
+      expect(guidance!).toMatch(FIRST_SENTENCE);
+      expect(guidance!).toContain(ENTRY_POINT);
+      expect(guidance!).toContain(FIX);
+      expect(guidance!).toContain('ADR-0049');
+      expect(guidance!).not.toMatch(ISSUE_ID);
+    });
+
+    it('the ComponentPropsMap row refuses even the empty bag — the flipped accept pin', () => {
+      for (const bag of [{}, { mode: 'float' }, { agentId: 'ask', context: { recordId: 'r1' } }]) {
+        const r = ComponentPropsMap['ai:chat_window'].safeParse(bag);
+        expect(r.success, JSON.stringify(bag)).toBe(false);
+        if (r.success) continue;
+        expect(r.error.issues).toHaveLength(1);
+        const issue = r.error.issues[0]!;
+        // The `retiredKey` channel at element grain: `expected: 'never'`.
+        expect(issue.code).toBe('invalid_type');
+        expect(issue.path).toEqual([]);
+        expect(issue.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get('ai:chat_window'));
+      }
+    });
+
+    it('PageComponentSchema refuses the node by name at `type`, bare or populated', () => {
+      for (const properties of [undefined, {}, { mode: 'inline' }]) {
+        const r = PageComponentSchema.safeParse(
+          properties === undefined ? { type: 'ai:chat_window' } : { type: 'ai:chat_window', properties },
+        );
+        expect(r.success, `properties=${JSON.stringify(properties)}`).toBe(false);
+        if (r.success) continue;
+        expect(r.error.issues).toHaveLength(1);
+        const issue = r.error.issues[0]!;
+        expect(issue.code).toBe('custom');
+        expect(issue.path).toEqual(['type']);
+        expect(issue.message).toMatch(FIRST_SENTENCE);
+        expect((issue as { params?: Record<string, unknown> }).params).toEqual({ retiredComponentType: 'ai:chat_window' });
+      }
+    });
+
+    it('PageSchema refuses an authored page at the element path — the door `os validate` parses', () => {
+      const r = PageSchema.safeParse({
+        name: 'account_detail',
+        label: 'Account',
+        regions: [{
+          name: 'main',
+          components: [
+            { type: 'page:header', properties: { title: 'Account' } },
+            { type: 'ai:chat_window', properties: { mode: 'sidebar' } },
+          ],
+        }],
+      });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const located = r.error.issues.filter((i) => i.code === 'custom');
+      expect(located).toHaveLength(1);
+      expect(located[0]!.path).toEqual(['regions', 0, 'components', 1, 'type']);
+      expect(located[0]!.message).toMatch(FIRST_SENTENCE);
+    });
+
+    it('PageComponentType itself refuses the member with the prescription — the enum error map', () => {
+      expect(PageComponentType.options).not.toContain('ai:chat_window');
+      const r = PageComponentType.safeParse('ai:chat_window');
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues[0]!.code).toBe('invalid_value');
+      expect(r.error.issues[0]!.message).toMatch(FIRST_SENTENCE);
+      // Only a value that USED to be legal gets the prescription — a stranger
+      // keeps zod's own enum message.
+      const stranger = PageComponentType.safeParse('ai:chat');
+      expect(stranger.success).toBe(false);
+      if (!stranger.success) expect(stranger.error.issues[0]!.message).not.toContain('floating chat overlay');
+    });
+
+    it('control: `ai:suggestion`, the member the ruling keeps, still parses at every door', () => {
+      expect(RETIRED_PAGE_COMPONENT_TYPES.has('ai:suggestion')).toBe(false);
+      expect(PageComponentType.options).toContain('ai:suggestion');
+      expect(PageComponentType.safeParse('ai:suggestion').success).toBe(true);
+      expect(ComponentPropsMap['ai:suggestion'].safeParse({ context: 'account' }).success).toBe(true);
+      expect(PageComponentSchema.safeParse({ type: 'ai:suggestion', properties: { context: 'account' } }).success).toBe(true);
+      const page = PageSchema.safeParse({
+        name: 'account_detail',
+        label: 'Account',
+        regions: [{ name: 'main', components: [{ type: 'ai:suggestion' }] }],
+      });
+      expect(page.success).toBe(true);
+    });
+
+    it('the open string arm stays open — only the retired NAME is refused', () => {
+      for (const type of ['ai:assistant', 'custom.chat_window', 'object-grid']) {
         expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
       }
     });

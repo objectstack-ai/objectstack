@@ -6084,6 +6084,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`translation-widget-sub-caption-retired`.',
   },
   {
+    id: 'ui-ai-chat-window-retired',
+    order: 65,
+    text:
+      'It also retires the `ai:chat_window` page element (#21504, ADR-0049 enforce-or-remove), '
+      + 'the `user:profile` shape one namespace over: no renderer for it ever shipped, and none is '
+      + 'wanted — the console leaves it unregistered on purpose, because the floating chat overlay '
+      + 'it mounts on every page is the supported AI chat entry point — so a page that placed one '
+      + 'validated clean and drew "Unknown component type", and its four props configured nothing. '
+      + 'The name leaves `PageComponentType` and is refused by name at the node, its '
+      + '`ComponentPropsMap` row stays as a whole-bag refusal carrying the same prescription, and '
+      + 'the props def `AIChatWindowProps` is unpublished. No conversion is registered: the only '
+      + 'edit is deleting the node, a layout decision that is the author\'s. Its D3 record is the '
+      + 'semantic entry `ui-ai-chat-window-retired`; `ai:suggestion` is unchanged.',
+  },
+  {
     id: 'ui-form-layout-inline-grid-retired',
     order: 40,
     text:
@@ -18799,6 +18814,53 @@ const step18: MigrationStep = {
         + 'both fulfilling shapes and the runtime that fulfils each; the author adds the shape '
         + 'they meant or drops the flag.',
     },
+    // #21504 — the D3 record of the `ai:chat_window` retirement (ADR-0049
+    // enforce-or-remove; triage ruling 5963897014: retire, refused BY NAME through
+    // `RETIRED_PAGE_COMPONENT_TYPES`, the `user:profile` precedent of #14159). There
+    // is no D2 half: the element's four keys left with its props def, so there is no
+    // key a walker could strip and leave a valid node behind, and deleting an
+    // authored page node is a layout decision a mechanical conversion must not make
+    // (the `element-filter-removed` docblock's rule). What the chain owes the
+    // upgrader is the delegation itself, in writing — the `element:filter` /
+    // `element:form` node entry's shape, for a node the parse now refuses by name.
+    //
+    // The replacement is not new prose: it is the node-level refusal message in
+    // `RETIRED_PAGE_COMPONENT_TYPES` (ui/page.zod.ts), so the door that refuses and
+    // the chain that prescribes carry one instruction.
+    {
+      id: 'ui-ai-chat-window-retired',
+      surface:
+        'page.component.ai:chat_window — the component node, with every key its props bag '
+        + 'declared (`mode`, `agentId`, `context`, `aria`), in regions, named slots and nested '
+        + 'containers alike',
+      replacement:
+        'Delete the component node and put nothing in its place: AI chat is not a page element, '
+        + 'and the floating chat overlay the console mounts on every page is the supported entry '
+        + 'point. To choose which platform agent the overlay answers with — what `agentId` reached '
+        + 'for — set the app\'s `defaultAgent` (a platform agent: `ask`, or `build` on an authoring '
+        + 'surface). `mode`, `context` and `aria` have no counterpart on the page: none of them was '
+        + 'ever read, and the overlay is not configured per page',
+      reason:
+        'No renderer for `ai:chat_window` ever shipped in objectui, framework or cloud, and none is '
+        + 'wanted: the console leaves it unregistered on purpose so that a page naming it fails '
+        + 'loudly, and Studio\'s page palette excludes it. So the element and its four keys were a '
+        + 'capability claim nothing kept — a page that placed one validated clean and drew "Unknown '
+        + 'component type" in front of an end user. Zero producers were measured in objectstack, '
+        + 'cloud and hotcrm (one comment naming it as dropped). The name is now refused at '
+        + '`PageComponentSchema.type`, its `ComponentPropsMap` row refuses every props bag with the '
+        + 'same prescription, and the enum no longer lists it; `ai:suggestion` is unchanged. No '
+        + 'conversion is registered, because the only edit is deleting the node, and which region '
+        + 'closes up, holds something else, or keeps its slot is the author\'s judgment about a '
+        + 'page they composed — this entry is that delegation',
+      acceptanceCriteria:
+        'No `ai:chat_window` component remains in any page — regions, named slots and nested '
+        + 'containers alike. `os validate` is clean: a remaining node is reported at its own `type` '
+        + 'path with `params.retiredComponentType` naming `ai:chat_window`, so each one is named '
+        + 'individually rather than as one page-level failure. An app whose removed node named an '
+        + '`agentId` now names that platform agent in its `defaultAgent` instead, or leaves it unset '
+        + 'for the default `ask`. Replaying the 17 → 18 chain over the edited source then reports the '
+        + 'migrated stack schema-valid — `schemaValid: true` in `--json`',
+    },
     // The one key this close DECLARES rather than refuses is `dependsOn`, so an author
     // who wrote it keeps working and now has a contract saying so. Everything else
     // undeclared becomes a parse error. Registered as a structured TODO (ADR-0087 D3)
@@ -26692,6 +26754,21 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entries stay as history — gate (b2) of build-schemas.ts accepts an entry
     // naming a key the build no longer emits.
     'system/TrainingRecord',
+    // #21504 — `ui/AIChatWindowProps` (`mode`, `agentId`, `context`, `aria`) leaves
+    // with the `ai:chat_window` page element it described (ADR-0049
+    // enforce-or-remove; triage ruling 5963897014, the `user:profile` precedent of
+    // #14159). No renderer for the element ever shipped, so none of the four keys
+    // was read anywhere. Its only carrier, the `ComponentPropsMap['ai:chat_window']`
+    // row, is kept as a whole-bag refusal (`retiredComponentProps`) that answers
+    // with the element's retirement prescription, and the node itself is refused by
+    // name at `PageComponentSchema.type`. Upgraders get the D3 semantic entry
+    // `ui-ai-chat-window-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look.
+    'ui/AIChatWindowProps',
     // Commit 35ad101bc — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
