@@ -82,19 +82,25 @@ function sourceFiles(dir = SRC): string[] {
   return out.sort();
 }
 
-/** The file's code with its comments removed: a prose mention of a helper is not a copy of it. */
-function codeOf(file: string): string {
-  return readFileSync(join(SRC, file), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+/**
+ * Does `source` USE `name` as code: import it, declare it, or call it? A prose
+ * mention of a helper (a docblock's `{@link name}` or a backticked name) is
+ * not a copy of it, and no such mention is an import list, a declaration or a
+ * call, so no comment stripping is needed to tell them apart.
+ */
+function uses(source: string, name: string): boolean {
+  const imported = new RegExp(`import\\s*(type\\s*)?\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from`);
+  const declared = new RegExp(`\\b(function|const|let|var)\\s+${name}\\b`);
+  const called = new RegExp(`\\b${name}\\s*\\(`);
+  return imported.test(source) || declared.test(source) || called.test(source);
 }
 
-/** Which of `names` each file's code holds, keyed by file; files holding none are left out. */
+/** Which of `names` each file uses, keyed by file; files using none are left out. */
 function holders(names: readonly string[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const file of sourceFiles()) {
-    const code = codeOf(file);
-    const held = names.filter((name) => new RegExp(`\\b${name}\\b`).test(code));
+    const source = readFileSync(join(SRC, file), 'utf8');
+    const held = names.filter((name) => uses(source, name));
     if (held.length > 0) out[file] = held;
   }
   return out;
