@@ -206,7 +206,7 @@ export function declaredNoOperatorObjectColumn(def: unknown): NoOperatorObjectCo
  * [#20745] The columns every record carries whether or not the declared map
  * lists them, with the type each stores: the same three names `find` /
  * `findOne` add to their known set and the write gate admits unconditionally
- * (`PLATFORM_PROVISIONED_COLUMNS` in `engine.ts`), because the platform
+ * (`PLATFORM_PROVISIONED_COLUMNS` in `declared-read-columns.ts`), because the platform
  * provisions them rather than the author declaring them.
  */
 const PLATFORM_PROVISIONED_COLUMN_TYPES: ReadonlyMap<string, string> = new Map([

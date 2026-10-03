@@ -429,7 +429,7 @@ export class MongoDBDriver implements IDataDriver {
   }
 
   /**
-   * [#14428] A miss answers `null` — the arm `IDataDriver.update()` declares
+   * [commit ca3fd4b1a] A miss answers `null` — the arm `IDataDriver.update()` declares
    * (#13878) and the one `InMemoryDriver`, `SqlDriver`, `SqliteWasmDriver` and
    * `TursoDriver`'s local face already return.
    *

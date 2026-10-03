@@ -123,6 +123,7 @@ import {
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
+    type SearchFieldMeta,
     classifyDottedFilterHead,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
@@ -213,7 +214,6 @@ import {
     serveStoredHashTokens,
     serveStoredMetadataHashColumnRows,
     serveStoredMetadataHashColumns,
-    STORED_METADATA_UNSEARCHABLE_COLUMNS,
     storedMetadataHashEvaluateRefusal,
     storedMetadataSearchRefusal,
     type StoredHashDigest,
@@ -3968,6 +3968,13 @@ const FILTER_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']
  * produce one, but `POST /data/:object/query` is not the only door — the RPC
  * dispatcher and in-process callers hand over live objects — and a gate that
  * can hang the read path is worse than the defect it closes.
+ *
+ * [#21544] ⛔ This answers the ingress gate's question — does each named KEY
+ * exist — and its failure direction (a hole, never a false 400) is right only
+ * for that question. It is NOT what the stored-metadata family's evaluate
+ * refusals read: a filter can read a column without naming it as a key (a
+ * cross-field comparand), and a hole there is a leak, not a missing 400. That
+ * question has its own collector, {@link collectStoredMetadataFilterFields}.
  */
 function collectFilterFieldKeys(
     where: unknown,
@@ -3989,6 +3996,204 @@ function collectFilterFieldKeys(
         out.push(key);
     }
     return out;
+}
+
+/**
+ * [#21544] The stored-metadata family's ONE filter-field collector: every column
+ * a read query's filters READ, judged the way the family's evaluate refusals
+ * ({@link storedMetadataBodyPredicateRefusal},
+ * {@link storedMetadataHashEvaluateRefusal}) need it. The generic data door
+ * calls it, and so does the in-process reader-context seam in
+ * `@objectstack/runtime` (`stored-metadata-reader-seam.ts`), on the same query,
+ * so the two answer every filter identically. `[]` for an object outside the
+ * family ({@link isStoredMetadataBodyObject}) or a query that is not a record.
+ *
+ * The filter positions it reads are a read query's three: `where`, `filter`
+ * (the engine option alias a direct engine call may still carry) and each
+ * `aggregations[i].filter`. ⛔ Not `having`: its keys and references name the
+ * AGGREGATED row's columns — group keys and aggregation aliases — and the
+ * engine refuses any other name before a row exists, so a family column can
+ * never be read there, while an alias that happens to be spelled like one
+ * (`{ function: 'count', alias: 'metadata' }`) is a legitimate count.
+ *
+ * What counts as a read, and why it is more than the ingress gate's
+ * {@link collectFilterFieldKeys} collects. The first two rules are measured
+ * reaches at the generic data door before this collector existed (a family
+ * column evaluated, unrefused); the rest are the stricter collector's rules,
+ * adopted whole so the door and the seam agree — where measured, the door
+ * already refused those shapes elsewhere (its dotted-path rule, the engine's
+ * filter doors), and now the family's own refusal answers them first:
+ *
+ * - **A cross-field comparand is a read.** `{ name: { $eq: { $field: 'metadata' } } }`
+ *   compares each row's `name` with its stored body, and the SQL drivers
+ *   evaluate it: row presence discloses the referenced column exactly as a
+ *   filter on it would. Every node under a field key that carries a string
+ *   `$field` — an operator bag, a list member, an `addDays` offset — is a read
+ *   of that column: the reference shape `driver-sql` resolves (the spec's
+ *   `FieldReferenceSchema`), taken without its other refinements, so a
+ *   malformed reference is refused here rather than read.
+ * - **Depth never hides a read.** The walk is iterative and visits every node
+ *   once per reading, so it terminates on a self-referential live object
+ *   without a depth backstop: the ingress collector's backstop stops at 32
+ *   levels, and a body predicate nested below it was evaluated unrefused.
+ * - **A dotted name reads its head.** `metadata.x` reads `metadata`, as a
+ *   key and as a reference.
+ * - **A `$` key is never a column, and what sits beneath one is read as a
+ *   condition** — the three declared combinators and any other alike, so an
+ *   unrecognised combinator cannot hide a family column (the engine refuses
+ *   one anyway; the refusal just arrives first).
+ * - **A field key's value is read for references only.** The keys of a
+ *   nested-relation condition (`{ owner: { region: 'NA' } }`) are another
+ *   object's columns; a `$field` beneath one is still collected, so the
+ *   ambiguous spelling is refused rather than resolved.
+ * - **A `FilterArray` is lowered first** (`parseFilterAST`), the sugar a direct
+ *   engine call still honours on `where`, so either authoring form reads the
+ *   same.
+ *
+ * Each column is returned once.
+ */
+export function collectStoredMetadataFilterFields(object: string, query: unknown): string[] {
+    if (!isStoredMetadataBodyObject(object)) return [];
+    if (query === null || typeof query !== 'object' || Array.isArray(query)) return [];
+    const bag = query as Record<string, unknown>;
+    const filters: unknown[] = [bag.where, bag.filter];
+    if (Array.isArray(bag.aggregations)) {
+        for (const aggregation of bag.aggregations) {
+            if (aggregation !== null && typeof aggregation === 'object') {
+                filters.push((aggregation as { filter?: unknown }).filter);
+            }
+        }
+    }
+    const out = new Set<string>();
+    for (const filter of filters) collectFilterReads(isFilterAST(filter) ? parseFilterAST(filter) : filter, out);
+    return [...out];
+}
+
+/** The head segment of a column name: `metadata.x` reads `metadata`. */
+function headSegment(name: string): string {
+    return name.split('.')[0] as string;
+}
+
+/**
+ * The walk {@link collectStoredMetadataFilterFields} runs over one filter
+ * condition. A node is visited as a CONDITION (its non-`$` keys are columns)
+ * or as a COMPARAND (the value under a column key, where only a `$field`
+ * reference is a read), at most once per reading — two readings, because a
+ * live object reached once as a comparand and once as a condition must be read
+ * both ways.
+ */
+function collectFilterReads(root: unknown, out: Set<string>): void {
+    const seenAsCondition = new WeakSet<object>();
+    const seenAsComparand = new WeakSet<object>();
+    const pending: Array<{ node: unknown; condition: boolean }> = [{ node: root, condition: true }];
+    while (pending.length > 0) {
+        const { node, condition } = pending.pop() as { node: unknown; condition: boolean };
+        if (node === null || typeof node !== 'object') continue;
+        const seen = condition ? seenAsCondition : seenAsComparand;
+        if (seen.has(node)) continue;
+        seen.add(node);
+        if (Array.isArray(node)) {
+            for (const member of node) pending.push({ node: member, condition });
+            continue;
+        }
+        const record = node as Record<string, unknown>;
+        if (!condition && typeof record.$field === 'string') out.add(headSegment(record.$field));
+        for (const [key, value] of Object.entries(record)) {
+            if (condition && !key.startsWith('$')) {
+                out.add(headSegment(key));
+                pending.push({ node: value, condition: false });
+            } else {
+                pending.push({ node: value, condition });
+            }
+        }
+    }
+}
+
+/**
+ * The slice of an object definition {@link narrowStoredMetadataSearch} reads:
+ * the field map, the declared `searchableFields`, and the display field the
+ * search resolution falls back on.
+ */
+export interface StoredMetadataSearchSchema {
+    fields?: unknown;
+    searchableFields?: unknown;
+    nameField?: unknown;
+    displayNameField?: unknown;
+}
+
+/**
+ * [#21207, #21544] A `search` on a stored-metadata table never scans its body or
+ * content-hash columns — the ONE narrowing the generic data door and the
+ * in-process reader-context seam (`@objectstack/runtime`) both call, so a
+ * search answers the same through either.
+ *
+ * A search is a substring filter the engine evaluates over every column it
+ * scans, and with no `searchableFields` declared it scans every text-like
+ * column — the stored body and both stored hashes among them. Over those it is
+ * the verifier the filter refusals close: a guessed hash, or a guessed prefix
+ * of withheld credential material, returns the row exactly when it is right.
+ * The authority on which columns a search may never scan is the family's
+ * search predicate ({@link storedMetadataSearchRefusal}), asked per field:
+ *
+ * - an EXPLICIT field list — `searchFields`, else the object-form
+ *   `search.fields`, the engine's own precedence and both its shapes (a comma
+ *   string or an array) — naming one is refused, `INVALID_FIELD` / 400, the
+ *   evaluate refusals' envelope, under the caller's wire spelling of the slot
+ *   (`wireSpelling`, the door's; the bare canonical name when absent);
+ * - a search that names none is NARROWED: the object's resolved searchable set
+ *   ({@link resolveSearchFieldResolution}) minus those columns is returned, for
+ *   the caller to run as `searchFields` — the engine intersects an override
+ *   with that set and never widens it;
+ * - a set that narrows to nothing is refused rather than returned empty: an
+ *   empty override is ABSENT to the engine, which would then scan the whole
+ *   default set, these columns included.
+ *
+ * Returns `undefined` when the query runs as it is — an object outside the
+ * family, no search, an explicit list that passes, or no readable field map
+ * (the engine has none to expand a search over either; the same rule the door's
+ * field gates apply: a non-object, array or empty `fields`). Throws the refusal.
+ */
+export function narrowStoredMetadataSearch(
+    object: string,
+    query: Readonly<Record<string, unknown>>,
+    schema: StoredMetadataSearchSchema | null | undefined,
+    wireSpelling: Readonly<{ search?: string; searchFields?: string }> = {},
+): string[] | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const search = query.search;
+    const objectForm = search !== null && typeof search === 'object';
+    const objectFormFields = objectForm ? (search as Record<string, unknown>).fields : undefined;
+    const [explicit, param] = query.searchFields != null
+        ? [query.searchFields, wireSpelling.searchFields ?? 'searchFields']
+        : objectFormFields != null
+            ? [objectFormFields, wireSpelling.search ?? 'search']
+            : [undefined, ''];
+    const names: string[] = typeof explicit === 'string'
+        ? explicit.split(',').map((s) => s.trim()).filter(Boolean)
+        : Array.isArray(explicit) ? explicit.filter((f: unknown): f is string => typeof f === 'string') : [];
+    if (names.length > 0) {
+        const refusal = storedMetadataSearchRefusal(object, names, param);
+        if (refusal) throw refusal;
+        return undefined;
+    }
+    if (search == null) return undefined;
+    const fields = schema?.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
+        return undefined;
+    }
+    const { allowed } = resolveSearchFieldResolution({
+        fields: fields as Record<string, SearchFieldMeta>,
+        searchableFields: schema?.searchableFields as string[] | undefined,
+        displayField: (schema?.nameField ?? schema?.displayNameField) as string | undefined,
+    });
+    const searchParam = wireSpelling.search ?? 'search';
+    const narrowed = allowed.filter((field) => !storedMetadataSearchRefusal(object, [field], searchParam));
+    if (narrowed.length === 0) {
+        const refusal = storedMetadataSearchRefusal(object, allowed, searchParam);
+        if (refusal) throw refusal;
+        return undefined;
+    }
+    return narrowed;
 }
 
 /**
@@ -11559,62 +11764,6 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#21207] A `search` on a stored-metadata table never scans its body or
-     * content-hash columns ({@link STORED_METADATA_UNSEARCHABLE_COLUMNS}).
-     *
-     * A search is a substring filter the engine evaluates over every column it
-     * scans, and with no `searchableFields` declared it scans every text-like
-     * column — the stored body and both stored hashes among them. Over those
-     * it is the verifier the filter refusals close: a guessed hash, or a guessed
-     * prefix of withheld credential material, returns the row exactly when it
-     * is right. So an explicit field list naming one is refused
-     * (`INVALID_FIELD` / 400, the evaluate refusals' envelope), and a search
-     * that names none is handed to the engine with the object's searchable set
-     * minus those columns — the engine intersects an override with that set and
-     * never widens it. Runs after {@link assertSearchFieldsAreSearchable}, so a
-     * name that is not searchable at all keeps its own answer.
-     */
-    private narrowStoredMetadataSearch(
-        object: string,
-        options: Record<string, any>,
-        wireSpelling: Record<string, string>,
-    ): void {
-        if (!isStoredMetadataBodyObject(object)) return;
-        const objectForm = options.search !== null && typeof options.search === 'object';
-        const [explicit, param] = options.searchFields != null
-            ? [options.searchFields, wireSpelling.searchFields ?? 'searchFields']
-            : objectForm && options.search.fields != null
-                ? [options.search.fields, wireSpelling.search ?? 'search']
-                : [undefined, ''];
-        const names: string[] = typeof explicit === 'string'
-            ? explicit.split(',').map((s: string) => s.trim()).filter(Boolean)
-            : Array.isArray(explicit) ? explicit.filter((f: unknown): f is string => typeof f === 'string') : [];
-        if (names.length > 0) {
-            const refusal = storedMetadataSearchRefusal(object, names, param);
-            if (refusal) throw refusal;
-            return;
-        }
-        if (options.search == null) return;
-        const gate = this.resolveQueryFields(object);
-        // No field map: the engine has none to expand a search over either.
-        if (!gate) return;
-        const { allowed } = resolveSearchFieldResolution({
-            fields: gate.fields,
-            searchableFields: gate.schema?.searchableFields,
-            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
-        });
-        const narrowed = allowed.filter((field) => !STORED_METADATA_UNSEARCHABLE_COLUMNS.includes(field));
-        if (narrowed.length === 0) {
-            // An empty override is ABSENT to the engine, which would then scan
-            // the whole default set — these columns included. Refuse instead.
-            const refusal = storedMetadataSearchRefusal(object, allowed, wireSpelling.search ?? 'search');
-            if (refusal) throw refusal;
-            return;
-        }
-        options.searchFields = narrowed;
-    }
-
-    /**
      * [#4254] GROUP-BY axis. A grouping target the object does not have is
      * refused (`400 INVALID_FIELD`); a grouping target the spec cannot read is
      * refused as a shape (`400 INVALID_QUERY`).
@@ -12144,7 +12293,13 @@ export class ObjectStackProtocolImplementation implements
         }
         // [#21207] …and on a stored-metadata table a search never scans the body
         // or content-hash columns: refused when named, narrowed away otherwise.
-        this.narrowStoredMetadataSearch(request.object, options, wireSpelling);
+        // Runs after the searchability gate above, so a name that is not
+        // searchable at all keeps its own answer. [#21544] The ONE narrowing,
+        // a module function the in-process reader-context seam calls too.
+        const narrowedSearchFields = narrowStoredMetadataSearch(
+            request.object, options, this.engine?.registry?.getObject?.(request.object), wireSpelling,
+        );
+        if (narrowedSearchFields) options.searchFields = narrowedSearchFields;
 
         // Boolean fields
         for (const key of ['distinct', 'count']) {
@@ -12263,14 +12418,14 @@ export class ObjectStackProtocolImplementation implements
         // evaluates the body — a filter oracle that rebuilds a withheld
         // credential by probing, or an order over the same bytes — so it is
         // refused here, in the same shape as the grouping refusal, before the
-        // engine is asked. Field keys are collected the same way
-        // `assertFilterFieldsExist` reads them, so a nested-relation filter whose
-        // HEAD segment is the body column is caught too.
-        const aggregationFilterFields = Array.isArray(options.aggregations)
-            ? (options.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) =>
-                  collectFilterFieldKeys(a?.filter))
-            : [];
-        const filterFields = [...collectFilterFieldKeys(options.where), ...aggregationFilterFields];
+        // engine is asked. [#21544] The columns a filter READS are collected by
+        // the family's ONE collector, which the reader-context seam calls too:
+        // every key's head AND every cross-field `{ $field }` comparand, at any
+        // depth, in `where` and each `aggregations[i].filter` — so a filter that
+        // reads the body or a hash without naming it as a key (a comparand), or
+        // names it below the ingress collector's depth backstop, is refused like
+        // a direct one. `[]` outside the family.
+        const filterFields = collectStoredMetadataFilterFields(request.object, options);
         const sortFields = Array.isArray(options.orderBy)
             ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
             : [];

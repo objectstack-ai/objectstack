@@ -290,6 +290,14 @@ import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
 import { materializeDeclaredFields } from './declared-fields.js';
+// [#21571] The declared column set — the read verbs' default projection, their
+// explicit-projection filter and the write path's undeclared-key door, one list.
+import {
+  PLATFORM_PROVISIONED_COLUMNS,
+  declaredColumnSet,
+  rowsWithDeclaredColumnsOnly,
+  withDeclaredColumnsOnly,
+} from './declared-read-columns.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -1912,19 +1920,17 @@ function assertProjectionHasNoDottedPaths(
  *   because the partial-success path (`insertMany`) reports per row and must
  *   cull the bad rows instead of failing the batch around them.
  */
-const PLATFORM_PROVISIONED_COLUMNS = ['id', 'created_at', 'updated_at'] as const;
-
 function undeclaredWriteFieldErrors(
   object: string,
   schema: { fields?: unknown } | undefined,
   rows: readonly unknown[],
 ): Array<Error | undefined> {
   const out: Array<Error | undefined> = new Array(rows.length);
-  const fields = schema?.fields;
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return out;
-  const declared = new Set(Object.keys(fields as Record<string, unknown>));
-  if (declared.size === 0) return out;
-  for (const provisioned of PLATFORM_PROVISIONED_COLUMNS) declared.add(provisioned);
+  // [#21571] The declared set and its "no opinion" cases (no map, an array
+  // map, an empty map) are `declaredColumnSet`'s, shared with the read verbs'
+  // default projection — one answer to "is this a column of the object".
+  const declared = declaredColumnSet(schema);
+  if (!declared) return out;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
@@ -11894,13 +11900,12 @@ export class ObjectQL implements IObjectQLEngine {
     // projection is a different fact and no longer reaches this filter via
     // the engine — `assertProjectionHasNoDottedPaths` above refused it.
     if (_findSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
-      const known = new Set(Object.keys(_findSchema.fields));
       // Always allow the primary key + audit columns even if not present in
       // schema.fields. Without this, callers requesting `select=id,name`
       // silently get the `id` projected away, breaking record navigation.
-      known.add('id');
-      known.add('created_at');
-      known.add('updated_at');
+      // [#21571] The same three the default projection and the write door
+      // admit — `PLATFORM_PROVISIONED_COLUMNS`, one list.
+      const known = new Set<string>([...Object.keys(_findSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       // Whole names, no head-splitting: only plain entries reach here (the
       // dotted refusal above fired on anything carrying a '.').
       const filtered = ast.fields.filter(f => known.has(f));
@@ -11938,6 +11943,19 @@ export class ObjectQL implements IObjectQLEngine {
 
       try {
           let result = await driver.find(object, hookContext.input.ast as QueryAST, hookContext.input.options as any);
+
+          // [#21571] The read's default projection is the DECLARED field set:
+          // a column no metadata declares (a field retired in an upgrade,
+          // whose column additive sync leaves behind) never leaves the engine.
+          // Shaped here, on the rows as the driver returned them, so it holds
+          // whichever driver answered and whichever rung of a driver's
+          // recovery ladder answered (driver-sql retries `select('*')` when a
+          // projected statement names a missing column) — and before formulas,
+          // `expand`, file references and the hooks, so all of them see the
+          // declared record. See `declared-read-columns.ts`.
+          if (Array.isArray(result)) {
+            result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+          }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
           // [#20082] With the caller's permission map when a formula calls
@@ -12174,12 +12192,9 @@ export class ObjectQL implements IObjectQLEngine {
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
     // refused any dotted entry above, so none reaches this filter).
     if (_findOneSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
-      const known = new Set(Object.keys(_findOneSchema.fields));
       // Always allow the primary key + audit columns even if not present
-      // in schema.fields (matches `find()` behavior).
-      known.add('id');
-      known.add('created_at');
-      known.add('updated_at');
+      // in schema.fields (matches `find()` behavior, one list).
+      const known = new Set<string>([...Object.keys(_findOneSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       const filtered = ast.fields.filter(f => known.has(f));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
@@ -12214,6 +12229,10 @@ export class ObjectQL implements IObjectQLEngine {
       hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any);
 
       let result = await driver.findOne(objectName, hookContext.input.ast as QueryAST, hookContext.input.options as any);
+
+      // [#21571] Same default projection as `find`, same position: the
+      // declared field set, applied to the row as the driver returned it.
+      result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).

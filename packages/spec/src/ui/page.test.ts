@@ -900,7 +900,7 @@ describe('Page end-to-end', () => {
           components: [
             {
               type: 'element:text',
-              properties: { content: '# Order Dashboard', variant: 'heading' },
+              properties: { content: '# Order Dashboard', variant: 'h2' },
             },
             {
               type: 'element:number',
