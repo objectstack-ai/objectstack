@@ -283,9 +283,20 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `89cad75d5`; re-derived at that pin 2026-10-02 — `dataset-format.ts` and
-   * `date-display.ts` are byte-identical to `31971ff1e`, so every anchor below
-   * held unmoved and was re-READ in place. At `31971ff1e` (2026-10-01) both
+   * `ab1879721`; re-derived at that pin 2026-10-03 — `date-display.ts` is
+   * byte-identical to `89cad75d5`, so `formatDate` `445-480` and the ±7-day
+   * fallback `399` held unmoved and were re-READ in place; `dataset-format.ts`
+   * changed (+53/-36, objectui#11475: `scalePercent` scales at the storage
+   * its caller states, through the spec's `percentScaleOf`, instead of
+   * guessing from the value's magnitude), above `formatMeasureDate` in the
+   * percent-scaling helpers and below it in `formatMeasure`'s docblock (line
+   * for line) and its percent arm, so
+   * `formatMeasureDate` `:229-263` -> `:240-274`, its datetime arm `:259`-`:261`
+   * -> `:270`-`:272` and its call `:369` -> `:380` MOVED byte-identical,
+   * re-READ with the same reading below. At `89cad75d5` (2026-10-02)
+   * `dataset-format.ts` and `date-display.ts` were byte-identical to
+   * `31971ff1e`, so every anchor below held unmoved and was re-READ in place.
+   * At `31971ff1e` (2026-10-01) both
    * files were byte-identical to `e420df310`, so every anchor held unmoved and
    * was re-READ in place. At `e420df310` (2026-09-30)
    * `dataset-format.ts` was byte-identical to `db11afd49`, so `formatMeasureDate` `:229-263`, its call
@@ -330,17 +341,17 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * into and widening that published signature was refused) in
    * objectui
    * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
-   * non-numeric value through `formatMeasureDate` (`:229-263`, was `:229-264`
-   * and before that `:185-198`) at `:369`,
+   * non-numeric value through `formatMeasureDate` (`:240-274`, was `:229-263`,
+   * `:229-264` and before that `:185-198`) at `:380`,
    * whose date-only arm threads `format` into the STYLE parameter of
    * `formatDate` (`utils/date-display.ts:445-480`, was `:378-413`, `:355-390`, `:271-306`,
    * `:198-233` and before that `:131-164`, whose `relative` branch falls back to the absolute form
    * beyond ±7 days at `:399`, was `:332`, `:309`, `:225`, `:152` and `:117` — the fallback strips the style through
    * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
-   * `formatRelativeDate` (`:259`), `short` with
-   * `formatDateTime(v, { locale, style: 'compact' })` (`:260`) and everything
+   * `formatRelativeDate` (`:270`), `short` with
+   * `formatDateTime(v, { locale, style: 'compact' })` (`:271`) and everything
    * else — a date PATTERN included — with the bare
-   * `formatDateTime(v, { locale })` (`:261`).
+   * `formatDateTime(v, { locale })` (`:272`).
    * Teaching
    * the shared path a pattern grammar would change every list cell that reads
    * it, so that gap is still DOCUMENTED here rather than closed (objectui#7178

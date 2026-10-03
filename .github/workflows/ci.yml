@@ -1526,6 +1526,14 @@ jobs:
       - name: Run the non-SQL temporal backends under the skewed process zone
         env:
           TZ: America/New_York
+          # [#21564] The same URL the SQL legs of this job receive, for the
+          # postgres service this job already runs. `service-analytics` keys
+          # its live-PostgreSQL cells on it (`describe.skipIf(!config)`), so
+          # without this line they were named skips here and the job read as
+          # though ADR-0053 D-A3's live non-UTC PostgreSQL row had run. Core,
+          # formula, driver-memory and driver-mongodb do not read it. No
+          # `OS_EXPECT_LIVE_DIALECT_MATRIX` here: no test in this step reads it.
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           # The axis is only real if the zone actually took. Without this, a
           # dropped `TZ:` line silently returns the job to UTC coverage and
