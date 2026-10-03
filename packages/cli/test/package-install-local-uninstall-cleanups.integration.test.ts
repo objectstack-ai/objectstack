@@ -30,6 +30,10 @@
  * before the uninstall, so "no binding" is read off a row that existed, not off
  * an empty table.
  *
+ * A third order of events measures the re-seed window — DELETE, then a hot
+ * install of ANOTHER package, then restart — and records, as `it.fails`, the
+ * defect it found there; the block above that `describe` says what it is.
+ *
  * ## Spawn shape
  *
  * Shared with `package-install-local-boot-steps.integration.test.ts` (#21322):
@@ -81,6 +85,22 @@ const ARTIFACT = {
     name: PERMISSION_SET,
     label: 'Tasks App Task User',
     objects: { [TASK]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } },
+  }],
+};
+
+/**
+ * A second, unrelated package for the re-seed order of events: its hot install
+ * announces `metadata:reloaded`, which re-runs plugin-security's
+ * declared-permission seeding over every package the running kernel still holds.
+ */
+const OTHER_APP_ID = 'com.example.notesapp';
+const OTHER_ARTIFACT = {
+  manifest: { id: OTHER_APP_ID, namespace: 'notes_app', version: '0.1.0', type: 'app', name: 'Notes App' },
+  objects: [{
+    name: 'notes_app_note',
+    label: 'Note',
+    sharingModel: 'public_read_write',
+    fields: { name: { type: 'text', label: 'Name' } },
   }],
 };
 
@@ -245,6 +265,10 @@ interface Run {
   restarted?: Grants;
   /** The package's object after the restart — the uninstall's own effect, as the control. */
   object?: Answer;
+  /** Re-seed order only: the hot install of {@link OTHER_APP_ID} after the DELETE. */
+  otherInstall?: { exit: number | null; output: string };
+  /** Re-seed order only: same process, right after that second install. */
+  afterOtherInstall?: Grants;
 }
 
 /**
@@ -274,7 +298,7 @@ async function readAfterRestart(live: LiveStart, run: Run): Promise<void> {
   run.object = await http(live, 'GET', `/api/v1/data/${TASK}`, token);
 }
 
-const runs: Record<'hot' | 'restarted', Run> = { hot: {}, restarted: {} };
+const runs: Record<'hot' | 'restarted' | 'reseed', Run> = { hot: {}, restarted: {}, reseed: {} };
 
 beforeAll(async () => {
   const root = mkdtempSync(join(tmpdir(), 'install-local-uninstall-'));
@@ -282,6 +306,9 @@ beforeAll(async () => {
   const appDir = join(root, 'app');
   mkdirSync(join(appDir, 'dist'), { recursive: true });
   writeFileSync(join(appDir, 'dist', 'objectstack.json'), JSON.stringify(ARTIFACT, null, 2), 'utf8');
+  const otherAppDir = join(root, 'other-app');
+  mkdirSync(join(otherAppDir, 'dist'), { recursive: true });
+  writeFileSync(join(otherAppDir, 'dist', 'objectstack.json'), JSON.stringify(OTHER_ARTIFACT, null, 2), 'utf8');
   const port = randomPort();
 
   // ── order 1: hot install → DELETE → restart ────────────────────────────
@@ -313,7 +340,24 @@ beforeAll(async () => {
   const e = await bootStart(coldDir, coldHome, port);
   await readAfterRestart(e, runs.restarted);
   await stopGroup(e.child);
-}, 6 * BOOT_TIMEOUT_MS);
+
+  // ── order 3: hot install → DELETE → hot install of ANOTHER package → restart ──
+  // The DELETE does not withdraw the package from the running kernel, so it is
+  // still registered when the second install announces `metadata:reloaded`.
+  const reseedDir = join(root, 'reseed');
+  mkdirSync(reseedDir, { recursive: true });
+  const reseedHome = join(reseedDir, 'home');
+  const f = await bootStart(reseedDir, reseedHome, port);
+  const fSession = await authenticate(f);
+  runs.reseed.install = await packageInstall(appDir, f);
+  await grantThenUninstall(f, fSession, runs.reseed);
+  runs.reseed.otherInstall = await packageInstall(otherAppDir, f);
+  runs.reseed.afterOtherInstall = await readGrants(f, fSession.token, runs.reseed.setId!);
+  await stopGroup(f.child);
+  const g = await bootStart(reseedDir, reseedHome, port);
+  await readAfterRestart(g, runs.reseed);
+  await stopGroup(g.child);
+}, 8 * BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
@@ -358,4 +402,51 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
       });
     });
   }
+
+  // ── The re-seed window: MEASURED RED, reported for filing, not fixed here ──
+  //
+  // This DELETE leaves the package registered in the running kernel until the
+  // next restart (the response's own note says so), and plugin-security's
+  // `metadata:reloaded` subscriber re-runs the declared-permission seeding over
+  // every package the kernel holds. So another package's hot install before
+  // that restart re-projects the uninstalled package's set as a fresh
+  // `managed_by: package` row, and the restart leaves it orphaned: the package
+  // is gone, its set is not. The grant does NOT come back — the cleanup deleted
+  // the binding and the seeding writes none — and that half is pinned plainly.
+  //
+  // The two set readings are `it.fails`: each turns red the day its half is
+  // fixed, which is the cue to promote it to a plain assertion.
+  describe('hot install → DELETE → hot install of another package → restart (the re-seed window)', () => {
+    it('precondition: both installs landed, and the DELETE revoked the set and its grant', () => {
+      const run = runs.reseed;
+      expect(run.install?.exit, run.install?.output).toBe(0);
+      expect(run.otherInstall?.exit, run.otherInstall?.output).toBe(0);
+      expect(run.granted?.status, JSON.stringify(run.granted?.body)).toBe(201);
+      expect(rowsOf(run.before!.sets).map((r) => [r?.name, r?.managed_by, r?.package_id]))
+        .toEqual([[PERMISSION_SET, 'package', APP_ID]]);
+      expect(run.uninstall?.status, JSON.stringify(run.uninstall?.body)).toBe(200);
+      expect(rowsOf(run.after!.sets), JSON.stringify(run.after!.sets.body)).toEqual([]);
+      expect(rowsOf(run.after!.bindings), JSON.stringify(run.after!.bindings.body)).toEqual([]);
+    });
+
+    it('the grant stays revoked through the other install and the restart, and the package object is gone', () => {
+      const run = runs.reseed;
+      for (const answer of [run.afterOtherInstall!.sets, run.afterOtherInstall!.bindings, run.restarted!.sets, run.restarted!.bindings]) {
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+      }
+      expect(rowsOf(run.afterOtherInstall!.bindings), JSON.stringify(run.afterOtherInstall!.bindings.body)).toEqual([]);
+      expect(rowsOf(run.restarted!.bindings), JSON.stringify(run.restarted!.bindings.body)).toEqual([]);
+      expect(run.object?.status, JSON.stringify(run.object?.body)).toBe(404);
+    });
+
+    it.fails('KNOWN-BROKEN: the other package\'s hot install re-projects the uninstalled package\'s set (promote to a plain assertion once fixed)', () => {
+      const run = runs.reseed;
+      expect(rowsOf(run.afterOtherInstall!.sets), JSON.stringify(run.afterOtherInstall!.sets.body)).toEqual([]);
+    });
+
+    it.fails('KNOWN-BROKEN: that re-projected set survives the restart as an orphan row (promote to a plain assertion once fixed)', () => {
+      const run = runs.reseed;
+      expect(rowsOf(run.restarted!.sets), JSON.stringify(run.restarted!.sets.body)).toEqual([]);
+    });
+  });
 });
