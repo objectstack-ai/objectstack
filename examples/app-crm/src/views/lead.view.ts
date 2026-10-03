@@ -44,6 +44,54 @@ export const LeadViews = defineView({
       },
     },
   },
+  // The default form — what the create and edit surfaces render. The public
+  // Web-to-Lead form below stays a NAMED form: it is served by its slug, never
+  // as the create or edit form.
+  form: {
+    type: 'simple',
+    sections: [
+      {
+        name: 'lead_information',
+        label: 'Lead Information',
+        columns: 2,
+        fields: [
+          { field: 'name',     required: true },
+          { field: 'company' },
+          { field: 'email' },
+          { field: 'phone' },
+          { field: 'title' },
+          { field: 'source' },
+        ],
+      },
+      {
+        name: 'qualification',
+        label: 'Qualification',
+        columns: 2,
+        fields: [
+          { field: 'status',    required: true },
+          { field: 'lead_score' },
+          { field: 'assigned_to' },
+          { field: 'account' },
+        ],
+      },
+      {
+        name: 'conversion',
+        label: 'Conversion',
+        columns: 2,
+        fields: [
+          { field: 'converted_opportunity' },
+          { field: 'is_closed' },
+        ],
+      },
+      {
+        name: 'notes',
+        label: 'Notes',
+        columns: 1,
+        fields: [{ field: 'notes' }],
+      },
+    ],
+  },
+
   formViews: {
     /**
      * PUBLIC / ANONYMOUS — Web-to-Lead.
@@ -77,50 +125,6 @@ export const LeadViews = defineView({
         allowAnonymous: true,
         publicLink: '/forms/contact-us',
       },
-    },
-    default: {
-      type: 'simple',
-      sections: [
-        {
-          name: 'lead_information',
-          label: 'Lead Information',
-          columns: 2,
-          fields: [
-            { field: 'name',     required: true },
-            { field: 'company' },
-            { field: 'email' },
-            { field: 'phone' },
-            { field: 'title' },
-            { field: 'source' },
-          ],
-        },
-        {
-          name: 'qualification',
-          label: 'Qualification',
-          columns: 2,
-          fields: [
-            { field: 'status',    required: true },
-            { field: 'lead_score' },
-            { field: 'assigned_to' },
-            { field: 'account' },
-          ],
-        },
-        {
-          name: 'conversion',
-          label: 'Conversion',
-          columns: 2,
-          fields: [
-            { field: 'converted_opportunity' },
-            { field: 'is_closed' },
-          ],
-        },
-        {
-          name: 'notes',
-          label: 'Notes',
-          columns: 1,
-          fields: [{ field: 'notes' }],
-        },
-      ],
     },
   },
 });

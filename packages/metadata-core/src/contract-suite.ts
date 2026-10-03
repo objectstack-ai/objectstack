@@ -87,7 +87,7 @@ export interface DeclaredDivergences {
    * for it is a MAY. That sentence used to be unwritten, and this member's
    * own doc used to name the no-`since` case as part of the divergence.
    *
-   * Value is the tracking issue, e.g. `'#10842'`. **No declaration today:**
+   * Value is the tracking issue, e.g. the one commit f334d662e closed. **No declaration today:**
    * `SysMetadataRepository`, the only one there has ever been, was fixed and
    * deleted its line — the pin below is what told it to. An empty ledger is
    * the mechanism at rest, not dead code; the shrink-only direction is the

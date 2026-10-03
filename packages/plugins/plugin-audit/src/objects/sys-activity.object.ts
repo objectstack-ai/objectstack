@@ -117,8 +117,8 @@ export const SysActivity = ObjectSchema.create({
           + 'vocabulary, not a closed enum: metadata authors may contribute their own values '
           + '(sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an '
           + 'undeclared value is stored verbatim rather than rejected. Consumers must render '
-          + 'an unknown value instead of assuming this list is exhaustive (maintainer ruling '
-          + '2026-08-24, #11507).',
+          + 'an unknown value instead of assuming this list is exhaustive: the vocabulary is '
+          + 'open by decision, not a gap awaiting enforcement.',
         required: true,
         readonly: true,
         searchable: true,

@@ -120,7 +120,9 @@ const NON_STRING_OVER_REST: ReadonlyArray<readonly [string, unknown]> = [
   ['$ne true', { $ne: true }],
   ['a $in member true', { $in: [10, true] }],
   ['a $between bound true', { $between: [true, 20] }],
-  ['$gt [1] (an array)', { $gt: [1] }],
+  // [#21448] `$gt [1]` left this table: a list at a scalar operator is the
+  // shared comparand-shape face's refusal, one door before this one — pinned
+  // in its own block below. A list as a `$in` MEMBER is still this door's.
   ['a $in member [1]', { $in: [[1], 10] }],
 ];
 
@@ -134,7 +136,7 @@ const NON_STRING_OVER_REST: ReadonlyArray<readonly [string, unknown]> = [
 const NON_STRING_IN_PROCESS: ReadonlyArray<readonly [string, () => unknown]> = [
   ['true', () => true],
   ['a Date', () => new Date(Date.UTC(2026, 0, 1))],
-  ['an array', () => [1]],
+  // [#21448] `[1]` left this table for the shared comparand-shape face's block below.
 ];
 
 /** name · the constraint as a numeric string · the same as a number · `where` count. */
@@ -298,6 +300,41 @@ for (const cell of CELLS) {
         expect(having.status, JSON.stringify(having.body)).toBe(400);
         expect(having.body.code).toBe('INVALID_FILTER');
         expect(having.body.error).toContain('having.total.$gt');
+        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+      });
+
+      it('[#21448] a list at a scalar operator: one 400 at every position, in the shared comparand-shape face\'s words — VALIDATION_FAILED at the wire, INVALID_FILTER in process — no read', async () => {
+        const before = reads.n;
+        const sentence = (field: string) => `Operator "$gt" on field "${field}" requires a single comparable value, but received an array ([1])`;
+        // Over the wire the route parses its body first, and the schema door
+        // asks the face (#20116): VALIDATION_FAILED, located on the member, in
+        // the face's sentence less its location — before the engine runs.
+        for (const [body, member, field] of [
+          [{ where: { amount: { $gt: [1] } } }, 'query.where.amount.$gt', 'amount'],
+          [perAggregation({ amount: { $gt: [1] } } as FilterCondition), 'query.aggregations.1.filter.amount.$gt', 'amount'],
+          [grouped('native', { total: { $gt: [1] } } as FilterCondition), 'query.having.total.$gt', 'total'],
+        ] as const) {
+          const res = await query(body as Record<string, unknown>);
+          expect(res.status, JSON.stringify(res.body)).toBe(400);
+          expect(res.body.code, member).toBe('VALIDATION_FAILED');
+          const at = (res.body.fields as Array<{ field: string; message: string }>).filter((f) => f.field === member);
+          expect(at, JSON.stringify(res.body.fields)).toHaveLength(1);
+          expect(at[0]!.message.startsWith(`${sentence(field)}. Write ONE value.`), at[0]!.message).toBe(true);
+        }
+        // In process the engine's seam runs the face itself: INVALID_FILTER, located.
+        const found = await refusalOf(engine.find(OBJECT, { where: { amount: { $gt: [1] } } as FilterCondition }));
+        expect({ code: found?.code, status: found?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(found?.message).toContain(`${sentence('amount')} at where.amount.$gt.`);
+        const filtered = await refusalOf(engine.aggregate(OBJECT, perAggregation({ amount: { $gt: [1] } } as FilterCondition)));
+        expect({ code: filtered?.code, status: filtered?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(filtered?.message).toContain(`${sentence('amount')} at aggregations[1].filter.amount.$gt.`);
+        for (const path of ['native', 'rows'] as const) {
+          for (const column of ['total', 'top'] as const) {
+            const having = await refusalOf(engine.aggregate(OBJECT, grouped(path, { [column]: { $gt: [1] } } as FilterCondition)));
+            expect({ code: having?.code, status: having?.status }, `having ${path} ${column}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+            expect(having?.message, `having ${path} ${column}`).toContain(`${sentence(column)} at having.${column}.$gt.`);
+          }
+        }
         expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
       });
 

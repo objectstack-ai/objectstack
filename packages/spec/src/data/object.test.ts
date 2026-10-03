@@ -2542,7 +2542,7 @@ describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
     const result = ObjectCapabilities.parse({ apiMethods: ['delete', 'restore', 'purge'] });
     expect(result.apiMethods).toEqual(['delete']);
     const msg = warn.mock.calls.map((c) => c[0]).join('\n');
-    expect(msg).toContain('#2377');
+    expect(msg).toContain('`enable.trash` was retired because no runtime ever read it');
   });
 
   it('the authored enum itself no longer admits legacy values', () => {

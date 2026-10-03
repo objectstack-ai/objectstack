@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.objectstack-ai/objectstack",
+  "title": "ObjectStack",
+  "description": "Read and write your ObjectStack app's records and run its exposed actions, as MCP tools.",
+  "version": "17.6.0",
+  "websiteUrl": "https://objectstack.ai/docs/ai/connect-mcp",
+  "repository": {
+    "url": "https://github.com/objectstack-ai/objectstack",
+    "source": "github",
+    "id": "1136691870",
+    "subfolder": "packages/mcp"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{host}/api/v1/mcp",
+      "variables": {
+        "host": {
+          "description": "Host name of your own ObjectStack deployment, plus :port when it is not 443. Every deployment serves MCP at /api/v1/mcp; there is no shared hosted endpoint.",
+          "isRequired": true,
+          "placeholder": "crm.example.com"
+        }
+      },
+      "headers": [
+        {
+          "name": "x-api-key",
+          "description": "Optional osk_ API key, minted on the deployment's Connect an Agent page. Leave it unset to sign in with OAuth instead.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

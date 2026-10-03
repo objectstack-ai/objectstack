@@ -47,16 +47,27 @@ const refusalOf = (run: () => unknown): Refusal => {
  * trips the door it is used to find. The EQUALITY spellings do refuse it, since
  * the 2026-09-23 arm (#19757) — and they answer `undefined` either way: before
  * that arm they lowered it to the implicit form, which carries no `$` key.
- * [#19886] The `$ne` spellings refuse it too, since ruling A, so they answer
- * `undefined` here now; the `$ne` pins below find their spellings with a
- * SCALAR probe instead.
+ * [#19886] The `$ne` spellings refuse it too, since ruling A; the `$ne` pins
+ * below find their spellings with a SCALAR probe instead.
+ * [#21448] So does every other scalar spelling now, ordering and text alike.
+ * A spelling that refuses the list probe is therefore asked again with ONE
+ * value, which every scalar operator accepts and every list operator refuses,
+ * so each spelling still lowers through exactly one of the two probes. The
+ * equality spellings still answer `undefined`: one value lowers them to the
+ * implicit form, which carries no `$` key.
  */
 const loweredOperatorOf = (op: string): string | undefined => {
+  const lowerWith = (probe: unknown): Record<string, unknown> | undefined =>
+    parseFilterAST([['probe', op, probe]]) as Record<string, unknown> | undefined;
   let lowered: Record<string, unknown> | undefined;
   try {
-    lowered = parseFilterAST([['probe', op, ['a', 'b']]]) as Record<string, unknown> | undefined;
+    lowered = lowerWith(['a', 'b']);
   } catch {
-    return undefined;
+    try {
+      lowered = lowerWith('a');
+    } catch {
+      return undefined;
+    }
   }
   const spec = lowered?.probe;
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return undefined;
@@ -914,5 +925,160 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
   it('returns the SAME reference on the passthrough path — the door allocates nothing', () => {
     const where = { stage: { $in: ['won'] } };
     expect(parseFilterAST(where)).toBe(where);
+  });
+});
+
+// ── the one-value arm for every other scalar operator (#21448) ─────────────
+//
+// The triage ruling (record 5958292323): "A list at a scalar operator (`$gt`,
+// `$gte`, `$lt`, `$lte`, `$eq`, `$ne` and the rest of the scalar set) is a
+// shape error, whatever the column type." `$eq` and `$ne` keep their own arms
+// and remedies (above). Before this arm every row below RETURNED from this
+// face (measured on `origin/main` `b94a2a727`, and again by this PR's
+// ablation), and the analytics lowering bound the list's first member.
+
+describe('[#21448] a LIST at every other scalar operator is refused — whatever the column type', () => {
+  /** The declared vocabulary, read off the enforced operator schema. */
+  const declared = Object.keys(FieldOperatorsSchema.shape);
+  /** Its list half: the operators whose enforced slot ACCEPTS an array. */
+  const arrayValued = declared.filter((op) => FieldOperatorsSchema.safeParse({ [op]: ['a', 'b'] }).success);
+  /** The arm's operators: the one-value half, less the equality pair and its own two arms. */
+  const oneValueOperators = declared.filter((op) => !arrayValued.includes(op) && op !== '$eq' && op !== '$ne');
+
+  it('the judged operators are the schema\'s one-value half, derived — a new scalar operator joins by itself', () => {
+    // Guards the loops below from passing vacuously, and names what the
+    // derivation finds today: the ordering, text and flag operators.
+    expect(arrayValued.sort()).toEqual(['$between', '$in', '$nin']);
+    expect([...oneValueOperators].sort()).toEqual([
+      '$contains', '$empty', '$endsWith', '$exists', '$gt', '$gte', '$icontains', '$ilike',
+      '$like', '$lt', '$lte', '$notContains', '$null', '$startsWith',
+    ]);
+  });
+
+  it.each([
+    ['a pair', [10, 99]],
+    ['one member', [10]],
+    ['two strings', ['a', 'z']],
+    ['an EMPTY list — still a list in a one-value slot', []],
+  ])('refuses %s at every one of them, in the envelope, naming the operator and the path', (_label, list) => {
+    for (const op of oneValueOperators) {
+      const err = refusalOf(() => assertListComparandShapes({ f: { [op]: list } }));
+      // ADR-0112 class 1, both halves.
+      expect(err.code, op).toBe(StandardErrorCode.enum.INVALID_FILTER);
+      expect(err.status, op).toBe(400);
+      expect(err.message, op).toMatch(
+        new RegExp(`^Operator "\\${op}" on field "f" requires a single comparable value, but received an array `),
+      );
+      expect(err.message, op).toContain(`at where.f.${op}.`);
+    }
+  });
+
+  it.each([
+    ['nested under $and', { $and: [{ g: 1 }, { f: { $gt: [1] } }] }, 'where.$and[1].f.$gt'],
+    ['nested under $or', { $or: [{ g: 1 }, { f: { $contains: ['a'] } }] }, 'where.$or[1].f.$contains'],
+    ['nested under $not', { $not: { f: { $lte: [1, 2] } } }, 'where.$not.f.$lte'],
+    ['beside a legal operator on the same field', { f: { $gte: 1, $lt: [9] } }, 'where.f.$lt'],
+  ])('refuses it at its own path — %s', (_label, where, path) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(`at ${path}.`);
+  });
+
+  it('every AST spelling that carries its value to one of these operators refuses a list — the FilterArray spelling', () => {
+    // Derived by LOWERING one value: a spelling carries its value when
+    // `[f, op, 'a']` lowers to `{ f: { $op: 'a' } }` with `$op` in the arm's
+    // set. (`is_null` and friends lower to a hard-coded flag and carry no value,
+    // so they are not this loop's.)
+    const carrying = [...VALID_AST_OPERATORS].filter((op) => {
+      try {
+        const spec = (parseFilterAST([['f', op, 'a']]) as Record<string, unknown> | undefined)?.f;
+        if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return false;
+        const [key, value] = Object.entries(spec as Record<string, unknown>)[0] ?? [];
+        return key !== undefined && oneValueOperators.includes(key) && value === 'a';
+      } catch {
+        return false;
+      }
+    });
+    // Guards the loop: the twenty ordering spellings and the text spellings.
+    expect(carrying).toEqual(expect.arrayContaining(['>', 'gt', 'after', '<=', 'before', 'contains', 'starts_with', 'like']));
+    for (const op of carrying) {
+      const err = refusalOf(() => parseFilterAST([['f', op, ['a', 'z']]]));
+      expect(err.code, op).toBe(StandardErrorCode.enum.INVALID_FILTER);
+      expect(err.status, op).toBe(400);
+      expect(err.message, op).toMatch(/^Operator "\$[A-Za-z]+" on field "f" requires a single comparable value/);
+    }
+  });
+
+  it('names the list it received, and prescribes ONE value, $in and $between by their spec and authoring spellings', () => {
+    const err = refusalOf(() => parseFilterAST({ amount: { $gt: [10, 99] } }));
+    // The leading sentence is driver-memory's own for this condition.
+    expect(err.message).toMatch(
+      /^Operator "\$gt" on field "amount" requires a single comparable value, but received an array \(\[10,99\]\) at where\.amount\.\$gt\. Write ONE value\. /,
+    );
+    expect(err.message).toContain('"one of these values" use {"$in": […]} (authoring: in)');
+    expect(err.message).toContain('for a range, {"$between": [min, max]} (authoring: between)');
+    expect(err.message).toMatch(/The filter was NOT applied, .*UNFILTERED result set\.$/);
+    // The two prescribed operators are DECLARED, and each authoring spelling
+    // lowers to its `$` spelling through the one AST table.
+    expect(declared).toEqual(expect.arrayContaining(['$in', '$between']));
+    expect(loweredOperatorOf('in')).toBe('$in');
+    expect(loweredOperatorOf('between')).toBe('$between');
+    // A caller-supplied context keeps its prefix, as on every sibling arm.
+    expect(refusalOf(() => assertListComparandShapes({ amount: { $gt: [10] } }, "find('deal')")).message)
+      .toMatch(/^find\('deal'\): Operator "\$gt" on field "amount"/);
+  });
+
+  it('a list at a FLAG is this arm\'s too; a non-boolean scalar flag is still not this face\'s', () => {
+    // How many values comes before which value: the boolean rule (#5347 /
+    // #5369) is downstream of this face on every door and keeps judging a
+    // scalar flag.
+    expect(refusalOf(() => parseFilterAST({ deleted_at: { $null: [true] } })).message)
+      .toMatch(/^Operator "\$null" on field "deleted_at" requires a single comparable value/);
+    expect(parseFilterAST({ deleted_at: { $null: 'x' } })).toEqual({ deleted_at: { $null: 'x' } });
+  });
+
+  it('LIT CONTROL — the list operators keep their lists, one value passes, and the other arms keep their words', () => {
+    // The controls the ruling names: a list at `$in` / `$nin`, a scalar at `$gt`.
+    expect(parseFilterAST({ s: { $in: ['a', 'b'] } })).toEqual({ s: { $in: ['a', 'b'] } });
+    expect(parseFilterAST({ s: { $nin: ['a'] } })).toEqual({ s: { $nin: ['a'] } });
+    expect(parseFilterAST({ s: { $in: [] } })).toEqual({ s: { $in: [] } });
+    expect(parseFilterAST({ n: { $between: [1, 5] } })).toEqual({ n: { $between: [1, 5] } });
+    expect(parseFilterAST({ n: { $gt: 10 } })).toEqual({ n: { $gt: 10 } });
+    // Every one-value comparand the vocabulary declares keeps passing.
+    const day = new Date('2026-07-01T00:00:00.000Z');
+    for (const where of [
+      { n: { $gte: 'a' } }, { n: { $lt: day } }, { n: { $lte: { $field: 'm' } } },
+      { s: { $contains: 'a' } }, { s: { $like: 'a%' } }, { s: { $exists: false } }, { s: { $empty: true } },
+    ]) {
+      expect(parseFilterAST(where), JSON.stringify(where)).toEqual(where);
+    }
+    // The older arms answer first, in their own words.
+    expect(refusalOf(() => parseFilterAST({ n: { $gt: null } })).message)
+      .toContain('does not accept a null comparand');
+    expect(refusalOf(() => parseFilterAST({ s: { $eq: ['a'] } })).message).toContain('{"$contains": "…"}');
+    expect(refusalOf(() => parseFilterAST({ s: { $ne: ['a'] } })).message).toContain('{"$nin": […]}');
+    // Not judged here: an operator outside the vocabulary (refused downstream,
+    // by name), a nested list inside `$in`, and a no-`$`-key field spec.
+    expect(parseFilterAST({ s: { $wat: ['a'] } })).toEqual({ s: { $wat: ['a'] } });
+    expect(parseFilterAST({ s: { $in: [['a']] } })).toEqual({ s: { $in: [['a']] } });
+    expect(parseFilterAST({ acct: { amount: { $gt: [1] } } })).toEqual({ acct: { amount: { $gt: [1] } } });
+  });
+
+  it('the whole refusal fits under the 500-char client bound (#5423)', () => {
+    // The sibling arms' bound test above, on this arm: one prescription pair
+    // plus the received list, the long list cut at the shared 60-char preview
+    // bound, at every one of its operators, under the same context prefix.
+    for (const op of oneValueOperators) {
+      for (const where of [
+        { close_date: { [op]: ['a'] } },
+        { close_date: { [op]: ['aaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccc'] } },
+        { $not: { $or: [{ close_date: { [op]: [] } }] } },
+      ]) {
+        const err = refusalOf(() => parseFilterAST(where, "find('deal')"));
+        expect(err.message.length, `${op} ${JSON.stringify(where)}`).toBeLessThan(500);
+        expect(err.message, `${op} ${JSON.stringify(where)}`).toMatch(/UNFILTERED result set\.$/);
+      }
+    }
   });
 });

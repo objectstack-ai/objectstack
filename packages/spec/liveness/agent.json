@@ -85,9 +85,9 @@
       "note": "evaluateAgentAccess() — the caller must hold ALL required entries, matched against the union of user.permissions and user.positions; same two enforcement points as access. ⚠ 2026-09-15 (#13272): the previous wording — \"caller must hold ALL required permissions/roles; enforced at the chat route.\" — is FALSIFIED, measured at cloud @cb8ee7ff. `roles` is the alias protocol 17 removed from the producer's envelope (framework #6011), and what can satisfy a required entry is a permission or a POSITION name, never a role. The chat route is one of the two enforcement points, not the only one."
     },
     "lifecycle": {
-      "status": "experimental",
-      "evidence": "no runtime reader (StateMachine)",
-      "note": "aspirational autonomy."
+      "status": "dead",
+      "verifiedAt": "2026-10-02",
+      "note": "REMOVED 2026-10-02 (#21320; ADR-0049 enforce-or-remove, ruled D on objectstack-ai/cloud#2569) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from stored rows and existing sources by the protocol-18 conversion agent-lifecycle-removed. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It was experimental with no runtime reader: no runtime in this repository read it (measured in this checkout), and the cloud zero-reader census is the ruling card's own (cloud @3aadd908, attributed, not re-taken here). What it reached for: a conversation phase is a skill with its own instructions and tools, selected by triggerConditions (ADR-0064); multi-step orchestration is a Flow (ADR-0019); a record's status transitions are the state_machine validation rule (ADR-0020). Its value schema, the XState StateMachineSchema family (automation/state-machine.zod.ts), had no other authorable consumer and left with it."
     },
     "memory": {
       "status": "live",

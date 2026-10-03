@@ -384,3 +384,150 @@ describe('isMissingTableError — every in-repo call names the object it read (#
     ).toEqual([]);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// [#21418] `operatorFacingErrorText` — the enumeration of its callers
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The helper's answer is cut by construction (the maintainer's ruling A on
+// #21385: "one cutter for every log face"), so a caller needs no cut of its
+// own. What a caller DOES owe is a pin: a synthetic sentinel bound into a raw
+// statement reaches none of the carriers it writes the answer to — a log
+// line's meta or message, a result's `detail` or `error`. This table is the
+// list of those callers, frozen, with the file that holds each one's pin. A
+// caller added, removed or given another call site reddens here, and the
+// remedy is to pin its carriers and add its row — ⛔ never a cut at the caller,
+// which would be a second copy of the one cut.
+//
+// Same scan, same `packages/**/*.ts` radius and same blind spot as the gate
+// above: callees are matched by NAME, so a renamed import binding fails the
+// check below rather than shrinking the population.
+
+const OPERATOR_TEXT_HELPER = 'operatorFacingErrorText';
+
+/** A test file is a pin, never a caller of record. */
+const TEST_FILE = /\.test\.ts$/;
+
+/**
+ * Every non-test caller under `packages/`, its call-site count, and the test
+ * that pins its carriers with the sentinel. Re-derived when #21418 landed by
+ * this scan and, independently, by `git grep -ln` over the same tree.
+ */
+const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; readonly sentinelPin: string }>> = {
+  'packages/cli/src/commands/db/clean.ts': {
+    calls: 1,
+    sentinelPin: 'packages/cli/src/commands/db/clean.operator-text-21418.test.ts',
+  },
+  'packages/metadata-protocol/src/migrations/partial-index-probe.ts': {
+    calls: 2,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata-protocol/src/migrations/read-probe.ts': {
+    calls: 2,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata-protocol/src/migrations/runtime-index-preflight.ts': {
+    calls: 2,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts': {
+    calls: 5,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata/src/migrations/drop-projection-tables.ts': {
+    calls: 1,
+    sentinelPin: 'packages/metadata/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata/src/migrations/migrate-env-id-to-project-id.ts': {
+    calls: 1,
+    sentinelPin: 'packages/metadata/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata/src/migrations/migrate-project-id-to-environment-id.ts': {
+    calls: 1,
+    sentinelPin: 'packages/metadata/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+};
+
+/** The sentinel every pin above binds, spelled in each pin file. */
+const OPERATOR_TEXT_SENTINEL = 'SENTINEL-21418-BOUND-VALUE';
+
+function operatorTextCallSites(files: readonly string[]): {
+  calls: Map<string, number>;
+  renamed: RenamedImport[];
+} {
+  const calls = new Map<string, number>();
+  const renamed: RenamedImport[] = [];
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8');
+    if (!text.includes(OPERATOR_TEXT_HELPER)) continue;
+    const path = relative(REPO_ROOT, file).split(sep).join('/');
+    const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const name = ts.isIdentifier(callee)
+          ? callee.text
+          : ts.isPropertyAccessExpression(callee)
+            ? callee.name.text
+            : undefined;
+        if (name === OPERATOR_TEXT_HELPER) calls.set(path, (calls.get(path) ?? 0) + 1);
+      }
+      if (ts.isImportSpecifier(node) && node.propertyName?.text === OPERATOR_TEXT_HELPER) {
+        const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+        renamed.push({ path, line: line + 1, local: node.name.text });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return { calls, renamed };
+}
+
+const OPERATOR_TEXT_SCAN = operatorTextCallSites(FILES);
+
+describe('[#21418] operatorFacingErrorText — every caller is enumerated and pinned', () => {
+  it('POSITIVE CONTROL: the matcher sees the defining contract tests call the helper', () => {
+    // Zero here means the matcher stopped matching, not that the helper has
+    // no callers. Measured when this landed: 30 calls in that one file.
+    const contract = OPERATOR_TEXT_SCAN.calls.get(
+      'packages/types/src/driver-error-classification.operator-text.test.ts',
+    );
+    expect(contract ?? 0).toBeGreaterThanOrEqual(20);
+  });
+
+  it('no renamed import hides a call from the by-name matcher', () => {
+    expect(OPERATOR_TEXT_SCAN.renamed).toEqual([]);
+  });
+
+  it('the non-test callers are exactly the enumerated ones, call sites included', () => {
+    const found = Object.fromEntries(
+      [...OPERATOR_TEXT_SCAN.calls.entries()]
+        .filter(([path]) => !TEST_FILE.test(path))
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    const expected = Object.fromEntries(
+      Object.entries(OPERATOR_TEXT_CALLERS)
+        .map(([path, { calls }]) => [path, calls] as const)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    expect(
+      found,
+      `${OPERATOR_TEXT_HELPER}() is written to an operator-facing carrier at each of these sites. ` +
+        'A new caller (or a new call site in an enumerated one) owes a pin that binds a ' +
+        `synthetic sentinel (${OPERATOR_TEXT_SENTINEL}) into a raw statement and asserts it ` +
+        'reaches none of the carriers the site writes, then a row in OPERATOR_TEXT_CALLERS. ' +
+        'The helper already answers cut text; never add a cut at the caller.',
+    ).toEqual(expected);
+  });
+
+  it("each caller's pin exists, imports the caller and binds the sentinel", () => {
+    for (const [caller, { sentinelPin }] of Object.entries(OPERATOR_TEXT_CALLERS)) {
+      const pin = join(REPO_ROOT, sentinelPin);
+      expect(existsSync(pin), `${caller}: its pin ${sentinelPin} is missing`).toBe(true);
+      const text = readFileSync(pin, 'utf8');
+      const module = `./${caller.split('/').pop()!.replace(/\.ts$/, '.js')}`;
+      expect(text.includes(`'${module}'`), `${sentinelPin} does not import ${module}`).toBe(true);
+      expect(text.includes(OPERATOR_TEXT_SENTINEL), `${sentinelPin} does not bind the sentinel`).toBe(true);
+    }
+  });
+});

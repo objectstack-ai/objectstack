@@ -509,6 +509,85 @@ describe('JobSchema', () => {
   });
 });
 
+// A job carries a sandboxed `body`, the hook body shape reused by reference —
+// its L2 member only — and `handler` is deprecated beside it. The four presence
+// shapes, the L1 refusal and the one time-limit spelling are pinned here; the
+// runtime binder that SCHEDULES a body is a separate change.
+describe('JobSchema.body', () => {
+  const base = { name: 'nightly_sweep', schedule: { type: 'interval' as const, intervalMs: 60000 } };
+  const body = { language: 'js' as const, source: "await ctx.api.object('task').find({});", capabilities: ['api.read' as const] };
+
+  it('accepts a body with no handler — `handler` is no longer required', () => {
+    const r = JobSchema.safeParse({ ...base, body });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.body?.source).toBe(body.source);
+    expect(r.success && r.data.handler).toBeUndefined();
+  });
+
+  it('accepts a handler with no body — the deprecated form still parses', () => {
+    const r = JobSchema.safeParse({ ...base, handler: 'sweep' });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.body).toBeUndefined();
+  });
+
+  it('accepts both, keeping both — `body` wins at run time, `handler` stays beside it', () => {
+    const r = JobSchema.safeParse({ ...base, handler: 'sweep', body });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.handler).toBe('sweep');
+    expect(r.success && r.data.body?.language).toBe('js');
+  });
+
+  it('refuses neither, located at `body`', () => {
+    const r = JobSchema.safeParse(base);
+    expect(r.success).toBe(false);
+    const issue = r.error?.issues.find((i) => i.path.join('.') === 'body');
+    expect(issue?.code).toBe('custom');
+    // The message must name both keys — the author is choosing between them.
+    expect(issue?.message).toContain('`body`');
+    expect(issue?.message).toContain('`handler`');
+  });
+
+  it('refuses an L1 expression body, located at `body.language`, with a reason rather than zod\'s bare literal message', () => {
+    const r = JobSchema.safeParse({ ...base, body: { language: 'expression', source: 'input.amount > 1' } });
+    expect(r.success).toBe(false);
+    const issue = r.error?.issues.find((i) => i.path.join('.') === 'body.language');
+    expect(issue?.code).toBe('invalid_value');
+    expect(issue?.message).not.toBe('Invalid input: expected "js"');
+    expect(issue?.message).toMatch(/L1/);
+  });
+
+  it('keeps zod\'s own message for any other language — only `expression` gets the L1 reason', () => {
+    const r = JobSchema.safeParse({ ...base, body: { language: 'python', source: 'pass' } });
+    const issue = r.error?.issues.find((i) => i.path.join('.') === 'body.language');
+    expect(issue?.message).toBe('Invalid input: expected "js"');
+  });
+
+  it('refuses `body.timeoutMs` — the job-level `timeoutMs` is the one limit', () => {
+    const r = JobSchema.safeParse({ ...base, body: { ...body, timeoutMs: 1000 } });
+    expect(r.success).toBe(false);
+    const issue = r.error?.issues.find((i) => i.path.join('.') === 'body.timeoutMs');
+    expect(issue?.code).toBe('custom');
+    expect(issue?.message).toContain('`timeoutMs`');
+  });
+
+  it('accepts the job-level `timeoutMs` above the 30 s body cap — long work states its limit there', () => {
+    const r = JobSchema.safeParse({ ...base, body, timeoutMs: 600000 });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.timeoutMs).toBe(600000);
+  });
+
+  it('keeps the body shape strict — a misspelt key is refused, not stripped', () => {
+    const r = JobSchema.safeParse({ ...base, body: { ...body, capability: ['log'] } });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+  });
+
+  it('types `handler` as optional on the authoring input', () => {
+    const job: Job = { ...base, body };
+    expect(defineJob(job).body?.capabilities).toEqual(['api.read']);
+  });
+});
+
 describe('JobExecutionStatus', () => {
   it('should accept valid execution statuses', () => {
     expect(() => JobExecutionStatus.parse('running')).not.toThrow();

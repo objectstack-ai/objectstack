@@ -40,10 +40,10 @@ const result = DatabaseLevelIsolationStrategySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `'isolated_db'` | ✅ | Database-level isolation strategy |
-| **database** | `{ namingPattern: string; serverStrategy: Enum<'shared' \| 'sharded' \| 'dedicated'>; separateCredentials: boolean; autoCreateDatabase: boolean }` | optional | Database configuration |
-| **connectionPool** | `{ poolSize: integer; maxActivePools: integer; idleTimeoutSeconds: integer; usePooler: boolean }` | optional | Connection pool configuration |
-| **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
-| **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
+| **database** | `{ namingPattern?: string; serverStrategy?: Enum<'shared' \| 'sharded' \| 'dedicated'>; separateCredentials?: boolean; autoCreateDatabase?: boolean }` | optional | Database configuration |
+| **connectionPool** | `{ poolSize?: integer; maxActivePools?: integer; idleTimeoutSeconds?: integer; usePooler?: boolean }` | optional | Connection pool configuration |
+| **backup** | `{ strategy?: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours?: integer; retentionDays?: integer }` | optional | Backup configuration |
+| **encryption** | `{ perTenantKeys?: boolean; algorithm?: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
 
 ### Nested Shape: `DatabaseLevelIsolationStrategy.database`
 
@@ -120,8 +120,8 @@ Quota enforcement check result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `'shared_schema'` | ✅ | Row-level isolation strategy |
-| **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
-| **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
+| **database** | `{ enableRLS?: boolean; contextMethod?: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable?: string; applicationValidation?: boolean }` | optional | Database configuration |
+| **performance** | `{ usePartialIndexes?: boolean; usePartitioning?: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
 ### Nested Shape: `RowLevelIsolationStrategy.database`
 
@@ -150,9 +150,9 @@ Quota enforcement check result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `'isolated_schema'` | ✅ | Schema-level isolation strategy |
-| **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
-| **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
-| **performance** | `{ poolPerSchema: boolean; schemaCacheTtlSeconds: integer }` | optional | Performance settings |
+| **schema** | `{ namingPattern?: string; includePublicSchema?: boolean; sharedSchema?: string; autoCreateSchema?: boolean }` | optional | Schema configuration |
+| **migrations** | `{ strategy?: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent?: integer; rollbackOnError?: boolean }` | optional | Migration configuration |
+| **performance** | `{ poolPerSchema?: boolean; schemaCacheTtlSeconds?: integer }` | optional | Performance settings |
 
 ### Nested Shape: `SchemaLevelIsolationStrategy.schema`
 
@@ -249,8 +249,8 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `'shared_schema'` | ✅ | Row-level isolation strategy |
-| **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
-| **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
+| **database** | `{ enableRLS?: boolean; contextMethod?: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable?: string; applicationValidation?: boolean }` | optional | Database configuration |
+| **performance** | `{ usePartialIndexes?: boolean; usePartitioning?: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
 ### Nested Shape: `TenantIsolationConfig[strategy='shared_schema'].database`
 
@@ -278,9 +278,9 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `'isolated_schema'` | ✅ | Schema-level isolation strategy |
-| **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
-| **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
-| **performance** | `{ poolPerSchema: boolean; schemaCacheTtlSeconds: integer }` | optional | Performance settings |
+| **schema** | `{ namingPattern?: string; includePublicSchema?: boolean; sharedSchema?: string; autoCreateSchema?: boolean }` | optional | Schema configuration |
+| **migrations** | `{ strategy?: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent?: integer; rollbackOnError?: boolean }` | optional | Migration configuration |
+| **performance** | `{ poolPerSchema?: boolean; schemaCacheTtlSeconds?: integer }` | optional | Performance settings |
 
 ### Nested Shape: `TenantIsolationConfig[strategy='isolated_schema'].schema`
 
@@ -316,10 +316,10 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `'isolated_db'` | ✅ | Database-level isolation strategy |
-| **database** | `{ namingPattern: string; serverStrategy: Enum<'shared' \| 'sharded' \| 'dedicated'>; separateCredentials: boolean; autoCreateDatabase: boolean }` | optional | Database configuration |
-| **connectionPool** | `{ poolSize: integer; maxActivePools: integer; idleTimeoutSeconds: integer; usePooler: boolean }` | optional | Connection pool configuration |
-| **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
-| **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
+| **database** | `{ namingPattern?: string; serverStrategy?: Enum<'shared' \| 'sharded' \| 'dedicated'>; separateCredentials?: boolean; autoCreateDatabase?: boolean }` | optional | Database configuration |
+| **connectionPool** | `{ poolSize?: integer; maxActivePools?: integer; idleTimeoutSeconds?: integer; usePooler?: boolean }` | optional | Connection pool configuration |
+| **backup** | `{ strategy?: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours?: integer; retentionDays?: integer }` | optional | Backup configuration |
+| **encryption** | `{ perTenantKeys?: boolean; algorithm?: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
 
 ### Nested Shape: `TenantIsolationConfig[strategy='isolated_db'].database`
 
@@ -395,9 +395,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **encryption** | `{ atRest: boolean; inTransit: boolean; fieldLevel: boolean }` | optional | Encryption requirements |
-| **accessControl** | `{ requireMFA: boolean; requireSSO: boolean; ipWhitelist?: string[]; sessionTimeoutSeconds: integer }` | optional | Access control requirements |
-| **compliance** | `{ standards?: Enum<'sox' \| 'hipaa' \| 'gdpr' \| 'pci_dss' \| 'iso_27001' \| 'fedramp'>[]; requireAuditLog: boolean; auditRetentionDays: integer; dataResidency?: object }` | optional | Compliance requirements |
+| **encryption** | `{ atRest?: boolean; inTransit?: boolean; fieldLevel?: boolean }` | optional | Encryption requirements |
+| **accessControl** | `{ requireMFA?: boolean; requireSSO?: boolean; ipWhitelist?: string[]; sessionTimeoutSeconds?: integer }` | optional | Access control requirements |
+| **compliance** | `{ standards?: Enum<'sox' \| 'hipaa' \| 'gdpr' \| 'pci_dss' \| 'iso_27001' \| 'fedramp'>[]; requireAuditLog?: boolean; auditRetentionDays?: integer; dataResidency?: object }` | optional | Compliance requirements |
 
 ### Nested Shape: `TenantSecurityPolicy.encryption`
 

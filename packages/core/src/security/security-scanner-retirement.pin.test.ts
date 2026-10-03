@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import * as coreBarrel from '../index.js';
 import * as securityBarrel from './index.js';
 
-// ─── [#14919] `PluginSecurityScanner` is RETIRED ────────────────────────────
+// ─── [commit cc00df2f7] `PluginSecurityScanner` is RETIRED ────────────────────────────
 //
 // ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 (director summon
 // #14, decision batch #42). The class, its two companion types (`ScanTarget`,

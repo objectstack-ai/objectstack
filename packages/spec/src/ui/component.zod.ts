@@ -404,7 +404,8 @@ const emptyProps = (type: string) =>
 
 /**
  * A component RETIRED at element grain whose props bag is refused WHOLE —
- * `user:profile` (#14159). The `retiredKey` channel one grain wider: where a
+ * `user:profile` (#14159), and `ai:chat_window` (#21504), whose four keys left
+ * with its props def. The `retiredKey` channel one grain wider: where a
  * tombstoned KEY accepts absence and refuses any value, a retired ELEMENT has
  * nothing an author may write at all, so the row is `z.never` — `{}` is refused
  * exactly like a populated bag, `expected: 'never'` / `code: 'invalid_type'` is
@@ -2354,17 +2355,12 @@ export const PageAccordionProps = strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const AIChatWindowProps = strictObject({
-  surface: 'this `ai:chat_window`',
-  history: PROPS_HISTORY,
-  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-}, {
-  mode: z.enum(['float', 'sidebar', 'inline']).default('float').describe('Display mode for the chat window'),
-  agentId: z.string().optional().describe('Specific AI agent to use'),
-  context: z.record(z.string(), z.unknown()).optional().describe('Contextual data to pass to the AI'),
-  /** ARIA accessibility */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-});
+// `AIChatWindowProps` REMOVED (#21504, ADR-0049) with the `ai:chat_window`
+// element it described: `mode` / `agentId` / `context` / `aria` were read by
+// nothing, because no renderer for the element ever shipped. Its row in
+// `ComponentPropsMap` below now refuses the whole bag
+// (`retiredComponentProps`), and the def is recorded in
+// `migrations/entries/retired-defs/18.ui__AIChatWindowProps.ts`.
 
 /**
  * ----------------------------------------------------------------------
@@ -5668,8 +5664,20 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
     .describe('Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
   mapStyle: z.string().optional()
     .describe('MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record'),
-  navigation: z.unknown().optional()
-    .describe('Marker-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
+  /**
+   * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
+   * `object-timeline` already take. `ObjectMap.tsx:1189` (at the pin
+   * `89cad75d55`) hands `schema.navigation` to `useNavigationOverlay`, which
+   * reads `navigation?.mode ?? 'page'`
+   * (`react/src/hooks/useNavigationOverlay.ts:364`) and types its mode union
+   * as that schema's.
+   * Until #21464 this member was `z.unknown()`, so `navigation: 42` and a bare
+   * mode string such as `'drawer'` passed every door and opened the record
+   * page, whatever they named.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe('Marker-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
   enableClustering: z.boolean().optional()
     .describe('Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers'),
 }));
@@ -5679,7 +5687,9 @@ export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state — `filter` carries
  * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
  * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
- * default-free family the way `object-grid` did.
+ * default-free family the way `object-grid` did. Since #21464 `navigation`
+ * carries {@link NavigationConfigSchema} too, whose defaulted members
+ * materialize on parse on a document that authored the key.
  */
 export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
 
@@ -5881,8 +5891,19 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
     .describe('Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   gantt: GanttConfigSchema.optional()
     .describe('Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
-  navigation: z.unknown().optional()
-    .describe('Task-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema; renderer default `drawer`'),
+  /**
+   * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
+   * `object-timeline` already take. `ObjectGantt.tsx:1960` (at the pin
+   * `89cad75d55`) reads `schema.navigation ?? { mode: 'drawer' }`, classifies
+   * its `.mode` there, and hands it to `useNavigationOverlay` (`:2025-2026`),
+   * which types its mode union as that schema's. Until #21464 this member was
+   * `z.unknown()`, so `navigation: 42` and a bare mode string such as
+   * `'drawer'` passed every door and opened the record page, whatever they
+   * named.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe("Task-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values. The renderer's own default is `{ mode: 'drawer' }` when the key is absent"),
   label: I18nLabelSchema.optional()
     .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
   skipWeekends: z.boolean().optional()
@@ -5910,7 +5931,9 @@ export type ObjectGanttProps = z.input<typeof ObjectGanttPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state — `filter` carries
  * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
  * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
- * default-free family the way `object-grid` did.
+ * default-free family the way `object-grid` did. Since #21464 `navigation`
+ * carries {@link NavigationConfigSchema} too, whose defaulted members
+ * materialize on parse on a document that authored the key.
  */
 export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 
@@ -6206,8 +6229,20 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   tree: TreeConfigSchema.optional()
     .describe('Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: { parentField?, labelField?, fields?, defaultExpandedDepth? }. `parentField` auto-detects from the object schema when omitted'),
-  navigation: z.unknown().optional()
-    .describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
+  /**
+   * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
+   * `object-timeline` already take, and the type objectui's own
+   * `ObjectTreeSchema.navigation` mirrors (objectui#11168 slice 3).
+   * `ObjectTree.tsx:1054` (at the pin `89cad75d55`) hands `schema.navigation`
+   * to `useNavigationOverlay` (`:1046`), which reads `navigation?.mode ??
+   * 'page'` and types its mode union as that schema's. Until #21464 this
+   * member was `z.unknown()`, so `navigation: 42` and a bare mode string such
+   * as `'drawer'` passed every door and opened the record page, whatever they
+   * named.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
@@ -6215,7 +6250,9 @@ export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
  * ADR-0122: the parsed state differs from the authored state — `filter` carries
  * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
  * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
- * default-free family the way `object-grid` did.
+ * default-free family the way `object-grid` did. Since #21464 `navigation`
+ * carries {@link NavigationConfigSchema} too, whose defaulted members
+ * materialize on parse on a document that authored the key.
  */
 export type ObjectTreePropsParsed = z.infer<typeof ObjectTreePropsSchema>;
 
@@ -6659,7 +6696,16 @@ export const ComponentPropsMap = {
   'mcp:connect-agent': emptyProps('mcp:connect-agent'),
 
   // AI
-  'ai:chat_window': AIChatWindowProps,
+  // RETIRED by name (#21504, ADR-0049; triage ruling: the `user:profile`
+  // precedent) — no renderer by design, the console's floating chat overlay is
+  // the AI chat entry point. The row STAYS, for the reason `user:profile`'s
+  // does above: every reader that dispatches on the row keeps recognising the
+  // name and answers with the prescription instead of skipping it as an
+  // unregistered custom string. Its four keys (`mode`, `agentId`, `context`,
+  // `aria`) left with `AIChatWindowProps`, so the WHOLE bag is refused — the
+  // node itself is refused at `PageComponentSchema.type`, and a row that still
+  // accepted `{ mode }` would contradict that door one level up.
+  'ai:chat_window': retiredComponentProps('ai:chat_window'),
   'ai:suggestion': strictObject({
     surface: 'this `ai:suggestion`',
     history: PROPS_HISTORY,

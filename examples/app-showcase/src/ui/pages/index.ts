@@ -103,7 +103,7 @@ export const ComponentGalleryPage = definePage({
         // ever built because the cross-reference walk visits `config.actions` and
         // never an INLINE action (#6889) — so it depended on a branch under
         // retirement and on a validation hole, both at once.
-        { type: 'element:button', properties: { label: 'Create Task', icon: 'plus', action: { name: 'showcase_new_task', type: 'form', target: 'showcase_task.edit', refreshAfter: true } } },
+        { type: 'element:button', properties: { label: 'Create Task', icon: 'plus', action: { name: 'showcase_new_task', type: 'form', target: 'showcase_task.form', refreshAfter: true } } },
       ],
     },
     {

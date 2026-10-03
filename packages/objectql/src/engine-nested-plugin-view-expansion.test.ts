@@ -66,7 +66,7 @@ const PKG = 'com.acme.sales';
  *
  * The default `list` deliberately RESTATES `listViews.all_accounts` verbatim —
  * the common "default == the named view" authoring pattern the expander
- * collapses by structural signature. That is what makes the expansion exactly
+ * collapses as a whole-body restatement. That is what makes the expansion exactly
  * the card's measured `['account', 'account.all_accounts', 'account.form']`
  * rather than carrying a separate `account.default`.
  */

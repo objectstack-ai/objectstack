@@ -143,7 +143,8 @@ export function validateSeedStateMachine(stack: AnyRec): SeedStateMachineFinding
           message:
             `seeds '${rule.field}=${value}', which the '${objectName}' state machine does not declare ` +
             `(known states: ${[...rule.states].sort().join(', ')}). Seed writes are exempt from the ` +
-            'state_machine rule (#3433), so this is NOT rejected at write time — a typo lands silently.',
+            'state_machine rule (a seed records established facts rather than walking the lifecycle), so ' +
+            'this is NOT rejected at write time — a typo lands silently.',
           hint:
             `If '${value}' is a real state, add it to the state machine (as an initial state or a ` +
             `transition endpoint). If it is a typo, correct it to a declared state. The exemption lets ` +

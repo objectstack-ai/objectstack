@@ -77,7 +77,7 @@ describe('[#10556 (a)] SecurityPlugin default report sink', () => {
     expect(filter).toBeDefined();
 
     expect(seen).toHaveLength(1);
-    expect(String(seen[0]?.[0])).toContain('denying (fail-closed, #2852)');
+    expect(String(seen[0]?.[0])).toContain("denying (fail-closed: a delegated read is never scoped wider than its delegator's own)");
   });
 
   it('guarantees a `warn` channel on the default sink, and routes it to the console', () => {

@@ -8,7 +8,7 @@ ObjectStack no longer has a standalone Salesforce-style Workflow Rule authoring
 type. Use:
 
 - **Flow** for event-triggered or scheduled automation.
-- **State machine metadata** for strict lifecycle transitions.
+- **A `state_machine` validation rule** for strict lifecycle transitions.
 - **Approval nodes** inside Flow for human approval pauses.
 
 This page keeps the historical route but documents the current split.
@@ -60,42 +60,51 @@ registration/runtime.
 
 ## State machines for lifecycle constraints
 
-Use `StateMachineSchema` when the core requirement is "this object can only move
-through these states by these events."
+Use a `state_machine` validation rule when the core requirement is "this record
+can only move through these states." It is one of the object's `validations`: a
+flat table of each state's allowed next states, enforced by the write path (see
+[State Machine](/docs/protocol/objectql/state-machine)).
 
 {/* os:check */}
 ```typescript
-import type { StateMachineConfig } from '@objectstack/spec/automation';
+import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-export const caseLifecycle: StateMachineConfig = {
-  id: 'case_lifecycle',
-  initial: 'new',
-  states: {
-    new: {
-      on: {
-        ASSIGN: { target: 'assigned' },
-      },
-    },
-    assigned: {
-      on: {
-        RESOLVE: { target: 'resolved', cond: 'has_resolution' },
-        ESCALATE: { target: 'escalated' },
-      },
-    },
-    escalated: {
-      on: {
-        RESOLVE: { target: 'resolved', cond: 'has_resolution' },
-      },
-    },
-    resolved: {
-      type: 'final',
-    },
+export const SupportCase = ObjectSchema.create({
+  name: 'support_case',
+  label: 'Support Case',
+  sharingModel: 'private',
+  fields: {
+    status: Field.select({
+      label: 'Status',
+      required: true,
+      options: [
+        { label: 'New', value: 'new' },
+        { label: 'Assigned', value: 'assigned' },
+        { label: 'Escalated', value: 'escalated' },
+        { label: 'Resolved', value: 'resolved' },
+      ],
+    }),
   },
-};
+  validations: [
+    {
+      type: 'state_machine',
+      name: 'case_status_flow',
+      field: 'status',
+      events: ['update'],
+      message: 'Invalid case status transition.',
+      transitions: {
+        new: ['assigned'],
+        assigned: ['resolved', 'escalated'],
+        escalated: ['resolved'],
+        resolved: [],
+      },
+    },
+  ],
+});
 ```
 
-State machines describe valid transitions and guards. Use Flow nodes for side
-effects around those transitions when you need notifications, record updates, or
+The rule declares which transitions are legal. Use Flow nodes for side effects
+around those transitions when you need notifications, record updates, or
 external calls.
 
 ---

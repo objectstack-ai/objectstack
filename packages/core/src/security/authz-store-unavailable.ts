@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13279] The LOUD failure an unreachable permission store raises.
+ * [commit 6a180e42d] The LOUD failure an unreachable permission store raises.
  *
  * ## The defect this exists to end
  *

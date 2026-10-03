@@ -317,12 +317,14 @@ describe('approvals: the actor is the authenticated caller, not a body field', (
     expect(out.request.status).toBe('recalled');
   });
 
-  it('a system context may still name an actor with no session behind it (SLA sweep)', async () => {
+  it('a system context may still name an actor with no session behind it (SLA sweep), and records no person', async () => {
     const req = await open();
     const out = await svc.decideNode(req.id, { decision: 'approve', actorId: SLA_ACTOR_ID }, SYS);
     expect(out.finalized).toBe(true);
     const row = (engine._tables['sys_approval_action'] ?? []).find((a: any) => a.action === 'approve');
-    expect(row.actor_id).toBe(SLA_ACTOR_ID);
+    // ADR-0118 D1: the named actor admits the call; the `sys_user` lookup holds
+    // the person the context vouches for — nobody, for a machine.
+    expect(row.actor_id).toBeNull();
   });
 
   it('a privileged admin may still override a stuck request', async () => {

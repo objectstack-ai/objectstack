@@ -116,7 +116,7 @@ export class PluginPermissionEnforcer {
    * fails on the claim AND on the measurement, so it goes red the day the
    * seam lands and tells that author the sentence is theirs to rewrite.
    * Building the per-plugin context is the ADR-0025 materialize seam
-   * (#17147, Phase 1b of #11333).
+   * (measured and recorded in commit aaacf1d5c; the phase after commit ea4d16420).
    *
    * Prefer this over {@link registerPluginPermissions} for distributed
    * plugins: it registers what was granted, not what was declared.

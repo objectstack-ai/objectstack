@@ -97,33 +97,40 @@ const storedRow = (
  * The engine double: `findOne` over a row table, plus the registry surface the
  * layered read touches on its way past the overlay.
  *
- * ⛔ No `find` / `insert` / `update` / `delete`, deliberately — the read path
- * under test issues exactly one verb, and a double declaring verbs no case
- * exercises would owe `check:engine-double-contract` a dispatch contract that
- * protects nothing. Same shape the two sibling read-gate pins drive.
+ * `find` is the second verb the read path issues, and only for a `view` name
+ * with no stored row of its own: the read then selects the stored view
+ * containers that might expand that name, through the list read's own row
+ * selection (#21442). It records into `finds` — the same partitions question
+ * asked of that read. ⛔ No `insert` / `update` / `delete`, deliberately — a
+ * double declaring verbs no case exercises would owe
+ * `check:engine-double-contract` a dispatch contract that protects nothing. Same shape the two sibling read-gate pins drive.
  */
 function makeHarness(rows: StoredRow[]) {
     const findOnes: Array<Record<string, unknown>> = [];
+    const finds: Array<Record<string, unknown>> = [];
+    const matching = (where: Record<string, unknown>) => {
+        // `check:where-matcher` — a hand-written matcher with no combinator
+        // branch reads `$and` as a field name and answers the wrong question
+        // rather than failing. Refuse the shape this double does not
+        // implement, matching the sibling doubles' convention.
+        for (const k of Object.keys(where)) {
+            if (k.startsWith('$')) {
+                throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
+            }
+        }
+        return rows.filter((r) =>
+            Object.entries(where).every(([k, v]) => {
+                if (v === undefined) return true;
+                return (r as unknown as Record<string, unknown>)[k] === v;
+            }),
+        );
+    };
     const engine: any = {
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
             if (table !== 'sys_metadata') return undefined;
             const where = opts?.where ?? {};
             findOnes.push({ ...where });
-            // `check:where-matcher` — a hand-written matcher with no combinator
-            // branch reads `$and` as a field name and answers the wrong
-            // question rather than failing. Refuse the shape this double does
-            // not implement, matching the sibling doubles' convention.
-            for (const k of Object.keys(where)) {
-                if (k.startsWith('$')) {
-                    throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
-                }
-            }
-            return rows.find((r) =>
-                Object.entries(where).every(([k, v]) => {
-                    if (v === undefined) return true;
-                    return (r as unknown as Record<string, unknown>)[k] === v;
-                }),
-            );
+            return matching(where)[0];
         },
         registry: {
             registerItem: () => undefined,
@@ -137,8 +144,14 @@ function makeHarness(rows: StoredRow[]) {
             applyNavContributions: (app: unknown) => app,
         },
     };
+    engine.find = async (table: string, opts?: { where?: Record<string, unknown> }) => {
+        if (table !== 'sys_metadata') return [];
+        const where = opts?.where ?? {};
+        finds.push({ ...where });
+        return matching(where);
+    };
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
-    return { protocol, findOnes };
+    return { protocol, findOnes, finds };
 }
 
 /** Every `organization_id` partition the engine was asked for, deduplicated. */
@@ -443,11 +456,14 @@ describe('§5 an already-gating caller receives the same scope it did before', (
         // for `view` gets the org partition read, exactly as before.
         const gated = organizationIdForMetaRead('view', ORG);
         expect(gated).toBe(ORG);
-        const { protocol, findOnes } = makeHarness([]);
+        const { protocol, findOnes, finds } = makeHarness([]);
         await protocol.getMetaItemLayered({
             type: 'view', name: 'probe', organizationId: gated,
         });
         expect(partitions(findOnes)).toEqual([null, ORG]);
+        // [#21442] `probe` has no row of its own, so the read also selects the
+        // stored containers that might expand it — from the same partitions.
+        expect(partitions(finds)).toEqual([null, ORG]);
     });
 });
 

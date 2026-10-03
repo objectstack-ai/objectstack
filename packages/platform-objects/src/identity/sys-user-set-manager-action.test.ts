@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #19249 — the `set_user_manager` row action on `sys_user`, pinned against the
+ * Commit 74fb2f7a8 — the `set_user_manager` row action on `sys_user`, pinned against the
  * three things about it that are decisions rather than code.
  *
  * `sys_user.manager_id` drives the approvals `manager` rung and the ADR-0057

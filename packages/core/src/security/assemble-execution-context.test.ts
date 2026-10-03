@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #6216 — the ExecutionContext assembly converges onto ONE module, and the
+// Commit f586f1a89 — the ExecutionContext assembly converges onto ONE module, and the
 // maintainer ruling of 2026-08-08 (Option A) is explicit that **neither surface
 // changes runtime behaviour**: what changes is that the anonymous divergence
 // becomes named API instead of drift.
 //
 // A green suite proves nothing about that on its own — the suite was green
 // before the change too. So the load-bearing test here is a PARITY PIN: the
-// pre-#6216 assembly of each face is transcribed VERBATIM below, frozen, and
+// assembly of each face before commit f586f1a89 is transcribed VERBATIM below, frozen, and
 // every shape either face can serve is assembled both ways and compared.
 //
 // ⚠ The two `legacy*` functions are FROZEN TRANSCRIPTIONS of code that no
@@ -30,9 +30,9 @@ import {
 } from './assemble-execution-context.js';
 import type { ResolvedAuthzContext } from './resolve-authz-context.js';
 
-// ───────────────────────── frozen pre-#6216 transcriptions ─────────────────────────
+// ───────────────────────── frozen transcriptions from before commit f586f1a89 ─────────────────────────
 
-/** Runtime / MCP dispatcher assembly, verbatim, pre-#6216. FROZEN — see header. */
+/** Runtime / MCP dispatcher assembly, verbatim, before commit f586f1a89. FROZEN — see header. */
 function legacyDispatcherAssembly(
   authz: ResolvedAuthzContext,
   oauthPrincipal: OAuthTokenProvenance | undefined,
@@ -49,7 +49,7 @@ function legacyDispatcherAssembly(
     if (oauthPrincipal?.clientId) {
       ctx.principalKind = 'agent';
       ctx.onBehalfOf = { userId: authz.userId, principalKind: 'human' };
-      // Pre-#6216 these two read `scopesToAgentPermissionSets(oauthPrincipal.scopes)`
+      // Before commit f586f1a89 these two read `scopesToAgentPermissionSets(oauthPrincipal.scopes)`
       // and `oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS)` inline.
       // Both are now interpreted at the `/mcp` door and arrive pre-derived; the
       // scope→ceiling mapping itself is pinned end-to-end through the real
@@ -88,7 +88,7 @@ function legacyDispatcherAssembly(
 }
 
 /**
- * REST `computeExecCtx` assembly, verbatim, pre-#6216. FROZEN — see header.
+ * REST `computeExecCtx` assembly, verbatim, before commit f586f1a89. FROZEN — see header.
  * `authGate` / `__kernel` are outside: at the time this was frozen neither was
  * an `ExecutionContext` field, and the REST face added both after assembly.
  *
@@ -280,7 +280,7 @@ describe('#6216 — REST face: byte-for-byte parity with the pre-#6216 assembly'
             localization,
             requestLocale,
             // The named per-face divergence: REST has never carried the
-            // session bearer, and #6216 preserves that.
+            // session bearer, and commit f586f1a89 preserves that.
             accessToken: undefined,
             authGate: undefined,
           });
@@ -494,7 +494,7 @@ describe('#6216 — the field set is CLOSED', () => {
 });
 
 describe('#6216 — the measured residual: keys that were present-with-undefined', () => {
-  // Reported rather than hidden. The pre-#6216 dispatcher assigned
+  // Reported rather than hidden. The dispatcher before commit f586f1a89 assigned
   // `ctx.timezone` / `ctx.locale` unconditionally inside its authenticated
   // branch, and the REST literal always spelled `tenantId` / `email` — so both
   // faces could emit a key whose value was `undefined`. The shared assembler

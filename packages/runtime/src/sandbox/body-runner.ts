@@ -57,6 +57,7 @@ import {
   resolveRecordTitle,
   resolveRelatedTitleTarget,
 } from '@objectstack/objectql';
+import { serveStoredMetadataReadsThrough } from '../stored-metadata-reader-seam.js';
 
 interface FactoryOptions {
   ql: any;
@@ -785,7 +786,21 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
   };
 }
 
+/**
+ * The `ctx.api` a sandboxed body (hook or action) reads and writes through.
+ *
+ * [#21454] Served through the stored-metadata reader seam: a read of the
+ * stored-metadata-body family answers the generic data door's form (the body
+ * projected, the content hash keyed), never the stored row. This is the one
+ * place both body faces get their API, so the hook face, the action face and
+ * every fallback below are served alike, and a body can copy only what it was
+ * served.
+ */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
+  return serveStoredMetadataReadsThrough(buildSandboxApiSource(engineCtx, ql, errLabel), ql);
+}
+
+function buildSandboxApiSource(engineCtx: any, ql: any, errLabel: string) {
   const engineApi = engineCtx?.api;
   if (engineApi && typeof engineApi.object === 'function') return engineApi;
   // [#3914] The host's own execution envelope, when it supplied one. Hooks get

@@ -121,7 +121,7 @@ describe('#12702 — org-scoped tier-A admission, derived from the registry', ()
 
     it('the boundary fold composes: a URL-only spelling folded through canonicalMetaUrlType is admitted', () => {
         // `email_templates` is a URL-only spelling (`SINGULAR_TO_PLURAL` has no
-        // manifest key for it — the #10340 measurement). The doors fold BEFORE
+        // manifest key for it — the measurement commit 26f3588fb wrote). The doors fold BEFORE
         // asking; this case pins that the folded spelling answers tier-A.
         expect(canonicalMetaUrlType('email_templates')).toBe('email_template');
         const out = verdict({

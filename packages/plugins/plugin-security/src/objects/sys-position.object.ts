@@ -285,7 +285,8 @@ export const SysPosition = ObjectSchema.create({
       readonly: true,
       defaultValue: 'admin',
       description:
-        'Record provenance (unified tri-state, A4 #2920): platform = framework built-in ' +
+        'Record provenance, on the one platform / package / admin vocabulary that capabilities, ' +
+        'permission sets and positions all share: platform = framework built-in ' +
         '(read-only) / package = stack/package-declared / admin = tenant-created. Legacy rows ' +
         'may carry system (== platform) / config (== package) / user (== admin).',
       options: [

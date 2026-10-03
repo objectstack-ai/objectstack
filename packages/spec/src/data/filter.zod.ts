@@ -3259,7 +3259,8 @@ export const RETIRED_FILTER_OPERATORS: Readonly<
   $regex: {
     to: '$icontains',
     why:
-      '`$regex` was never declared by the Filter Protocol and is retired (#4706). It could not '
+      '`$regex` was never declared by the Filter Protocol and is retired under ADR-0049 '
+      + 'enforce-or-remove: it is refused here, never reinterpreted. It could not '
       + 'mean one thing across the backends: driver-sql compiled it to a LIKE-escaped substring '
       + 'match (so "a.b" matched only the literal "a.b"), driver-memory evaluated it as a real '
       + 'RegExp (so it also matched "axb", and an invalid pattern silently matched nothing), and '
@@ -3274,7 +3275,8 @@ export const RETIRED_FILTER_OPERATORS: Readonly<
     to: '$icontains',
     why:
       '`$options` was never a predicate — it was the regex-flags companion to `$regex`, which is '
-      + 'retired (#4706). Its only real use was `$options: "i"` for a case-insensitive match: '
+      + 'retired under ADR-0049 enforce-or-remove. Its only real use was `$options: "i"` for a '
+      + 'case-insensitive match: '
       + 'write `$icontains` instead, which says that in the operator name and folds ASCII case on '
       + 'every backend. On its own, with no `$regex` beside it, it never constrained anything.',
   },

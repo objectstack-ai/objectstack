@@ -32,7 +32,7 @@ export const SysApprovalAction = ObjectSchema.create({
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{action} · {step_name}',
-  highlightFields: ['request_id', 'step_name', 'action', 'actor_id', 'via_override', 'created_at'],
+  highlightFields: ['request_id', 'step_name', 'action', 'actor_id', 'acted_as', 'via_override', 'created_at'],
 
   // ADR-0104 D3 wave 2. `attachments` is a media field, so the files it holds
   // are OWNED by this row — and the storage service would otherwise authorize
@@ -49,7 +49,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'recent',
       label: 'Recent',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'via_override', 'comment'],
+      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'acted_as', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No approval actions yet', message: 'Actions are logged automatically when approvals progress.' },
@@ -69,7 +69,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'all_actions',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'via_override', 'comment'],
+      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'acted_as', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
@@ -132,10 +132,52 @@ export const SysApprovalAction = ObjectSchema.create({
       },
     ),
 
+    // [ADR-0118 D1] The PERSON who took the action — a `sys_user` id or
+    // nothing, never a slot literal or a sentinel. The slot the action was
+    // admitted under is a separate fact and lives in `acted_as` below: one
+    // holder of a position acts for it, one person can hold several slots, and
+    // a slot recorded HERE (as it once was) left the decider on no column at
+    // all, and dropped the row from every join on this lookup. Empty means no
+    // person is recorded: a system-initiated action — the SLA sweep's
+    // `escalate` and the auto-decision after it, the dead-run sweep's `recall`;
+    // a machine has no `sys_user` id, and what it did is the row's kind — or,
+    // with `acted_as` set, a decision recorded before the person was captured,
+    // whose decider no stored record names. The boot-time `backfillActionSlots`
+    // moved such a slot out of this column rather than guess a person, and
+    // nulls the machine sentinels earlier writers stored here.
     actor_id: Field.lookup('sys_user', {
       label: 'Actor',
       required: false,
       group: 'Action',
+      description:
+        'The user who took this action. Empty when no person is recorded: a system-initiated action, or a '
+        + 'decision recorded before the deciding user was captured, which still shows the slot it was taken '
+        + 'as.',
+    }),
+
+    // The pending-approver slot the action was taken AS — the slot's address in
+    // its stored spelling, exactly as it stood in `pending_approvers` when the
+    // action was admitted: a user id, an email, or a `type:value` literal such
+    // as `position:<name>`. `ApprovalActionRow.acted_as` is the contract's
+    // reading of this column.
+    //
+    // It is never a person (that is `actor_id`), and it is what every
+    // slot-against-slate comparison reads: the multi-approver tally,
+    // `decision_progress`, and the slot half of the already-acted probe. ⛔ No
+    // reader falls back to `actor_id` for a slot.
+    //
+    // Empty on an action no slot admitted — the submitter's own actions, a
+    // system action, an admin override (`via_override`) — and on a row written
+    // before this column whose slot could not be recovered without guessing.
+    acted_as: Field.text({
+      label: 'Acted As',
+      required: false,
+      maxLength: 255,
+      group: 'Action',
+      description:
+        'The pending-approver slot this action was taken as, in the slot’s stored spelling: a user id, an '
+        + 'email, or a position address. Empty when no slot admitted the action, such as the submitter’s own '
+        + 'actions, system actions and admin overrides.',
     }),
 
     comment: Field.textarea({ label: 'Comment', required: false, group: 'Action' }),
@@ -172,18 +214,32 @@ export const SysApprovalAction = ObjectSchema.create({
     // ("<from_id> → <to_id>"), which no client could parse or render readably.
     // `comment` is pure user input again; timelines render "from A to B" from
     // these fields.
-    reassign_from: Field.lookup('sys_user', {
+    //
+    // [ADR-0118 D1] A reassignment moves a pending-approver SLOT, not
+    // necessarily a person, so both hold the slot's ADDRESS in its stored
+    // spelling — a user id, an email, or a `type:value` literal such as
+    // `position:<name>` — the same kind of column as `acted_as`, and for the
+    // same reason. As `sys_user` lookups they held addresses no join could
+    // resolve, and dropped those rows from every report on them. The person who
+    // made the move is `actor_id`.
+    reassign_from: Field.text({
       label: 'Reassigned From',
       required: false,
+      maxLength: 255,
       group: 'Action',
-      description: 'User whose pending-approver slot was handed over (reassign actions only)',
+      description:
+        'The pending-approver slot that was handed over, in the slot’s stored spelling: a user id, an email, '
+        + 'or a position address (reassign actions only).',
     }),
 
-    reassign_to: Field.lookup('sys_user', {
+    reassign_to: Field.text({
       label: 'Reassigned To',
       required: false,
+      maxLength: 255,
       group: 'Action',
-      description: 'User who received the pending-approver slot (reassign actions only)',
+      description:
+        'The pending-approver address the slot was handed to, in its stored spelling: a user id, an email, '
+        + 'or a position address (reassign actions only).',
     }),
 
     attachments: Field.file({

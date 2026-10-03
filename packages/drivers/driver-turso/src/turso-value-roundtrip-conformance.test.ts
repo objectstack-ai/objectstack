@@ -7,7 +7,7 @@
  * This driver is dual-transport and the two halves share no value codec:
  *
  * - **Local / replica** — `TursoDriver extends SqlDriver`, so the `Field.json`
- *   codec #12380 made injective is inherited whole. This half is the twin of
+ *   codec commit 4045b954d made injective is inherited whole. This half is the twin of
  *   `sql-driver-value-roundtrip-conformance.test.ts`'s SQLite cell.
  * - **Remote** — does not go through knex at all. `RemoteTransport` carries its
  *   own `serializeValue` on the write path and its own `mapRows` on the read

@@ -513,6 +513,29 @@ export interface ApprovalActionRow {
    * predates the column — "not recorded", which is not the same claim.
    */
   via_override?: boolean;
+  /**
+   * The pending-approver slot this action was taken as: the slot's address in
+   * its stored spelling, exactly as it stood in the request's
+   * `pending_approvers` when the action was admitted — a `position:<name>`
+   * address (or `role:<name>`, the deprecated pre-rename spelling), an email,
+   * or a user id.
+   *
+   * "Who acted" and "as which slot" are two facts. One holder of a position
+   * can act for it, and one person can hold several slots, so the slot is
+   * recorded beside the person rather than in place of them. It is what a
+   * timeline shows as the capacity an approver acted in.
+   *
+   * It is never a person. The person who acted is `actor_id` (a `sys_user` id
+   * or nothing, ADR-0118 D1). A slot addressed by a user id carries that id
+   * here as the slot's address, which makes no claim about who acted.
+   *
+   * Absent means one of two things, and this member alone does not tell them
+   * apart: the action was not admitted through a slot (a submitter's own
+   * action, a system action, or an admin override — see `via_override`), or
+   * the row was written before the slot was recorded. So absent alone never
+   * proves that no slot was involved: "not recorded" is not the same claim.
+   */
+  acted_as?: string;
 }
 
 /** Input for a decision on an approval request. */

@@ -109,6 +109,10 @@ const FAMILY: Record<string, string[]> = {
   // `--delete` it boots, reports and writes nothing, so the family gains a
   // member without this fixture gaining a destructive run.
   'secret orphans': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only and writes nothing, so the family gains a member
+  // without this fixture gaining a run that re-wraps anything.
+  'secret rewrap': [],
   'storage orphans': [],
 };
 

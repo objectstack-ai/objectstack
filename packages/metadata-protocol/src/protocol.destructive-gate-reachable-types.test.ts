@@ -133,6 +133,19 @@ const fieldRow = (type: string): Row => row({
     metadata: JSON.stringify({ name: FIELD, label: 'Probe', type }),
 });
 
+/**
+ * [#21470] The body a hatch-path save SENDS: a field definition with no
+ * `name`. A `field` row is named `<object>.<field>`, which a `FieldSchema`
+ * `name` (dot-free) can never spell, so every runtime write door now refuses a
+ * `field` body whose `name` is set (`VALIDATION_ERROR` / 400, before this
+ * file's gates) — the write would register the row under the column name.
+ * `FieldSchema` does not require `name`, so the nameless body is the one the
+ * hatch can carry, and what these cases measure is unchanged: the destructive
+ * gate's reach, not the body's name. The STORED rows above keep theirs, as a
+ * row written before that refusal sits at rest.
+ */
+const HATCH_BODY = (type: 'text' | 'number') => ({ label: 'Probe', type });
+
 /** An `object` row carrying a real `fields` map — the only diffable shape. */
 const objectRow = (name: string, fields: readonly string[]): Row => row({
     type: 'object',
@@ -364,7 +377,7 @@ describe('[#11014 §2 reason 1] a `field` body has no `fields` map to diff', () 
         const r = await save(protocol, {
             type: 'field',
             name: DOTTED,
-            item: { name: FIELD, label: 'Probe', type: 'number' },
+            item: HATCH_BODY('number'),
         });
 
         // It persisted — so the request reached, and passed, the gate.
@@ -379,7 +392,7 @@ describe('[#11014 §2 reason 1] a `field` body has no `fields` map to diff', () 
         const r = await save(protocol, {
             type: 'field',
             name: DOTTED,
-            item: { name: FIELD, label: 'Probe', type: 'number' },
+            item: HATCH_BODY('number'),
         });
 
         expect(r.outcome).toBe('resolved');
@@ -469,7 +482,7 @@ describe('[#11014 §3] the double fault the trimmed limb used to catch', () => {
         const r = await save(protocol, {
             type: 'field',
             name: DOTTED,
-            item: { name: FIELD, label: 'Probe', type: 'text' },
+            item: HATCH_BODY('text'),
         });
 
         expect(r.outcome).toBe('resolved');

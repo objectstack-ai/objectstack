@@ -1224,23 +1224,20 @@
       "title": "Boot-time migration-journal scan: an interrupted run (started ∧ ¬done) is reported at kernel:ready with the exact `os migrate resume` prescription, boot PROCEEDS without resuming, and the two quiet-degradation arms (no journal object → silent; scan THROWS → 'could not check' warning) stay distinguishable",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["operator (local shell)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch copy of the app whose objectstack.config.ts plugins array adds `new MigrationRecoveryPlugin()` (exported from @objectstack/runtime — packages/runtime/src/index.ts); PlatformObjectsPlugin (the journal object) is auto-registered by serve.ts §5c, but the RECOVERY plugin is not, so a stock config never runs the scan",
+          "the app as shipped: every `os serve` boot (and so `os start` / `os dev`, which spawn it) composes MigrationRecoveryPlugin beside PlatformObjectsPlugin (the journal object) — serve.ts §5c and §5c-bis — so a stock config runs the scan; a config whose plugins array composes its own `new MigrationRecoveryPlugin()` keeps that instance instead",
           "an isolated persistent sqlite DB (own port, -d file:/tmp/<run>/journal.db) whose base schema was synced by one prior boot, so sys_migration_journal exists as a table to seed — the same scratch-DB class of fixture cli.migrate-plan-apply-json uses",
           "a way to hand-insert rows into that sqlite file between boots (sqlite3 CLI or a small node script); the journal's API surface is read-only (apiMethods get/list), so REST cannot seed it"
-        ],
-        "knownGaps": [
-          "NO stock boot path composes MigrationRecoveryPlugin: it is exported from @objectstack/runtime and instantiated only by its own unit test — serve.ts auto-registers PlatformObjectsPlugin but never this plugin, standalone-stack/default-host do not, the showcase config's plugins array does not, and buildDataMigrationPlugins (the migrate CLI's boot) does not either. A stock showcase boot therefore runs NO journal scan, and its silence over a seeded interrupted row proves nothing. If the runner judges the scan should be on by default (the plugin header and sys-migration-journal.object.ts argue recovery must be 'discoverable with zero host wiring'), that is a composition finding to file — never a reason to tick or to skip the item."
         ]
       },
       "steps": [
-        "create the scratch app per fixtures (config composes `new MigrationRecoveryPlugin()`); boot it once on its own port with -d file:/tmp/<run>/journal.db so schema sync creates the sys_migration_journal table; grep this first boot's log for migration-recovery output (expect none — clean-journal baseline); stop the server",
+        "boot the app once on its own port with -d file:/tmp/<run>/journal.db so schema sync creates the sys_migration_journal table; grep this first boot's log for migration-recovery output (expect none — clean-journal baseline); stop the server",
         "hand-seed the crash-shaped state directly into the sqlite file: one row (run_id 'qa-interrupted-1', seq 0, kind 'run_started', plan_hash 'qa', detail '{\"planId\":\"qa_plan\"}') and one row (run_id 'qa-interrupted-1', seq 1, kind 'chunk_started', chunk_index 0) — started ∧ ¬done with an UNKNOWN-outcome chunk; read the table's real columns first (PRAGMA table_info) and respect the unique (run_id, seq) index; record the exact row count",
         "boot again against the SAME DB; capture the FULL boot log, then GET /api/v1/health and /api/v1/ready once up",
         "re-count sys_migration_journal rows after the boot and diff against the pre-boot count",
@@ -1250,7 +1247,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the boot log warns per interrupted run, naming the run ('qa-interrupted-1'), the plan ('qa_plan'), the UNKNOWN-outcome chunk ('1 chunk(s) with UNKNOWN outcome (0) — started, never confirmed committed'), and the exact acting command — plus the summary 'interrupted migration run(s) found in sys_migration_journal. They are NOT resumed automatically — run \\'os migrate resume\\' to act on them.' Because the scratch boot registers no plan, the per-run line is the UNRESUMABLE variant ('No loaded plugin registers plan \\'qa_plan\\' … Load the package that owns it, then: os migrate resume --run qa-interrupted-1', describeInterruptedRun) — that variant still names the command; expecting the bare 'Resume with:' line here is a mis-read of the fixture, not a product FAIL",
+          "clause": "the boot log warns per interrupted run, naming the run ('qa-interrupted-1'), the plan ('qa_plan'), the UNKNOWN-outcome chunk ('1 chunk(s) with UNKNOWN outcome (0) — started, never confirmed committed'), and the exact acting command — plus the summary 'interrupted migration run(s) found in sys_migration_journal. They are NOT resumed automatically — run \\'os migrate resume\\' to act on them.' Because no loaded package registers the seeded plan id 'qa_plan', the per-run line is the UNRESUMABLE variant ('No loaded plugin registers plan \\'qa_plan\\' … Load the package that owns it, then: os migrate resume --run qa-interrupted-1', describeInterruptedRun) — that variant still names the command; expecting the bare 'Resume with:' line here is a mis-read of the fixture, not a product FAIL",
           "oracle": "log",
           "verify": "grep the second boot's log for the per-run warning and the NOT-resumed summary (emitted at migration-recovery-plugin.ts)",
           "evidence": "the boot-log excerpt containing both lines"
@@ -1262,7 +1259,7 @@
           "evidence": "both probe statuses + the two row counts"
         },
         {
-          "clause": "on a composition where the scan is PROVEN active (clause 1, same config, same DB), a journal with nothing to find boots in silence: the first boot (empty journal) and the third boot (run concluded by run_done) both emit zero migration-recovery lines — findInterruptedRuns treats run_done as concluded (migration-journal.ts) and the empty result returns before any warn. Absence of a warning is only meaningful once the arm is proven — this clause may not be scored on a stock boot, where silence means the plugin was never composed",
+          "clause": "on a composition where the scan is PROVEN active (clause 1, same config, same DB), a journal with nothing to find boots in silence: the first boot (empty journal) and the third boot (run concluded by run_done) both emit zero migration-recovery lines — findInterruptedRuns treats run_done as concluded (migration-journal.ts) and the empty result returns before any warn. Absence of a warning is only meaningful once the arm is proven — this clause may not be scored before clause 1 proved the scan active on the same composition and DB",
           "oracle": "log",
           "verify": "grep boots 1 and 3 for 'migration' / 'interrupted' recovery output; both empty, while boot 2 (between them, same composition) warned",
           "evidence": "the three grep results side by side"
@@ -1283,7 +1280,7 @@
       "negative": [
         "any journal write caused by booting — a new chunk_started/chunk_done row, the seeded run progressing or concluding — is an auto-resume, THE fail the boot-discovers/CLI-acts split exists for",
         "a warning emitted on a journal-less lean kernel, or silence on a throwing scan, conflates the two degradation arms — 'silent by design' and 'could not check' must never trade places",
-        "silence on a STOCK showcase boot over a seeded interrupted row is not a pass of anything: stock composition never runs the scan (see knownGaps) — scoring that silence as 'clean journal' is the absence-inference trap applied to a plugin that was never loaded"
+        "silence over a seeded interrupted row on a boot whose scan was never proven active is not a pass of anything — score the clean-journal clause only after clause 1 proved the arm; scoring unproven silence as 'clean journal' is the absence-inference trap"
       ],
       "traps": ["absence-inference", "stale-dist"],
       "automated": { "kind": "unit", "ref": "packages/runtime/src/migration-recovery-plugin.test.ts" },
@@ -1291,7 +1288,7 @@
         "packages/runtime/src/migration-recovery-plugin.ts#describeInterruptedRun — kernel:ready hook; silent no-engine return; silent absent-journal return; scan-failure warning (string); per-run warns + NOT-resumed summary; describeInterruptedRun (unresumable variant); the boot-discovers/CLI-acts ruling in the header",
         "packages/core/src/utils/migration-journal.ts#findInterruptedRuns — findInterruptedRuns (started ∧ ¬done; run_done concludes; a run_failed run fully compensated is settled)",
         "packages/platform-objects/src/system/sys-migration-journal.object.ts#run_id (row contract, (run_id, seq) unique index, apiMethods get/list — registered by PlatformObjectsPlugin)",
-        "packages/cli/src/commands/serve.ts#kernel (PlatformObjectsPlugin auto-registered into every served kernel — which is why the absent-journal arm cannot be staged on a served boot; MigrationRecoveryPlugin itself is auto-registered NOWHERE)",
+        "packages/cli/src/commands/serve.ts#kernel (PlatformObjectsPlugin auto-registered into every served kernel — which is why the absent-journal arm cannot be staged on a served boot — and MigrationRecoveryPlugin beside it, §5c-bis, guarded so a config's own instance is kept)",
         "packages/runtime/CHANGELOG.md 17.0.0, commit 071d0dc — 'boot reconciliation and os migrate resume for the migration journal' (ADR-0119 D2, #4617 deliverable 3)",
         "cli.migrate-plan-apply-json (the CLI side of the same journal — this item is the boot-side DETECTION that item's `os migrate resume --json` step presumes)"
       ],
@@ -1301,6 +1298,12 @@
           "date": "2026-08-20",
           "change": "new — authored in the scoped scan-functionality coverage sweep: the boot-side journal scan (ADR-0119 D2 deliverable 3, landed v17) had no item; existing coverage touched only the CLI half (cli.migrate-plan-apply-json's resume --json exit-code step). Grounding found the load-bearing fixture fact the item now encodes: MigrationRecoveryPlugin is exported from @objectstack/runtime but composed by NO stock boot path (not serve.ts, not standalone-stack, not the showcase config, not buildDataMigrationPlugins) — only its unit test instantiates it — so the item boots a scratch config that composes it explicitly, and treats stock-boot silence as the absence-inference trap, not evidence",
           "ref": "claude/new-session-0pv25p"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-03",
+          "change": "the composition gap the fixtures encoded is closed: every `os serve` boot now composes MigrationRecoveryPlugin beside PlatformObjectsPlugin, and the `os migrate` data boot composes its registry. The scratch-config fixture, the knownGaps entry and the stock-boot negative are rewritten to match; steps, oracles and clauses are otherwise unchanged",
+          "ref": "#21498"
         }
       ]
     },

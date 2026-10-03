@@ -29,7 +29,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
-import { expandViewContainer, ViewSchema } from '@objectstack/spec/ui';
+import { expandViewContainer, isAggregatedViewContainer, ViewSchema } from '@objectstack/spec/ui';
+import { MetadataPlugin } from '@objectstack/metadata';
+import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
@@ -771,5 +773,290 @@ describe('#21334 a container on another package\'s object never takes that packa
         const served = await objectDoor(protocol);
         expect(served.filter((v) => v._packageId === REPAIR)).toEqual([]);
         await expectEveryPackagedNameIntact(protocol);
+    });
+
+    /**
+     * #21442 — every name the object door lists answers the same row by name,
+     * on both kernels, for every member kind and every container scope.
+     *
+     * The list read expands each stored container it reads into its own answer;
+     * nothing else stores or registers those views on every kernel. Measured on
+     * `origin/main` before this change, with this harness: the by-name read
+     * answered an expanded name only on an unscoped kernel and only for an
+     * environment-wide container (registry hydration), and answered nothing on
+     * `env_local` or for an organization-scoped container. Triage's ruling A:
+     * the by-name read expands the in-scope containers through the function the
+     * list read uses, ⛔ no second expansion rule and ⛔ no kernel-specific
+     * branch. The container's own name stays its stored row — the control.
+     */
+    describe('#21442 a name a stored container expands answers by name what the object door lists', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        const ownNames = (served: any[]) => served.filter((v) => String(v.name).startsWith(`${TASK}.${OWN}`));
+        const layers = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (await protocol.getMetaItemLayered({ type: 'view', name, ...scoped(organizationId) })) as any;
+        const history = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (await protocol.historyMetaItem({ type: 'view', name, ...scoped(organizationId) })).events;
+        const diff = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (protocol as any).diffMetaItem({ type: 'view', name, ...scoped(organizationId) });
+        /** What the registry holds for `view`, by key — reads must leave it as they found it. */
+        const registrySnapshot = (registry: ReturnType<typeof faithfulRegistry>) =>
+            JSON.stringify(registry.listItems('view').map((it) => [it.name, it._packageId ?? null]).sort());
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const c of CONTAINERS) {
+                    for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                        it(`${c.arm}, member ${kind}: every name the object door lists answers that same item by name`, async () => {
+                            const { protocol } = showcaseHarness(environmentId);
+                            await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                            const served = await objectDoor(protocol, c.organizationId);
+                            expect(ownNames(served).map((v) => v.name), 'the expanded name is listed').toEqual([m.servedAs]);
+                            for (const listed of served) {
+                                const read = await byNameDoor(protocol, listed.name, c.organizationId);
+                                expect(withoutDiagnostics(read), `${listed.name} by name`).toEqual(withoutDiagnostics(listed));
+                            }
+                            // CONTROL — the container's own name is still its stored row.
+                            const row = await byNameDoor(protocol, OWN, c.organizationId);
+                            expect(row?.name).toBe(OWN);
+                            expect(row?.object).toBe(TASK);
+                            for (const key of Object.keys(m.member)) expect(row?.[key], `the stored container carries ${key}`).toEqual(m.member[key]);
+                        });
+                    }
+
+                    it(`${c.arm}: the layers name the container and its scope; history and diff resolve to the container's own row`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const member = MEMBER_CASES['listViews.*'];
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...member.member }, c);
+                        const expanded = member.servedAs;
+
+                        const layered = await layers(protocol, expanded, c.organizationId);
+                        // `overlay` is the container's own stored row, as the
+                        // layers read reports a stored row; `overlayScope` the
+                        // scope it was read from.
+                        expect(layered.overlay?.name).toBe(OWN);
+                        expect(layered.overlay?.listViews).toEqual(member.member.listViews);
+                        expect(layered.overlay?._packageId).toBe(c.ownPackage);
+                        expect(layered.overlayScope).toBe(c.organizationId ? 'org' : 'env');
+                        // `effective` is what the by-name read answers.
+                        expect(withoutDiagnostics(layered.effective))
+                            .toEqual(withoutDiagnostics(await byNameDoor(protocol, expanded, c.organizationId)));
+                        // CONTROL — the container's own name reports its own row, unchanged.
+                        const ownLayers = await layers(protocol, OWN, c.organizationId);
+                        expect(ownLayers.overlay?.name).toBe(OWN);
+                        expect(ownLayers.effective?.listViews).toEqual(member.member.listViews);
+
+                        const ownHistory = await history(protocol, OWN, c.organizationId);
+                        expect(ownHistory.length, 'the container has a change log of its own').toBeGreaterThan(0);
+                        const expandedHistory = await history(protocol, expanded, c.organizationId);
+                        expect(expandedHistory, 'the container\'s own log, nothing synthesized').toEqual(ownHistory);
+                        expect(expandedHistory.every((e: any) => e.ref.name === OWN), 'every event names the container').toBe(true);
+
+                        const ownDiff = await diff(protocol, OWN, c.organizationId);
+                        const expandedDiff = await diff(protocol, expanded, c.organizationId);
+                        expect(expandedDiff).toEqual(ownDiff);
+                        expect(expandedDiff.name, 'the answer names the item actually diffed').toBe(OWN);
+                    });
+
+                    it(`${c.arm}: the reads persist and register nothing, and a name nothing expands still answers nothing`, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, c);
+                        const rowsBefore = JSON.stringify([...rows.keys()].sort());
+                        const registryBefore = registrySnapshot(registry);
+
+                        const expanded = MEMBER_CASES['listViews.*'].servedAs;
+                        await byNameDoor(protocol, expanded, c.organizationId);
+                        await layers(protocol, expanded, c.organizationId);
+                        await history(protocol, expanded, c.organizationId);
+                        await diff(protocol, expanded, c.organizationId);
+                        expect(JSON.stringify([...rows.keys()].sort()), 'no derived row is stored').toBe(rowsBefore);
+                        expect(registrySnapshot(registry), 'no derived item is registered by a read').toBe(registryBefore);
+
+                        const nothing = `${TASK}.${OWN}.not_a_member`;
+                        expect(await byNameDoor(protocol, nothing, c.organizationId)).toBeUndefined();
+                        expect(await history(protocol, nothing, c.organizationId), 'no history for a name never stored').toEqual([]);
+                        const layeredNothing = await layers(protocol, nothing, c.organizationId);
+                        expect([layeredNothing.overlay, layeredNothing.overlayScope, layeredNothing.effective]).toEqual([null, null, null]);
+                    });
+                }
+
+                it('ISOLATION — an organization-scoped container\'s names answer nothing by name for another organization', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    const org = CONTAINERS.find((c) => c.organizationId !== undefined)!;
+                    await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, org);
+                    const expanded = MEMBER_CASES['listViews.*'].servedAs;
+
+                    expect(await byNameDoor(protocol, expanded, ORG)).toBeTruthy();
+                    expect(ownNames(await objectDoor(protocol, 'org_globex'))).toEqual([]);
+                    expect(await byNameDoor(protocol, expanded, 'org_globex')).toBeUndefined();
+                    expect(await byNameDoor(protocol, expanded)).toBeUndefined();
+                });
+
+                for (const organizationId of [undefined, ORG]) {
+                    it(`a tenant overlay of the package's own container (${organizationId ? 'organization-scoped' : 'environment-wide'}): each name it expands answers the overlay's view by name, not the packaged one`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const overlay = {
+                            name: TASK,
+                            list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
+                            listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+                        };
+                        await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay, ...scoped(organizationId) } as any);
+
+                        const served = await objectDoor(protocol, organizationId);
+                        for (const name of [DEFAULT, `${TASK}.in_progress`]) {
+                            const listed = named(served, name);
+                            expect(listed, `${name} is listed once`).toHaveLength(1);
+                            expect(String(listed[0].label)).toMatch(/^Customized/);
+                            const read = await byNameDoor(protocol, name, organizationId);
+                            expect(withoutDiagnostics(read), `${name} by name`).toEqual(withoutDiagnostics(listed[0]));
+                        }
+                        // The layers: the packaged item, the overlay that customizes it, and the result.
+                        const layered = await layers(protocol, DEFAULT, organizationId);
+                        expect(layered.code?.label).toBe('All Tasks');
+                        expect(layered.overlay?.name).toBe(TASK);
+                        expect(layered.overlayScope).toBe(organizationId ? 'org' : 'env');
+                        expect(layered.effective?.label).toBe('Customized');
+                    });
+                }
+            });
+        }
+
+        it('both kernels answer every listed name with the same item', async () => {
+            for (const c of CONTAINERS) {
+                for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                    const answers = [];
+                    for (const [, environmentId] of KERNELS) {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                        answers.push(withoutDiagnostics(await byNameDoor(protocol, m.servedAs, c.organizationId)));
+                    }
+                    expect(answers[0], `${c.arm}, member ${kind}`).toBeTruthy();
+                    expect(answers[1], `${c.arm}, member ${kind}`).toEqual(answers[0]);
+                }
+            }
+        });
+    });
+});
+
+/**
+ * #21412 — the runtime save door refuses a view container whose own `name`
+ * disagrees with the name it is saved under, through the one judge the source
+ * registrars call (`@objectstack/metadata/view-container-name`).
+ *
+ * Before: the card's probe was ACCEPTED — stored as row `crm_lead` with body
+ * `name` `lead_views`, and registered as `lead_views` (the container, keyed by
+ * `body.name` in `hydrateOverlayIntoRegistry`) plus `crm_lead.default`: one
+ * document answering under a name its row does not have. The two source
+ * registrars refuse the same document.
+ *
+ * The key judged here is the SAVE name, not the binding: this door keeps a
+ * container saved under a name other than its object (the #13407 case above,
+ * #21334's arm), so the body it stamps for such a container must pass when it
+ * is sent back. Shapes as the card's measurement named them (row = save name):
+ * P1 row crm_lead / `name` lead_views; P2 row lead_views / `name` lead_views,
+ * bound to crm_lead; P2b P2 with no `name`; P3 row lead_views / `name`
+ * crm_lead; P4 row crm_lead / `name` lead_views, no other binding.
+ */
+describe('#21412 the save door refuses a container whose own name disagrees with the name it is saved under', () => {
+    const named = (name: string | undefined, body: Record<string, unknown>) =>
+        (name === undefined ? { ...body } : { name, ...body });
+    /** Bound to crm_lead through its own `object`, no `data` on any arm. */
+    const objectBound = { object: 'crm_lead', list: { label: 'All Leads', type: 'grid', columns: [{ field: 'name' }] } };
+    /** No binding but whatever `name` it carries. */
+    const unbound = { list: { label: 'All', type: 'grid', columns: [{ field: 'name' }] } };
+
+    async function save(name: string, item: unknown) {
+        const harness = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(harness.engine);
+        let error: any = null;
+        try {
+            await protocol.saveMetaItem({ type: 'view', name, item });
+        } catch (e) {
+            error = e;
+        }
+        const viewRows = Array.from(harness.rows.values()).filter((r) => r.type === 'view');
+        // The keys the registry holds a CONTAINER under — its expansions carry
+        // `viewKind` and are the container's derived items, not a second key
+        // for the document (seat answer Q4).
+        const containerKeys = Array.from(harness.registered.get('view')?.entries() ?? [])
+            .filter(([, v]) => isAggregatedViewContainer(v))
+            .map(([k]) => k);
+        return { ...harness, protocol, error, viewRows, containerKeys };
+    }
+
+    function expectRefused(outcome: Awaited<ReturnType<typeof save>>) {
+        // The minimum a rejection pin asserts: the ADR-0112 envelope.
+        expect(outcome.error).toBeInstanceOf(Error);
+        expect(outcome.error.code).toBe('VALIDATION_ERROR');
+        expect(outcome.error.status).toBe(400);
+        // ...and the refused document reached nothing.
+        expect(outcome.viewRows).toEqual([]);
+        expect(outcome.registered.get('view')?.size ?? 0).toBe(0);
+    }
+
+    it('P1, the card\'s probe: refused VALIDATION_ERROR / 400, nothing stored, nothing registered', async () => {
+        expectRefused(await save('crm_lead', named('lead_views', leadContainer)));
+    });
+
+    it('P1 is refused THROUGH the judge: the door throws exactly what it returns for that document', async () => {
+        const body = named('lead_views', leadContainer);
+        const { error } = await save('crm_lead', body);
+        expect(error.message).toBe(savedItemNameRefusal('view', body, 'crm_lead', 'save')!.message);
+    });
+
+    it('P1 answers the envelope a source registrar answers for the same document', async () => {
+        const body = named('lead_views', objectBound);
+        const { error: saveDoor } = await save('crm_lead', body);
+        const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } }) as any;
+        const ctx = {
+            logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+            registerService: () => {}, getService: () => undefined, trigger: async () => {},
+        } as any;
+        const registrar = await plugin._parseAndRegisterArtifact(ctx, JSON.parse(JSON.stringify({
+            manifest: { id: 'com.acme.crm', name: 'CRM', version: '1.0.0', type: 'app' },
+            views: [body],
+        })), 'fixture-21412').then(() => null, (e: any) => e);
+        expect(registrar).toBeInstanceOf(Error);
+        expect([saveDoor.code, saveDoor.status]).toEqual([registrar.code, registrar.status]);
+        expect([saveDoor.code, saveDoor.status]).toEqual(['VALIDATION_ERROR', 400]);
+    });
+
+    it('P3: a `name` equal to the binding but not to the row is refused', async () => {
+        expectRefused(await save('lead_views', named('crm_lead', leadContainer)));
+    });
+
+    it('P4: a `name` that is the only binding, but not the row, is refused', async () => {
+        expectRefused(await save('crm_lead', named('lead_views', unbound)));
+    });
+
+    it('P2: a `name` equal to the row passes though the container binds elsewhere — one key, the row\'s', async () => {
+        const outcome = await save('lead_views', named('lead_views', objectBound));
+        expect(outcome.error).toBeNull();
+        expect(outcome.viewRows.map((r) => [r.name, JSON.parse(r.metadata).name])).toEqual([['lead_views', 'lead_views']]);
+        expect(outcome.containerKeys).toEqual(['lead_views']);
+        const list: any = await outcome.protocol.getMetaItems({ type: 'view' });
+        expect(switcherMatches(list.items, 'crm_lead').map((v: any) => v.name)).toEqual(['crm_lead.default']);
+    });
+
+    it('P2b: an absent `name` passes and is stamped with the row name — and the stamped body passes when sent back', async () => {
+        const outcome = await save('lead_views', named(undefined, objectBound));
+        expect(outcome.error).toBeNull();
+        expect(outcome.viewRows.map((r) => JSON.parse(r.metadata).name)).toEqual(['lead_views']);
+        expect(outcome.containerKeys).toEqual(['lead_views']);
+
+        const read: any = await outcome.protocol.getMetaItem({ type: 'view', name: 'lead_views' });
+        expect(read.item.name).toBe('lead_views');
+        const { _diagnostics: _drop, ...sentBack } = read.item;
+        await expect(outcome.protocol.saveMetaItem({ type: 'view', name: 'lead_views', item: sentBack })).resolves.toBeTruthy();
+    });
+
+    it('CONTROL: a `name` equal to the row and the binding passes, under one key', async () => {
+        const outcome = await save('crm_lead', named('crm_lead', leadContainer));
+        expect(outcome.error).toBeNull();
+        expect(outcome.containerKeys).toEqual(['crm_lead']);
     });
 });

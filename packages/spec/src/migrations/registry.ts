@@ -5075,6 +5075,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'nothing refuses at publish: the upgrade signal is behavioural and belongs here.',
   },
   {
+    id: 'agent-lifecycle-retired',
+    order: 62,
+    text:
+      'It also retires an agent\'s conversation state machine, `agent.lifecycle` (ADR-0049 '
+      + 'enforce-or-remove). It was parsed and never read: no runtime moved an agent through a declared '
+      + 'state or refused an undeclared transition, and enforcing it would have meant a statechart '
+      + 'interpreter beside Flow, the two-engine shape ADR-0020 rejected. What it reached for is served '
+      + 'elsewhere — a conversation phase is a skill selected by its `triggerConditions`, a multi-step '
+      + 'process is a Flow, a record\'s status transitions are the `state_machine` validation rule — so '
+      + 'authoring refuses the key with that prescription, and the D2 conversion `agent-lifecycle-removed` '
+      + 'deletes it, losslessly, retired from the load path. The XState `StateMachineSchema` family, '
+      + 'kept by ADR-0020 only for this door, left the package with it.',
+  },
+  {
     id: 'agent-memory-store-retired-and-limits-required',
     order: 61,
     text:
@@ -6070,6 +6084,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`translation-widget-sub-caption-retired`.',
   },
   {
+    id: 'ui-ai-chat-window-retired',
+    order: 65,
+    text:
+      'It also retires the `ai:chat_window` page element (#21504, ADR-0049 enforce-or-remove), '
+      + 'the `user:profile` shape one namespace over: no renderer for it ever shipped, and none is '
+      + 'wanted — the console leaves it unregistered on purpose, because the floating chat overlay '
+      + 'it mounts on every page is the supported AI chat entry point — so a page that placed one '
+      + 'validated clean and drew "Unknown component type", and its four props configured nothing. '
+      + 'The name leaves `PageComponentType` and is refused by name at the node, its '
+      + '`ComponentPropsMap` row stays as a whole-bag refusal carrying the same prescription, and '
+      + 'the props def `AIChatWindowProps` is unpublished. No conversion is registered: the only '
+      + 'edit is deleting the node, a layout decision that is the author\'s. Its D3 record is the '
+      + 'semantic entry `ui-ai-chat-window-retired`; `ai:suggestion` is unchanged.',
+  },
+  {
     id: 'ui-form-layout-inline-grid-retired',
     order: 40,
     text:
@@ -6116,6 +6145,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`update`, `delete`, `export`), refusing `read` and `import`, which nothing reads. Read by '
       + 'the component-props gate (advisory); a stored page still saves and loads, so no conversion '
       + 'is registered. Its D3 record is the semantic entry `ui-object-grid-row-members-typed`.',
+  },
+  {
+    id: 'ui-object-map-gantt-tree-navigation-typed',
+    order: 64,
+    text:
+      'It also types `navigation` on the `object-map`, `object-gantt` and `object-tree` page blocks '
+      + '(#21464, the first stage of the `ComponentPropsMap` `z.unknown()` close-out): each renderer '
+      + 'hands it to the shared navigation hook, which reads `navigation.mode` and falls back to `page`, '
+      + 'so `navigation: 42` and a bare mode string passed every door and opened the record page. The '
+      + 'three rows now take the list view\'s `NavigationConfigSchema` by reference, the carrier the grid, '
+      + 'kanban, calendar and timeline blocks already take. Read by the component-props gate '
+      + '(advisory); a stored page still saves and loads, so no conversion is registered. Its D3 record '
+      + 'is the semantic entry `ui-object-map-gantt-tree-navigation-typed`.',
   },
   {
     id: 'ui-object-master-detail-form-details-closed',
@@ -6629,6 +6671,50 @@ const step18: MigrationStep = {
         + '`HotReloadManager` stay exported from `@objectstack/core` with their '
         + 'tests green. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing '
         + 'ever read the container, so removing it removes no behaviour.',
+    },
+    // #21320 — ADR-0049 enforce-or-remove (ruled D, retire, on
+    // objectstack-ai/cloud#2569) — the D3 entry of the `agent.lifecycle`
+    // retirement, one entry for the one family: the key and the XState
+    // `StateMachineSchema` exports that only it still reached leave for the same
+    // reason. The key's deletion is mechanical (the D2 conversion
+    // `agent-lifecycle-removed`); where the intent behind a deleted machine goes —
+    // a skill, a Flow, or a `state_machine` validation rule — is not, and that
+    // judgement is what this entry carries.
+    {
+      id: 'agent-lifecycle-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
+      surface:
+        'agent.lifecycle — the agent conversation state machine left the shape; with it the XState '
+        + 'StateMachineSchema family left @objectstack/spec/automation (StateMachineSchema, StateNodeSchema, '
+        + 'TransitionSchema, ActionRefSchema, GuardRefSchema and their types), and StateNodeConfig left the '
+        + 'root and /ai entries',
+      replacement:
+        'no key: delete `lifecycle` from every agent. Put what the machine meant where the platform enforces '
+        + 'it — a phase of a conversation is a skill with its own `instructions` and `tools`, selected by its '
+        + '`triggerConditions` and attached through the agent\'s `skills`; a multi-step process is a Flow; a '
+        + 'record\'s status transitions are a `state_machine` validation rule on the object (a flat table of '
+        + 'each state\'s allowed next states). Code that imported the state machine exports declares the shape '
+        + 'it needs itself, or drops it',
+      reason:
+        'ADR-0049 enforce-or-remove: `agent.lifecycle` was parsed and never read. No runtime — not this '
+        + 'repository, not the cloud AI runtime that executes agents — moved an agent through a declared '
+        + 'state or refused an undeclared transition, so an authored machine changed nothing an agent did. '
+        + 'Enforcing it would have meant a statechart interpreter beside Flow, the two-engine shape ADR-0020 '
+        + 'rejected, and what it reached for is already served: conversation phases by skills (ADR-0064), '
+        + 'orchestration by Flow (ADR-0019), record transitions by the `state_machine` validation rule '
+        + '(ADR-0020). Authoring now refuses the key with that prescription, and TypeScript rejects it. The '
+        + 'D2 conversion `agent-lifecycle-removed` deletes it from existing sources and stored agent rows, '
+        + 'losslessly. `StateMachineSchema` had kept its file only for this door (ADR-0020 implementation '
+        + 'note 1), so the family left with it — which of the three destinations each deleted machine meant '
+        + 'is the author\'s judgement, not a mechanical rewrite',
+      acceptanceCriteria:
+        'No agent declares `lifecycle`; it is refused at parse with its prescription, and TypeScript rejects '
+        + 'it. Every conversation phase a deleted machine described is a skill the agent lists in `skills`, '
+        + 'with its own `instructions`, `tools` and `triggerConditions`; every multi-step process it described '
+        + 'is a Flow; every record status transition it described is a `state_machine` validation rule on that '
+        + 'object. No source imports StateMachineSchema, StateNodeSchema, TransitionSchema, ActionRefSchema, '
+        + 'GuardRefSchema or their types from @objectstack/spec. Every agent parses under the new schema.',
+      conversionIds: ['agent-lifecycle-removed'],
     },
     // #20274 — ADR-0049 enforce-or-remove (ruling record 5950198150, letter A′) —
     // the D3 entry of the `agent.memory` contract: one entry for the one decision,
@@ -18728,6 +18814,53 @@ const step18: MigrationStep = {
         + 'both fulfilling shapes and the runtime that fulfils each; the author adds the shape '
         + 'they meant or drops the flag.',
     },
+    // #21504 — the D3 record of the `ai:chat_window` retirement (ADR-0049
+    // enforce-or-remove; triage ruling 5963897014: retire, refused BY NAME through
+    // `RETIRED_PAGE_COMPONENT_TYPES`, the `user:profile` precedent of #14159). There
+    // is no D2 half: the element's four keys left with its props def, so there is no
+    // key a walker could strip and leave a valid node behind, and deleting an
+    // authored page node is a layout decision a mechanical conversion must not make
+    // (the `element-filter-removed` docblock's rule). What the chain owes the
+    // upgrader is the delegation itself, in writing — the `element:filter` /
+    // `element:form` node entry's shape, for a node the parse now refuses by name.
+    //
+    // The replacement is not new prose: it is the node-level refusal message in
+    // `RETIRED_PAGE_COMPONENT_TYPES` (ui/page.zod.ts), so the door that refuses and
+    // the chain that prescribes carry one instruction.
+    {
+      id: 'ui-ai-chat-window-retired',
+      surface:
+        'page.component.ai:chat_window — the component node, with every key its props bag '
+        + 'declared (`mode`, `agentId`, `context`, `aria`), in regions, named slots and nested '
+        + 'containers alike',
+      replacement:
+        'Delete the component node and put nothing in its place: AI chat is not a page element, '
+        + 'and the floating chat overlay the console mounts on every page is the supported entry '
+        + 'point. To choose which platform agent the overlay answers with — what `agentId` reached '
+        + 'for — set the app\'s `defaultAgent` (a platform agent: `ask`, or `build` on an authoring '
+        + 'surface). `mode`, `context` and `aria` have no counterpart on the page: none of them was '
+        + 'ever read, and the overlay is not configured per page',
+      reason:
+        'No renderer for `ai:chat_window` ever shipped in objectui, framework or cloud, and none is '
+        + 'wanted: the console leaves it unregistered on purpose so that a page naming it fails '
+        + 'loudly, and Studio\'s page palette excludes it. So the element and its four keys were a '
+        + 'capability claim nothing kept — a page that placed one validated clean and drew "Unknown '
+        + 'component type" in front of an end user. Zero producers were measured in objectstack, '
+        + 'cloud and hotcrm (one comment naming it as dropped). The name is now refused at '
+        + '`PageComponentSchema.type`, its `ComponentPropsMap` row refuses every props bag with the '
+        + 'same prescription, and the enum no longer lists it; `ai:suggestion` is unchanged. No '
+        + 'conversion is registered, because the only edit is deleting the node, and which region '
+        + 'closes up, holds something else, or keeps its slot is the author\'s judgment about a '
+        + 'page they composed — this entry is that delegation',
+      acceptanceCriteria:
+        'No `ai:chat_window` component remains in any page — regions, named slots and nested '
+        + 'containers alike. `os validate` is clean: a remaining node is reported at its own `type` '
+        + 'path with `params.retiredComponentType` naming `ai:chat_window`, so each one is named '
+        + 'individually rather than as one page-level failure. An app whose removed node named an '
+        + '`agentId` now names that platform agent in its `defaultAgent` instead, or leaves it unset '
+        + 'for the default `ask`. Replaying the 17 → 18 chain over the edited source then reports the '
+        + 'migrated stack schema-valid — `schemaValid: true` in `--json`',
+    },
     // The one key this close DECLARES rather than refuses is `dependsOn`, so an author
     // who wrote it keeps working and now has a contract saying so. Everything else
     // undeclared becomes a parse error. Registered as a structured TODO (ADR-0087 D3)
@@ -19396,6 +19529,43 @@ const step18: MigrationStep = {
         + 'paths. Each grid that set one of them now shows it: the declared row height, the row colours '
         + 'its `colors` map names, the navigation mode on a row click, the conditional styles, the bulk '
         + 'actions, the group-header numbers and the affordances `operations` names.',
+    },
+    // #21464 — `navigation` on the `object-map`, `object-gantt` and `object-tree`
+    // page blocks was `z.unknown()` although each renderer hands it to the shared
+    // navigation hook, which reads `.mode` and types its mode union as the list
+    // view's `NavigationConfigSchema`; any value passed and an off-shape one opened
+    // the record page in silence. The three rows now take that schema by reference,
+    // the carrier `object-grid`, `object-kanban`, `object-calendar` and
+    // `object-timeline` already take. D3 only: page-component `properties` is not
+    // parsed on the metadata save or load path, so a stored page is never refused;
+    // an off-shape value has no rewrite that says what the author meant; and the
+    // authored census found nothing in either repository's corpora to respell.
+    {
+      id: 'ui-object-map-gantt-tree-navigation-typed',
+      surface: 'page `object-map`, `object-gantt` and `object-tree` components — `properties.navigation` '
+        + '(which used to accept any value)',
+      replacement: 'the list view\'s navigation block `{ mode?, size?, openNewTab?, preventNavigation? }`, '
+        + '`mode` one of `page`, `drawer`, `modal`, `split`, `popover`, `new_window`, `none` — the block '
+        + '`object-grid`, `object-kanban`, `object-calendar` and `object-timeline` already take. Rewrite a bare '
+        + 'mode string such as `navigation: \'drawer\'` as `navigation: { mode: \'drawer\' }`.',
+      reason: 'Each of the three renderers hands `navigation` to the shared navigation hook, which reads '
+        + '`navigation.mode`, falls back to `page` when it finds none, and types its mode union as the list '
+        + 'view\'s `NavigationConfigSchema`. The rows declared the member `z.unknown()`, so any value passed '
+        + 'the component-props gate and an off-shape one was answered with a silent default: `navigation: 42` '
+        + 'and a bare mode string such as `\'drawer\'` both opened the record page, whatever they named. The '
+        + 'three rows now take the list view\'s schema by reference, so one value is judged the same way on '
+        + 'every door that carries it. It is read where every page component\'s props are: the '
+        + 'component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and '
+        + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s '
+        + '`properties` is not parsed on the metadata save or load path. No conversion is registered: '
+        + 'nothing on the load path refuses the shape, and an off-shape value has no rewrite that both keeps '
+        + 'what the block shows today (the record page) and honours what the author wrote — which is the '
+        + 'judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-map`, `object-gantt` and `object-tree` node validates: '
+        + '`objectstack validate` reports no `component-props-invalid` / `component-props-unknown-key` '
+        + 'finding under `properties.navigation`. Each block that set `navigation` opens the mode it names '
+        + 'on a marker, task or row click.',
     },
     // #20928 — the third carrier of the inline grid column. An
     // `object-master-detail-form` page block's `details` was `z.array(z.unknown())`
@@ -20631,6 +20801,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #21320 — ADR-0049 enforce-or-remove, ruled D (retire) on
+    // objectstack-ai/cloud#2569: `agent.lifecycle`, the agent conversation state
+    // machine, was parsed and never read — no runtime in this repository or in
+    // cloud moved an agent through a declared state, and every enforcement design
+    // measured there was a subset statechart interpreter beside Flow (the
+    // two-engine shape ADR-0020 rejected). Tombstoned with `retiredKey()` on the
+    // strict `AgentSchema`; D2 conversion `agent-lifecycle-removed` (lossless
+    // delete, retired from the load path); D3 semantic entry
+    // `agent-lifecycle-retired`. Its value schema, `automation/StateMachine`, left
+    // with it (RETIRED_DEFS_BY_MAJOR). Registered under 18 for the launch-window
+    // reason its neighbours state.
+    'ai/Agent:lifecycle',
     // #20274 — ADR-0049 enforce-or-remove, ruling record 5950198150 (letter A′,
     // maintainer 「同意」): the `agent.memory` contract states exactly what the
     // runtime honours, and the memory store is platform infrastructure, not agent
@@ -25059,6 +25241,18 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ScheduledExport',
+    // #21320 — `automation/ActionRef` (a named side effect, by name or parameterised) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/ActionRef',
+    // #21320 — `automation/GuardRef` (a named transition condition) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/GuardRef',
     // #17158 — `automation/ScheduleState`, retired whole with the export-job API family
     // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
     // retired its side first in objectui#10247). It declared
@@ -25072,6 +25266,32 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'automation/ScheduleState',
+    // #21320 — `automation/state-machine.zod.ts` `StateMachineSchema`, the
+    // XState-style machine (hierarchical and parallel states, guarded transitions,
+    // entry/exit actions), retired whole with its last authorable door, the
+    // tombstoned `agent.lifecycle` (ADR-0049 enforce-or-remove, ruled D on
+    // objectstack-ai/cloud#2569). ADR-0020 had already retired it as a
+    // record-lifecycle declaration — the `workflow` type and `object.stateMachines`
+    // went, and a record's legal transitions are the `state_machine` validation
+    // rule — and kept the file only because the agent door still imported it
+    // (ADR-0020 implementation note 1). The rest of the family — `StateNode`,
+    // `Transition`, `ActionRef`, `GuardRef` — left with it, each registered in its
+    // own entry file beside this one. Upgraders get the D3 semantic entry
+    // `agent-lifecycle-retired`. Registered under 18 for the launch-window reason
+    // its neighbours state.
+    'automation/StateMachine',
+    // #21320 — `automation/StateNode` (one state of a machine, recursive) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/StateNode',
+    // #21320 — `automation/Transition` (a guarded transition between states) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/Transition',
     // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
     // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the
@@ -26534,6 +26754,21 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entries stay as history — gate (b2) of build-schemas.ts accepts an entry
     // naming a key the build no longer emits.
     'system/TrainingRecord',
+    // #21504 — `ui/AIChatWindowProps` (`mode`, `agentId`, `context`, `aria`) leaves
+    // with the `ai:chat_window` page element it described (ADR-0049
+    // enforce-or-remove; triage ruling 5963897014, the `user:profile` precedent of
+    // #14159). No renderer for the element ever shipped, so none of the four keys
+    // was read anywhere. Its only carrier, the `ComponentPropsMap['ai:chat_window']`
+    // row, is kept as a whole-bag refusal (`retiredComponentProps`) that answers
+    // with the element's retirement prescription, and the node itself is refused by
+    // name at `PageComponentSchema.type`. Upgraders get the D3 semantic entry
+    // `ui-ai-chat-window-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look.
+    'ui/AIChatWindowProps',
     // Commit 35ad101bc — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See

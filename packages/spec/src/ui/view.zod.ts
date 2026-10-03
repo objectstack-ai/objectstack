@@ -4720,9 +4720,16 @@ export const ViewSchema = lazySchema(() => strictObject({
   //
   // `name`, `label` and `object` are NOT in this list, and the first draft had
   // all three — wrongly. A container carries its own identity and its object
-  // binding: `saveMetaItem` sends the name, artifact-shipped containers do
-  // (`service-ai/ai_traces`), the validation sweep injects it, and a
-  // stack-level `views: [...]` entry needs `object` to say which object it
+  // binding. Its `name` is written by the metadata door itself: `saveMetaItem`
+  // stamps the save name onto a body that has none (`normalizeViewMetadata`)
+  // and serves it back, so a read-then-write round trip sends it. That stamp is
+  // the only platform writer of the key — artifact-shipped containers carry
+  // none, and the validation sweep passes its name as the request name, not in
+  // the body. An authored `name` is held to one rule at every door that files a
+  // container: when set, it equals the key that door files it under (the object
+  // key the source registrars derive from the binding; the save name at
+  // `saveMetaItem`), or the door refuses it (`@objectstack/metadata/view-container-name`).
+  // And a stack-level `views: [...]` entry needs `object` to say which object it
   // belongs to (this file's own note on `ObjectListViewSchema` calls the
   // container "view definitions for a specific object", and `getViewsByObject()`
   // is what reads that binding). Tombstoning them rejected shapes the platform
@@ -6739,15 +6746,26 @@ export function isAggregatedViewContainer(item: any): boolean {
   return Boolean(item.list || item.form || item.listViews || item.formViews);
 }
 
-/** Structural signature used to collapse a container's default `list`/`form`
- *  with a redundant `listViews`/`formViews` restatement of the same view (the
- *  common "default == listViews.all" authoring pattern). */
-function viewSignature(v: any): string {
-  if (!v || typeof v !== 'object') return '';
+/** The whole body of a list view, serialised with its keys sorted at every
+ *  depth, so a `listViews` entry that restates the container's default `list`
+ *  key for key (the "default == listViews.all" authoring pattern) is found
+ *  whatever order its keys were written in. A restatement is the WHOLE body:
+ *  two lists that differ in anything (a filter, a sort, a kanban setting) are
+ *  two views, never one. The view's own `name` is its identity, not its body,
+ *  and is left out. `undefined` when the body cannot be serialised; such a body
+ *  restates nothing. */
+function listViewBody(v: any): string | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const body = { ...v };
+  delete body.name;
   try {
-    return JSON.stringify({ type: v.type ?? null, label: v.label ?? null, columns: v.columns ?? null });
+    return JSON.stringify(body, (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, value[k]]))
+        : value,
+    );
   } catch {
-    return '';
+    return undefined;
   }
 }
 
@@ -6825,10 +6843,20 @@ export interface ExpandViewResult {
  * every name collision that forced a rename.
  *
  * List family: `listViews` entries first (keys taken from the author), then the
- * default `list` — deduped by structural signature so a `listViews.all` that
- * merely restates `list` collapses into one item. The view matching the
- * declared default is flagged `isDefault`. Form family: `formViews` entries,
- * then the default `form`.
+ * default `list`. A `listViews` entry whose whole body restates `list` key for
+ * key (its own `name` aside) collapses with it into that one named item; a named
+ * list that differs from `list` in anything else is its own view, and `list` is
+ * then served as its own item.
+ * The item carrying the declared default list is flagged `isDefault`; with no
+ * `list`, the first named list is.
+ *
+ * Form family: `formViews` entries, then the default `form`. `ViewSchema` makes
+ * `form` the container's default form and `formViews` additional named forms, so
+ * `form` is always served as its own item (`<object>.form`) and is the only form
+ * item flagged `isDefault` — a named form never stands in for it, even one whose
+ * body equals it. A container with no `form` declares no default form: none of
+ * its named forms is flagged, and each is served only where it is asked for by
+ * name.
  *
  * Collisions are captured at the exact points the shared `used` set forces a
  * rename, so the diagnostic can never drift from the expansion it describes.
@@ -6840,7 +6868,7 @@ export function expandViewContainerWithDiagnostics(object: string, container: an
   let order = 0;
 
   // ---- list family ----
-  const listSigToName = new Map<string, string>();
+  const listBodyToName = new Map<string, string>();
   const listViews =
     container.listViews && typeof container.listViews === 'object' ? container.listViews : {};
   for (const [k, v] of Object.entries<any>(listViews)) {
@@ -6848,7 +6876,8 @@ export function expandViewContainerWithDiagnostics(object: string, container: an
     const requested = `${object}.${k}`;
     const name = uniqueViewName(requested, used);
     if (name !== requested) collisions.push({ requested, renamedTo: name, viewKind: 'list', key: k });
-    listSigToName.set(viewSignature(v), name);
+    const body = listViewBody(v);
+    if (body !== undefined) listBodyToName.set(body, name);
     const item: ExpandedViewItem = { name, object, viewKind: 'list', label: v.label, config: cloneViewConfig(v), order: order++, scope: 'package' };
     stampRenameWarning(item, requested);
     out.push(item);
@@ -6856,7 +6885,8 @@ export function expandViewContainerWithDiagnostics(object: string, container: an
   const defaultList = container.list;
   let defaultListName: string | undefined;
   if (defaultList && typeof defaultList === 'object') {
-    const dup = listSigToName.get(viewSignature(defaultList));
+    const body = listViewBody(defaultList);
+    const dup = body === undefined ? undefined : listBodyToName.get(body);
     if (dup) {
       defaultListName = dup; // already represented by a named listViews entry
     } else {
@@ -6876,8 +6906,11 @@ export function expandViewContainerWithDiagnostics(object: string, container: an
   }
 
   // ---- form family ----
-  const formStart = out.length;
-  const formSigSeen = new Set<string>();
+  // `form` is the default form and `formViews` are additional named forms
+  // (`ViewSchema`): every named form is served by its own name and is never the
+  // default; `form` is always served as its own item and is the one default.
+  // Nothing here compares a named form with `form`, and nothing promotes a named
+  // form when `form` is absent — a container with no `form` declares no default.
   const formViews =
     container.formViews && typeof container.formViews === 'object' ? container.formViews : {};
   for (const [k, v] of Object.entries<any>(formViews)) {
@@ -6885,26 +6918,20 @@ export function expandViewContainerWithDiagnostics(object: string, container: an
     const requested = `${object}.${k}`;
     const name = uniqueViewName(requested, used);
     if (name !== requested) collisions.push({ requested, renamedTo: name, viewKind: 'form', key: k });
-    formSigSeen.add(viewSignature(v));
     const item: ExpandedViewItem = { name, object, viewKind: 'form', label: v.label, config: cloneViewConfig(v), order: order++, scope: 'package' };
     stampRenameWarning(item, requested);
     out.push(item);
   }
   const defaultForm = container.form;
-  let defaultFormName: string | undefined;
-  if (defaultForm && typeof defaultForm === 'object' && !formSigSeen.has(viewSignature(defaultForm))) {
+  if (defaultForm && typeof defaultForm === 'object') {
     const key = typeof defaultForm.name === 'string' && defaultForm.name ? defaultForm.name : 'form';
     const requested = `${object}.${key}`;
     const name = uniqueViewName(requested, used);
     if (name !== requested) collisions.push({ requested, renamedTo: name, viewKind: 'form', key });
     const item: ExpandedViewItem = { name, object, viewKind: 'form', label: defaultForm.label, config: cloneViewConfig(defaultForm), order: order++, scope: 'package' };
     stampRenameWarning(item, requested);
+    item.isDefault = true;
     out.push(item);
-    defaultFormName = name;
-  }
-  if (!defaultFormName && out.length > formStart) defaultFormName = out[formStart].name;
-  for (let i = formStart; i < out.length; i++) {
-    if (out[i].name === defaultFormName) out[i].isDefault = true;
   }
 
   return { items: out, collisions };

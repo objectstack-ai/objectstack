@@ -2128,14 +2128,14 @@ export class TursoDriver extends SqlDriver {
   // [#6402] Every `options` parameter in this file is a {@link DriverOptions},
   // matching `SqlDriver` / `IDataDriver` — the two faces of one driver may not
   // declare one argument two ways. This was the last `any` axis left in the
-  // overrides: #5181 (PR #6076), #6075 (PR #6210) and #6212 each narrowed
+  // overrides: #5181 (commit 6513c1749), commit d367f03d6 (PR #6210) and #6212 each narrowed
   // `query`, and each deliberately left `options` alone because it is a
   // SEPARATE axis whose shape was verbatim-identical across all 17 overrides —
   // narrowing one would have read as a verdict on the other sixteen. #6402
   // closed all 17 in one sweep, so there is no half-narrowed state to
   // interpret. Keep it that way: a new override here declares `DriverOptions`.
 
-  // [#17690] The return is the contract's own type, and this override needs it
+  // [commit be5c60291] The return is the contract's own type, and this override needs it
   // declared HERE: an override re-declares the door in this package's own
   // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
   // consumer holding a `TursoDriver` — measured twice already (#15280 for
@@ -2729,7 +2729,7 @@ export class TursoDriver extends SqlDriver {
   // already do: `RemoteTransport.create()` answers `Record<string, unknown>`
   // through the generic `formatRemoteRow`, and the local branch forwards to
   // `super.create` (narrowed alongside). Same shape the `update()` override
-  // above took with #14438.
+  // above took with commit 2200f8ec8.
   override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     this.assertRemoteTransactionUnsupported(options, 'create');
     if (this.isRemote) {
@@ -2752,9 +2752,9 @@ export class TursoDriver extends SqlDriver {
     return super.create(object, data, options);
   }
 
-  // [#14438] The override declares the contract's type, as both of its branches
+  // [commit 2200f8ec8] The override declares the contract's type, as both of its branches
   // already do: `super.update` (driver-sql) and `RemoteTransport.update()`
-  // (#14428) both answer `Record<string, unknown> | null`, and `formatRemoteRow`
+  // (commit ca3fd4b1a) both answer `Record<string, unknown> | null`, and `formatRemoteRow`
   // is a generic pass-through. The explicit `Promise<any>` here was the one
   // place this package's own `.d.ts` re-erased the door.
   override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
@@ -2773,7 +2773,7 @@ export class TursoDriver extends SqlDriver {
     return super.update(object, id, data, options);
   }
 
-  // [#17690] The return is the contract's own type, and this override needs it
+  // [commit be5c60291] The return is the contract's own type, and this override needs it
   // declared HERE: an override re-declares the door in this package's own
   // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
   // consumer holding a `TursoDriver` — measured twice already (#15280 for
@@ -3441,7 +3441,7 @@ export class TursoDriver extends SqlDriver {
     return super.bulkCreate(object, data, options);
   }
 
-  // [#17690] The return is the contract's own type, and this override needs it
+  // [commit be5c60291] The return is the contract's own type, and this override needs it
   // declared HERE: an override re-declares the door in this package's own
   // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
   // consumer holding a `TursoDriver` — measured twice already (#15280 for
@@ -3546,7 +3546,7 @@ export class TursoDriver extends SqlDriver {
   // have been a lie on the remote arm. The `any` masked that real LSP
   // violation, and closing it meant widening `SqlDriver`'s narrowing (measured
   // at the time: +14 further consumer sites across the driver packages) or
-  // restructuring the remote handle — both above an annotation swap (#17690).
+  // restructuring the remote handle — both above an annotation swap (commit be5c60291).
   //
   // What dissolved it is that the remote arm no longer returns anything.
   // [#18616] made it REFUSE, and `refuseRemoteTransaction` returns `never`, so
@@ -3686,12 +3686,12 @@ export class TursoDriver extends SqlDriver {
    *
    * In local / replica modes the existing Knex-based path remains in effect.
    *
-   * ⛔ #16711 — this parameter type must declare every key `SqlDriver.initObjects`
+   * ⛔ Commit 7862fb711 — this parameter type must declare every key `SqlDriver.initObjects`
    * declares, and `scripts/check-object-def-param-keys.mjs` fails the build if it
    * stops doing so. An `override` does NOT inherit the base's parameter type, so
    * this literal is what every caller of `@objectstack/driver-turso` sees: while
    * it read `{ name; fields? }`, #4311's `tenancy` fix sat on the base for five
-   * weeks and was invisible from outside `@objectstack/driver-sql`, and #16570's
+   * weeks and was invisible from outside `@objectstack/driver-sql`, and commit b72226f48's
    * `indexes` fix would have escaped the same way. The escape is silent because
    * TypeScript's excess-property check fires on a FRESH object literal only — and
    * the remote arm below forwards the WHOLE object as `schema`, so the runtime

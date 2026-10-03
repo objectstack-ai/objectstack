@@ -1,115 +1,61 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The divergent view-container `name` refusal — ONE judge, called by the boot
- * registrar and by `os validate`.
+ * The divergent view-container `name` refusal, as `@objectstack/objectql`
+ * exports it — a re-export of the ONE judge, which lives in
+ * `@objectstack/metadata/view-container-name`.
  *
- * ## What it judges
+ * ## What it judges, and who calls it
  *
- * An aggregated `defineView` container is registered under the OBJECT it
- * binds to, not under its own `name` (`resolveMetadataItemName` in
- * `engine.ts`). A container whose own `name` is set and differs from that
- * derived key is refused: resolving the disagreement silently in either
- * direction files the item under a key the author never wrote (#7378 row 1).
- * The boot loop adopted the refusal under the maintainer ruling of
- * 2026-09-03 (direction 2), converging onto the artifact/HMR loader, which
- * already refused the same document.
+ * A container's own `name`, when set, must equal the key the door files the
+ * container under; a disagreement is refused under the maintainer's ruling of
+ * 2026-09-03 (direction 2), because resolving it silently in either direction
+ * files the item under a key the author never wrote (#7378 row 1). Four doors
+ * judge it, in one template:
  *
- * ## Why this is a module and not a block inside `registerMetadataCollections`
+ *  - the boot registrar (`registerMetadataCollections` in `engine.ts`), which
+ *    throws what {@link viewContainerNameRefusal} returns;
+ *  - `os validate` / `os compile` (`packages/cli`), which report it — the
+ *    author-time judge of what `os serve` accepts (#20331);
+ *  - the artifact/HMR loader (`@objectstack/metadata`'s `plugin.ts`), which
+ *    throws it before it files anything;
+ *  - the runtime save door (`saveMetaItem`, `@objectstack/metadata-protocol`),
+ *    through the judge's save-door entry (#21412).
  *
- * `os validate` is the author-time judge of what the runtime will accept. It
- * used to pass this document (exit 0) while `os serve` refused it at boot
- * (#20331). The fix is the SAME judgment at both doors, in the same words —
- * not a second rule that agrees with the first only until one of them is
- * edited. So the check moved here, and the boot loop throws what this
- * returns; the CLI reports it. The message and the envelope moved byte for
- * byte. The GATE moved whole, precondition included: the boot loop skips an
- * entry whose derived key is falsy (it warns and registers nothing) BEFORE it
- * reaches this check, and this function answers `undefined` for that entry
- * too, so a door that calls it alone cannot refuse what boot skips.
+ * ## Why the judge moved, and why this export stays
  *
- * ## Why it derives the key itself instead of taking it
+ * The runtime save door is the third door and the one that forced the move:
+ * `@objectstack/metadata-protocol` cannot import `@objectstack/objectql` (the
+ * edge runs the other way), and `@objectstack/core` cannot host the judge
+ * because the derivation it needs lives in `@objectstack/metadata`, which lists
+ * core. `@objectstack/metadata` is the one layer every door already depends on,
+ * so the judge — its gate, its envelope and its words — lives there now, and
+ * this module keeps the published name and signature so `engine.ts` and the CLI
+ * doors import exactly what they imported before. The words the boot registrar
+ * and `os validate` print are byte for byte what this module used to build.
  *
- * For a container, the key boot registers under IS
- * {@link deriveViewContainerObject} — the first branch of
- * `resolveMetadataItemName` returns exactly that, gated on the same
- * {@link isAggregatedViewContainer}. Taking the key as a parameter would make
- * every other caller re-derive it, which is a second spelling of "which
- * derivation does boot use for a container" — the drift this module exists to
- * close. Deriving here keeps one answer for both doors.
+ * ## Why the source registrars' entry derives the key, and the save door's does not
  *
- * The gate is two of the three narrowings the ruling named as load-bearing;
- * the third, `key === 'views'`, stays at the call site, because only the
- * `views:` collection carries containers:
- *   * {@link isAggregatedViewContainer} — the CONTAINER branch only. A
- *     standalone ViewItem's `name` is its identity, not a binding;
- *   * `name` present AND different. A container with no `name` is untouched;
- *     so is one whose `name` already equals the derived key, and one that
- *     declares no binding anywhere else, because the derivation then falls
- *     back to that same `name` and cannot disagree with itself.
- * Ahead of both sits the boot loop's own precondition: a derived key that is
- * falsy means boot skips the entry, so there is nothing to refuse. The key
- * CAN be `''` while `name` is set — `deriveViewContainerObject`'s `??` chain
- * keeps an empty string, so `list: { data: { object: '' } }` with no
- * top-level `object` derives `''` — and without this line a second door
- * would refuse a container boot only warns about.
+ * For a container, the key the source registrars file under IS
+ * `deriveViewContainerObject` — the first branch of `resolveMetadataItemName`
+ * returns exactly that, gated on the same `isAggregatedViewContainer` — so the
+ * entry this module exports derives it itself rather than make every caller
+ * re-derive it (a second spelling of "which derivation does boot use for a
+ * container"). The precondition moved with it: a falsy derived key refuses
+ * nothing, because boot warns and skips that entry.
  *
- * The runtime string carries NO tracker id: it is read by authors and
- * operators who cannot resolve one (`check:doc-authoring`). The envelope is
- * the artifact door's — `VALIDATION_ERROR` / 400 — asserted equal to it in
+ * The runtime save door's key is not a derivation: it files the row under the
+ * name it is SAVED under, and that name is not always the binding (it keeps a
+ * container saved under a name other than its object, #13407, and expands one
+ * on another package's object under its own name, #21334). So the save door's
+ * entry takes the key; judging it against the derived key was measured and
+ * refused (#21412). Both entries share one judgement and one template, and
+ * differ only in where the key came from.
+ *
+ * The envelope is the artifact door's and every door's — `VALIDATION_ERROR` /
+ * 400 — asserted equal across the source registrars in
  * `view-container-divergent-name-registrars.test.ts`.
  */
 
-import { isAggregatedViewContainer } from '@objectstack/spec';
-// The LEAF subpath, for the reason `engine.ts` states at its own import.
-import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
-
-/** The refusal, in the ADR-0112 envelope the boot registrar throws it in. */
-export interface ViewContainerNameRefusal extends Error {
-  code: 'VALIDATION_ERROR';
-  status: 400;
-  httpStatus: 400;
-}
-
-/**
- * Judge one `views:` entry: the refusal when it is an aggregated container
- * whose own `name` disagrees with the object key it binds to, else
- * `undefined`.
- *
- * Pure: it throws nothing and registers nothing. The boot registrar throws
- * what it returns; `os validate` reports it.
- *
- * @param container   One entry of a `views:` collection.
- * @param sourceLabel The words naming the source, as the boot registrar
- *   names it (`manifest`, `nested plugin`).
- * @param ownerId     The owning package id the boot registrar stamps.
- */
-export function viewContainerNameRefusal(
-  container: unknown,
-  sourceLabel: string,
-  ownerId: string | undefined,
-): ViewContainerNameRefusal | undefined {
-  if (!isAggregatedViewContainer(container)) return undefined;
-  const name = (container as { name?: unknown }).name;
-  if (typeof name !== 'string' || !name) return undefined;
-  const itemName = deriveViewContainerObject(container);
-  // Boot's precondition, carried with the gate: `registerMetadataCollections`
-  // warns and skips an entry whose derived key is falsy before it reaches
-  // this check, so such an entry is never refused.
-  if (!itemName) return undefined;
-  if (name === itemName) return undefined;
-  const err = new Error(
-    `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `
-    + `\`name\` is '${name}', which disagrees with the object key it binds to, `
-    + `'${itemName}' (derived from its own \`object\`, else \`list.data.object\` / `
-    + '`form.data.object`). A disagreement is almost always an authoring bug, and resolving '
-    + 'it silently in either direction can file the item under a key the caller never wrote '
-    + '(refuse loudly, locate the mismatch) — the artifact/HMR loader refuses '
-    + 'this same document. Register under one name: drop `name`, or set it to '
-    + `'${itemName}'.`,
-  ) as ViewContainerNameRefusal;
-  err.code = 'VALIDATION_ERROR';
-  err.status = 400;
-  err.httpStatus = 400;
-  return err;
-}
+export { viewContainerNameRefusal } from '@objectstack/metadata/view-container-name';
+export type { ViewContainerNameRefusal } from '@objectstack/metadata/view-container-name';

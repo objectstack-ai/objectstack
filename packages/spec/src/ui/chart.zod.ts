@@ -51,7 +51,9 @@ import { strictObject } from '../shared/strict-object';
 //      (`TouchTargetConfigSchema`, `GestureConfigSchema`) did not. (Those two
 //      negative controls are gone as of #4988, which retired the five no-door
 //      interaction modules outright; a re-run needs a fresh negative control —
-//      an inline `z.object({ a: z.string() })` is the cheapest one.)
+//      an inline `z.object({ a: z.string() })` is the cheapest one. Likewise
+//      the `StateMachineSchema` positive control left the package at #21320,
+//      retired with `agent.lifecycle`; the other four still stand.)
 //   3. PARSE — `getMetadataTypeSchema('dashboard' | 'report')` is what
 //      `MetadataManager.validate`, `GET /api/v1/meta` and the Studio form all
 //      go through, so a chart key is judged on the stored-metadata path.

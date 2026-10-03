@@ -26,7 +26,7 @@
  *
  * `ComponentPropsMap` cannot drive this rule: a Zod schema does not say which
  * of its `z.string()` props is a FIELD NAME (`RecordPathProps.statusField` and
- * `AIChatWindowProps.agentId` are both plain strings), and the type universe is
+ * `ElementImagePropsSchema.alt` are both plain strings), and the type universe is
  * open anyway — `PageComponent.type` is `z.union([PageComponentType,
  * z.string()])`, so unregistered types like `record:line_items` parse and are
  * authored in the wild. The table below names the field-bearing props

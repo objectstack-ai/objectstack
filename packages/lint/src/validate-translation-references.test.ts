@@ -2160,9 +2160,9 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
   // nothing here, drops the record, and reports every view key the app ships —
   // ~40 correct keys on the real corpus.
   //
-  // The default list carries a `label` (#6038): without one it is
-  // signature-identical to `listViews.my_leads` (`{type,label,columns}` all
-  // equal), the composer collapses the two, and `all_leads` is not a runtime
+  // The default list carries a `label` (#6038): without one it restates
+  // `listViews.my_leads` key for key (each view's own `name` aside), the
+  // composer collapses the two, and `all_leads` is not a runtime
   // view name at all — so the fixture would be asserting that a key nothing
   // resolves is legal. The label makes it the distinct default list this test
   // says it is. The collapse itself is pinned separately below.
@@ -2304,9 +2304,9 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
     });
 
     it('a default list collapsed into a `listViews` entry contributes that entry\'s key, not its own `name`', () => {
-      // Composer fact 2 — the `examples/app-crm` shape: `list` is
-      // signature-identical to `listViews.all` (`{type,label,columns}` equal),
-      // so the two are ONE registry entry named `all`. `list.name` resolves to
+      // Composer fact 2 — the `examples/app-crm` shape: `list` restates
+      // `listViews.all` key for key (its own `name` is identity, not body), so
+      // the two are ONE registry entry named `all`. `list.name` resolves to
       // nothing and must not be a legal bundle key.
       const collapsed = {
         objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],

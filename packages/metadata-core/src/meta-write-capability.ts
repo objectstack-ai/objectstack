@@ -113,13 +113,13 @@ export type MetaWriteCapabilityVerdict =
  *
  * `canonicalType` MUST be the URL segment folded through
  * `canonicalMetaUrlType` — the boundary folds, the layers below read the
- * canonical singular (`metadata-url-spelling.ts`; the #10340 measurement in
+ * canonical singular (`metadata-url-spelling.ts`; the measurement commit 26f3588fb wrote in
  * `meta-write-org-scope.ts` is why this is not optional).
  *
  * `activeOrganizationId` MUST be the same value the door threads into
  * {@link organizationIdForMetaWrite} (REST `ctx.tenantId`, dispatcher
  * `resolveActiveOrganizationId`) — one resolution feeding authorization AND
- * scope, the single-resolution shape the REST doors already carry (#8919).
+ * scope, the single-resolution shape the REST doors already carry (commit b5378550e).
  */
 export function metaWriteCapabilityVerdict(input: {
     isSystem?: boolean;

@@ -74,7 +74,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared
  * Metadata types whose registry entry declares `allowOrgOverride: true`,
  * augmented with each one's MANIFEST plural spelling (`SINGULAR_TO_PLURAL`).
  *
- * ⚠️ [#10340] That augmentation is NOT the protocol's URL fold, and the doc
+ * ⚠️ [commit 26f3588fb] That augmentation is NOT the protocol's URL fold, and the doc
  * that used to stand here — "judged identically to the singular form — the
  * same normalization the protocol's own allow-list does" — was measured
  * false. The protocol folds through `META_URL_TO_SINGULAR`, the COMPLETE
@@ -109,7 +109,7 @@ const ORG_OVERRIDABLE_TYPES: ReadonlySet<string> = (() => {
  *
  * Expects the CANONICAL singular type. It additionally tolerates the
  * manifest-collection spellings (`views`, `emailTemplates`, …) — kept for the
- * dispatcher-era callers — but ⚠️ [#10340] that tolerance is NOT the URL
+ * dispatcher-era callers — but ⚠️ [commit 26f3588fb] that tolerance is NOT the URL
  * fold: URL-only spellings (`translations`, `email_templates`) answer
  * `false` here. A caller holding a raw `/meta/:type` segment must fold it
  * through `canonicalMetaUrlType` BEFORE asking, as the REST doors do; see

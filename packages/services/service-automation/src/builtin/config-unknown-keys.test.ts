@@ -94,7 +94,7 @@ describe('unknown node config keys are rejected (#4277)', () => {
     // …and this particular key has a documented incident, so it also carries
     // its tombstone (the UNKNOWN_KEY_GUIDANCE pattern).
     expect(msg).toContain('visibleWhen');
-    expect(msg).toContain('#3528');
+    expect(msg).toContain('blocks the screen from ever being submitted');
     // The flow is NOT registered.
     await expect(engine.getFlow('f')).resolves.toBeNull();
   });

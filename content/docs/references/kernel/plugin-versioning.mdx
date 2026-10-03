@@ -108,7 +108,7 @@ Compatibility level between versions
 | **type** | `Enum<'version-mismatch' \| 'missing-dependency' \| 'circular-dependency' \| 'incompatible-versions' \| 'conflicting-interfaces'>` | ✅ |  |
 | **plugins** | `{ pluginId: string; version: string; requirement?: string }[]` | ✅ |  |
 | **description** | `string` | ✅ |  |
-| **resolutions** | `{ strategy: Enum<'upgrade' \| 'downgrade' \| 'replace' \| 'disable' \| 'manual'>; description: string; automaticResolution: boolean; riskLevel: Enum<'low' \| 'medium' \| 'high'> }[]` | optional |  |
+| **resolutions** | `{ strategy: Enum<'upgrade' \| 'downgrade' \| 'replace' \| 'disable' \| 'manual'>; description: string; automaticResolution?: boolean; riskLevel: Enum<'low' \| 'medium' \| 'high'> }[]` | optional |  |
 | **severity** | `Enum<'critical' \| 'error' \| 'warning' \| 'info'>` | ✅ |  |
 
 ### Nested Shape: `DependencyConflict.plugins[number]`
@@ -180,7 +180,7 @@ Compatibility level between versions
 | **pluginId** | `string` | ✅ |  |
 | **currentVersion** | `string` | ✅ |  |
 | **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| …>; breakingChanges?: object[]; … }[]` | ✅ |  |
-| **supportedVersions** | `{ version: string; supported: boolean; endOfLife?: string; securitySupport: boolean }[]` | ✅ |  |
+| **supportedVersions** | `{ version: string; supported: boolean; endOfLife?: string; securitySupport?: boolean }[]` | ✅ |  |
 | **minimumCompatibleVersion** | `string` | optional | Oldest version that can be directly upgraded |
 
 ### Nested Shape: `PluginCompatibilityMatrix.compatibilityMatrix[number]`
@@ -242,7 +242,7 @@ Compatibility level between versions
 | **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| …>; breakingChanges?: object[]; … }[]` | optional |  |
 | **securityFixes** | `{ cve?: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; description: string; fixedIn: string }[]` | optional |  |
 | **statistics** | `{ downloads?: integer; installations?: integer; ratings?: number }` | optional |  |
-| **support** | `{ status: Enum<'active' \| 'maintenance' \| 'deprecated' \| 'eol'>; endOfLife?: string; securitySupport: boolean }` | ✅ |  |
+| **support** | `{ status: Enum<'active' \| 'maintenance' \| 'deprecated' \| 'eol'>; endOfLife?: string; securitySupport?: boolean }` | ✅ |  |
 
 ### Nested Shape: `PluginVersionMetadata.version`
 
