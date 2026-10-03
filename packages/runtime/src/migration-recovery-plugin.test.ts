@@ -80,6 +80,31 @@ describe('MigrationRecoveryPlugin — the migration-plans registry', () => {
     expect(registry.get('nope')).toBeUndefined();
     expect(registry.list()).toEqual([plan]);
   });
+
+  it('with bootScan: false, registers the registry and never reads the journal (#21498)', async () => {
+    // The one-shot `os migrate` boot's composition: the registry a plan's owner
+    // and `os migrate resume` meet, without a scan that boot would only repeat.
+    const rows = [
+      { run_id: 'r1', seq: 0, kind: 'run_started' },
+      { run_id: 'r1', seq: 1, kind: 'chunk_started', chunk_index: 0 },
+    ];
+    const scanned = { ...engineWith(rows), find: vi.fn(engineWith(rows).find) };
+    const ctx = makeCtx({ engine: scanned });
+    const plugin = new MigrationRecoveryPlugin({ bootScan: false });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._ready();
+    expect(ctx._services.get('migration-plans')).toBeDefined();
+    expect(scanned.find).not.toHaveBeenCalled();
+    expect(ctx._warns).toEqual([]);
+
+    // Control: the default composition over the same journal does scan and report.
+    const control = { ...engineWith(rows), find: vi.fn(engineWith(rows).find) };
+    const controlCtx = makeCtx({ engine: control });
+    await boot(controlCtx);
+    expect(control.find).toHaveBeenCalled();
+    expect(controlCtx._warns.join('\n')).toContain("run 'r1'");
+  });
 });
 
 describe('MigrationRecoveryPlugin — boot scan', () => {
