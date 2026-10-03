@@ -2,24 +2,12 @@
 //
 // [#21476] One predicate decides whether an open public form can take an
 // anonymous submission on this deployment, and every door that serves the form
-// reads it.
-//
-// An anonymous submission carries no organization. On a walled tenancy posture
-// the engine refuses an insert without one into an object walled by an
-// organization column, so a form bound to such an object used to be served
-// (`GET` 200) and then refuse every submit (`500
-// ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`). Pinned here:
-//
-//   - walled posture, walled object: both anonymous doors answer the withdrawn
-//     form's not-found answer, byte for byte, and nothing is written;
-//   - every route under `/forms/` is one of those doors (the enumeration), so a
-//     third door cannot be added without reading the predicate;
-//   - controls: the same form bound to a `tenancy: { enabled: false }` object,
-//     the single posture, a degraded walled request (in force: `single`), and no
-//     tenancy service at all are all accepted;
-//   - the administrator's read (`GET /meta/view/:name`, both arms) names the
-//     reason at the form's `sharing`, exactly when the doors answer not-found,
-//     and the reason enters the cached arm's validator.
+// reads it. On a walled posture a form bound to an object walled by an
+// organization column used to be served and then answer `500
+// ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` on every submit. Pinned: both doors
+// answer the withdrawn form's answer byte for byte and nothing is written; every
+// `/forms/` route is one of those doors; the controls are accepted; and the
+// administrator's read (both arms) names the reason, inside the validator.
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
@@ -49,54 +37,34 @@ function mockRes() {
 }
 
 /** A flattened `viewKind: 'form'` item, as the protocol serves it. */
-function formView(allowAnonymous = true) {
-  return {
-    name: 'contact',
-    object: 'inquiry',
-    viewKind: 'form',
-    config: {
-      data: { object: 'inquiry' },
-      sections: [{ fields: ['name', 'email'] }],
-      sharing: { enabled: true, allowAnonymous, publicLink: `/forms/${SLUG}` },
-    },
-    _diagnostics: { valid: true },
-  };
-}
+const formView = (allowAnonymous = true) => ({
+  name: 'contact', object: 'inquiry', viewKind: 'form', _diagnostics: { valid: true },
+  config: {
+    data: { object: 'inquiry' },
+    sections: [{ fields: ['name', 'email'] }],
+    sharing: { enabled: true, allowAnonymous, publicLink: `/forms/${SLUG}` },
+  },
+});
 
 /** The bound object as the doors read it: the registry injects `organization_id`. */
-function inquiryObject(tenancyDisabled: boolean) {
-  return {
-    name: 'inquiry',
-    label: 'Inquiry',
-    ...(tenancyDisabled ? { tenancy: { enabled: false } } : {}),
-    fields: {
-      organization_id: { type: 'lookup', reference: 'sys_organization' },
-      name: { type: 'text', label: 'Name' },
-      email: { type: 'text', label: 'Email' },
-    },
-  };
-}
+const inquiryObject = (tenancyDisabled: boolean) => ({
+  name: 'inquiry', label: 'Inquiry', ...(tenancyDisabled ? { tenancy: { enabled: false } } : {}),
+  fields: {
+    organization_id: { type: 'lookup', reference: 'sys_organization' },
+    name: { type: 'text', label: 'Name' },
+    email: { type: 'text', label: 'Email' },
+  },
+});
 
 /** Reproduces the registry's own "never registered" rejection. */
-function notRegistered(): Error {
-  return Object.assign(new Error("Service 'tenancy' not found"), {
-    __objectstackServiceNotRegistered: true,
-    code: 'SERVICE_NOT_REGISTERED',
-    serviceName: 'tenancy',
-  });
-}
+const notRegistered = (): Error => Object.assign(new Error("Service 'tenancy' not found"), {
+  __objectstackServiceNotRegistered: true, code: 'SERVICE_NOT_REGISTERED', serviceName: 'tenancy',
+});
 
 type Tenancy = 'isolated' | 'group' | 'degraded' | 'single' | 'not-registered';
 
-interface Setup {
-  tenancy: Tenancy;
-  /** The bound object opts out of tenancy (ADR-0066) — the control. */
-  tenancyDisabled?: boolean;
-  /** `false` withdraws the form, the reference answer. */
-  allowAnonymous?: boolean;
-  /** Serve the admin read from `getMetaItemCached` (the default arm) instead of `getMetaItem`. */
-  cached?: boolean;
-}
+/** `tenancyDisabled`: the control object (ADR-0066); `allowAnonymous: false`: the withdrawn reference; `cached`: the default admin-read arm. */
+interface Setup { tenancy: Tenancy; tenancyDisabled?: boolean; allowAnonymous?: boolean; cached?: boolean }
 
 function build(setup: Setup) {
   const createData = vi.fn().mockResolvedValue({ object: 'inquiry', id: 'rec_1', record: {} });
@@ -105,10 +73,8 @@ function build(setup: Setup) {
     if (req.type === 'object') return [inquiryObject(setup.tenancyDisabled ?? false)];
     return [];
   });
-  const getMetaItemCached = vi.fn(async () => ({
-    data: formView(setup.allowAnonymous ?? true),
-    etag: { value: 'v1', weak: false },
-    notModified: false,
+  const getMetaItemCached = vi.fn(async (_req: { cacheRequest: { ifNoneMatch?: string } }) => ({
+    data: formView(setup.allowAnonymous ?? true), etag: { value: 'v1', weak: false }, notModified: false,
   }));
   const protocol: any = {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
@@ -141,28 +107,17 @@ function build(setup: Setup) {
   const formDoors = routes.filter((r) => r.path.includes('/forms/'));
   const drive = async (route: { handler: (req: any, res: any) => any }, method: string) => {
     const res = mockRes();
-    await route.handler({
-      params: { slug: SLUG },
-      query: {},
-      headers: {},
-      ...(method === 'POST' ? { body: { name: 'x', email: 'x@example.com' } } : {}),
-    } as any, res);
+    const body = method === 'POST' ? { body: { name: 'x', email: 'x@example.com' } } : {};
+    await route.handler({ params: { slug: SLUG }, query: {}, headers: {}, ...body } as any, res);
     return res;
   };
   return {
-    createData,
-    getMetaItems,
-    getMetaItemCached,
-    formDoors,
-    drive,
+    createData, getMetaItems, getMetaItemCached, formDoors, drive,
     get: () => drive(find('GET', '/api/v1/forms/:slug'), 'GET'),
     post: () => drive(find('POST', '/api/v1/forms/:slug/submit'), 'POST'),
     async adminRead(headers: Record<string, string> = {}) {
       const res = mockRes();
-      await find('GET', '/api/v1/meta/:type/:name').handler(
-        { params: { type: 'view', name: 'contact' }, query: {}, headers } as any,
-        res,
-      );
+      await find('GET', '/api/v1/meta/:type/:name').handler({ params: { type: 'view', name: 'contact' }, query: {}, headers } as any, res);
       return res;
     },
   };
@@ -267,7 +222,8 @@ describe('[#21476] the administrator\'s read names why intake is unavailable', (
     const first = await s.adminRead();
     const etag = first.headers.ETag;
     expect(etag).toMatch(/^"v1~[0-9a-f]{8}"$/);
-    expect(s.getMetaItemCached.mock.calls[0][0].cacheRequest.ifNoneMatch).toBeUndefined();
+    expect(s.getMetaItemCached).toHaveBeenCalledTimes(1);
+    expect(s.getMetaItemCached.mock.calls[0]?.[0].cacheRequest).toEqual({ ifNoneMatch: undefined, ifModifiedSince: undefined });
 
     const stale = await s.adminRead({ 'if-none-match': '"v1"' });
     expect(stale.statusCode).toBe(200);
