@@ -136,19 +136,32 @@ describe('#21470 — the write-door entry judges every type', () => {
         const view = savedItemNameRefusal('view', boundBody('lead_views'), 'crm_lead', 'save')!;
         expect(view.message.endsWith("Register under one name: drop `name`, or set it to 'crm_lead'.")).toBe(true);
         const other = savedItemNameRefusal('dashboard', dash('dash_b'), 'dash_a', 'save')!;
-        expect(other.message.endsWith("Register under one name: set `name` to 'dash_a'.")).toBe(true);
+        expect(other.message.endsWith("Register under one name: set `name` to 'dash_a', or save the item under 'dash_b'.")).toBe(true);
         expect(other.message).not.toContain('drop `name`');
+        // A `name` that is not a name offers only the direction that exists.
+        const empty = savedItemNameRefusal('translation', { name: '', locale: 'zh-CN' }, 'crm_zh', 'save')!;
+        expect(empty.message.endsWith("Register under one name: set `name` to 'crm_zh'.")).toBe(true);
+    });
+
+    it('a `field` is told to drop `name`: its row is named object.field, which a dot-free column `name` cannot spell', () => {
+        // The field's canonical body carries its column name under a dotted row;
+        // registered, the row would answer under the column name alone.
+        const field = savedItemNameRefusal('field', { name: 'zz_probe', type: 'text' }, 'crm_task.zz_probe', 'save')!;
+        expectEnvelope(field);
+        expect(field.message).toContain('Register under one name: drop `name`');
+        expect(field.message).not.toContain("set `name` to 'crm_task.zz_probe'");
+        expect(savedItemNameRefusal('field', { type: 'text' }, 'crm_task.zz_probe', 'save')).toBeUndefined();
     });
 
     it('the restore and publish doors prescribe the save that fixes a body their caller cannot edit', () => {
         const restored = savedItemNameRefusal('dashboard', dash('dash_b'), 'dash_a', 'restore')!;
         expectEnvelope(restored);
         expect(restored.message).toContain('the name it is restored under');
-        expect(restored.message).toContain("save 'dash_a' with `name` set to 'dash_a', instead of restoring this version");
+        expect(restored.message).toContain("save the item with `name` set to 'dash_a', or under 'dash_b', instead of restoring this version");
         const published = savedItemNameRefusal('dashboard', dash('dash_b'), 'dash_a', 'publish')!;
         expectEnvelope(published);
         expect(published.message).toContain('the name it is published under');
-        expect(published.message).toContain("save the draft again with `name` set to 'dash_a', then publish it");
+        expect(published.message).toContain("save the draft again with `name` set to 'dash_a', or under 'dash_b', then publish it");
     });
 });
 
