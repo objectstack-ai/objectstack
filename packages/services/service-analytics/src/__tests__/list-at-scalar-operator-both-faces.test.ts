@@ -38,7 +38,10 @@
  * before any leaf exists, so the arm reaches it with no change here.
  *
  * The PostgreSQL cells run where `OS_TEST_POSTGRES_URL` is set and are a named
- * skip otherwise; no CI step provisions that variable for this package. The
+ * skip otherwise; CI provisions that variable for this package in the
+ * Temporal Conformance job's step
+ * "Run the non-SQL temporal backends under the skewed process zone"
+ * (`.github/workflows/ci.yml`). The
  * live cell owns its table, dropped before and after.
  */
 
