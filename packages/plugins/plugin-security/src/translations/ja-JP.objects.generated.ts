@@ -43,7 +43,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "管理元",
-        help: "レコードの出所：platform（組み込み）/ package（宣言済み）/ admin（テナント作成）。",
+        help: "レコードの出所（ケイパビリティ・権限セット・ポジションで共通の platform / package / admin の語彙）：platform（組み込み）/ package（宣言済み）/ admin（テナント作成）。",
         options: {
           platform: "プラットフォーム",
           package: "パッケージ",
@@ -230,7 +230,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "管理元",
-        help: "レコードの出所：platform（配布）/ package（パッケージ）/ admin（環境作成）。",
+        help: "レコードの出所（ケイパビリティ・権限セット・ポジションで共通の platform / package / admin の語彙）：platform（配布）/ package（パッケージ）/ admin（環境作成）。",
         options: {
           platform: "プラットフォーム",
           package: "パッケージ",

@@ -1034,7 +1034,7 @@ export class SecurityPlugin implements Plugin {
       if (this.warnedEntitlementRefusals.has(refusal.problem)) continue;
       this.warnedEntitlementRefusals.add(refusal.problem);
       this.logger?.warn?.(
-        `[security/#12699] org-scoping entitlement key '${refusal.key}' REFUSED — ${refusal.problem}`,
+        `[security] org-scoping entitlement key '${refusal.key}' REFUSED — ${refusal.problem}`,
         { key: refusal.key, declared: refusal.value },
       );
     }
@@ -1638,14 +1638,14 @@ export class SecurityPlugin implements Plugin {
       const entitlement = this.deploymentOrgScopingEntitlement();
       if (entitlement.platformGlobalObjects.size > 0) {
         ctx.logger.info(
-          `[security/#12699] deployment declares ${entitlement.platformGlobalObjects.size} platform-global ` +
+          `[security] deployment declares ${entitlement.platformGlobalObjects.size} platform-global ` +
             `object(s) — Layer 0 does not wall them on THIS deployment`,
           { objects: [...entitlement.platformGlobalObjects].sort() },
         );
       }
       if (entitlement.suppressUnboundedOrgAdminGrant) {
         ctx.logger.info(
-          '[security/#12699] deployment suppresses the unbounded organization_admin auto-grant — ' +
+          '[security] deployment suppresses the unbounded organization_admin auto-grant — ' +
             'membership-driven grants hand out organization_admin_no_bypass under this walled posture',
         );
       }
@@ -2101,7 +2101,7 @@ export class SecurityPlugin implements Plugin {
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2213,7 +2213,8 @@ export class SecurityPlugin implements Plugin {
             if (stripped.size > 0) {
               ctx.logger.warn(
                 `[security] public-form insert on '${grantObject}' supplied server-managed ` +
-                  `field(s) [${[...stripped].join(', ')}] — stripped (#3022)`,
+                  `field(s) [${[...stripped].join(', ')}] — stripped: an anonymous form submission cannot set ` +
+                  `ownership, tenancy or audit columns`,
               );
             }
           }
@@ -5144,7 +5145,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] controlled_by_parent write gate could not resolve the sharing (OWD) edit ` +
           `check for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — ` +
-          `denying (fail-closed, #5386)`,
+          `denying (fail-closed: a child is writable only where its master is, so a master check that ` +
+          `cannot be resolved refuses)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return false;
@@ -5243,7 +5245,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] the row-level write gate could not resolve the sharing (${method}) verdict ` +
           `for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — keeping ` +
-          `the platform ownership floor (fail-closed, #5492)`,
+          `the platform ownership floor (fail-closed: only a resolved sharing allow, from Modify All Data ` +
+          `or an edit-level share, may replace that floor)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return 'deny';
@@ -5442,7 +5445,7 @@ export class SecurityPlugin implements Plugin {
       this.logger.warn?.(
         `[security] checkAuthoredRowWrite could not resolve an authored-policy verdict for ` +
           `'${object}' record '${recordId}' (${operation}, user ${context?.userId ?? 'unknown'}) — ` +
-          `abstaining (fail-closed, #5493)`,
+          `abstaining (fail-closed: a verdict that cannot be resolved never lifts the sharing refusal)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return 'abstain';
@@ -5500,7 +5503,8 @@ export class SecurityPlugin implements Plugin {
     } catch (e) {
       this.logger.error?.(
         `[security] getReadFilter could not resolve the sharing (OWD) read scope for object ` +
-          `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed, #4467)`,
+          `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed: a path that bypasses ` +
+          `the engine middleware never runs without the owner and share scope a direct read applies)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return { ...RLS_DENY_FILTER };
@@ -5537,7 +5541,8 @@ export class SecurityPlugin implements Plugin {
         `[security] getReadFilter received an on-behalf-of context for object ` +
           `'${object}' (agent ${context?.userId ?? 'unknown'} on behalf of ` +
           `${context.onBehalfOf.userId}) — the D10 delegator intersection is not ` +
-          `implemented on the read-scope path; denying (fail-closed, #2852)`,
+          `implemented on the read-scope path; denying (fail-closed: a delegated read is never scoped ` +
+          `wider than its delegator's own)`,
       );
       return { ...RLS_DENY_FILTER };
     }
@@ -7048,7 +7053,9 @@ export class SecurityPlugin implements Plugin {
         `[Security] Access denied: '${name}' is a platform-curated capability name — a sys_capability ` +
           `row cannot be created with it or renamed to it through the admin door. The platform defines ` +
           `this capability and seeds its own row for it; grants and requiredPermissions already resolve ` +
-          `the name. Choose a different capability name (ADR-0066 asset ownership, #8552).`,
+          `the name. A curated name is refused at authoring so that no admin-authored row can collide ` +
+          `with the row the platform seeds for it. Choose a different capability name (ADR-0066 asset ` +
+          `ownership).`,
         { operation: op, object: opCtx.object, name, curated: true },
       );
     };
@@ -7661,8 +7668,9 @@ export class SecurityPlugin implements Plugin {
       // `sys_audit_log` ledger is deliberately not the sink here. Named after
       // the cloud precedent (`cross_org_admin_read`).
       this.logger.warn?.(
-        `[security/#12974] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
-          'the Layer 0 organization wall — the org filter below was NOT appended',
+        `[security] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
+          'the Layer 0 organization wall on a read — the org filter below was NOT appended (only the ' +
+          "declared platform owner's reads cross it; writes stay walled for everyone)",
         {
           event: PLATFORM_OWNER_WALL_BYPASS_EVENT,
           object,
@@ -8241,7 +8249,8 @@ export class SecurityPlugin implements Plugin {
     if (ancestors.includes(object)) {
       this.logger.error?.(
         `[security] controlled_by_parent derivation found a CYCLE resolving '${object}' ` +
-          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed, #11082)`,
+          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `cannot resolve admits no child rather than leaving it unrestricted)`,
       );
       return { [rel.fk]: { $in: [] } };
     }
@@ -8249,7 +8258,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] controlled_by_parent derivation exceeded the chain depth bound ` +
           `(${CBP_MAX_CHAIN_DEPTH}) resolving '${object}' ` +
-          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed, #11082)`,
+          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `cannot resolve admits no child rather than leaving it unrestricted)`,
       );
       return { [rel.fk]: { $in: [] } };
     }
@@ -8266,7 +8276,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] controlled_by_parent derivation could not resolve the sharing (OWD) read ` +
           `scope of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
-          `— denying (fail-closed, #5386)`,
+          `— denying (fail-closed: a child is readable only where its master is, so a master scope that ` +
+          `cannot be resolved admits no child)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return { [rel.fk]: { $in: [] } };
@@ -8901,7 +8912,7 @@ export class SecurityPlugin implements Plugin {
         // FULL mask, never to the unmasked value. (The spec parse rejects such
         // declarations at authoring; this covers rows that arrived around it.)
         this.logger?.warn?.(
-          `[security/#8993] field '${object}.${fname}' declares an invalid maskingRule — ` +
+          `[security] field '${object}.${fname}' declares an invalid maskingRule — ` +
             `applying a full mask (fail-closed). Fix the declaration to a preset ` +
             `('phone' | 'id_card' | 'bank_account' | 'email' | 'name') or {keepHead, keepTail}.`,
           { object, field: fname },

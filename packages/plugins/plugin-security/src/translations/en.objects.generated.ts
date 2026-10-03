@@ -43,7 +43,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance (unified tri-state, A4 #2920): platform = framework built-in (read-only) / package = stack/package-declared / admin = tenant-created. Legacy rows may carry system (== platform) / config (== package) / user (== admin).",
+        help: "Record provenance, on the one platform / package / admin vocabulary that capabilities, permission sets and positions all share: platform = framework built-in (read-only) / package = stack/package-declared / admin = tenant-created. Legacy rows may carry system (== platform) / config (== package) / user (== admin).",
         options: {
           platform: "Platform",
           package: "Package",
@@ -230,7 +230,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance (unified tri-state, A4 #2920): 'platform' = shipped by the platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly for admins); 'admin' = created/owned in this environment by an administrator (live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",
+        help: "Record provenance, on the one platform / package / admin vocabulary that capabilities, permission sets and positions all share: 'platform' = shipped by the platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly for admins); 'admin' = created/owned in this environment by an administrator (live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",
         options: {
           platform: "Platform",
           package: "Package",
