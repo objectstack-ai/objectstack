@@ -1,0 +1,19 @@
+---
+'@objectstack/metadata-protocol': minor
+---
+
+The runtime save door refuses a view container saved under a name its own expansion produces
+
+Clause-②: yes (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at one runtime write door over existing keys: no key of `ViewSchema` or of any other metadata schema is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Whether such a container was meant as the object's container or as a view item of that name is authoring intent no conversion entry can decide. New saves are refused with the remedy; a row stored before this change keeps its bytes and is served as before, and no stored row is re-saved. The census found no such row and no writer that produces the shape by default: no seeded `sys_metadata` view rows in the example apps, no packaged container with a top-level `name` among the twelve `defineView` sites in `examples/`, and no Studio or in-repo AI writer that saves a container under an expanded name unless its author types that name into the container (Studio's generic metadata editor saves a body under its own `name`); hosted tenants were not measured. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what a runtime write door accepts, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+
+**BREAKING** accept-set narrowing at the runtime save door, shipped as `minor` under the repo's launch-window convention for breaking changes, the grade the same door's `name` refusals shipped with.
+
+**What was accepted before.** `saveMetaItem`, which `PUT /api/v1/meta/view/:name` and the dispatcher's metadata save both call, accepted an aggregated view container (`list` / `form` / `listViews` / `formViews`) saved under one of the names its own expansion produces: for example `{ name: 'crm_lead.default', object: 'crm_lead', list: { … } }` saved as `crm_lead.default`, the name its bare `list` expands to. That row is the name's own stored row, and an expansion fills only names that have no row of their own (the object door adopts that rule in this same release), so the container's expansion never filled it. The object door (`GET /api/v1/meta/view?object=…`), which never lists a container, listed nothing under the name, and the by-name read answered the raw container. No door answered a view item for the name, and nothing said why.
+
+**What is refused now.** That save, with `VALIDATION_ERROR` / 400, before anything is stored or registered, in draft and in publish mode. Whether a name is one the container's own expansion produces is decided by the same expansion the read doors run, so every member kind (a bare or named `list`, `listViews`, `form`, `formViews`) and the expander's de-duplicated names (`…_2`) are judged where the readers place them. A container with no `name` is judged under the save name the door stamps on it. A container on another package's object expands under its own name, which is never the name it is saved under, so it is not refused.
+
+**What still saves.** A container under its object's name, which expands as before. A view item (a body carrying `viewKind`) under an expanded name, the sanctioned override for that name. The read doors are unchanged. A row stored in this shape before this change keeps its bytes and is served as before; `migrate meta --stored` and package duplication, which re-save stored rows through this door, now report such a row as failed with this refusal instead of re-saving it.
+
+**The fix.** Save the container under its object's name (`crm_lead`), or save a view item (`name`, `object`, `viewKind`, `config`) under the expanded name (`crm_lead.default`).
