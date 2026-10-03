@@ -1609,7 +1609,8 @@ export class TursoDriver extends SqlDriver {
       batchSchemaSync: true,
 
       // Remote transport does NOT do native date bucketing. SqlDriver's
-      // `aggregate` — which emits `date_trunc`/`strftime` for structured
+      // `aggregate` — which emits its dialect's bucket expression (`strftime`
+      // here; see `SqlDriver.buildDateBucketExpr`) for structured
       // `{ field, dateGranularity }` groupBy items — is only reached in
       // local/replica mode; remote mode delegates `aggregate` to
       // `RemoteTransport.aggregate`, which accepts only string group-by
