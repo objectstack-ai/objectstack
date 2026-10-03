@@ -940,6 +940,11 @@ export const REMOTE_FACE_ANSWERS = {
   // Pure functions of the registries the remote arms read themselves.
   temporalFilterValue: 'inherited',
   temporalFilterColumnSql: 'inherited',
+  // The SQLite bucket expression, rendered by Knex's compiler, which needs no
+  // connection; libSQL runs it. The remote `aggregate` buckets nothing (its
+  // `queryDateGranularity` is empty), so the engine buckets in memory, on the
+  // UTC calendar whose keys this expression answers.
+  dateBucketSql: 'inherited',
 } as const satisfies Record<keyof SqlDriver, RemoteFaceAnswer>;
 
 // ── Remote operation timeout ─────────────────────────────────────────────────

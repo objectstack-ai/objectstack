@@ -6167,10 +6167,10 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#21441] The date-bucket expression {@link aggregate} groups `field` by at
-   * `granularity`, rendered as SQL text in this driver's dialect, or `null`
-   * where {@link buildDateBucketExpr} has none: a granularity this dialect
-   * buckets in memory (`week` on SQLite, see
+   * [#21441] The date-bucket expression this dialect groups `field` by at
+   * `granularity` (the one {@link aggregate} runs), rendered as SQL text, or
+   * `null` where {@link buildDateBucketExpr} has none: a granularity this
+   * dialect buckets in memory (`week` on SQLite, see
    * {@link dateGranularityCapabilities}), or a client this driver does not
    * model.
    *
