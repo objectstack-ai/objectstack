@@ -140,27 +140,24 @@ describe('[#21476] a public form that cannot take intake on this posture is not 
     expect([postStatus, JSON.parse(postBody).code]).toEqual([404, 'FORM_NOT_FOUND']);
   });
 
-  for (const posture of ['isolated', 'group'] as const) {
-    it(`walled ('${posture}'), walled object: both doors answer the withdrawn form's answer byte for byte, nothing is written`, async () => {
-      const s = build({ tenancy: posture });
-      expect(answer(await s.get())).toEqual(await withdrawnAnswer('get'));
-      expect(answer(await s.post())).toEqual(await withdrawnAnswer('post'));
-      expect(s.createData).not.toHaveBeenCalled();
-    });
-  }
-
-  it('ENUMERATION: every route under /forms/ is an anonymous form door, and each answers the withdrawn answer', async () => {
-    const s = build({ tenancy: 'isolated' });
-    expect(s.formDoors.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
-      'GET /api/v1/forms/:slug',
-      'POST /api/v1/forms/:slug/submit',
-    ]);
-    for (const door of s.formDoors) {
-      const expected = await withdrawnAnswer(door.method === 'POST' ? 'post' : 'get');
-      expect(answer(await s.drive(door, door.method)), `${door.method} ${door.path}`).toEqual(expected);
-    }
-    expect(s.createData).not.toHaveBeenCalled();
+  // ENUMERATION: the doors are read off the registered routes, not listed by
+  // hand, and each door × walled posture is its own row.
+  const doors = build({ tenancy: 'isolated' }).formDoors;
+  it('ENUMERATION: the routes under /forms/ are exactly the two anonymous form doors', () => {
+    expect(doors.map((r) => `${r.method} ${r.path}`).sort())
+      .toEqual(['GET /api/v1/forms/:slug', 'POST /api/v1/forms/:slug/submit']);
   });
+  for (const door of doors) {
+    for (const posture of ['isolated', 'group'] as const) {
+      it(`${door.method} ${door.path} · '${posture}', walled object: the withdrawn form's answer byte for byte, nothing written`, async () => {
+        const s = build({ tenancy: posture });
+        const route = s.formDoors.find((r) => r.method === door.method && r.path === door.path)!;
+        const expected = await withdrawnAnswer(door.method === 'POST' ? 'post' : 'get');
+        expect(answer(await s.drive(route, door.method))).toEqual(expected);
+        expect(s.createData).not.toHaveBeenCalled();
+      });
+    }
+  }
 
   it('CONTROL: walled posture, object declared tenancy: { enabled: false } — accepted on both doors', async () => {
     const s = build({ tenancy: 'isolated', tenancyDisabled: true });
