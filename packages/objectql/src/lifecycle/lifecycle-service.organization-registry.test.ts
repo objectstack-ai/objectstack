@@ -27,6 +27,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '../engine.js';
 import { LifecycleService } from './lifecycle-service.js';
 import { parseLifecycleDuration } from './duration.js';
@@ -42,6 +43,9 @@ const TELEMETRY_OBJ = {
 } as any;
 
 const ORG_OBJECT = { name: 'sys_organization', fields: { name: { type: 'text' } } } as any;
+
+/** A system-context read of one row, spelled as a typed query. */
+const ORG_PROBE: EngineQueryOptions = { limit: 1, context: { isSystem: true } };
 
 const isoCutoff = (literal: string) => new Date(FIXED_NOW - parseLifecycleDuration(literal)).toISOString();
 
@@ -120,7 +124,7 @@ async function lifecycleEngine(opts: {
     driverReads,
     driverDeletes,
     /** The `where` of every candidate read the reaper issued through the engine. */
-    reapReads: () => callsOn('sys_job_run').map(({ call }) => (call[1] as any)?.where),
+    reapReads: () => callsOn('sys_job_run').map(({ call }) => call[1]?.where),
     /** How many times the tenant scan asked the engine for `sys_organization`. */
     orgReads: () => callsOn('sys_organization').length,
     /** What the engine rejected the tenant scan's read with. */
@@ -174,7 +178,7 @@ describe('LifecycleService.sweep — the tenant scan asks the registry first (#2
     const box = await lifecycleEngine({ registerOrganization: false });
 
     const refusal = await box.engine
-      .find('sys_organization', { limit: 1, context: { isSystem: true } } as any)
+      .find('sys_organization', ORG_PROBE)
       .then(() => undefined, (error: unknown) => error as Error & { code?: unknown; status?: unknown; object?: unknown });
 
     expect(refusal?.code).toBe('OBJECT_NOT_FOUND');
@@ -255,7 +259,7 @@ describe('LifecycleService.sweep — the tenant scan asks the registry first (#2
     box.engine.registerHook(
       'beforeFind',
       async () => {
-        await box.engine.find('sys_org_unit', { limit: 1, context: { isSystem: true } } as any);
+        await box.engine.find('sys_org_unit', ORG_PROBE);
       },
       { object: 'sys_organization' },
     );
