@@ -297,7 +297,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     note: 'An unescaped comparand compiles to LIKE \'%100%%\', which also matches row 6 (100X match).',
   },
   {
-    name: 'icontains (the infix/view spelling, #8934) lowers to $icontains — % stays a LITERAL through that door too',
+    name: 'icontains (the infix/view spelling, ruled never an alias of ilike) lowers to $icontains — % stays a LITERAL through that door too',
     // Computed THROUGH the lowering on purpose: today this case is byte-equal
     // at runtime to the one above, and that is the point. If the infix spelling
     // is ever folded onto `$ilike` instead (the boundary #8934 rules out), the
@@ -306,7 +306,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     // where it executes, not only in the spec's own suite.
     filter: parseFilterAST(['name', 'icontains', '100%']) as FilterCondition,
     expected: ['5'],
-    note: 'The three authoring dialects declare ONE capability (#8934): the infix door must reach the same escaped-substring operator the $ dialect names directly, never the raw-pattern $ilike.',
+    note: 'The three authoring dialects declare ONE capability, ruled when `icontains` joined the view and infix vocabularies: the infix door must reach the same escaped-substring operator the $ dialect names directly, never the raw-pattern $ilike.',
   },
   {
     name: '$icontains treats _ as a literal character, not a single-character wildcard',
@@ -346,7 +346,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     name: '$contains is case-SENSITIVE — a lower-case comparand misses the upper-case row',
     filter: { name: { $contains: 'acme' } },
     expected: ['2'],
-    note: 'Row 1 (ACME Corp) must NOT match. SQLite\'s LIKE folds ASCII — the defect #6518 replaced with GLOB on the SQLite dialects; a JS backend\'s equivalent is a RegExp carrying the `i` flag, which #6682 took off the last two. A backend returning both here has regressed to one of them.',
+    note: 'Row 1 (ACME Corp) must NOT match: the `$contains` family is case-sensitive on every backend, by ruling. SQLite\'s LIKE folds ASCII — the defect the SQL family replaced with GLOB on the SQLite dialects; a JS backend\'s equivalent is a RegExp carrying the `i` flag, since taken off driver-memory and driver-mongodb, the last two. A backend returning both here has regressed to one of them.',
   },
   {
     name: '$contains is case-SENSITIVE — an upper-case comparand misses the lower-case row',
@@ -425,7 +425,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     expectRejection: true,
     code: 'INVALID_FILTER',
     mustMention: ['$regex', '$icontains'],
-    note: 'Not `expected: []`. Answering zero rows is what driver-memory already did for an invalid pattern — the silent wrong answer #4706 retired the operator over.',
+    note: 'Not `expected: []`. Answering zero rows is what driver-memory already did for an invalid pattern — the silent wrong answer `$regex` was retired over, by ruling, with a loud refusal naming `$icontains`.',
   },
   {
     name: '$regex with $options is REFUSED as one mistake, not two',
@@ -433,7 +433,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     expectRejection: true,
     code: 'INVALID_FILTER',
     mustMention: ['$regex', '$options', '$icontains'],
-    note: 'The exact shape plugin-auth\'s adapter used to emit, and the one `$icontains` replaces one-for-one. #5710 flipped that producer before any backend enrolled this case (re-verified 2026-08, #6993). "One mistake" is about the AUTHOR\'s fix being single (write $icontains), not about the message naming one key: it must name BOTH retired spellings, or an author who fixes only $regex trips the dangling-$options refusal on the next attempt.',
+    note: 'The exact shape plugin-auth\'s adapter used to emit, and the one `$icontains` replaces one-for-one. That producer was moved off `$regex` before any backend enrolled this case (re-verified 2026-08 by executing each face). "One mistake" is about the AUTHOR\'s fix being single (write $icontains), not about the message naming one key: it must name BOTH retired spellings, or an author who fixes only $regex trips the dangling-$options refusal on the next attempt.',
   },
   {
     name: 'a dangling $options with no $regex is REFUSED',
@@ -449,7 +449,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     expectRejection: true,
     code: 'INVALID_FILTER',
     mustMention: ['$icontains'],
-    note: 'Every row contains the empty substring, so evaluating it is a predicate that constrains nothing — the widening #5240 refused `{ field: {} }` over, one level in.',
+    note: 'Every row contains the empty substring, so evaluating it is a predicate that constrains nothing — the widening for which a field with zero operators, `{ field: {} }`, is refused by ruling, one level in.',
   },
   {
     name: 'a non-string $icontains comparand is REFUSED',

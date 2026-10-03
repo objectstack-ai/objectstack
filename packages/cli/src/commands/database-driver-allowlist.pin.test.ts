@@ -188,6 +188,19 @@ describe('#6860 — --database-driver allowlist agrees with resolveStorageDefini
         // would parse and "parses every offered kind" would prove nothing.
         await expect(parseDriverFlag(flags, 'not-a-driver')).rejects.toThrow(/expected .*not-a-driver.* to be one of/i);
       });
+
+      // The in-memory engine was withdrawn from the spec's selection face, so the
+      // derived allowlist refuses its spellings at PARSE time — before the
+      // command body, and so before `os dev` prints a Database row for a store
+      // its serve child would never open. The wording is oclif's (the allowlist
+      // is derived, never subtracted here); it lists the legal kinds, sqlite
+      // among them.
+      it('refuses the withdrawn in-memory spellings at parse time', async () => {
+        for (const spelling of ['memory', 'mingo', 'in-memory']) {
+          await expect(parseDriverFlag(flags, spelling), `--database-driver ${spelling}`)
+            .rejects.toThrow(/to be one of: .*sqlite/i);
+        }
+      });
     });
   }
 

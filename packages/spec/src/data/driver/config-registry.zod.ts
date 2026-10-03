@@ -96,6 +96,16 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * before this table existed while refusing to widen a boot flag nobody asked to
  * widen.
  *
+ * One row has since moved the OTHER way. The in-memory (mingo) engine refuses
+ * every tenant-scoped read, so a boot on it answered 503 to data requests; it
+ * was retired as a boot store, at this declaration rather than at a consumer.
+ * Its row offers no selection spelling — `memory`, `mingo` and `in-memory`
+ * joined `inmemory` on the contract-only column — so every derived selection
+ * face drops them and both hosts refuse them, while a stored
+ * `datasource.driver: memory` still parses against {@link MemoryConfigSchema}.
+ * `memory` is therefore the one id in {@link BUILTIN_DRIVER_IDS} that is not in
+ * {@link DATABASE_DRIVER_SELECTION_IDS}.
+ *
  * ## `mongo` → `mongodb`, and turso becoming a real builtin (commit e2798fab7)
  *
  * The old canon was `mongo` while both hosts, the npm package
@@ -126,23 +136,30 @@ export interface DriverVocabularyEntry {
   readonly id: string;
   /**
    * Spellings an operator or author may SELECT this driver by, matched
-   * case-insensitively. Includes {@link id}. This is the face both boot hosts
-   * accept, and the ruling fixes it as the union of what they accepted before
-   * commit e2798fab7 — never widened by accident.
+   * case-insensitively. Includes {@link id} on every row that is selectable at
+   * all; a row withdrawn from selection — `memory`, the retired in-memory
+   * engine — has none, and keeps its spellings on
+   * {@link contractOnlyAliases}. This is the face both boot hosts accept, and
+   * the ruling fixes it as the union of what they accepted before commit
+   * e2798fab7 — never widened by accident.
    */
   readonly aliases: readonly string[];
   /**
    * Spellings that resolve this driver's CONFIG CONTRACT but are not offered as
-   * a selection, because no host has ever accepted them as one. Dropping them
-   * would silently un-validate a stored `driver: 'sqlite3'` datasource's config;
-   * promoting them to selections would widen a boot flag on no ruling. So they
-   * are kept, and kept apart.
+   * a selection, because no host accepts them as one — either never did
+   * (`sqlite3`, `mariadb`, `inmemory`) or no longer does (`memory`, `mingo`,
+   * `in-memory`, withdrawn when the in-memory engine was retired as a boot
+   * store). Dropping them would silently un-validate a stored
+   * `driver: 'sqlite3'` or `driver: 'memory'` datasource's config; promoting
+   * them to selections would widen a boot flag on no ruling. So they are kept,
+   * and kept apart.
    */
   readonly contractOnlyAliases?: readonly string[];
   /**
    * Can this driver be selected with no database URL at all?
    *
-   * `true` for the three local engines (memory has no target to name; the two
+   * `true` for the three local engines (memory has no target to name — a
+   * contract-face fact only, since memory is no longer selectable; the two
    * sqlite kinds fall back to `:memory:` / the unified default file). `false`
    * for every kind whose target is a server or an endpoint — there is nothing
    * truthful to guess, so both hosts refuse with a typed error naming what to
@@ -158,7 +175,7 @@ export interface DriverVocabularyEntry {
  * order the tuple used before commit e2798fab7, plus `turso` appended.
  */
 const DRIVER_VOCABULARY = [
-  { id: 'memory', aliases: ['memory', 'mingo', 'in-memory'], contractOnlyAliases: ['inmemory'], hasLocalDefault: true },
+  { id: 'memory', aliases: [], contractOnlyAliases: ['memory', 'mingo', 'in-memory', 'inmemory'], hasLocalDefault: true },
   { id: 'sqlite', aliases: ['sqlite', 'sql'], contractOnlyAliases: ['sqlite3', 'better-sqlite3'], hasLocalDefault: true },
   { id: 'sqlite-wasm', aliases: ['sqlite-wasm', 'wasm-sqlite', 'wasm'], hasLocalDefault: true },
   { id: 'postgres', aliases: ['postgres', 'postgresql', 'pg'], hasLocalDefault: false },
@@ -317,8 +334,9 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  *
  * ## Which question this answers, and why it is not {@link BUILTIN_DRIVER_IDS}
  *
- * The two have equal contents today and answer different questions, which is the
- * distinction commit e2798fab7 was written to keep visible:
+ * The two answer different questions, which is the distinction commit e2798fab7
+ * was written to keep visible — and since the in-memory engine's retirement as
+ * a boot store they also have different contents:
  *
  *  - {@link BUILTIN_DRIVER_IDS} — "which ids does the platform ship a CONFIG
  *    CONTRACT for". That is what {@link DRIVER_CONFIG_SCHEMAS} is keyed by, and
@@ -327,22 +345,25 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  *    That is what `os start --database-driver` / `os dev --database-driver`
  *    enumerate in their oclif `options:` allowlist.
  *
- * A driver that ships a contract but must not be bootable would belong in the
- * first and not the second. Nothing is in that position today; the point of the
- * separate name is that the day one is, the flag does not widen by inheritance.
+ * A driver that ships a contract but must not be bootable belongs in the first
+ * and not the second. `memory` is in that position: it keeps its config contract
+ * and is offered by no boot flag. That is the point of the separate name — the
+ * day a driver stopped being bootable, the flag narrowed by derivation instead
+ * of keeping it by inheritance.
  *
  * ## Derived from the SELECTION column, so the contract-only spellings cannot leak
  *
  * Built by filtering {@link DATABASE_DRIVER_SELECTION_ALIASES} — the
  * {@link DriverVocabularyEntry.aliases} face — down to the spellings that resolve
- * to THEMSELVES. Ten of its seventeen entries are dropped by that filter (`pg`,
- * `mingo`, `sql`, `wasm`, `libsql`, …): they select a driver, but under another
- * driver's canonical name, and an allowlist that offered both would be advertising
- * one driver twice.
+ * to THEMSELVES. Eight of its fourteen entries are dropped by that filter (`pg`,
+ * `sql`, `wasm`, `libsql`, …): they select a driver, but under another driver's
+ * canonical name, and an allowlist that offered both would be advertising one
+ * driver twice.
  *
  * {@link DriverVocabularyEntry.contractOnlyAliases} (`sqlite3`, `better-sqlite3`,
- * `mariadb`, `inmemory`) cannot appear here at all — not because they are filtered
- * out, but because they never enter the array this reads. Deriving a boot flag from
+ * `mariadb`, and the in-memory engine's `memory`, `mingo`, `in-memory`,
+ * `inmemory`) cannot appear here at all — not because they are filtered out, but
+ * because they never enter the array this reads. Deriving a boot flag from
  * {@link DRIVER_ID_ALIASES} instead would have offered all four, which is a
  * WIDENING of what both hosts accept, dressed as a refactor: neither host has ever
  * accepted `--database-driver sqlite3`, and commit e2798fab7's ruling fixes the selection face
@@ -356,12 +377,15 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  * NOT a second (e.g. alphabetical) opinion about presentation: the table publishes
  * one order and everything derived from it publishes that one.
  *
- * ## If an id must ever be withheld from the flag
+ * ## Withholding an id from the flag
  *
- * Declare it on the ROW — a column saying so, next to `hasLocalDefault` — and let
- * this projection read it. Never subtract it at the consumer: a boot host that
- * removes an id the table still advertises is exactly the second definition this
- * export exists to delete.
+ * Declare it on the ROW and let this projection read it. Never subtract it at
+ * the consumer: a boot host that removes an id the table still advertises is
+ * exactly the second definition this export exists to delete. `memory` is the
+ * worked case, and it needed no new column: its row moved every spelling from
+ * {@link DriverVocabularyEntry.aliases} to
+ * {@link DriverVocabularyEntry.contractOnlyAliases}, so no selection alias
+ * resolves to it and this projection drops it on its own.
  */
 export const DATABASE_DRIVER_SELECTION_IDS: readonly BuiltinDriverId[] = Object.freeze(
   DATABASE_DRIVER_SELECTION_ALIASES.filter(

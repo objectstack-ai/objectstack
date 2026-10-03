@@ -210,7 +210,7 @@ export const VALUE_ROUNDTRIP_CASES: readonly ValueRoundTripCase[] = [
     name: 'm_two',
     column: 'v_multi',
     wrote: ['userA', 'userB'],
-    note: "#11535's exact shape: the array that came back as the string '[\"userA\",\"userB\"]'",
+    note: "the exact shape a single-value column kept for a multi-value field corrupted: the array that came back as the string '[\"userA\",\"userB\"]'",
   },
   { name: 'm_one', column: 'v_multi', wrote: ['solo'], note: 'single-element array must not degrade to its element' },
   { name: 'm_empty', column: 'v_multi', wrote: [], note: 'empty array must not degrade to null' },
@@ -222,8 +222,8 @@ export const VALUE_ROUNDTRIP_CASES: readonly ValueRoundTripCase[] = [
   },
 
   // ── scalar columns: the value class stated in the declaration ─────────────
-  { name: 'b_true', column: 'v_boolean', wrote: true, note: 'declared boolean — #11782 read this back as 1 on MySQL' },
-  { name: 'b_false', column: 'v_boolean', wrote: false, note: 'declared boolean — the 0 half of #11782' },
+  { name: 'b_true', column: 'v_boolean', wrote: true, note: 'declared boolean — MySQL read this back as 1 until every read door presented a declared boolean as true/false' },
+  { name: 'b_false', column: 'v_boolean', wrote: false, note: 'declared boolean — the 0 half of that MySQL read-back' },
   { name: 'num_int', column: 'v_number', wrote: 42, note: 'declared number, integral' },
   { name: 'num_real', column: 'v_number', wrote: 1.5, note: 'declared number, fractional' },
   { name: 'num_zero', column: 'v_number', wrote: 0, note: 'zero must survive as a number, not become null' },

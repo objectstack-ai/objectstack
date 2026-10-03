@@ -126,7 +126,7 @@
       "file": "packages/cli/package.json",
       "field": "dependencies",
       "axis": "product-consumer",
-      "why": "the CLI imports the driver nowhere; it declares it so a CLI-installed app can RESOLVE it when `--database-driver memory` / `OS_DATABASE_DRIVER=memory` / a `memory://` URL routes to driverId `memory` and service-datasource's factory reaches for it by dynamic import."
+      "why": "the CLI imports the driver nowhere. It used to declare it so a CLI-installed app could RESOLVE it when `--database-driver memory` / `OS_DATABASE_DRIVER=memory` / a `memory://` URL routed to driverId `memory`; the in-memory engine has since been retired as a boot store, and every one of those doors refuses it on both hosts (the spec row withdrew its selection spellings; the runtime and the CLI refuse the `memory://` / `mingo://` schemes). What still resolves the driver in a CLI-installed app is a project-declared non-default datasource with `driver: memory` (the config-contract face the withdrawal kept) or the dev SQLite step-down's last rung, both through service-datasource's dynamic import, which service-datasource declares itself. The declaration is kept rather than removed: the retirement ruling kept the driver-memory package as it is, and dropping a published dependency is a packaging decision it did not take."
     },
     {
       "file": "packages/plugins/plugin-dev/package.json",

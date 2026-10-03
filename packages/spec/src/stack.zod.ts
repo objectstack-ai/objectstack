@@ -1361,9 +1361,15 @@ export type AssembledPackageBodyParsed = z.infer<typeof AssembledPackageBodySche
  * the base's `.optional()`: a hook that carries a `body` instead declares no
  * handler at all, and the registry record of a hook whose handler was an inline
  * callable has none either (the projection drops it).
+ *
+ * `safeExtend`, not `extend` (#21565): `HookSchema` carries an object-level
+ * check — a hook `body` may not target a stored-metadata table — and zod
+ * refuses to overwrite a key on a refined object with `extend`. `safeExtend`
+ * accepts the narrower `handler` and keeps that check, so an artifact's parse
+ * refuses the same hook the authoring door does.
  */
 function jsonStageHooksKey() {
-  return z.array(HookSchema.extend({
+  return z.array(HookSchema.safeExtend({
     handler: z.string().optional()
       .describe('Handler function name — the lowered string ref the JSON artifact carries'),
   })).optional().describe('Object Lifecycle Hooks, as a JSON document carries them');

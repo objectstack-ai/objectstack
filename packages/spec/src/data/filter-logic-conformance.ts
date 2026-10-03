@@ -336,7 +336,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: 'multi-key $or branch ANDs its own keys',
     filter: { $or: [{ a: 'x', b: 'y' }] },
     expected: ['1'],
-    note: '#3774: compiled to `a = x OR b = y`, matching 1,2,3.',
+    note: 'A $or combines its branches, never the keys inside one: a driver that OR-ed a branch\'s own keys compiled this to `a = x OR b = y`, matching 1,2,3.',
   },
   {
     name: 'each $or branch ANDs independently',
@@ -359,7 +359,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: 'multiple operators on one field AND within a branch',
     filter: { $or: [{ a: { $ne: 'qq', $eq: 'x' }, b: 'y' }] },
     expected: ['1'],
-    note: '#3774: a single-key branch is miscompilable too — the operator map is looped with the same flag.',
+    note: 'A single-key branch is miscompilable too — that driver looped the operator map with the same OR flag.',
   },
   {
     name: 'an abutting $gte/$lt window ANDs its bounds',
@@ -417,25 +417,25 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: 'empty $and is TRUE — the AND identity',
     filter: { $and: [] },
     expected: ['1', '2', '3', '4'],
-    note: '#5322: a conjunction of zero conditions constrains nothing.',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity. A conjunction of zero conditions constrains nothing.',
   },
   {
     name: 'empty $or is FALSE — the OR identity',
     filter: { $or: [] },
     expected: [],
-    note: '#5322/#5134: a disjunction of zero conditions matches nothing. Fail-closed for an RLS scope — a disjunct list that loops to zero items hides every row instead of exposing the table.',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity. A disjunction of zero conditions matches nothing. Fail-closed for an RLS scope — a disjunct list that loops to zero items hides every row instead of exposing the table, as a SQL lowering that dropped the empty group once did.',
   },
   {
     name: 'a {} branch is a TRUE disjunct and absorbs its $or',
     filter: { $or: [{ a: 'x' }, {}] },
     expected: ['1', '2', '3', '4'],
-    note: '#5322: collapsing to the surviving branches instead compiles `a = x` — a silently NARROWED scope (#5297).',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity, so `{}` is a TRUE disjunct. Collapsing to the surviving branches instead compiles `a = x` — a silently NARROWED scope, the answer the RLS read-scope compiler gave until it was aligned.',
   },
   {
     name: '$not of {} is FALSE — NOT TRUE',
     filter: { $not: {} },
     expected: [],
-    note: '#5322: emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass (#5297).',
+    note: 'Ruled: every face reduces an empty combinator to its boolean identity, so NOT of `{}` is FALSE. Emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass, which the read-scope compiler was until it compiled this to an always-false clause.',
   },
 
   // ── NULL / no-value semantics (#5146, #5298) ──────────────────────────────
@@ -467,13 +467,13 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$ne returns the rows with no value',
     filter: { d: { $ne: 'v1' } },
     expected: ['2', '3', '4'],
-    note: '#5298: "not v1" is true of a row whose d is absent. A three-valued `d <> ?` drops rows 3-4 — half the table, silently.',
+    note: 'Ruled NULL-safe on every face: "not v1" is true of a row whose d is absent. A three-valued `d <> ?` drops rows 3-4 — half the table, silently.',
   },
   {
     name: '$not returns the rows with no value',
     filter: { $not: { d: 'v1' } },
     expected: ['2', '3', '4'],
-    note: '#5146: the same ruling reached through the combinator. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
+    note: 'The same NULL-safe ruling reached through the combinator, where it was first made for `$not` itself. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
   },
 
   // [#13540] The negated OPERATOR forms of the same ruling, enrollable since
@@ -500,13 +500,13 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$nin returns the rows with no value',
     filter: { d: { $nin: ['v1'] } },
     expected: ['2', '3', '4'],
-    note: '#5298 option A: the list form of `$ne` — "not one of [v1]" is true of a row whose d is absent. A three-valued `NOT IN` drops rows 3-4; the reference matcher answered this way on a stored null but not on a missing key until PR #13356.',
+    note: 'Ruled NULL-safe: the list form of `$ne` — "not one of [v1]" is true of a row whose d is absent. A three-valued `NOT IN` drops rows 3-4; the reference matcher answered this way on a stored null but not on a missing key until it was realigned to the ruling.',
   },
   {
     name: '$notContains returns the rows with no value',
     filter: { d: { $notContains: 'v1' } },
     expected: ['2', '3', '4'],
-    note: '#5298 option A: a row with no value satisfies the negated substring test. The reference matcher failed BOTH readings of this one on the type test (`null` is not a string) until PR #13356; the SQL faces reach it through `nullSafeNegative`.',
+    note: 'Ruled NULL-safe: a row with no value satisfies the negated substring test. The reference matcher failed BOTH readings of this one on the type test (`null` is not a string) until it was realigned to the ruling; the SQL faces reach it through `nullSafeNegative`.',
   },
   {
     name: '$null true selects exactly the no-value rows',
@@ -536,7 +536,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$exists true selects exactly the valued rows',
     filter: { d: { $exists: true } },
     expected: ['1', '2'],
-    note: '#5299 cell 2 / #5962: `$exists` means HAS A VALUE, never key-presence. A key-presence reading returns all four rows here, because the fixture stores `d: null` with the key present — the reading every divergent exit failed on.',
+    note: 'Ruled: `$exists` means HAS A VALUE, never key-presence, because SQL cannot tell a missing key from a stored null. A key-presence reading returns all four rows here, because the fixture stores `d: null` with the key present — the reading every divergent exit failed on.',
   },
   {
     name: '$exists false selects exactly the no-value rows',
@@ -558,25 +558,25 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$empty true selects exactly the no-value rows',
     filter: { d: { $empty: true } },
     expected: ['3', '4'],
-    note: '#20444: null is empty on every row of the ruled table. A face with no arm refuses, which is red here, never a silent answer.',
+    note: 'Every face answers `$empty` by the field\'s declared type, and null is empty under every type\'s arm. A face with no arm refuses, which is red here, never a silent answer.',
   },
   {
     name: '$empty false selects exactly the valued rows',
     filter: { d: { $empty: false } },
     expected: ['1', '2'],
-    note: '#20444: the exact complement, so `$empty` is pinned as a partition of the table rather than one half of one.',
+    note: '`$empty: false` is the exact complement by ruling, so `$empty` is pinned as a partition of the table rather than one half of one.',
   },
   {
     name: '$not over $empty true returns the valued rows',
     filter: { $not: { d: { $empty: true } } },
     expected: ['1', '2'],
-    note: '#20444: `$empty` spells its NULL case out, so it is never UNKNOWN; a three-valued `NOT (d IS NULL OR …)` that dropped a row would fail here.',
+    note: 'The ruled `$empty` arms spell their NULL case out, so `$empty` is never UNKNOWN; a three-valued `NOT (d IS NULL OR …)` that dropped a row would fail here.',
   },
   {
     name: '$not over $empty false returns the no-value rows',
     filter: { $not: { d: { $empty: false } } },
     expected: ['3', '4'],
-    note: '#20444: the negation of the complement is the empty partition, rows 3-4 — the rows an unguarded `NOT (d IS NOT NULL AND …)` loses to UNKNOWN.',
+    note: 'Under the same declared-type arms, the negation of the complement is the empty partition, rows 3-4 — the rows an unguarded `NOT (d IS NOT NULL AND …)` loses to UNKNOWN.',
   },
   {
     name: '$empty inside a $or branch OR-s with its sibling branch',
@@ -592,7 +592,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     name: '$empty ANDs with a sibling operator on the same field',
     filter: { d: { $empty: false, $ne: 'v1' } },
     expected: ['2'],
-    note: '#20444: a face that lowers `$empty` beside the field\'s other operators must not let either overwrite the other.',
+    note: 'A face that lowers `$empty` to the field\'s declared-type arm beside the field\'s other operators must not let either overwrite the other.',
   },
 
   // ── Shapes read scopes are actually written in ────────────────────────────
