@@ -36,9 +36,12 @@
  *            outright (#8976).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
- *          → removes the cached manifest. Kernel must be restarted to fully
- *            unload — `engine.registerApp` is additive only. We document
- *            this in the response message.
+ *          → removes the cached manifest, then runs the uninstall cleanups
+ *            domain plugins registered with the protocol (#21490) — the
+ *            package's permission sets and their grants go with it — and
+ *            reports each outcome as `cleanups`. Kernel must be restarted to
+ *            fully unload — `engine.registerApp` is additive only. We
+ *            document this in the response message.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -87,8 +90,35 @@ import {
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { DeletePackageRequest, UninstallCleanupOutcome } from '@objectstack/metadata-protocol';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
+
+/**
+ * [#21490] The one `protocol` verb this plugin calls: the runner of the
+ * uninstall cleanups domain plugins register through
+ * `registerUninstallCleanup` — the same registry, through the same runner,
+ * that the protocol's own uninstall (`deletePackage`) runs.
+ *
+ * The `protocol` slot is uncontracted (`ServiceSlotContracts` leaves it
+ * unmapped), so this is a per-consumer narrowing, the shape
+ * `PackagesDomainProtocol` gives `deletePackage` in
+ * `packages/runtime/src/domains/packages.ts`: the verb's name is this file's,
+ * its request and outcome types are the producer's own declared ones — never
+ * a restatement here.
+ *
+ * Optional, and asked as a capability question at the call site: a protocol
+ * from a build without the runner holds cleanups this door cannot run, and
+ * the uninstall says so instead of answering as if they had run.
+ */
+type UninstallCleanupRunner = {
+    runUninstallCleanups?(
+        request: Pick<DeletePackageRequest, 'packageId' | 'organizationId' | 'actor'>,
+    ): Promise<UninstallCleanupOutcome[]>;
+};
+
+/** The outcome name this door reports when the runner itself could not run. */
+const UNINSTALL_CLEANUP_RUNNER = 'protocol.runUninstallCleanups';
 
 /**
  * [#8976] The capability every MUTATING install-local route demands.
@@ -1092,14 +1122,98 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         } catch (err: any) {
             return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: err?.message ?? String(err) } }, 500);
         }
-        ctx.logger?.info?.(`[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; restart runtime to unload from running kernel)`);
+        // [#21490] Only now — the ledger entry is gone, so the package will not
+        // come back at the next restart — revoke what its metadata granted.
+        // Never before: an uninstall whose ledger write failed above leaves the
+        // package installed, and it must keep its grants.
+        const cleanups = await this.runUninstallCleanups(ctx, manifestId, admission.userId);
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; ${cleanups.length} uninstall cleanup(s) ran; restart runtime to unload from running kernel)`);
         return c.json({
             success: true,
             data: {
                 manifestId,
-                note: 'Cached manifest removed. The app remains loaded in the running kernel until the next restart (the kernel API does not support unregistering apps in-place).',
+                cleanups,
+                note: 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The app remains loaded in the running kernel until the next restart (the kernel API does not support unregistering apps in-place).',
             },
         }, 200);
+    };
+
+    /**
+     * [#21490] Run the protocol's registered uninstall cleanups for a package
+     * this door just removed from its ledger — ADR-0086 D3's data-plane
+     * revocation, which ADR-0090 states as "(removing its sets by `packageId`,
+     * ADR-0086 D3) revokes it everywhere at once. No ghost grants."
+     *
+     * Before this, the door removed the ledger entry and nothing else: the
+     * package's object answered 404 after a restart, while its `managed_by:
+     * package` `sys_permission_set` row — and every grant of it — survived.
+     * `plugin-security` registers exactly that revocation
+     * (`security.package-permissions`); only the protocol's own uninstall ran it.
+     *
+     * ⛔ No second revocation path lives here. The cleanups are whatever domain
+     * plugins registered with the protocol, run by the protocol's own runner —
+     * this door knows no table, and a cleanup registered tomorrow fires here
+     * with no edit to this file.
+     *
+     * The request:
+     *   - `packageId` is the MANIFEST id, never the ledger's `packageId`. The
+     *     registry, and so every row a domain plugin stamped for the package,
+     *     knows the package by `manifest.id`; the ledger's `packageId` is the
+     *     marketplace catalog's id on a cloud install and can differ from it.
+     *   - no `organizationId`: an install-local package is installed for the
+     *     whole runtime (the ledger is per runtime, and the rehydrate registers
+     *     it for every tenant), so its revocation is too.
+     *   - `actor` is the operator the admission resolved.
+     *
+     * What comes back is reported, never swallowed — on the response, as the
+     * protocol's own uninstall reports it (`cleanups`). Never throws: the
+     * uninstall has already happened, so a cleanup that could not run is an
+     * outcome, not a failed request. Three answers:
+     *   - no `protocol` service — no cleanup registry exists, so none is
+     *     registered and none is owed: `[]`;
+     *   - a protocol without the runner, or a runner that throws — one failed
+     *     outcome named {@link UNINSTALL_CLEANUP_RUNNER}, so the caller can
+     *     tell "nothing to revoke" from "the revocation never ran";
+     *   - otherwise the runner's outcomes, verbatim.
+     */
+    private runUninstallCleanups = async (
+        ctx: PluginContext,
+        manifestId: string,
+        actor: string,
+    ): Promise<UninstallCleanupOutcome[]> => {
+        let protocol: UninstallCleanupRunner | undefined;
+        try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
+        if (!protocol) return [];
+
+        const notRun = (error: string): UninstallCleanupOutcome[] => [
+            { name: UNINSTALL_CLEANUP_RUNNER, success: false, removed: 0, error },
+        ];
+        let outcomes: UninstallCleanupOutcome[];
+        if (typeof protocol.runUninstallCleanups !== 'function') {
+            outcomes = notRun(
+                'this runtime\'s protocol cannot run uninstall cleanups — upgrade @objectstack/metadata-protocol '
+                + 'alongside @objectstack/cloud-connection',
+            );
+        } else {
+            try {
+                outcomes = await protocol.runUninstallCleanups({ packageId: manifestId, actor });
+            } catch (err: any) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] the uninstall cleanups of ${manifestId} could not be run: ${err?.message ?? err}`);
+                outcomes = notRun('the uninstall cleanups could not be run');
+            }
+        }
+
+        const failed = outcomes.filter((o) => o.success !== true);
+        if (failed.length > 0) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but ${failed.length} uninstall cleanup(s) did not `
+                + `complete (${failed.map((o) => o.name).join(', ')}) — what they revoke, such as the package's `
+                + 'permission sets and their grants, SURVIVES the uninstall. Each outcome is on the response '
+                + '(`cleanups`). Remedy: once the cause is fixed, install the package again and uninstall it again — '
+                + 'the cleanups re-select by package id, so a second pass removes whatever the first could not.',
+            );
+        }
+        return outcomes;
     };
 
     /**

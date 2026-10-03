@@ -17,6 +17,7 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { oneShotSettingsPlugin, resolveExistingDataKey } from '../../utils/one-shot-settings.js';
+import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
@@ -203,7 +204,21 @@ export default class SecretRewrap extends Command {
 
       // Read at DRIVER level and UNSCOPED, as the union reads its holders: a
       // row missing from this read is a row the run never mentions.
-      const secrets: RewrapSecretRow[] = (await secretDriver.find('sys_secret', {})).map((r) => ({
+      //
+      // [#21552] Not asked: the dry run's read-only boot measured which tables
+      // exist, and a table that does not exist holds no row, so there is
+      // nothing to re-wrap on it. Every read below, the union's included, asks
+      // `reads` first and takes an absent table as no rows. Read anyway, a
+      // project whose database does not exist yet was refused with exit 1.
+      // `--apply` booted plain, so there nothing is absent and every read is
+      // real; its write goes through the unwrapped driver.
+      // ⛔ Only a table the boot MEASURED absent: any other refused read still
+      // lands in the catch below, and an empty answer is never invented for it.
+      const reads = absentTableReads(stack, (object) => engine.getConfigs()[object]);
+      const secretRows: Record<string, unknown>[] = reads.absent('sys_secret')
+        ? []
+        : await secretDriver.find('sys_secret', {});
+      const secrets: RewrapSecretRow[] = secretRows.map((r) => ({
         id: String(r.id),
         namespace: String(r.namespace ?? ''),
         key: String(r.key ?? ''),
@@ -213,8 +228,12 @@ export default class SecretRewrap extends Command {
         ciphertext: r.ciphertext,
       }));
 
-      const union = await collectSecretReferenceUnion({ engine, declaredDatasources });
+      const union = await collectSecretReferenceUnion({
+        engine: secretUnionReadView(engine, reads),
+        declaredDatasources,
+      });
       const plan = planSysSecretRewrap({ secrets, union, derivationOf: ciphertextDerivationStatus });
+      reads.notice(json);
 
       // ── --apply: refusals that come before any row is opened ─────────────
       // An incomplete union settles every version-1 row as left at planning
@@ -299,8 +318,9 @@ export default class SecretRewrap extends Command {
       if (exitCode !== 0) this.exit(exitCode);
     } catch (error) {
       // A read the run could not make is a refusal, and under `--json` a
-      // refusal is still one JSON document. The dry run boots read-only, so a
-      // database that lacks a table it reads is refused here.
+      // refusal is still one JSON document. [#21552] A table the dry run's
+      // read-only boot measured absent is not one of them: it is answered
+      // above with no rows and never read. Any other refused read lands here.
       if (isExitSignal(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (json) { await emitJson({ error: 'scan_failed', message, ...errorCodeFields(error) }, 1, { compact: true }); return; }
