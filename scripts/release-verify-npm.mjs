@@ -142,8 +142,9 @@
  *
  * The self-test's battery 12 runs the audit step itself — its text, read out of
  * `.github/workflows/release.yml` — against a throwaway repository, a stub
- * registry, a stub Actions API (the audit asks whether the version's publish
- * is in flight in another run before it backfills any Release) and stub
+ * registry, a stub Actions API (the audit asks whether the version's publish,
+ * or its publishing run's image build, is in flight in another run before it
+ * backfills any Release or requests the image) and stub
  * `npm` / `gh` / `curl`, so the wiring is pinned where it lives rather than
  * described here.
  *
@@ -205,7 +206,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '9. The job summary is written SYNCHRONOUSLY, before process.exit': 4,
   '10. The probe: the whole group in one read, three answers': 9,
   '11. The 17.5.0 publish window, replayed on npm\'s own clock': 7,
-  '12. The audit step backfills only a version whose whole group is on npm, and no publish of it is in flight': 24,
+  '12. The audit step backfills only a version whose whole group is on npm, and no publish or image build of it is in flight': 34,
   '13. The backfill builds from the version commit\'s tree, as the publish does': 11,
 });
 
@@ -940,13 +941,15 @@ async function stubRegistryServer() {
 
 /**
  * The Actions API the audit's in-flight read asks (`release-pending-publish.mjs
- * in-flight`), on 127.0.0.1. `set({ publishing, broken })`: `publishing` names
- * a version whose publish job is `in_progress` in run 4242, which only the
- * `in_progress` run-list filter lists; `broken` answers every request 503.
- * Records every request, so a case can assert the audit asked, or did not.
+ * in-flight`), on 127.0.0.1. `set({ publishing, publishStatus, docker, broken })`:
+ * `publishing` names a version whose publish job is `publishStatus` (default
+ * `in_progress`) in run 4242, which only the `in_progress` run-list filter
+ * lists; `docker` is the status of that run's docker job, absent when unset
+ * (GitHub has not created it); `broken` answers every request 503. Records
+ * every request, so a case can assert the audit asked, or did not.
  */
 async function stubActionsApi() {
-  let state = { publishing: null, broken: false };
+  let state = { publishing: null, publishStatus: 'in_progress', docker: null, broken: false };
   const asked = [];
   const server = createServer((req, res) => {
     const url = new URL(String(req.url), 'http://stub.invalid');
@@ -963,7 +966,9 @@ async function stubActionsApi() {
     }
     if (state.publishing && url.pathname.endsWith('/actions/runs/4242')) return send(200, run);
     if (state.publishing && url.pathname.endsWith('/actions/runs/4242/jobs')) {
-      return send(200, { total_count: 1, jobs: [{ name: `Publish ${state.publishing} to npm (awaiting approval)`, status: 'in_progress' }] });
+      const jobs = [{ name: `Publish ${state.publishing} to npm (awaiting approval)`, status: state.publishStatus }];
+      if (state.docker) jobs.push({ name: 'Docker image / Build & push ghcr.io/objectstack-ai/objectstack', status: state.docker });
+      return send(200, { total_count: jobs.length, jobs });
     }
     return send(404, { message: 'Not Found' });
   });
@@ -972,7 +977,12 @@ async function stubActionsApi() {
     url: `http://127.0.0.1:${server.address().port}`,
     asked,
     set(next) {
-      state = { publishing: next.publishing ?? null, broken: next.broken ?? false };
+      state = {
+        publishing: next.publishing ?? null,
+        publishStatus: next.publishStatus ?? 'in_progress',
+        docker: next.docker ?? null,
+        broken: next.broken ?? false,
+      };
       asked.length = 0;
     },
     close: () => new Promise((resolve_) => { server.close(resolve_); }),
@@ -1650,7 +1660,7 @@ export async function selfTest() {
   }
 
   // ── 12. The audit step itself ─────────────────────────────────────────────
-  battery('12. The audit step backfills only a version whose whole group is on npm, and no publish of it is in flight');
+  battery('12. The audit step backfills only a version whose whole group is on npm, and no publish or image build of it is in flight');
   {
     // The step's REAL text, read out of release.yml, run by bash the way
     // Actions runs it, in a throwaway repository: base (1.0.0) -> the version
@@ -1725,7 +1735,7 @@ export async function selfTest() {
       if (script !== null) writeFileSync(scriptFile, script);
 
       let runs = 0;
-      const audit = async ({ event = 'push', before, head, present, broken = [], releases = false, image = false, flight = {} }) => {
+      const audit = async ({ event = 'push', before, head, present, broken = [], releases = false, image = false, flight = {}, token = 'stub' }) => {
         runs += 1;
         const temp = join(root, `run-${runs}`);
         mkdirSync(temp);
@@ -1738,7 +1748,7 @@ export async function selfTest() {
           SHA: head,
           EVENT: event,
           BEFORE: before ?? '',
-          GH_TOKEN: 'stub',
+          GH_TOKEN: token,
           GITHUB_API_URL: actions.url,
           GITHUB_RUN_ID: '9999',
           GITHUB_REPOSITORY: 'objectstack-ai/objectstack',
@@ -1840,6 +1850,7 @@ export async function selfTest() {
       );
       const other = await audit({ before: vc, head: landing, present: whole, flight: { publishing: '1.2.0' } });
       t('a publish of ANOTHER version in flight does not hold this one back: the Releases are backfilled', other.outputs['releases-missing'] === 'true', said(other));
+      t('...and the image is requested', other.outputs['image-missing'] === 'true', said(other));
       const unreadable = await audit({ before: vc, head: landing, present: whole, flight: { broken: true } });
       t(
         'the Actions API unreadable: the audit stays green, backfills no GitHub Release off a guess, and a warning says so',
@@ -1848,9 +1859,67 @@ export async function selfTest() {
         said(unreadable),
       );
       t(
-        'Releases present: the in-flight read is never asked — the common path pays no Actions reads',
+        '...and requests no image build off a guess either, with a warning that names the unread image build',
+        unreadable.outputs['image-missing'] === undefined &&
+          /::warning::No ghcr image for 1\.1\.0 .* still building it could not be read \(.*HTTP 503/.test(unreadable.stdout),
+        said(unreadable),
+      );
+      t(
+        'nothing missing: the in-flight read is never asked — the common path pays no Actions reads',
         complete.actionsAsked.length === 0,
         JSON.stringify(complete.actionsAsked),
+      );
+
+      // The image half of the 17.6.0 race: npm settled, and the publishing
+      // run's `docker` job (needs: publish) had not been created yet, so both
+      // runs built and pushed 17.6.0's image. The same read answers it.
+      t(
+        'PUBLISH IN FLIGHT (its docker job not created yet): no image build is requested beside it',
+        flying.outputs['image-missing'] === undefined,
+        said(flying),
+      );
+      t(
+        '...and a notice says why, naming the run whose image build is not finished',
+        /::notice::No ghcr image for 1\.1\.0 yet, but its publishing run has not finished building it .*run 4242 .*Docker image not yet created/.test(flying.stdout),
+        said(flying),
+      );
+      const published = await audit({ before: vc, head: landing, present: whole, releases: true, flight: { publishing: '1.1.0', publishStatus: 'completed' } });
+      t(
+        'the publish job completed, its docker job not created yet (Releases present): no image build is requested',
+        published.status === 0 && published.outputs['image-missing'] === undefined && published.outputs['releases-missing'] === undefined &&
+          /::notice::No ghcr image for 1\.1\.0 yet/.test(published.stdout),
+        said(published),
+      );
+      t(
+        '...because Releases present no longer skips the in-flight read: the image asks it',
+        published.actionsAsked.some((a) => /\/actions\/runs\/4242\/jobs/.test(a)) && published.actionsAsked.every((a) => a.startsWith('GET ')),
+        JSON.stringify(published.actionsAsked),
+      );
+      const building = await audit({ before: vc, head: landing, present: whole, flight: { publishing: '1.1.0', publishStatus: 'completed', docker: 'in_progress' } });
+      t(
+        'the publishing run\'s docker job in_progress: no image build is requested, while the Releases are backfilled',
+        building.outputs['image-missing'] === undefined && building.outputs['releases-missing'] === 'true',
+        said(building),
+      );
+      const built = await audit({ before: vc, head: landing, present: whole, flight: { publishing: '1.1.0', publishStatus: 'completed', docker: 'completed' } });
+      t(
+        'its docker job completed and the image is absent: the image is requested (the repair)',
+        built.status === 0 && built.outputs['image-missing'] === 'true',
+        said(built),
+      );
+      const shipped = await audit({ before: vc, head: landing, present: whole, image: true, flight: { publishing: '1.1.0', publishStatus: 'completed', docker: 'completed' } });
+      t(
+        'its docker job completed and the image is present: no image build is requested',
+        shipped.status === 0 && shipped.outputs['image-missing'] === undefined && /ghcr: image for 1\.1\.0 is present\./.test(shipped.stdout),
+        said(shipped),
+      );
+      const unasked = await audit({ before: vc, head: landing, present: whole, token: '' });
+      t(
+        'the in-flight read cannot run at all: the audit stays green, backfills nothing, and warns for the Releases and the image',
+        unasked.status === 0 && !backfills(unasked) &&
+          /::warning::1\.1\.0's GitHub Releases .* could not be asked/.test(unasked.stdout) &&
+          /::warning::No ghcr image for 1\.1\.0 .* could not be asked/.test(unasked.stdout),
+        said(unasked),
       );
     } finally {
       await registry.close();
@@ -2118,7 +2187,7 @@ export async function selfTest() {
     `OK release-verify-npm self-test: ${cases.length} cases pass across `
       + `${Object.keys(SELF_TEST_BATTERIES).length} batteries (the #15321 false red reproduced and absorbed, `
       + 'the masked partial publish caught, absence still fatal, the release audit backfilling '
-      + 'only a version whose whole group is on npm and whose publish is not in flight, and that backfill built '
+      + 'only a version whose whole group is on npm and whose publish and image build are not in flight, and that backfill built '
       + 'from the version commit\'s tree).',
   );
   selfTestReachedVerdict = true;

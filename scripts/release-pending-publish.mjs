@@ -856,7 +856,7 @@ export function judgePublishInFlight({ version, runs, currentRunId }) {
       ? {
           state: 'in-flight',
           reason: 'docker-in-flight',
-          detail: `the image build of ${version}'s publishing run is not finished: ${building
+          detail: `image build not finished in ${building
             .map((b) => `run ${b.run} (${b.event}, publish job ${b.publish}, Docker image ${b.docker})`)
             .join(', ')}`,
           inFlight: building,
