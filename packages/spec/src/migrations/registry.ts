@@ -6131,6 +6131,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-object-form-members-typed',
+    order: 67,
+    text:
+      'It also types four members of the `object-form` page block (#21464, the third stage of the '
+      + '`ComponentPropsMap` `z.unknown()` close-out): `contentLayout`, `submitBehavior`, '
+      + '`navigateOnSuccess` and `mobile` were `z.unknown()`, although the form reads each with one shape, '
+      + 'so a `submitBehavior` `kind` the form does not know passed every door and fell through to the '
+      + 'thank-you panel. `submitBehavior` takes the form view\'s own block by reference; the other three '
+      + 'take the measured shape. The form\'s `fields` and `sections` and the master-detail form\'s two '
+      + 'stay open — the form draws a `{ name }` field entry and an inline runtime field inside a section, '
+      + 'which the typed shapes would refuse — and `customFields` stays open until the spec declares the '
+      + 'runtime form field its entries are. Read by the component-props gate (advisory); a stored page '
+      + 'still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-form-members-typed`.',
+  },
+  {
     id: 'ui-object-grid-export-options-closed',
     order: 59,
     text:

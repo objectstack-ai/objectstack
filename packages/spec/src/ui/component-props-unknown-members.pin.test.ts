@@ -35,7 +35,11 @@
  * `rowActions` / `bulkActions` / `batchActions`, `object-kanban` `columns`,
  * `object-calendar` `calendar`) in
  * `component-list-family-typed-members.pin.test.ts`. The family's ninth,
- * `object-grid` `columns`, is held below.
+ * `object-grid` `columns`, is held below. The form family (`object-form`
+ * `contentLayout` / `submitBehavior` / `navigateOnSuccess` / `mobile`) in
+ * `component-form-family-typed-members.pin.test.ts`; its `fields` and
+ * `sections`, and the master-detail form's two, are held below, and its
+ * `customFields` waits with the objectui-held contracts.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -124,9 +128,8 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  */
 const STAGES = {
   'object-metric': 'the metric tile\'s four config blocks; the dashboard widget\'s `compareTo` and the chart\'s `aggregate` / `drillDown` are the by-reference candidates, and `trend` has no spec declaration, so it is typed to the renderer\'s read',
-  'object-form': 'the form and master-detail form rows; `FormViewSchema` (`sections`, `submitBehavior`) is the by-reference candidate',
-  'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, and `UIActionSchema`, an objectui interface that borrows some members from the spec `Action`); the spec declares each first, contract-first, then the row takes it',
-  'held-for-decision': 'a by-reference shape exists, but measured writers author values it refuses — the narrowing waits for a ruling',
+  'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`); the spec declares each first, contract-first, then the row takes it',
+  'held-for-decision': 'a typed shape exists (by reference, or the renderer\'s own declared type), but measured writers author values it refuses that the renderer draws — the narrowing waits for a ruling',
 } as const;
 type Stage = keyof typeof STAGES;
 
@@ -227,14 +230,11 @@ on(['object-metric'], ['aggregate'], staged('object-metric', 'plugin-dashboard/s
 on(['object-metric'], ['trend'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:254 (typed :176)'));
 on(['object-metric'], ['drillDown'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:265 (`ObjectMetricDrillDownConfig`, :218)'));
 on(['object-metric'], ['compareTo'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:267 (`CompareToConfig`, :241)'));
-on(['object-form'], ['fields[]'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:961'));
-on(['object-form'], ['customFields'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:755, :1180'));
-on(['object-form'], ['sections[]'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:364, :1518'));
-on(['object-form'], ['contentLayout'], staged('object-form', 'plugin-form/src/ModalForm.tsx:854 (`\'simple\' | \'tabbed\'`, :151)'));
-on(['object-form'], ['submitBehavior'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:1312-1313'));
-on(['object-form'], ['navigateOnSuccess'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:1373, :1412-1424'));
-on(['object-form'], ['mobile'], staged('object-form', 'plugin-form/src/ObjectForm.tsx:1857'));
-on(['object-master-detail-form'], ['sections[]', 'fields[]'], staged('object-form', 'plugin-form/src/MasterDetailForm.tsx:1692-1693, into the parent form'));
+// The form's inline members are objectui's runtime form field (`FormField`,
+// identity key `name`), merged over the generated set and drawn whole; the spec
+// declares no such field — its own form field is keyed by `field`, and the
+// merge never matches it — so the spec declares that contract first.
+on(['object-form'], ['customFields'], staged('objectui-held', 'plugin-form/src/customFieldsMerge.ts:78-108 (`FormField`, by `name`), from ObjectForm.tsx:755, :1180'));
 on(['object-gantt'], ['markers[]'], staged('objectui-held', 'plugin-gantt/src/ObjectGantt.tsx:2497 (`GanttMarker`)'));
 on(['object-timeline'], ['items[]'], staged('objectui-held', 'plugin-timeline/src/ObjectTimeline.tsx:587'));
 on(['object-timeline'], ['mapping'], staged('objectui-held', 'plugin-timeline/src/ObjectTimeline.tsx:551, :576-579'));
@@ -255,6 +255,27 @@ on(['object-kanban'], ['conditionalFormatting'], staged('held-for-decision', 'pl
 // `ListColumn` declares no `options`, so the narrowing would refuse a value the
 // grid draws: held until objectstack-ai/objectui#11544 is ruled.
 on(['object-grid'], ['columns[]'], staged('held-for-decision', 'plugin-grid/src/ObjectGrid.tsx:2158 (`normalizeColumns`), `columns[].options` drawn by the group-header formatter at :2997-3001'));
+// The renderer's own declared type for the form's `fields` is field-name
+// strings (`ObjectFormSchema.fields: string[]`), but its read also draws a
+// `{ name }` entry by that name, and measured writers author one: objectui's
+// published page-builder guide (`skills/objectui/guides/page-builder.md:263`),
+// its field-security and system-managed payload pins, and the `{ name }` row it
+// pins as behaviour (`plugin-form/src/__tests__/objectFormFieldsMembers-8071.test.tsx:165-167`).
+// Typing the member to strings would refuse a value the form draws.
+on(['object-form'], ['fields[]'], staged('held-for-decision', 'plugin-form/src/ObjectForm.tsx:961-981 and flatFields.ts:71-79, a `{ name }` entry drawn by that name'));
+// The form view's own `sections` is the by-reference shape, and every section
+// key the form reads is declared there — but a section's `fields` also draws an
+// inline runtime form field `{ name, type, … }` as it stands ("shape 3"), which
+// the form view's field entry (keyed by `field`) refuses; objectui's README
+// (`plugin-form/README.md:764`) and its submit-target pins
+// (`plugin-form/src/submitTargetRefusal.test.tsx:331-358`) author that shape
+// and assert that it renders and submits.
+on(['object-form'], ['sections[]'], staged('held-for-decision', 'plugin-form/src/sectionFields.ts:367-369 (shape 3), reached from ObjectForm.tsx:364, :1518 and every sectioned arm'));
+// The master-detail form hands both to its parent `object-form` verbatim, so
+// each is read exactly as that block's member is, and held with it; its own
+// `fields` writers author the `{ name }` entry too
+// (`plugin-form/src/__tests__/topLevelFieldsWarnCoverage-8847.test.tsx:254-257`).
+on(['object-master-detail-form'], ['sections[]', 'fields[]'], staged('held-for-decision', 'plugin-form/src/MasterDetailForm.tsx:1692-1693, into the parent form, read as `object-form`\'s'));
 
 /** Every `z.unknown()` member of every row, keyed as the ledger keys it. */
 function census(): Map<string, UnknownMember> {
