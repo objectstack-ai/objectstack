@@ -80,6 +80,20 @@ const TENANT_ROWS = [
   { id: 't2', name: 'B', organization_id: 'org_b' },
   { id: 't3', name: 'P', organization_id: null },
 ];
+/** [#21595] A date and a datetime on ISO-week boundary days, and the empty bucket. */
+const BUCKET = { name: 'probe_bucket', fields: { on: { type: 'date' }, at: { type: 'datetime' } } };
+const BUCKET_ROWS = [
+  { id: 'w1', on: '2020-12-31', at: '2020-12-31T23:30:00.000Z' }, // a Thursday
+  { id: 'w2', on: '2021-01-03', at: '2021-01-03T00:30:00.000Z' }, // the Sunday after it
+  { id: 'w3', on: '2021-01-04', at: '2021-01-04T12:00:00.000Z' }, // the Monday after that
+  { id: 'w4', on: '2024-12-30', at: '2024-12-30T12:00:00.000Z' }, // a Monday in December
+  { id: 'w5', on: '2026-12-28', at: '2026-12-28T12:00:00.000Z' }, // the Monday of a 53rd week
+  { id: 'w6', on: null, at: null },
+];
+/** The ISO week each row falls in, written out rather than computed. */
+const ISO_WEEK_OF: Record<string, string | null> = {
+  w1: '2020-W53', w2: '2020-W53', w3: '2021-W01', w4: '2025-W01', w5: '2026-W53', w6: null,
+};
 
 let seq = 0;
 const nextFile = () => join(scratch, `db-${++seq}.db`);
@@ -423,5 +437,63 @@ describe('members inherited unchanged, and true on the remote face', () => {
     expect(remote.temporalFilterColumnSql('probe_t', 'name', '"name"')).toBe(
       local.temporalFilterColumnSql('probe_t', 'name', '"name"'),
     );
+  });
+});
+
+/**
+ * [#21595] `dateBucketSql` is an `inherited` row: the remote face renders
+ * `SqlDriver`'s SQLite bucket expression with Knex's compiler, which needs no
+ * connection, and libSQL runs it. The row was measured once with a harness
+ * that no longer exists, so until this block it was held only structurally.
+ *
+ * Here the expression each face renders goes through that face's own
+ * `execute()`: libSQL behind the remote face, better-sqlite3 behind the local
+ * one. Measured: `@libsql/client` 0.18.0 bundles SQLite 3.45.1, which has no
+ * `strftime('%V')`, so a `week` arm built on `%V` answers NULL on the remote
+ * face while the local face answers the week.
+ */
+describe('dateBucketSql: the inherited expression runs on libSQL, as on the local face', () => {
+  const GRANULARITIES = ['day', 'week', 'month', 'quarter', 'year'] as const;
+
+  /** A driver of the given face over a fresh SQLite file, holding the bucket rows. */
+  async function withBuckets(face: Face): Promise<TursoDriver> {
+    const file = nextFile();
+    const client = face === 'remote' ? createClient({ url: `file:${file}` }) : null;
+    const driver =
+      face === 'remote'
+        ? new TursoDriver({ url: 'libsql://probe.example.turso.io', client: client! })
+        : new TursoDriver({ url: `file:${file}` });
+    open.push({ driver, client });
+    await driver.connect();
+    await driver.initObjects([BUCKET]);
+    await driver.bulkCreate(BUCKET.name, BUCKET_ROWS.map((row) => ({ ...row })));
+    return driver;
+  }
+
+  /** `id -> label`: the face's rendered expression, run through the face's own `execute()`. */
+  async function labels(driver: TursoDriver, field: 'on' | 'at', g: (typeof GRANULARITIES)[number]) {
+    const expr = driver.dateBucketSql(BUCKET.name, field, g);
+    expect(expr, `${field} @ ${g}: an expression is rendered`).toBeTypeOf('string');
+    const rows = (await driver.execute(`select id, ${expr} as b from ${BUCKET.name} order by id`)) as Array<{ id: string; b: unknown }>;
+    return Object.fromEntries(rows.map((row) => [row.id, row.b ?? null]));
+  }
+
+  it('the row is still `inherited`', () => {
+    expect(REMOTE_FACE_ANSWERS.dateBucketSql).toBe('inherited');
+  });
+
+  it.each(GRANULARITIES)('%s: libSQL answers the labels the local face answers, on both columns', async (g) => {
+    const remote = await withBuckets('remote');
+    const local = await withBuckets('local');
+    for (const field of ['on', 'at'] as const) {
+      expect(await labels(remote, field, g), `${field} @ ${g}`).toEqual(await labels(local, field, g));
+    }
+  });
+
+  it('week: libSQL answers the ISO week of each boundary day, on both columns', async () => {
+    const remote = await withBuckets('remote');
+    for (const field of ['on', 'at'] as const) {
+      expect(await labels(remote, field, 'week'), field).toEqual(ISO_WEEK_OF);
+    }
   });
 });

@@ -149,19 +149,27 @@ describe('TursoDriver date-bucket parity (framework#3773)', () => {
 
     it('the checker WOULD catch a driver that advertises a granularity it cannot run', async () => {
       // The tripwire the vacuous pass above is worth having. Rather than mock a
-      // remote transport into life, this drives a real local driver and makes it
-      // advertise `week` — which SqlDriver deliberately does NOT implement on
-      // SQLite (`%V` needs 3.46+), so `aggregate()` throws exactly as
-      // RemoteTransport would on a structured groupBy.
+      // remote transport into life, this drives a real local driver whose
+      // capability row advertises a granularity its bucket expression cannot
+      // render, so `aggregate()` throws exactly as RemoteTransport would on a
+      // structured groupBy.
       //
       // So: if someone deletes remote's `queryDateGranularity: {}` override
       // believing SqlDriver handles it, this is the shape of failure they get —
       // named, not silent.
+      //
+      // [#21595] It used to make the driver advertise `week`, which SqlDriver
+      // did not implement on SQLite. SQLite buckets `week` now, so the driver
+      // keeps its real row (which advertises `week`) and its `week` arm answers
+      // `null`, as it did before #21595: the incoherent pair a revert of the
+      // arm alone would ship.
       const driver = new TursoDriver({ url: ':memory:' });
-      Object.defineProperty(driver, 'supports', {
-        get: () => ({ queryDateGranularity: { week: true } }),
+      const inherited = (driver as any).buildDateBucketExpr.bind(driver);
+      Object.defineProperty(driver, 'buildDateBucketExpr', {
+        value: (field: string, g: string, table?: string) => (g === 'week' ? null : inherited(field, g, table)),
         configurable: true,
       });
+      expect(driver.supports.queryDateGranularity?.week).toBe(true);
 
       const problems = await checkDateBucketParity(driver, {
         createOptions: { bypassTenantAudit: true },

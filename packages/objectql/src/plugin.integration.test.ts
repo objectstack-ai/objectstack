@@ -1725,6 +1725,9 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
           fields: {
             status: { name: 'status', label: 'Status', type: 'text' },
             amount: { name: 'amount', label: 'Amount', type: 'number', readonlyWhen: "record.status == 'paid'" } as any,
+            // [#21613] Declared: the rule reads it off the prior read, which
+            // carries the declared fields only.
+            limit: { name: 'limit', label: 'Limit', type: 'number' },
           },
           validations: [{ type: 'cross_field', name: 'amount_cap', message: 'amount exceeds limit', condition: 'record.amount > record.limit', fields: ['amount'] }] as any,
         },

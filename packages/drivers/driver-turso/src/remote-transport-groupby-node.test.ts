@@ -235,6 +235,17 @@ async function localDriver(): Promise<SqlDriver> {
   return d;
 }
 
+/**
+ * [#21595] A `SqlDriver` over a client it does not model, whose capability row
+ * is empty: since SQLite buckets all five granularities, the one local face
+ * that still declines one. `mssql`'s driver (`tedious`) is a driver-sql
+ * dependency, and the refusal is raised while the statement is built, so no
+ * server is needed.
+ */
+function unmodeledDriver(): SqlDriver {
+  return new SqlDriver({ client: 'mssql' });
+}
+
 describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
   describe('a plain field name — the half that never moved', () => {
     it('compiles a string entry to GROUP BY, as it always did', async () => {
@@ -433,10 +444,10 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
    */
   describe('local/remote parity (#5240 — one condition, one wording)', () => {
     it("answers 'week' identically on both faces", async () => {
-      // `week` is the granularity BOTH faces decline: SQLite buckets
-      // day/month/quarter/year and leaves week to the in-memory path (strftime
-      // %V landed only in SQLite 3.46), and this transport buckets nothing. So
-      // it is the one input on which the two messages are comparable at all.
+      // The condition needs a `SqlDriver` face that declines the granularity,
+      // and this transport, which buckets nothing. [#21595] SQLite buckets all
+      // five since it gained a `week` arm, so the local side is a client
+      // driver-sql does not model, which declines every one.
       const query = {
         groupBy: [{ field: 'closed_at', dateGranularity: 'week' as const }],
         aggregations: [{ function: 'count' as const, alias: 'n' }],
@@ -448,30 +459,35 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
         (e) => e as WireBearingError,
       );
 
-      const d = await localDriver();
+      const d = unmodeledDriver();
       const local = await d.aggregate('deal', query).then(
         () => { throw new Error('expected the local driver to refuse'); },
         (e) => e as WireBearingError,
       );
+      await d.disconnect().catch(() => {});
 
       expect(remote.code).toBe(local.code);
       expect(remote.status).toBe(local.status);
       // First sentence is the contract; the tails differ on purpose — each face
-      // reports what IT buckets, which is the whole content of the asymmetry
-      // below.
+      // reports what IT buckets and names itself.
       expect(remote.message.split('. ')[0]).toBe(local.message.split('. ')[0]);
       expect(remote.message.split('. ')[0]).toBe(REFUSAL_SENTENCE('week').replace(/\.$/, ''));
+      expect(local.message).toContain("Bucketed here: none (dialect 'mssql')");
     });
 
-    it("'month' is declined here and compiled there — a DECLARED asymmetry, not a fork", async () => {
+    // [#21595] `week` joined `month` here when SQLite gained a `week` arm. The
+    // case that pinned the SQLite face's refusal tail for `week` ("Bucketed
+    // here: day, month, quarter, year") went with it: no granularity reaches
+    // that refusal on the SQLite face any more.
+    it.each(['month', 'week'] as const)("'%s' is declined here and compiled there — a DECLARED asymmetry, not a fork", async (g) => {
       // The two faces publish different `supports.queryDateGranularity`, and the
-      // engine reads it. `month` on the local face must therefore compile, not
-      // refuse: a parity test that demanded identical behaviour here would be
-      // demanding the capability bit mean nothing.
+      // engine reads it. The granularity on the local face must therefore
+      // compile, not refuse: a parity test that demanded identical behaviour
+      // here would be demanding the capability bit mean nothing.
       const d = await localDriver();
       await expect(
         d.aggregate('deal', {
-          groupBy: [{ field: 'closed_at', dateGranularity: 'month' }],
+          groupBy: [{ field: 'closed_at', dateGranularity: g }],
           aggregations: [{ function: 'count', alias: 'n' }],
         }),
       ).resolves.toBeDefined();
@@ -479,27 +495,10 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
       const { t } = transportWithCapturingClient();
       await expect(
         t.aggregate('deal', {
-          groupBy: [{ field: 'closed_at', dateGranularity: 'month' }],
+          groupBy: [{ field: 'closed_at', dateGranularity: g }],
           aggregations: [{ function: 'count', alias: 'n' }],
         }),
-      ).rejects.toThrow(REFUSAL_SENTENCE('month'));
-    });
-
-    it('the local face lists the granularities it DOES bucket', async () => {
-      const d = await localDriver();
-      const err = await d
-        .aggregate('deal', {
-          groupBy: [{ field: 'closed_at', dateGranularity: 'week' }],
-          aggregations: [{ function: 'count', alias: 'n' }],
-        })
-        .then(
-          () => { throw new Error('expected the local driver to refuse'); },
-          (e) => e as WireBearingError,
-        );
-      expect(err.code).toBe('NOT_IMPLEMENTED');
-      expect(err.status).toBe(501);
-      expect(err.message).toContain('Bucketed here: day, month, quarter, year');
-      expect(err.message).toContain("dialect 'better-sqlite3'");
+      ).rejects.toThrow(REFUSAL_SENTENCE(g));
     });
   });
 
