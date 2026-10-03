@@ -10,6 +10,7 @@ import {
   invalidFilterError,
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
+  normalizeDateRangeWindow,
   toSqlBindValue,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
@@ -46,7 +47,7 @@ import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 import { isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
+import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
@@ -1194,14 +1195,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // dataset, which is why an inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
-    // [ADR-0053 D-D1, amended — #5930 step 3] The column-type reader the `where`
-    // door's shared lowering applies at every filter position below — the
-    // measure filters, the `where` and the dataset's own scope (item 7): a
-    // member is `datetime` when the column it binds against is declared so,
-    // asked of the SAME target `compileFilterNode` coerces for. This face's own
-    // bare-day copy (`buildFilterClause`'s `lte` arm) stays until its deletion
-    // card, and is idempotent on the lowered bound.
-    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf));
+    // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] The column-type reader the
+    // `where` door's shared lowering applies at every filter position below —
+    // the measure filters, the `where`, the dataset's own scope and the
+    // `dateRange` windows (items 7 and 8): a member is `datetime` when the
+    // column it binds against is declared so, asked of the SAME target
+    // `compileFilterNode` coerces for. It is the ONE source of the whole-day
+    // rule on this face: `buildFilterClause` compiles the bound it is handed.
+    // A column the host cannot name a type for is read type-blind (item 7):
+    // this face is the last seam before its statement runs, so nothing
+    // downstream reads the declaration.
+    const lowering = declaredDatetimeLowering(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf),
+      'type-blind',
+    );
     // [#21376, #21426] The comparand verdicts' member reader (both arms read
     // it), asked of the SAME target, and applied at the same three filter
     // positions, before each is normalized ({@link judgedComparands}).
@@ -1267,7 +1275,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // Build time dimension filters
     if (query.timeDimensions && query.timeDimensions.length > 0) {
       for (const td of query.timeDimensions) {
-        const colExpr = this.resolveFieldSql(cube, td.dimension, tableName, joins);
+        // Resolved for every time dimension, window or not, as it always was:
+        // it registers the join a relationship-path member walks.
+        this.resolveFieldSql(cube, td.dimension, tableName, joins);
         if (td.dateRange) {
           // [#16322] The STRING arm is the CLOSED preset vocabulary (#16041),
           // lowered by the ONE shared resolver `driver-memory` and the ObjectQL
@@ -1281,8 +1291,8 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           const resolved = Array.isArray(td.dateRange)
             ? null
             : resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
-          const range = resolved
-            ? ([resolved.start, resolved.end] as [string, string])
+          const [start, end] = resolved
+            ? [resolved.start, resolved.end]
             // [commit 86c505286] An oddly-sized array is REFUSED, by the one
             // `explicitDateRangeWindow` every face in this package calls. ⛔ What
             // this replaced was a silent `if (range.length === 2)` DROP: a
@@ -1290,43 +1300,36 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
             // ALL of history — "plot all of history" is the very failure #16322
             // repaired for the string arm, and it was still live on this arm.
             : explicitDateRangeWindow(td.dateRange as readonly unknown[]);
-          // Same epoch-vs-text root cause as buildFilterClause: a dateRange on a
-          // SQLite `Field.datetime` column compares ISO TEXT against an INTEGER
-          // epoch and matches nothing. Coerce both bounds to the storage form —
-          // and normalise the column to that form too, because the column holds
-          // BOTH forms at once and coercing only the bounds still empties the
-          // half the writer stored the other way (#3912).
-          const td2 = this.resolveStorageTarget(cube, td.dimension, tableName, joins.referenceOf);
-          const column = this.temporalColumn(ctx, td2, colExpr);
-          // A bare-day window end means "through that whole day" (#3777). A
-          // BETWEEN's inclusive upper bound anchors a bare `YYYY-MM-DD` to
-          // midnight on a datetime column, dropping the final day's rows, so
-          // the window compiles half-open — `>= start AND < end+1day` — the
-          // same `[gte, lt)` the drill ranges emit. Equivalent to the old
-          // BETWEEN for a `date` column (plain `YYYY-MM-DD` ordering), which
-          // is what lets this path stay column-type-blind.
+          // [ADR-0053 D-D1 item 8, amended — #5930 step 4] The window is the
+          // `{ $gte, $lte }` pair the ObjectQL strategy hands the engine, lowered
+          // by the same reader as this statement's `where`
+          // ({@link normalizeDateRangeWindow}) and compiled by the same
+          // `compileFilterNode`, so its bounds take the storage-form coercion and
+          // the column normalisation every `where` bound takes (#3912). A bare-day
+          // explicit end means "through that whole day" (#3777): on a `datetime`
+          // column, or one whose type the host cannot name, the lowering rewrites
+          // it to `< end+1day`, the same `[gte, lt)` the drill ranges emit, and on
+          // the last supported day it drops the end (#20600); on a column declared
+          // anything else the end stays inclusive, the comparison the typed
+          // drivers run. This face kept its own type-blind copy of that rule
+          // until #5930 step 4.
           //
-          // [#16322] A RESOLVED window already states its own upper reading
-          // and is never a bare day, so it never takes the widening branch:
-          // the ten calendar presets stop BEFORE their end instant (`<`), the
-          // three rolling ones end at NOW and reach it (`<=`). ⛔ An explicit
-          // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
-          // had — the #16179 separation, on this side too.
-          const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
-          params.push(this.coerceTemporal(ctx, td2, range[0]));
-          const lower = `${column} >= $${params.length}`;
-          // [#20600] A bare end on the last supported day has no next day to
-          // stop before: every value is inside it, so the window keeps its
-          // start alone.
-          if (isUnboundedAbove(nextDay)) {
-            whereClauses.push(`(${lower})`);
-          } else {
-            const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
-            params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
-            whereClauses.push(
-              `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
-            );
-          }
+          // [#16322] A RESOLVED window states its own upper reading, and its ends
+          // are instants the lowering never widens: the ten calendar presets stop
+          // BEFORE their end instant (`$lt`), the three rolling ones end at NOW
+          // and reach it (`$lte`). ⛔ An explicit `[a, b]` a CALLER wrote keeps the
+          // inclusive reading it has always had — the #16179 separation, on this
+          // side too.
+          const bounds = resolved?.endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };
+          const windowSql = this.compileFilterNode(
+            normalizeDateRangeWindow(td.dimension, bounds, lowering),
+            cube,
+            tableName,
+            joins,
+            params,
+            ctx,
+          );
+          if (windowSql) whereClauses.push(windowSql);
         }
       }
     }
@@ -1832,10 +1835,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * through the combinators. `null` = no constraint.
    *
    * Leaves go through {@link buildFilterClause} exactly as they did when this
-   * was a flat loop, so the storage-form coercion and the calendar-day
-   * upper-bound rule (#3777) apply at every depth — including inside an `$or`,
-   * where a second, combinator-aware implementation would have been free to
-   * drift from the first.
+   * was a flat loop, so the storage-form coercion applies at every depth —
+   * including inside an `$or`, where a second, combinator-aware implementation
+   * would have been free to drift from the first. The calendar-day upper-bound
+   * rule (#3777) is not applied here at any depth: the tree arrives with it
+   * already applied by the shared lowering (#5930 step 4).
    *
    * Parenthesisation is explicit rather than left to SQL's precedence: `AND`
    * does bind tighter than `OR`, so `a AND b OR c` happens to be right, but
@@ -2077,21 +2081,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       });
     }
 
-    // A bare-day `lte` bound means "through that whole day" (#3777): compile
-    // half-open (`< day+1`) so a datetime column keeps the final day's rows.
-    // Equivalent to `<=` for a `date` column, so no column-type lookup needed.
-    if (operator === 'lte') {
-      const nextDay = nextUtcCalendarDay(values[0]);
-      // [#20600] On the last supported day there is no next day: every value is
-      // inside the bound, so what `lte` still asks is a value — the `set` arm's
-      // `IS NOT NULL`.
-      if (isUnboundedAbove(nextDay)) return `${rawCol} IS NOT NULL`;
-      if (nextDay != null) {
-        params.push(this.coerceTemporal(ctx, target, nextDay));
-        return `${this.temporalColumn(ctx, target, rawCol)} < $${params.length}`;
-      }
-    }
-
+    // [ADR-0053 D-D1, amended — #5930 step 4] An `lte` compiles the bound it is
+    // handed, like every other comparison. A bare-day upper bound means
+    // "through that whole day" (#3777) on a `datetime` column, and the shared
+    // lowering already rewrote such a bound to `lt` the next day (or, on the
+    // last supported day, to `set`) before this compiler saw the tree — with the
+    // column's declared type in hand ({@link compileClauses}' `lowering`). An
+    // `lte` that reaches this line is on a column declared something else
+    // (`date`, text, a number), where the comparison as written is the typed
+    // drivers' answer. This compiler kept a type-blind copy of the rule here,
+    // which widened a bare day on every column, until #5930 step 4.
+    //
     // Coerce so booleans/numbers bind as their native SQL types AND so a
     // relative-date / ISO-string comparand on a SQLite `Field.datetime` column
     // is converted to that column's storage form (#16737: the ONE statement of

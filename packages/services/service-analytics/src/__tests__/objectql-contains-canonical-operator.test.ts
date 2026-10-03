@@ -265,11 +265,11 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
       // the null-predicate disjunct. What THIS case asserts is unaffected and
       // still exact: the operator key is the declared `$notContains` and the
       // comparand is the author's literal `'a.b'`, not a `$regex` pattern.
-      // [ADR-0053 D-D1, amended — #5930 step 3] …twice now: the shared
-      // lowering's escape around this face's own copy. Same operator key, same
-      // literal comparand, same rows.
+      // [ADR-0053 D-D1, amended — #5930 step 4] …once: the shared lowering's
+      // escape, its one source since this face's own copy was deleted. Same
+      // operator key, same literal comparand, same rows.
       expect(await engineFilter({ stage: { $notContains: 'a.b' } })).toEqual({
-        $and: [{ $or: [{ stage: { $null: true } }, { $or: [{ stage: { $null: true } }, { stage: { $notContains: 'a.b' } }] }] }],
+        $and: [{ $or: [{ stage: { $null: true } }, { stage: { $notContains: 'a.b' } }] }],
       });
       expect(await engineFilter({ stage: { $startsWith: 'a.b' } })).toEqual({
         stage: { $startsWith: 'a.b' },

@@ -13,6 +13,7 @@ import {
 } from '@objectstack/core';
 import { describeInterruptedRun } from '@objectstack/runtime';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import { MIGRATION_JOURNAL_OBJECT } from '@objectstack/spec/system';
 import {
   printHeader,
   printSuccess,
@@ -140,7 +141,12 @@ export default class MigrateResume extends Command {
         // which is the truthful answer for this process.
       }
 
-      const interrupted = await findInterruptedRuns(engine);
+      // [#21529] Not asked: the list mode's read-only boot measured whether the
+      // journal table exists, and a table that does not exist holds no runs.
+      // Reading it anyway answered a fresh project's empty list with a query
+      // fault and exit 1. `--run` booted plain, so its table exists by now.
+      const journalAbsent = !flags.run && stack.tableAbsent(MIGRATION_JOURNAL_OBJECT);
+      const interrupted = journalAbsent ? [] : await findInterruptedRuns(engine);
 
       // ── list mode (no --run): read-only ──────────────────────────────
       if (!flags.run) {
@@ -153,7 +159,12 @@ export default class MigrateResume extends Command {
           return;
         }
         if (interrupted.length === 0) {
-          printSuccess('No interrupted migration runs — every run in the journal concluded.');
+          printSuccess(
+            journalAbsent
+              ? `No interrupted migration runs — this database has no ${MIGRATION_JOURNAL_OBJECT} table yet, ` +
+                  'so no run was ever journalled here.'
+              : 'No interrupted migration runs — every run in the journal concluded.',
+          );
           return;
         }
         printWarning(`${interrupted.length} interrupted migration run(s):`);

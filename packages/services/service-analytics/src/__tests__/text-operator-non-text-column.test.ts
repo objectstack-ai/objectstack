@@ -179,15 +179,16 @@ describe('[#14079] read-scope-sql compiles the contract\'s constant for a declar
   });
 
   it('composes with the NULL-safe $not rewrite: the negation of the constant is total', () => {
-    // `nullSafeNegationOperand` guards the leaf first, then the constant
-    // replaces the LIKE: TRUE for every row, what the JS faces answer for
-    // `!contains` on a number; its mirror is FALSE for every row.
-    // [ADR-0053 D-D1, amended — #5930 step 3] …after the shared lowering's own
-    // guard on the operand, which reaches this compiler first.
+    // The `$not` rewrite guards the leaf first, then the constant replaces the
+    // LIKE: TRUE for every row, what the JS faces answer for `!contains` on a
+    // number; its mirror is FALSE for every row.
+    // [ADR-0053 D-D1, amended — #5930 step 4] The rewrite is the shared
+    // lowering's, at this compiler's entry: one guard, its one source since
+    // this compiler's own copy (a second guard inside) was deleted.
     expect(compile({ $not: { score: { $contains: '5' } } } as FilterCondition).sql)
-      .toBe('NOT (("t"."score" IS NOT NULL AND ("t"."score" IS NOT NULL AND 1 = 0)))');
+      .toBe('NOT (("t"."score" IS NOT NULL AND 1 = 0))');
     expect(compile({ $not: { score: { $notContains: '5' } } } as FilterCondition).sql)
-      .toBe('NOT ((("t"."score" IS NULL OR (("t"."score" IS NULL OR 1 = 1)))))');
+      .toBe('NOT ((("t"."score" IS NULL OR 1 = 1)))');
   });
 
   it('a text column beside it is untouched, and params stay aligned with the LIKE that IS bound', () => {
@@ -199,10 +200,11 @@ describe('[#14079] read-scope-sql compiles the contract\'s constant for a declar
   it('without the option, or when the column is text, the LIKE is byte-identical to before', () => {
     expect(compileScopedFilterToSql({ score: { $contains: '5' } } as FilterCondition, ALIAS))
       .toEqual({ sql: '"t"."score" LIKE ? ESCAPE ?', params: ['%5%', '\\'] });
-    // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's NULL escape
-    // around this compiler's own; the LIKE inside is the same bytes.
+    // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's NULL
+    // escape, once (this compiler's own copy is deleted); the LIKE inside is
+    // the same bytes.
     expect(compile({ name: { $notContains: '5' } } as FilterCondition).sql)
-      .toBe('(("t"."name" IS NULL OR ("t"."name" IS NULL OR "t"."name" NOT LIKE ? ESCAPE ?)))');
+      .toBe('(("t"."name" IS NULL OR "t"."name" NOT LIKE ? ESCAPE ?))');
   });
 
   it('a comparand the contract refuses is refused AHEAD of the constant', () => {

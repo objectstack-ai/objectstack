@@ -243,11 +243,11 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
 
     it('the guard rides the leaf, so the emitted SQL negates a TOTAL predicate', () => {
       const { sql } = compileScopedFilterToSql({ $not: { stage: 'won' } } as FilterCondition, ALIAS);
-      // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering at this
-      // compiler's entry totalises the operand first; this compiler's own copy
-      // guards the leaf again. `X AND (X AND Y)` ≡ `X AND Y` until the copy's
-      // deletion card; the id sets in this block are the guarantee.
-      expect(sql).toBe('NOT (("t"."stage" IS NOT NULL AND ("t"."stage" IS NOT NULL AND "t"."stage" = ?)))');
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering at this
+      // compiler's entry totalises the operand, and it is the guard's one
+      // source: this compiler's own copy, which guarded the leaf a second time,
+      // is deleted. The id sets in this block are the guarantee.
+      expect(sql).toBe('NOT (("t"."stage" IS NOT NULL AND "t"."stage" = ?))');
     });
 
     it('`$not` over MULTIPLE columns admits a row that is NULL in EITHER', () => {
@@ -406,10 +406,10 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
      * different row sets — the defect, not a smaller version of the fix.
      */
     it('$ne / $nin / $notContains are NULL-safe outside a $not too (#5298)', () => {
-      // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's NULL
-      // escape (outer) around this compiler's own (inner): the same rows.
+      // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's NULL
+      // escape, once — this compiler's own wrap is deleted. The same rows.
       expect(compileScopedFilterToSql({ stage: { $ne: 'won' } } as FilterCondition, ALIAS).sql)
-        .toBe('(("t"."stage" IS NULL OR ("t"."stage" IS NULL OR "t"."stage" <> ?)))');
+        .toBe('(("t"."stage" IS NULL OR "t"."stage" <> ?))');
       expect(ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
       expect(ids({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
       expect(ids({ stage: { $notContains: 'wo' } })).toEqual(['2', '3', '4']);
