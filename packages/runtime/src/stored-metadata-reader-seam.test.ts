@@ -373,6 +373,7 @@ describe('[#21544] door / seam parity — one collector, one narrowing', () => {
     ['a dotted cross-field reference', 'sys_metadata', { where: { name: { $ne: { $field: 'metadata.x' } } } }, 'metadata'],
     ['a reference in a list', 'sys_metadata', { where: { name: { $in: [{ $field: 'checksum' }] } } }, 'checksum'],
     ['a reference under $not', 'sys_metadata_history', { where: { $not: { name: { $eq: { $field: 'previous_checksum' } } } } }, 'previous_checksum'],
+    ['an unrecognised $ key wrapping a body filter', 'sys_metadata', { where: { $nor: [{ metadata: { $contains: 'z' } }] } }, 'metadata'],
     ['a direct body filter 33 levels deep', 'sys_metadata', { where: deep(33, { metadata: { $contains: 'z' } }) }, 'metadata'],
     ['a cross-field comparand 33 levels deep', 'sys_metadata_history', { where: deep(33, { name: { $ne: { $field: 'checksum' } } }) }, 'checksum'],
     [
