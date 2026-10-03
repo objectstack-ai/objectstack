@@ -4,7 +4,6 @@
   "exports": {
     "ACTION_LOCATIONS": "src/ui/action.zod.ts#ACTION_LOCATIONS (const)",
     "ACTION_PARAM_BUILTIN_KEYS": "src/ui/action-params.zod.ts#ACTION_PARAM_BUILTIN_KEYS (const)",
-    "AIChatWindowProps": "src/ui/component.zod.ts#AIChatWindowProps (const)",
     "ASSEMBLED_VIEW_ITEMS_KEY": "src/ui/assembled-views.zod.ts#ASSEMBLED_VIEW_ITEMS_KEY (const)",
     "Action": "src/ui/action.zod.ts#Action (type)",
     "ActionAi": "src/ui/action.zod.ts#ActionAi (type)",
