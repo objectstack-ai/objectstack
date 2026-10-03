@@ -1,30 +1,41 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `@objectstack/metadata/view-container-name` — the divergent view-container
- * `name` refusal: ONE judge, called by every door that files a container.
+ * `@objectstack/metadata/view-container-name` — the divergent `name` refusal:
+ * ONE judge, called by every door that files a metadata item under a key.
  *
  * ## What it judges
  *
- * A container's own `name`, when set, must equal the key the door files the
- * container under. A disagreement is refused: resolving it silently in either
- * direction files the item under a key the author never wrote (#7378 row 1).
- * The maintainer's ruling of 2026-09-03 (direction 2) made the source
- * registrars refuse it; the runtime save door is the third door, ruled on
- * #21412 (seat answer, Q1 A).
+ * An item's own `name`, when set, must equal the key the door files the item
+ * under. A disagreement is refused: resolving it silently in either direction
+ * files the item under a key the author never wrote (#7378 row 1, the rule
+ * `IMetadataService.register` states for every type). The maintainer's ruling
+ * of 2026-09-03 (direction 2) made the source registrars refuse it for a view
+ * container; the runtime save door joined for containers on #21412 (seat
+ * answer, Q1 A) and for every type on #21470 (seat answer, Q1 A and Q2 A).
  *
  * The doors differ in WHERE their key comes from, and only there:
  *
  *  - **The source registrars** — the ObjectQL boot loop, `os validate` /
  *    `os compile` (the same judge, through `@objectstack/objectql`) and the
- *    artifact/HMR loader (`plugin.ts`) — file a container under the object it
- *    binds to, so their key is DERIVED: {@link viewContainerNameRefusal}.
- *  - **The runtime save door** (`saveMetaItem`, which REST `PUT
- *    /meta/view/:name` and the dispatcher both call) files the row under the
- *    name it is SAVED under, and that name is not always the binding: the
- *    door keeps a container saved under a name other than its object (#13407)
- *    and expands one on another package's object under its own name (#21334).
- *    So its key is the save name: {@link savedViewContainerNameRefusal}.
+ *    artifact/HMR loader (`plugin.ts`) — file a view container under the
+ *    object it binds to, so their key is DERIVED: {@link viewContainerNameRefusal}.
+ *  - **The runtime write doors** of `@objectstack/metadata-protocol` file a
+ *    `sys_metadata` row under the name the request names, and register the
+ *    row's body under the body's own `name` — so the two must agree, for every
+ *    type: {@link savedItemNameRefusal}. Three doors write a row:
+ *      - `save` — `saveMetaItem`, which REST `PUT /meta/:type/:name` and the
+ *        dispatcher both call. Its key is the save name, which for a view
+ *        container is not always the binding: the door keeps a container saved
+ *        under a name other than its object (#13407) and expands one on
+ *        another package's object under its own name (#21334);
+ *      - `restore` — `rollbackMetaItem` and `revertCommit`, which write a
+ *        stored history version back as the active row;
+ *      - `publish` — the draft promotion `publishMetaItem` and
+ *        `publishPackageDrafts` share, which writes a stored draft as the
+ *        active row.
+ *    A body stored before the save door judged every type reaches the last
+ *    two without passing the first; that is why they judge too.
  *
  * Judging the save door against the derived key instead was measured and
  * refused (#21412 probes P2–P4): it refuses the body that same door stores
@@ -39,33 +50,52 @@
  * {@link isAggregatedViewContainer}, and the artifact door derives the same
  * value before it registers. Taking the key as a parameter there would make
  * every one of those callers re-derive it, a second spelling of "which
- * derivation does a source registrar use" — so that entry keeps deriving. The
- * save door's key is not a derivation at all; it is the request's own name,
+ * derivation does a source registrar use" — so that entry keeps deriving. A
+ * write door's key is not a derivation at all; it is the request's own name,
  * which is why that entry takes it.
  *
- * ## The gate, carried whole
+ * ## What counts as SET
  *
- *   * {@link isAggregatedViewContainer} — the CONTAINER branch only. A
- *     standalone ViewItem's `name` is its identity, not a binding (the
- *     every-type half at the save door is #21470);
- *   * `name` a non-empty string AND different from the key. A container with
- *     no `name` is untouched (the save door stamps one);
- *   * a falsy key refuses nothing: the boot loop warns and skips an entry
- *     whose derived key is falsy, and `deriveViewContainerObject`'s `??` chain
- *     can keep `''` (`list: { data: { object: '' } }`), so a door that calls
- *     this alone cannot refuse what boot skips.
+ *   * The derived entry judges the CONTAINER branch only
+ *     ({@link isAggregatedViewContainer}): a standalone ViewItem's `name` is
+ *     its identity, not a binding. A `name` is set when it is a non-empty
+ *     string; a falsy derived key refuses nothing, because the boot loop warns
+ *     and skips an entry whose derived key is falsy, and
+ *     `deriveViewContainerObject`'s `??` chain can keep `''`
+ *     (`list: { data: { object: '' } }`), so a door that calls this alone
+ *     cannot refuse what boot skips.
+ *   * The write-door entry judges every type, with row 1's own predicate: a
+ *     `name` is set when the body carries one at all (`!== undefined`) —
+ *     `''`, `null` and a non-string included, because the registry keys the
+ *     body by `String(name)` whatever it is (measured: a `translation` body's
+ *     schema accepts `name: ''`, and a type with no schema accepts anything).
+ *     ONE exception, and it is the door's, not the type's: the save door
+ *     STAMPS a missing view name (`normalizeViewMetadata`, after this judge),
+ *     and a falsy one is missing to it — so for a `view` at the `save` door a
+ *     `name` is set only when it is a non-empty string. A truthy non-string
+ *     view `name` is the view schema's to refuse (measured: 422). The restore
+ *     and publish doors stamp nothing, so they take row 1's predicate for
+ *     views too.
  *
  * ## The words
  *
- * One template; each door supplies only where its key came from
- * ({@link KeyOrigin}). The source registrars' rendering is byte for byte the
- * words the boot loop and `os validate` have always printed. The runtime
- * string carries NO tracker id (`check:doc-authoring`). The envelope is
- * ADR-0112's `VALIDATION_ERROR` / 400 at every door.
+ * One template; each door supplies only where its key came from and what the
+ * author can do about it ({@link KeyOrigin}). The source registrars' rendering
+ * is byte for byte the words the boot loop and `os validate` have always
+ * printed, and the save door's rendering for a view container is byte for byte
+ * the words it printed before every type joined. The remedy is true per door
+ * and per type (`remediesFor`): "drop `name`" only where that works (a view,
+ * whose missing name the save door stamps; a `field`, whose row name its
+ * column `name` cannot spell); "set `name`", or save under the body's own
+ * name, everywhere else; and at the restore and publish doors, which write a
+ * stored body the caller cannot edit in place, the save that fixes it. The
+ * runtime string carries NO tracker id
+ * (`check:doc-authoring`). The envelope is ADR-0112's `VALIDATION_ERROR` /
+ * 400 at every door.
  *
  * ## Why a subpath of its own
  *
- * `@objectstack/metadata` is the one layer all three doors already depend on
+ * `@objectstack/metadata` is the one layer every door already depends on
  * (`@objectstack/objectql` and `@objectstack/metadata-protocol` list it, and
  * the artifact door lives in it); `@objectstack/core` cannot host it, because
  * `@objectstack/metadata` lists core and the judge needs the derivation that
@@ -87,25 +117,39 @@ export interface ViewContainerNameRefusal extends Error {
 }
 
 /**
- * Where a door's key came from — the only words that differ between doors.
- * `subject` names the container and its source, `key` says what the key is,
- * `keyDetail` follows the key, and `alsoRefused` follows the shared reason.
+ * Where a door's key came from and what fixes the disagreement — the only
+ * words that differ between doors. `subject` names the item and its source,
+ * `owner` whose `name` it is, `key` what the key is, `keyDetail` follows the
+ * key, `alsoRefused` follows the shared reason, and `remedy` follows
+ * "Register under one name: ".
  */
 interface KeyOrigin {
   subject: string;
+  owner: string;
   key: string;
   keyDetail: string;
   alsoRefused: string;
+  remedy: string;
 }
 
-function refusal(name: string, key: string, origin: KeyOrigin): ViewContainerNameRefusal {
+/** The owner words of a view container — the words every door printed before every type joined. */
+const CONTAINER_OWNER = "the container's";
+
+/** The remedy where the door stamps a missing `name`: the words the container doors always printed. */
+const stampedRemedy = (key: string): string => `drop \`name\`, or set it to '${key}'`;
+
+/** A `name` as the words show it: quoted when it is a string, its JSON otherwise. */
+function shown(name: unknown): string {
+  return typeof name === 'string' ? `'${name}'` : String(JSON.stringify(name));
+}
+
+function refusal(name: unknown, key: string, origin: KeyOrigin): ViewContainerNameRefusal {
   const err = new Error(
-    `Invalid ${origin.subject}: the container's own `
-    + `\`name\` is '${name}', which disagrees with ${origin.key}, `
+    `Invalid ${origin.subject}: ${origin.owner} own `
+    + `\`name\` is ${shown(name)}, which disagrees with ${origin.key}, `
     + `'${key}'${origin.keyDetail}. A disagreement is almost always an authoring bug, and resolving `
     + 'it silently in either direction can file the item under a key the caller never wrote '
-    + `(refuse loudly, locate the mismatch)${origin.alsoRefused}. Register under one name: drop \`name\`, or set it to `
-    + `'${key}'.`,
+    + `(refuse loudly, locate the mismatch)${origin.alsoRefused}. Register under one name: ${origin.remedy}.`,
   ) as ViewContainerNameRefusal;
   err.code = 'VALIDATION_ERROR';
   err.status = 400;
@@ -113,15 +157,22 @@ function refusal(name: string, key: string, origin: KeyOrigin): ViewContainerNam
   return err;
 }
 
-/** The judgement every door shares: a set own `name` that is not the key. */
-function judge(container: unknown, key: string | undefined, origin: () => KeyOrigin): ViewContainerNameRefusal | undefined {
-  if (!isAggregatedViewContainer(container)) return undefined;
-  const name = (container as { name?: unknown }).name;
-  if (typeof name !== 'string' || !name) return undefined;
+/**
+ * The judgement every door shares: a SET own `name` (each entry decides what
+ * set means for its door, see the header) that is not the key. A falsy key
+ * refuses nothing.
+ */
+function judge(
+  name: unknown,
+  key: string | undefined,
+  origin: (key: string) => KeyOrigin,
+): ViewContainerNameRefusal | undefined {
   if (!key) return undefined;
   if (name === key) return undefined;
-  return refusal(name, key, origin());
+  return refusal(name, key, origin(key));
 }
+
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value !== '';
 
 /**
  * Judge one `views:` entry at a SOURCE registrar: the refusal when it is an
@@ -141,30 +192,100 @@ export function viewContainerNameRefusal(
   sourceLabel: string,
   ownerId: string | undefined,
 ): ViewContainerNameRefusal | undefined {
-  return judge(container, deriveViewContainerObject(container), () => ({
+  if (!isAggregatedViewContainer(container)) return undefined;
+  const name = (container as { name?: unknown }).name;
+  if (!isNonEmptyString(name)) return undefined;
+  return judge(name, deriveViewContainerObject(container), (key) => ({
     subject: `\`views:\` container from ${sourceLabel} '${ownerId}'`,
+    owner: CONTAINER_OWNER,
     key: 'the object key it binds to',
     keyDetail: ' (derived from its own `object`, else `list.data.object` / `form.data.object`)',
     alsoRefused: ' — the artifact/HMR loader refuses this same document',
+    remedy: stampedRemedy(key),
   }));
 }
 
 /**
- * Judge one view body at the runtime SAVE door: the refusal when it is an
- * aggregated container whose own `name` disagrees with the name it is saved
- * under, else `undefined`. Call it before the door stamps a missing `name`.
+ * Judge one metadata body at a runtime WRITE door, for every type: the
+ * refusal when its own `name` is set and disagrees with the name the door
+ * writes the row under, else `undefined`. Pure: it throws nothing and writes
+ * nothing; the door throws what it returns, before anything is stored or
+ * registered.
  *
- * @param container The request's view body.
- * @param saveName  The name the door files the row under (`request.name`).
+ * @param type     The canonical (singular) metadata type the door writes.
+ * @param item     The body the door is about to write.
+ * @param saveName The name the door writes the row under (`request.name`).
+ * @param door     Which door writes it: `save` (`saveMetaItem`, which stamps
+ *   a missing view `name` after this call), `restore` (`rollbackMetaItem`,
+ *   `revertCommit`) or `publish` (the draft promotion). It decides what counts
+ *   as set and which remedy is true — see the header.
  */
-export function savedViewContainerNameRefusal(
-  container: unknown,
+export function savedItemNameRefusal(
+  type: string,
+  item: unknown,
   saveName: string,
+  door: 'save' | 'restore' | 'publish',
 ): ViewContainerNameRefusal | undefined {
-  return judge(container, saveName, () => ({
-    subject: 'view container',
-    key: 'the name it is saved under',
-    keyDetail: '',
-    alsoRefused: '',
-  }));
+  if (typeof item !== 'object' || item === null || Array.isArray(item)) return undefined;
+  const name = (item as { name?: unknown }).name;
+  const isView = type === 'view';
+  const stampsMissingName = door === 'save' && isView;
+  if (stampsMissingName ? !isNonEmptyString(name) : name === undefined) return undefined;
+  const container = isView && isAggregatedViewContainer(item);
+  const noun = container ? 'view container' : type;
+  const owner = container ? CONTAINER_OWNER : 'its';
+  return judge(name, saveName, (key) => {
+    const remedies = remediesFor(type, name, key);
+    if (door === 'save') {
+      return { subject: noun, owner, key: 'the name it is saved under', keyDetail: '', alsoRefused: '', remedy: remedies.save };
+    }
+    return door === 'restore'
+      ? {
+        subject: `${noun} version`,
+        owner,
+        key: 'the name it is restored under',
+        keyDetail: '',
+        alsoRefused: '',
+        remedy: `save the item ${remedies.saveWith}, instead of restoring this version`,
+      }
+      : {
+        subject: `${noun} draft`,
+        owner,
+        key: 'the name it is published under',
+        keyDetail: '',
+        alsoRefused: '',
+        remedy: `save the draft again ${remedies.saveWith}, then publish it`,
+      };
+  });
 }
+
+/**
+ * The fix that is TRUE for this type, said two ways: as the save door's
+ * remedy, and as the "with …" clause of the save the restore and publish doors
+ * prescribe (their caller cannot edit a stored version or draft in place).
+ *
+ *  - `view`: the save door stamps a missing name, so dropping it works — the
+ *    words the container doors always printed.
+ *  - `field`: a `field` row is named `object.field`, and `FieldSchema` keeps
+ *    the column `name` dot-free, so the save name can never be its `name`;
+ *    the schema does not require one, so dropping it is the fix (measured).
+ *  - every other type: set `name` to the save name, or — when the body's own
+ *    `name` is a name at all — save the item under it instead. Both are
+ *    offered because a save name the type's schema cannot spell (a dotted
+ *    name, where the schema forbids the dot) leaves only the second.
+ */
+function remediesFor(type: string, name: unknown, key: string): { save: string; saveWith: string } {
+  if (type === 'view') {
+    return { save: stampedRemedy(key), saveWith: `with \`name\` dropped or set to '${key}'` };
+  }
+  if (type === 'field') {
+    return {
+      save: 'drop `name` (a `field` row is named object.field, which its column `name` cannot spell)',
+      saveWith: 'with `name` dropped',
+    };
+  }
+  return isNonEmptyString(name)
+    ? { save: `set \`name\` to '${key}', or save the item under '${name}'`, saveWith: `with \`name\` set to '${key}', or under '${name}'` }
+    : { save: `set \`name\` to '${key}'`, saveWith: `with \`name\` set to '${key}'` };
+}
+

@@ -54,7 +54,7 @@ export * from './engine-findone-predicate.js';
 // reporting two.
 export * from './audit-field-governance.js';
 
-// [#10062] The ADR-0029 D9.6 provenance pair, sunk here from
+// [commit fa5d137ab] The ADR-0029 D9.6 provenance pair, sunk here from
 // `@objectstack/objectql`'s registry by the same criterion as everything above:
 // `@objectstack/service-automation` needs the same "does a code package ship
 // this name?" answer for ADR-0048 flow precedence, and was reaching it by
@@ -117,7 +117,7 @@ export * from './meta-write-org-scope.js';
 // (through `declaresOrgOverride`) so a second copy is forbidden drift.
 export * from './meta-write-capability.js';
 
-// [#8707 / #10101] The shared platform-row organization resolver — sunk here
+// [commit 1408fe385 / #10101] The shared platform-row organization resolver — sunk here
 // from `@objectstack/plugin-audit` per the maintainer ruling recorded on
 // cloud#1395 ("promoted to a shared resolver used by all three platform-row
 // writers"). The three sanctioned consumers — audit stamping, the approval-row

@@ -360,43 +360,39 @@ export const TaskViews = defineView({
     },
   },
 
-  formViews: {
-    // Keyed `edit`, NOT `default`: list and form views share one
-    // `<object>.<key>` namespace, and the main `list` implicitly claims
-    // `showcase_task.default`. A `default` form key collides — the build-time
-    // view-ref lint fails on it (framework #2554) instead of silently renaming
-    // it to `default_2` and breaking any action target that references it.
-    // simple ── single-section form ──────────────────────────────────────
-    edit: {
-      type: 'simple',
-      data,
-      sections: [
-        {
-          // #8231 remainder — a stable `name` is the only thing that makes
-          // this heading translatable; see `_sections.task` in
-          // `system/translations/index.ts`.
-          name: 'task',
-          label: 'Task',
-          columns: 2,
-          fields: [
-            { field: 'title', required: true },
-            { field: 'project', required: true },
-            { field: 'assignee' },
-            { field: 'status', required: true },
-            { field: 'priority' },
-            { field: 'due_date' },
-            // View-level conditional visibility (FormField.visibleWhen, CEL):
-            // the notes box only appears while the task is Urgent. Data-level
-            // counterpart is `visibleWhen` on invoice.paid_on.
-            // Width via the semantic `span` (#2578): 'full' = whole row at any
-            // derived column count — the primary primitive; absolute colSpan
-            // is legacy and lint-discouraged.
-            { field: 'notes', visibleWhen: P`record.priority == 'urgent'`, span: 'full' },
-          ],
-        },
-      ],
-    },
+  // The default form — what the create and edit surfaces render.
+  // simple ── single-section form ──────────────────────────────────────
+  form: {
+    type: 'simple',
+    data,
+    sections: [
+      {
+        // #8231 remainder — a stable `name` is the only thing that makes
+        // this heading translatable; see `_sections.task` in
+        // `system/translations/index.ts`.
+        name: 'task',
+        label: 'Task',
+        columns: 2,
+        fields: [
+          { field: 'title', required: true },
+          { field: 'project', required: true },
+          { field: 'assignee' },
+          { field: 'status', required: true },
+          { field: 'priority' },
+          { field: 'due_date' },
+          // View-level conditional visibility (FormField.visibleWhen, CEL):
+          // the notes box only appears while the task is Urgent. Data-level
+          // counterpart is `visibleWhen` on invoice.paid_on.
+          // Width via the semantic `span` (#2578): 'full' = whole row at any
+          // derived column count — the primary primitive; absolute colSpan
+          // is legacy and lint-discouraged.
+          { field: 'notes', visibleWhen: P`record.priority == 'urgent'`, span: 'full' },
+        ],
+      },
+    ],
+  },
 
+  formViews: {
     // tabbed ── sections rendered as tabs ────────────────────────────────
     tabbed: {
       type: 'tabbed',

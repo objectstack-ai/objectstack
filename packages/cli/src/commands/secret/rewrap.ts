@@ -16,11 +16,11 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { oneShotSettingsPlugin, resolveExistingDataKey } from '../../utils/one-shot-settings.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
 } from '../../utils/secret-reference-union.js';
-import type { ICryptoProvider } from '@objectstack/spec/contracts';
 import type {
   RewrapSecretRow,
   SysSecretRewrapReport,
@@ -58,7 +58,9 @@ import { readDeclaredDatasources } from './orphans.js';
  * is stored. It is resolved before the boot and handed to the settings
  * service the boot composes, so no provider in this run mints a key. No key is
  * a refusal, before any row is opened. The provider is `LocalCryptoProvider`,
- * the one every in-tree host constructs.
+ * the one every in-tree host constructs, and both halves — the key and the
+ * settings service — come from `utils/one-shot-settings.ts`, the one
+ * composition every one-shot command shares.
  */
 export default class SecretRewrap extends Command {
   static override description =
@@ -140,24 +142,15 @@ export default class SecretRewrap extends Command {
       planSysSecretRewrap,
       rewrapUnfinished,
     } = await import('../../utils/sys-secret-rewrap.js');
-    const { ciphertextDerivationStatus, LocalCryptoProvider, SettingsServicePlugin } =
-      await import('@objectstack/service-settings');
+    const { ciphertextDerivationStatus } = await import('@objectstack/service-settings');
     const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
 
     // ── The provider, resolved BEFORE the boot, from a key that already exists ──
     // The strict posture never mints a key, and the auto-key opt-in is
     // withheld. A missing key is refused only once the plan has a row to open,
     // so a run with nothing to open still reports.
-    let provider: (ICryptoProvider & { keySource: string }) | null = null;
-    let keyUnavailable: string | null = null;
-    try {
-      provider = new LocalCryptoProvider({
-        mode: 'production',
-        env: { ...process.env, OS_CRYPTO_AUTOKEY: undefined },
-      });
-    } catch (error) {
-      keyUnavailable = error instanceof Error ? error.message : String(error);
-    }
+    const dataKey = await resolveExistingDataKey();
+    const { provider, unavailable: keyUnavailable } = dataKey;
 
     let stack;
     try {
@@ -175,10 +168,7 @@ export default class SecretRewrap extends Command {
         // setting's value.
         extraPlugins: [
           new PlatformObjectsPlugin(),
-          new SettingsServicePlugin({
-            registerRoutes: false,
-            cryptoProvider: provider ?? refusingCryptoProvider(keyUnavailable ?? 'no data key'),
-          }),
+          await oneShotSettingsPlugin(dataKey),
         ],
         // The dry run boots READ-ONLY, the boot `os migrate plan` takes.
         // `--apply` keeps the plain boot: it writes rows.
@@ -320,24 +310,6 @@ export default class SecretRewrap extends Command {
       await stack.shutdown();
     }
   }
-}
-
-/**
- * The provider this run hands the settings service when no data key exists:
- * every call refuses with the reason. Composed so the service never builds a
- * default provider of its own, which in a development posture mints a key.
- */
-function refusingCryptoProvider(reason: string): ICryptoProvider {
-  const refuse = (): never => {
-    throw new Error(`No data key is available to this run, so nothing may be sealed or opened: ${reason}`);
-  };
-  return {
-    encrypt: async () => refuse(),
-    decrypt: async () => refuse(),
-    rotateKey: async () => refuse(),
-    digest: () => refuse(),
-    keyedDigest: async () => refuse(),
-  };
 }
 
 async function confirm(question: string): Promise<boolean> {

@@ -21,8 +21,12 @@
  * - **F9, the read scope** — `ReadScopeCompileOptions.declaredValueShape`,
  *   which both of its consumers fill from the context's `declaredValueShape`
  *   hook (the same `sourceFieldMeta`).
- * - **F11, the draft preview**, keeps its own bound copy: see the enumeration
- *   pin below.
+ * - **F11, the draft preview** — the drafted object's declared types, which
+ *   `queryDataset`'s preview branch hands `evaluateAnalyticsQueryOverRows` from
+ *   `sourceFieldMeta` (`declaredPreviewLowering`): a declared `datetime` is
+ *   rewritten, any other declared column is compared as written, and a column
+ *   with no declared type reads type-blind. The `dateRange` window is the same
+ *   pair, through the same lowering.
  *
  * ## Measured on the base (`0b8239111`), through the plugin's own composition
  *
@@ -43,6 +47,11 @@
  * answers them now, on both faces and both databases; so does every cell on a
  * host with no typed reader (below), and every cell of the read scope.
  *
+ * The draft preview (F11) answered the same text cells the native face did,
+ * through its own type-blind `lteBound`, except the last supported day, where
+ * it read a value that denotes no instant as written. With the drafted
+ * object's declared types it now answers every cell the engine does.
+ *
  * The PostgreSQL cell runs where `OS_TEST_POSTGRES_URL` is set and is a named
  * skip otherwise. It owns its table, dropped before and after.
  */
@@ -56,7 +65,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { lowerFilterCondition, TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 import { resolveFilterTokens } from '@objectstack/core';
-import type { AnalyticsService } from '../analytics-service.js';
+import { DatasetSchema } from '@objectstack/spec/ui';
+import { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
@@ -137,14 +147,8 @@ describe('[#5930 step 4] the enumeration: no analytics face keeps the meaning th
     ]);
   });
 
-  it('no face but the draft preview (F11) keeps a whole-day helper of its own', () => {
-    // F11 keeps `lteBound` and its window arm until its typed reader is wired:
-    // drafted rows reach it with no declared type, and the reader its host
-    // holds (`sourceFieldMeta`) is passed to it from `analytics-service.ts`.
-    // This entry only ever shrinks.
-    expect(holders(WHOLE_DAY_HELPERS)).toEqual({
-      'preview-evaluator.ts': ['nextUtcCalendarDay', 'isUnboundedAbove', 'lteBound'],
-    });
+  it('no face keeps a whole-day helper of its own', () => {
+    expect(holders(WHOLE_DAY_HELPERS)).toEqual({});
   });
 
   it('no face keeps a NULL-polarity copy', () => {
@@ -469,6 +473,72 @@ describe('[#5930 step 4] the ObjectQL face hands a column with no declared type 
       { note: { $lte: '2026-07-28' } },
       { signed_at: { $gte: '2026-07-28', $lte: '2026-07-28' } },
     ]);
+  });
+});
+
+// ── The draft preview (F11), through the door that reaches it ────────────────
+
+/**
+ * `AnalyticsService.queryDataset` with `previewDrafts`, over drafted seed rows
+ * (`draftRowsResolver`): the preview branch hands the evaluator the drafted
+ * object's declared types from `sourceFieldMeta`. The live path is not wired,
+ * so an answer can only come from the preview.
+ */
+describe('[#5930 step 4] the draft preview (F11) answers the typed drivers\' rows', () => {
+  const DATASET = DatasetSchema.parse({
+    name: 'os21417_preview',
+    label: 'Whole day preview',
+    object: OBJECT,
+    dimensions: [
+      { name: 'id', field: 'id', type: 'string' },
+      { name: 'signed_at', field: 'signed_at', type: 'date' },
+      { name: 'due_on', field: 'due_on', type: 'date' },
+      { name: 'note', field: 'note', type: 'string' },
+    ],
+    measures: [{ name: 'row_count', aggregate: 'count' }],
+  });
+  const service = (sourceFieldMeta?: (object: string, field: string) => { type: string } | undefined) =>
+    new AnalyticsService({
+      ...(sourceFieldMeta ? { sourceFieldMeta } : {}),
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => { throw new Error('the live path ran: the preview did not answer'); },
+      draftRowsResolver: async (object: string) => (object === OBJECT ? ROWS.map((r) => ({ ...r })) : null),
+    } as never);
+  const DECLARING = service((object, field) => (object === OBJECT && DECLARED[field] ? { type: DECLARED[field] } : undefined));
+  const viaPreview = async (svc: AnalyticsService, query: Partial<AnalyticsQuery>): Promise<Ids> => {
+    const selection = {
+      dimensions: ['id'],
+      measures: ['row_count'],
+      ...(query.where ? { runtimeFilter: query.where } : {}),
+      ...(query.timeDimensions ? { timeDimensions: query.timeDimensions } : {}),
+    };
+    const res = await svc.queryDataset(DATASET as never, selection as never, { tenantId: 'org_A' } as never, { previewDrafts: true });
+    return ids(res.rows as Array<Record<string, unknown>>);
+  };
+
+  for (const [label, query, expected] of CELLS) {
+    it(`${label}: ${expected}`, async () => {
+      expect(await viaPreview(DECLARING, query)).toBe(expected);
+    });
+  }
+
+  it('a host that names no declared type reads every column type-blind (ADR-0053 D-D1 item 7)', async () => {
+    // The text cells keep the type-blind answer — the cells where "answer as
+    // the typed drivers" cannot hold without a reader — and the datetime and
+    // date cells keep the engine's rows.
+    const typeBlind: Record<string, Ids> = {
+      'text $lte a day': 'r1,r2,r3',
+      'text $lte the last day': 'r1,r2,r3,r4',
+      'text $between one day': 'r2,r3',
+      'text $between to the last day': 'r2,r3,r4',
+      'text $not $lte a day': 'r4,r5',
+      'text window one day': 'r2,r3',
+      'text window to the last day': 'r2,r3,r4',
+    };
+    const undeclared = service();
+    for (const [label, query, expected] of CELLS) {
+      expect(await viaPreview(undeclared, query), label).toBe(typeBlind[label] ?? expected);
+    }
   });
 });
 

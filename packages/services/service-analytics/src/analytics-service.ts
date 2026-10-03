@@ -2470,7 +2470,7 @@ export class AnalyticsService implements IAnalyticsService {
               { filter: compiled.filter, measureFilters: compiled.measureFilters },
               context,
             );
-            return evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!);
+            return evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!, (field) => this.sourceFieldMeta?.(dataset.object, field)?.type);
           },
         } as IAnalyticsService;
         const previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);

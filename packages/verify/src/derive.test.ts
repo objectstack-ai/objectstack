@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { Field, FieldType, isMultiValueField } from '@objectstack/spec/data';
 // `.js` extension, deliberately: under `moduleResolution: NodeNext` a relative
 // import without it does not RESOLVE, so every symbol it names becomes `any` —
 // and the type-layer ratchet reads this file (`TEST_DEBT`, via the package's
@@ -219,5 +220,90 @@ describe('deriveCrudCases — an UNREADABLE `reference` carrier is refused (#185
     ).find((x) => x.object === 'contact');
     expect(blocked?.blocked).toMatch(/has no `reference` target/);
     expect(blocked?.blocked).not.toMatch(/rejected alias/i);
+  });
+});
+
+/**
+ * [#21509] A sample is written in the shape the field is STORED in, and that
+ * shape has exactly one answer: `@objectstack/spec`'s `isMultiValueField`, the
+ * predicate the engine, `driver-sql` and `os generate migration` all store by.
+ *
+ * The `select` / `radio` arm used to write one scalar option code and compare
+ * it `equal` whatever the field declared. A `select` declared `multiple: true`
+ * is stored and served as a LIST, so it read back `[code]` and `os verify`
+ * reported a fidelity gap the engine does not have — the shipped
+ * `examples/app-todo` (`todo_task.tags`) failed on exactly that.
+ */
+describe('deriveCrudCases — a sample takes the shape the field is STORED in (#21509)', () => {
+  const OPTIONS = [
+    { label: 'Important', value: 'important' },
+    { label: 'Quick Win', value: 'quick_win' },
+  ];
+  const caseFor = (field: Record<string, unknown>) =>
+    deriveCrudCases({
+      objects: [
+        { name: 'company', fields: { title: { type: 'text' } } },
+        { name: 'probe', fields: { f: field } },
+      ],
+    }).find((x) => x.object === 'probe');
+
+  it('a `select` declared `multiple: true` is written as a list and compared as a set', () => {
+    // Built with the spec's own builder — the way `examples/app-todo` authors
+    // `todo_task.tags` — rather than a hand-written literal.
+    const c = caseFor(Field.select({ label: 'Tags', multiple: true, options: OPTIONS }));
+    expect(c?.body?.f).toEqual(['important']);
+    expect(c?.asserts).toEqual([{ field: 'f', type: 'select', value: ['important'], kind: 'set' }]);
+  });
+
+  it.each([
+    ['omitted', {}],
+    ['false', { multiple: false }],
+  ])('control: a single-valued `select` (`multiple` %s) keeps one scalar code and `equal`', (_label, flag) => {
+    const c = caseFor(Field.select({ label: 'Priority', options: OPTIONS, ...flag }));
+    expect(c?.body?.f).toBe('important');
+    expect(c?.asserts).toEqual([{ field: 'f', type: 'select', value: 'important', kind: 'equal' }]);
+  });
+
+  /**
+   * The claim's enumeration, made mechanical: over EVERY `FieldType` the spec
+   * declares, with the flag and without it, whatever the derivation writes is
+   * a list exactly when `isMultiValueField` says the field is stored as one —
+   * scalar samples and relational refs alike. The loop is driven by the spec's
+   * own enum, so a type added there is judged here without an edit.
+   */
+  it('over every FieldType × `multiple`, the written shape IS `isMultiValueField`', () => {
+    const judged: string[] = [];
+    const listWritten = new Set<string>();
+    for (const type of FieldType.options) {
+      for (const multiple of [true, false]) {
+        const at = `${type} multiple=${multiple}`;
+        const stored = isMultiValueField({ type, multiple });
+        const c = caseFor({ type, multiple, options: OPTIONS, reference: 'company' });
+        expect(c?.blocked, at).toBeFalsy();
+
+        const ref = c?.relationalRefs?.find((r) => r.field === 'f');
+        if (ref) {
+          expect(ref.multiple, at).toBe(stored);
+        } else if (c?.body && 'f' in c.body) {
+          expect(Array.isArray(c.body.f), at).toBe(stored);
+          const a = c.asserts?.find((x) => x.field === 'f');
+          if (a) expect(a.kind === 'set', at).toBe(stored);
+        } else {
+          continue; // not written at all (computed / structured / media / no synth) — no shape to judge
+        }
+        judged.push(at);
+        if (stored) listWritten.add(type);
+      }
+    }
+    // Non-vacuity: the loop must actually have judged the multi-valued writers,
+    // or every assertion above could pass over a derivation that writes nothing.
+    expect([...listWritten]).toEqual(
+      expect.arrayContaining(['select', 'radio', 'multiselect', 'checkboxes', 'tags', 'lookup']),
+    );
+    // …and the single-valued side: a flag the predicate does not honour (a
+    // `text`, a `master_detail`) is judged as the scalar it is stored as.
+    expect(judged).toEqual(
+      expect.arrayContaining(['select multiple=false', 'text multiple=true', 'master_detail multiple=true']),
+    );
   });
 });

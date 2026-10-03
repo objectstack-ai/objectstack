@@ -281,13 +281,13 @@ describe("showcase actions — a `type: 'modal'` target names a page (#6739)", (
 
   it("`showcase_new_task` opens the Task form — type: 'form' at a FORM view", () => {
     expect(NewTaskAction.type).toBe('form');
-    expect(NewTaskAction.target).toBe('showcase_task.edit');
+    expect(NewTaskAction.target).toBe('showcase_task.form');
 
     // Both sites carrying the name agree, so the corpus teaches one shape.
     const inline = inlineActions()
       .map(({ action }) => action)
       .filter((a) => a.name === 'showcase_new_task');
     expect(inline).toHaveLength(1);
-    expect(inline[0]).toMatchObject({ type: 'form', target: 'showcase_task.edit' });
+    expect(inline[0]).toMatchObject({ type: 'form', target: 'showcase_task.form' });
   });
 });

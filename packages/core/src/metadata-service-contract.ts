@@ -41,7 +41,7 @@
  *  - `check:meta-type-normalized` (`scripts/check-meta-type-normalized.mjs`)
  *    is the CI gate whose whole job is to refuse a DECISION made on the
  *    un-normalized `:type` — its header carries the three authorization
- *    bypasses (#3984, #5881, #6241) that made the direction a rule. Its scan
+ *    bypasses (#3984, #5881, the one commit 83a3b1f2e closed) that made the direction a rule. Its scan
  *    surface is `packages/rest/src`; what this module converges with is its
  *    DIRECTION: normalize once, at the entry, and let every decision — here,
  *    every store key — read the normalized value;
@@ -65,7 +65,7 @@
  * Row 3: a `data` that is not a plain object cannot be a metadata document.
  * The pre-ruling `MetadataFacade` accepted such a write and filed it under the
  * literal key `undefined` — readable back through no member (silent loss, the
- * #6725 family) — and the interim fix coerced it into a `{ name, content }`
+ * same family as the defect commit 1507ba356 fixed) — and the interim fix coerced it into a `{ name, content }`
  * box, which collides with `content` being a REAL authorable field on live
  * metadata types (`doc`, `knowledge_document`). The ruling forbids both:
  * refuse, do not coerce into storability. `null` and arrays are refused with

@@ -475,6 +475,7 @@
     "system/Job:_packageId",
     "system/Job:_packageVersion",
     "system/Job:_provenance",
+    "system/Job:body",
     "system/Job:description",
     "system/Job:enabled",
     "system/Job:handler",

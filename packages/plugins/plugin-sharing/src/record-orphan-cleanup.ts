@@ -118,7 +118,10 @@ export interface OrphanSweepSubject {
   table: string;
   /** Noun for log messages: `share` → "orphan share sweep", "share rows". */
   noun: string;
-  /** Issue reference appended to the "revoked N rows" warning. */
+  /**
+   * Why the rows go, appended to the "revoked N rows" warning. Runtime text
+   * carries no tracker number, so this states the decision in words.
+   */
   issue: string;
 }
 

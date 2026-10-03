@@ -55,7 +55,7 @@ import {
   ObjectListViewSchema,
   checkListViewCalendarVisualization,
 } from './view.zod';
-import { PageSchema, checkPageSourceCompleteness } from './page.zod';
+import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind } from './page.zod';
 import {
   GlobalFilterSchema,
   checkGlobalFilterDateDefaultValue,
@@ -219,6 +219,22 @@ const pageSourceFixtures: Fixture[] = [
   { label: 'an `html` page with a `source`', value: { ...PAGE_BASE, kind: 'html', source: 'Card' }, refusesAt: [] },
   { label: 'a `full` page with no `source`', value: { ...PAGE_BASE, kind: 'full' }, refusesAt: [] },
   { label: 'a page with no `kind` (the `full` default)', value: { ...PAGE_BASE }, refusesAt: [] },
+];
+
+// `requires` only on the compiled kinds (#21459). A `react` page carries a
+// `source` throughout so the source-completeness sibling stays silent and each
+// fixture exercises THIS check alone; the kind-less fixture is the one whose
+// direct call sees no `kind` while the parse sees the applied `full` default,
+// so it also pins that the two read the same answer.
+const pageRequiresFixtures: Fixture[] = [
+  { label: '`requires` on a `react` page', value: { ...PAGE_BASE, kind: 'react', source: 'Card', requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: '`requires` on a `full` page', value: { ...PAGE_BASE, kind: 'full', requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: '`requires` on a `slotted` page', value: { ...PAGE_BASE, kind: 'slotted', requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: '`requires` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, requires: ['ui'] }, refusesAt: ['requires'] },
+  { label: 'an EMPTY `requires` on a `react` page — the key is refused, not its contents', value: { ...PAGE_BASE, kind: 'react', source: 'Card', requires: [] }, refusesAt: ['requires'] },
+  { label: '`requires` on an `html` page', value: { ...PAGE_BASE, kind: 'html', source: 'Card', requires: ['ui'] }, refusesAt: [] },
+  { label: '`requires` on a `jsx` page (the deprecated `html` alias)', value: { ...PAGE_BASE, kind: 'jsx', source: 'Card', requires: ['ui'] }, refusesAt: [] },
+  { label: 'a `react` page with no `requires`', value: { ...PAGE_BASE, kind: 'react', source: 'Card' }, refusesAt: [] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
@@ -430,7 +446,10 @@ const MIRRORED: MirroredSchema[] = [
   {
     name: 'PageSchema',
     schema: PageSchema,
-    exports: [{ name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures }],
+    exports: [
+      { name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures },
+      { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
+    ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
   {
@@ -577,11 +596,13 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares the export and attaches it to PageSchema', () => {
+  it('page.zod.ts declares both exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    expect(src).toContain('export function checkPageSourceCompleteness(');
-    expect(declarations(src, 'checkPageSourceCompleteness')).toBe(1);
-    expect(attachments(src, 'checkPageSourceCompleteness')).toBe(1);
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind']) {
+      expect(src).toContain(`export function ${name}(`);
+      expect(declarations(src, name)).toBe(1);
+      expect(attachments(src, name)).toBe(1);
+    }
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
@@ -608,6 +629,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   it.each([
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
+    ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
@@ -618,7 +640,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // [#17063] The retired member, from the same surface, in the same leg. A
   // downstream mirror re-attaching a check it imports from here is the whole
   // point of this file, so the barrel is where a relapse would first become
-  // reachable — the runtime namespace answers it, with the three survivors
+  // reachable — the runtime namespace answers it, with the four survivors
   // above as the lit control that the namespace is really populated.
   it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
     expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);

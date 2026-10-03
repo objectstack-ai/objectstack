@@ -19,7 +19,7 @@ import { createPublicKey } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { parseSignature, signPayload, verifyPayload } from '@objectstack/core';
-import { printError, printHeader, printKV, printStep, printSuccess } from '../../utils/format.js';
+import { isExitSignal, printError, printHeader, printKV, printStep, printSuccess } from '../../utils/format.js';
 import { OSPLUGIN_EXT } from '../../utils/osplugin.js';
 
 export default class PluginSign extends Command {
@@ -99,6 +99,7 @@ export default class PluginSign extends Command {
         return;
       }
     } catch (err) {
+      if (isExitSignal(err)) throw err;
       printError(`Self-verification error: ${(err as Error).message}`);
       this.exit(1);
       return;

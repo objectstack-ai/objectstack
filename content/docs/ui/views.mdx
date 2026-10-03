@@ -8,7 +8,7 @@ A **View** defines how records of an Object are displayed to users. ObjectStack 
 
 ## The `defineView` Container
 
-Views are authored **per object** inside a `defineView({ ... })` container — the default `list`, named `listViews`, and named `formViews` all live in one document. The loader expands the container into independently addressable `<object>.<key>` view items that power the view switcher.
+Views are authored **per object** inside a `defineView({ ... })` container — the default `list`, named `listViews`, the default `form`, and named `formViews` all live in one document. The loader expands the container into independently addressable `<object>.<key>` view items that power the view switcher.
 
 {/* os:check */}
 ```typescript
@@ -43,15 +43,13 @@ export const TaskViews = defineView({
     },
   },
 
-  // Named form views
-  formViews: {
-    edit: {
-      type: 'simple',
-      data,
-      sections: [
-        { name: 'task', label: 'Task', columns: 2, fields: ['title', 'status', 'assignee', 'due_date'] },
-      ],
-    },
+  // The default form — the create and edit surfaces render it
+  form: {
+    type: 'simple',
+    data,
+    sections: [
+      { name: 'task', label: 'Task', columns: 2, fields: ['title', 'status', 'assignee', 'due_date'] },
+    ],
   },
 });
 ```
@@ -360,39 +358,40 @@ gantt: {
 
 ## Form View
 
-A Form View defines how a single record is displayed for viewing or editing. Form views live under `formViews` in the same `defineView` container as the object's list views.
+A Form View defines how a single record is displayed for viewing or editing. It lives in the same `defineView` container as the object's list views:
+
+- `form` is the object's **default form** — the create and edit surfaces render it.
+- `formViews` holds **additional named forms**. Each one is served only where it is asked for by name: a form action's `target` (`<object>.<key>`), `addRecord.formView`, or a public `sharing.publicLink`. A named form never becomes the default — a container with no `form` has no default form, even when it declares named ones.
 
 ### Basic Structure
 
 ```typescript
-formViews: {
-  edit: {
-    type: 'simple',
-    data: { provider: 'object', object: 'task' },
-    sections: [
-      {
-        name: 'basic_information',
-        label: 'Basic Information',
-        columns: 2,
-        fields: [
-          { field: 'title', span: 'full' },
-          { field: 'status' },
-          { field: 'priority' },
-          { field: 'assignee' },
-          { field: 'due_date' },
-        ],
-      },
-      {
-        name: 'details',
-        label: 'Details',
-        collapsible: true,
-        columns: 1,
-        fields: [
-          { field: 'description' },
-        ],
-      },
-    ],
-  },
+form: {
+  type: 'simple',
+  data: { provider: 'object', object: 'task' },
+  sections: [
+    {
+      name: 'basic_information',
+      label: 'Basic Information',
+      columns: 2,
+      fields: [
+        { field: 'title', span: 'full' },
+        { field: 'status' },
+        { field: 'priority' },
+        { field: 'assignee' },
+        { field: 'due_date' },
+      ],
+    },
+    {
+      name: 'details',
+      label: 'Details',
+      collapsible: true,
+      columns: 1,
+      fields: [
+        { field: 'description' },
+      ],
+    },
+  ],
 },
 ```
 
@@ -467,7 +466,7 @@ app page or action, where `features.*` stays bound and stays legal. A record *fi
 
 ## Complete Example
 
-One container covering a default grid, a kanban saved view, and a tabbed edit form — mirroring `examples/app-showcase/src/ui/views/task.view.ts`:
+One container covering a default grid, a kanban saved view, and a tabbed default form — mirroring `examples/app-showcase/src/ui/views/task.view.ts`:
 
 {/* os:check */}
 ```typescript
@@ -502,37 +501,35 @@ export const TaskViews = defineView({
     },
   },
 
-  formViews: {
-    edit: {
-      type: 'tabbed',
-      data,
-      sections: [
-        {
-          name: 'details',
-          label: 'Details',
-          columns: 2,
-          fields: [
-            { field: 'title', span: 'full', required: true },
-            { field: 'status' },
-            { field: 'priority' },
-            { field: 'assignee' },
-            { field: 'due_date' },
-            { field: 'description', span: 'full' },
-          ],
-        },
-        {
-          name: 'system',
-          label: 'System',
-          collapsible: true,
-          collapsed: true,
-          columns: 2,
-          fields: [
-            { field: 'created_at', readonly: true },
-            { field: 'updated_at', readonly: true },
-          ],
-        },
-      ],
-    },
+  form: {
+    type: 'tabbed',
+    data,
+    sections: [
+      {
+        name: 'details',
+        label: 'Details',
+        columns: 2,
+        fields: [
+          { field: 'title', span: 'full', required: true },
+          { field: 'status' },
+          { field: 'priority' },
+          { field: 'assignee' },
+          { field: 'due_date' },
+          { field: 'description', span: 'full' },
+        ],
+      },
+      {
+        name: 'system',
+        label: 'System',
+        collapsible: true,
+        collapsed: true,
+        columns: 2,
+        fields: [
+          { field: 'created_at', readonly: true },
+          { field: 'updated_at', readonly: true },
+        ],
+      },
+    ],
   },
 });
 ```

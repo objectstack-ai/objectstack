@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13279] A permission-store OUTAGE must not be answerable as a capability
+ * [commit 6a180e42d] A permission-store OUTAGE must not be answerable as a capability
  * denial — at the resolver, and at every transport that authorizes through it.
  *
  * Maintainer ruling, 2026-08-30, verbatim 「第一批其余同意」:
@@ -337,7 +337,7 @@ describe('[#13279] every transport that authorizes through resolveAuthzContext',
 //        whose `sys_*` tables were never created (measured: it turned four CI
 //        suites red — client CRUD, runtime notifications, and two integration
 //        noise guards).
-//      - only the QUIET direction ⇒ satisfied by the pre-#13279 `return []`,
+//      - only the QUIET direction ⇒ satisfied by the `return []` before commit 6a180e42d,
 //        i.e. the defect itself: an outage answered as a capability denial.
 //
 //    ⚠️ The accepted risk lives in the first direction. A false POSITIVE from

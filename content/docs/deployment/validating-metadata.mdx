@@ -318,8 +318,8 @@ objects.employee.fields.ssn.pii: 'pii' is not a declared field key, so its value
   is dropped at load — the `dataQuality` governance family was pruned in 2026-06
   as dead in both layers — it enforced nothing.
 objects.employee.fields.ssn.indexed: 'indexed' is not a declared field key, so its
-  value is dropped at load — never a FieldSchema key; a field-level index flag
-  built no index (#2377). Declare the index in the object's `indexes[]`.
+  value is dropped at load — never a FieldSchema key; the field-level `index` flag
+  built no index and was removed for it. Declare the index in the object's `indexes[]`.
 ```
 
 Plain typos get a "did you mean" (`requred` → `required`); a retired key does

@@ -1534,7 +1534,7 @@
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
         "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
-        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.edit), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
+        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
         "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
         "empty-locations probe, both halves: (a) in a scratch/writable package author a copy of an api action with NO locations key; reload and sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY — then delete the probe; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
@@ -1574,7 +1574,7 @@
       "negative": [
         "any action rendering at a location it did not declare is a FAIL — placement is a contract, not a hint, and since objectui#3142 there is no everywhere-default left to inherit",
         "showcase_recalc_selection appearing on the list toolbar is the objectui#3142 regression shape — FAIL even though clicking it would merely error",
-        "a dispatch that opens the wrong target (e.g. log_time opening a list view instead of the showcase_task.edit form — the #2554 build-gate class) is a FAIL of the dispatch clause, not a cosmetic note"
+        "a dispatch that opens the wrong target (e.g. log_time opening a list view instead of the showcase_task.form form — the #2554 build-gate class) is a FAIL of the dispatch clause, not a cosmetic note"
       ],
       "traps": [
         "hydration-race",

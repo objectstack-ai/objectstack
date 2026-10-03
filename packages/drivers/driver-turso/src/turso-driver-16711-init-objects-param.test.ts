@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16711] `TursoDriver.initObjects` — the override that shadowed a base-class
+ * [commit 7862fb711] `TursoDriver.initObjects` — the override that shadowed a base-class
  * fix in a separately published package for five weeks.
  *
  * ## The defect this pins, which no gate scoped to `sql-driver.ts` could see
@@ -14,7 +14,7 @@
  *   - #4311 declared `tenancy` on `SqlDriver.initObjects` in August. From
  *     outside this package that fix did not exist: a fresh literal carrying
  *     `tenancy` was still TS2353 here, for five weeks, and nothing was red.
- *   - #16570's `indexes` fix would have escaped by the identical route.
+ *   - Commit b72226f48's `indexes` fix would have escaped by the identical route.
  *
  * ⭐ And the type face was the ONLY thing refusing them. The remote arm below
  * forwards the whole object through as `schema`
@@ -69,7 +69,7 @@ describe('TursoDriver.initObjects declares every key SqlDriver.initObjects does 
     const driver = await remoteDriver();
     const T = 'os16711_turso_all';
 
-    // Fresh literal in argument position. Before #16711 this did not compile:
+    // Fresh literal in argument position. Before commit 7862fb711 this did not compile:
     // `tenancy`, `indexes` and `lifecycle` were all TS2353 against this
     // override's own narrower literal, while the base declared the first two.
     await driver.initObjects([
@@ -102,7 +102,7 @@ describe('TursoDriver.initObjects declares every key SqlDriver.initObjects does 
 });
 
 /**
- * ⭐ THE NEGATIVE CONTROL (#16711 验收口径 item 4). Each `@ts-expect-error` IS
+ * ⭐ THE NEGATIVE CONTROL (验收口径 item 4 of the card commit 7862fb711 closed). Each `@ts-expect-error` IS
  * the assertion: `tsc` fails the file with TS2578 the moment the key starts
  * being accepted, which is precisely what a relaxation to `any` or an index
  * signature would do. Compile-time only, deliberately never called.

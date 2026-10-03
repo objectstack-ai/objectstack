@@ -178,11 +178,37 @@ export default class MigrateValueShapes extends Command {
         ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
         : { info: (m: string) => printInfo(m), warn: (m: string) => printWarning(m) };
 
-      const report = await scanValueShapes(engine, logger, {
+      // [#21529] Not asked: the scan's read-only boot measured which tables
+      // exist, and a table that does not exist stores no value to check. The
+      // scan reads through this view, which answers such a table with its true
+      // contents (no rows) without issuing the read. Read anyway, every covered
+      // object on a fresh project was "unreadable", the gate closed, and the
+      // scan exited 1 over data that does not exist. `--apply` booted plain, so
+      // there every table exists and every read is real.
+      // ⛔ Only a table the boot measured absent: any other refused read still
+      // lands in `unreadableObjects` and still closes the gate.
+      const notStored = new Set<string>();
+      const scanView = {
+        getObject: (name: string) => engine.getObject(name),
+        ...(typeof engine.getConfigs === 'function' ? { getConfigs: () => engine.getConfigs() } : {}),
+        find: (object: string, options: Record<string, unknown>) => {
+          if (!apply && stack.tableAbsent(object)) {
+            notStored.add(object);
+            return Promise.resolve([]);
+          }
+          return engine.find(object, options);
+        },
+      };
+
+      const report = await scanValueShapes(scanView, logger, {
         objects: flags.object,
         maxRecordsPerObject: flags['max-records'],
       });
       const passed = valueShapeScanPassed(report);
+      const notStoredLine = notStored.size > 0
+        ? `${notStored.size} scanned object(s) have no table in this database yet, so nothing is stored in ` +
+            `them and they were not read: ${[...notStored].sort().join(', ')}.`
+        : null;
 
       // The flag write is the ONLY write this command makes, and only on an
       // apply run that passed. A failing apply run still records — deliberately:
@@ -213,6 +239,7 @@ export default class MigrateValueShapes extends Command {
       }
 
       if (flags.json) {
+        if (notStoredLine) logger.info(notStoredLine);
         await emitJson({
           database: stack.dbLabel,
           apply,
@@ -229,6 +256,7 @@ export default class MigrateValueShapes extends Command {
       console.log('');
       console.log(formatValueShapeScanReport(report).join('\n'));
       console.log('');
+      if (notStoredLine) printInfo(notStoredLine);
 
       if (passed && apply) {
         printSuccess(
@@ -250,9 +278,9 @@ export default class MigrateValueShapes extends Command {
       // throws oclif's ExitError: rethrown, never re-reported. Caught here, it
       // printed a second `--json` document (`{"error":"EEXIT: 1"}`) after the
       // scan's own — the shape `summary-nulls` and `files-to-references`
-      // already guard against. A scan with unreadable objects fails the gate,
-      // and the read-only scan of a database without the app's tables has
-      // nothing else.
+      // already guard against. A scan with unreadable objects fails the gate.
+      // (A table the read-only boot measured absent is not one of them since
+      // #21529: it is answered from that measurement, above, never read.)
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));

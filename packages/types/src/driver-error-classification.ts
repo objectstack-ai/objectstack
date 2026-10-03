@@ -136,6 +136,10 @@
 // module was already this one's dependency across the package boundary; since
 // commit 6a180e42d moved this file into `@objectstack/types`, the two are siblings.
 import { isRelationSubObjectPhrase } from './relation-sub-object.js';
+// [#21418] The ONE driver-fault cut, a sibling module of this package since
+// #21385 placed it here. `operatorFacingErrorText` below answers only through
+// it — see that docblock — so adopting it adds no edge and no copy.
+import { redactStatementFromMessage, type DriverFaultOrigin } from './driver-fault-redaction.js';
 
 /**
  * The relation name each missing-table phrase puts on display, one capture per
@@ -678,7 +682,9 @@ const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
  * error whole under a non-enumerable `cause`. That is the disclosure clause of
  * the raw path and ⛔ is not reverted here: the fix for an operator record is
  * to read the `cause` the driver already attached, never to widen what the
- * envelope discloses.
+ * envelope discloses. [#21418] And that `cause` is read through the one
+ * driver-fault cut, never whole: it opens with the statement the driver sent
+ * (see {@link operatorFacingErrorText}).
  *
  * ⚠️ Matching the sentence — rather than the declaration alone — is what keeps
  * the READ-exit envelope (`backendStatementFaultError`, the #8931 / PR #9273
@@ -727,7 +733,9 @@ function messageChannelOf(node: unknown): string {
 
 /**
  * The text an OPERATOR should read for `error` — the dialect's own words when a
- * driver composed over them, the error's own message otherwise (commit 5a95b0e93).
+ * driver composed over them, the error's own message otherwise (commit 5a95b0e93)
+ * — and in either case CUT, so no statement and no bound value of one reaches
+ * the record it is written to (#21418).
  *
  * # The defect this closes
  *
@@ -738,16 +746,50 @@ function messageChannelOf(node: unknown): string {
  * into an operator-facing record therefore began storing *"the database refused
  * to run a raw statement"* where it used to store *"no such column: foo"*.
  *
- * For a LIVE console that is cosmetic — the driver writes the statement and the
- * dialect text to its warn sink one line earlier, so the operator has already
- * read it. For a STORED record it is not: whoever reads a backfill's `detail`
- * field a week later never had that console line, and for them the dialect's
- * words are unrecoverable. This helper is for the second class.
+ * For a LIVE console that is cosmetic — the driver writes the dialect's
+ * diagnostic to its warn sink one line earlier, with the statement and its
+ * bound values cut (#21385), so the operator has already read it. For a STORED
+ * record it is not: whoever reads a backfill's `detail` field a week later
+ * never had that console line, and for them the dialect's words are
+ * unrecoverable. This helper is for the second class.
+ *
+ * # The answer is cut by construction (#21418)
+ *
+ * The dialect error on a raw-statement envelope's `cause` is knex's
+ * `<statement> - <diagnostic>`: it opens with the statement the driver sent,
+ * compiled with its bound values inlined on SQLite and MySQL, and a dialect may
+ * inline a value in the diagnostic itself. Returning it whole handed every
+ * record this helper fills — a log line's meta, a result's `detail` or `error`
+ * — the values bound into the statement, and those records leave the data's
+ * trust boundary like any log does. The maintainer's ruling A on #21385 is
+ * "one cutter for every log face", so the single exit below passes the answer
+ * through THE driver-fault cut, {@link redactStatementFromMessage}
+ * (`./driver-fault-redaction.ts`). ⛔ No copy of the cut lives here, and ⛔ none
+ * is repeated at the callers: a cut at each caller is one more chance per
+ * caller to miss one. Which rule the cut runs under is what the walk below
+ * KNOWS about the text, never what the text looks like:
+ *
+ *  - **text reached BELOW the raw-path sentence** is the fault of a statement
+ *    the driver itself sent — that is the only thing such an envelope wraps —
+ *    so it is cut with `{ statementSent: true }`: the argument, and therefore
+ *    the text, the driver's own raw-terminal warn line writes for the same
+ *    fault, whatever word the statement opens with (#21345);
+ *  - **every other answer** — an undeclared throw, a declared envelope this
+ *    walk does not unwrap, the fallback channel — asks the shared leak
+ *    predicate, as the engine's own log line does: a driver dump is cut, and
+ *    anything else comes back exactly as before.
+ *
+ * What survives is what an operator came for: the dialect's own diagnostic,
+ * minus the value slots the cut's templates own, with the cut's marker where a
+ * statement was removed. The thrown value is never touched, so its `code`,
+ * `status`, class and `cause` reach every classifier that reads them exactly as
+ * the driver composed them.
  *
  * # What it does, and the two things that bound it
  *
  * It walks the `cause` chain to the first node that says something which is not
- * the raw-path composed sentence, and returns that. Both narrowings matter:
+ * the raw-path composed sentence, and returns that, cut as above. Both
+ * narrowings matter:
  *
  *  - **only a DECLARED fault is reinterpreted.** An undeclared throw — anything
  *    without `code: DATABASE_ERROR` — comes back as `messageChannelOf(error) ||
@@ -776,22 +818,43 @@ function messageChannelOf(node: unknown): string {
  * channel is, which inside this branch means a declared envelope whose own
  * `message` and `name` are both empty (measured: it answers `''`). The
  * "neither always prose nor never empty" reading above holds here too — what
- * the fallback rules out is `undefined`, never emptiness.
+ * the fallback rules out is `undefined`, never emptiness. The cut keeps both
+ * halves of that reading: it answers `''` for `''` and non-empty text for
+ * non-empty text.
  *
  * @param error - the thrown value, of any shape.
- * @returns text for an operator; never `undefined`, never empty for a thrown
- *          value that has any textual channel at all.
+ * @returns text for an operator, cut; never `undefined`, never empty for a
+ *          thrown value that has any textual channel at all.
  */
 export function operatorFacingErrorText(error: unknown): string {
-    const surface = messageChannelOf(error) || String(error);
+    const { text, origin } = uncutOperatorText(error);
+    return redactStatementFromMessage(text, origin);
+}
+
+/** What the walk knows when it never passed the raw-path sentence: nothing. */
+const NO_STATEMENT_KNOWN: DriverFaultOrigin = {};
+
+/**
+ * [#21418] The text {@link operatorFacingErrorText} answers BEFORE the cut, and
+ * what the walk learned about where that text came from. Module-private on
+ * purpose: its answer is not operator-facing text — it may open with a
+ * statement and the values bound into it — so the only way out of this module
+ * is through the cut.
+ */
+function uncutOperatorText(error: unknown): { text: string; origin: DriverFaultOrigin } {
+    const surface = { text: messageChannelOf(error) || String(error), origin: NO_STATEMENT_KNOWN };
     if (typeof error !== 'object' || error === null) return surface;
     const { code } = error as { code?: unknown };
     if (code !== DECLARED_DATABASE_FAULT_CODE) return surface;
 
+    // Set once the walk steps past a raw-path envelope: everything below one is
+    // the fault of a statement the driver sent.
+    let statementSent = false;
     let node: unknown = error;
     for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth += 1) {
         const text = messageChannelOf(node);
-        if (text !== '' && !RAW_STATEMENT_FAULT_SENTENCE.test(text)) return text;
+        if (RAW_STATEMENT_FAULT_SENTENCE.test(text)) statementSent = true;
+        else if (text !== '') return { text, origin: { statementSent } };
         if (node === null || (typeof node !== 'object' && typeof node !== 'function')) break;
         node = (node as { cause?: unknown }).cause;
     }

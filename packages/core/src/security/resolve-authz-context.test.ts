@@ -31,7 +31,7 @@ const apiKeyRefusalReasons = (spy: ReturnType<typeof vi.spyOn>) =>
 // Minimal in-memory ObjectQL: find(object, { where, limit }) with `===` + `$in`
 // match, and the caller's `limit` ENFORCED.
 //
-// [#10978] The bound is not decoration. A double that matches `where` and hands
+// [commit 4c9780c7a] The bound is not decoration. A double that matches `where` and hands
 // back every row it matched cannot tell a read bounded at 200 from the same read
 // bounded at 1000, or from one carrying no bound at all — so raising a limit,
 // lowering it, or folding two reads that carry different ones is green BY
@@ -1538,7 +1538,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
 });
 
 /**
- * [#10978] The instrument's own contract.
+ * [commit 4c9780c7a] The instrument's own contract.
  *
  * Every assertion in this file stands on `makeQl`, and a double that drops
  * `opts.limit` cannot fail a limit regression: raising a bound, lowering it, or

@@ -30,12 +30,14 @@
  * native strategy, the last seam before its statement runs, and as written on
  * the ObjectQL strategy, whose engine seam reads the declaration.
  *
- * F11 evaluates drafted rows with no schema. Its lowering reads no member as
- * `datetime`: its own bound copy (`lteBound`) keeps answering the whole-day
- * rule until its deletion card, and a type-blind rewrite here would move one
- * cell — `$lte` on the last supported day over a non-temporal value that sorts
- * above it — away from the typed drivers' answer. The NULL-polarity guards
- * apply on both faces whatever the type.
+ * F11 evaluates drafted rows, which carry no schema of their own. [#5930 step
+ * 4] Its reader is the drafted object's declared types, which `queryDataset`'s
+ * preview branch hands it from `sourceFieldMeta`
+ * (`declaredPreviewLowering`): a declared `datetime` is rewritten, any other
+ * declared column is compared as written, and a column with no declared type
+ * (or a caller that hands none, as below) reads type-blind. Its own bound copy
+ * (`lteBound`) is deleted. The NULL-polarity guards apply on both faces
+ * whatever the type.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -220,7 +222,7 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] F11: the draft preview evalua
     expect(previewIds({ stage: { $null: false } }, ROWS)).toEqual(['p1']);
   });
 
-  it('a bare-day bound is still answered through the whole named day (the face\'s own copy)', () => {
+  it('a bare-day bound is answered through the whole named day — the lowering\'s, read type-blind with no declared type', () => {
     const rows = [{ id: 'd27', at: '2026-07-27T10:00:00.000Z' }, { id: 'd28', at: '2026-07-28T10:00:00.000Z' }, { id: 'd29', at: '2026-07-29T10:00:00.000Z' }];
     expect(previewIds({ at: { $lte: '2026-07-28' } }, rows)).toEqual(['d27', 'd28']);
     expect(previewIds({ at: { $between: ['2026-07-28', '2026-07-28'] } }, rows)).toEqual(['d28']);

@@ -176,7 +176,7 @@ hint: 'search' scans this object's own columns, so a related record's column
 cannot be a search target — expand the relation and search the related object,
 or copy the value onto a stored text field here. Clients echo this declaration
 verbatim as the '$searchFields' override, so a stale entry becomes a 400
-INVALID_FIELD on list search (#4254), not just a quietly narrowed one.
+INVALID_FIELD on list search, not just a quietly narrowed one.
 ```
 
 A request that sends the dotted path is `400 INVALID_FIELD`:

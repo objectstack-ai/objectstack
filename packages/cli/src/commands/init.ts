@@ -17,6 +17,7 @@ import {
   printAuthoringAdvisories,
   printAuthoringRuleErrors,
   AUTHORING_ADVISORY_PRINT_LIMIT,
+  isExitSignal,
 } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
@@ -1389,6 +1390,10 @@ export default class Init extends Command {
       }
 
     } catch (error: any) {
+      // The two refusals above (scaffold self-test, dependency install) already
+      // printed their `✗` line and raised the exit signal with `this.error`.
+      // Re-reporting it here printed the refusal a second time.
+      if (isExitSignal(error)) throw error;
       printError(error.message || String(error));
       this.error(error.message || String(error));
     }

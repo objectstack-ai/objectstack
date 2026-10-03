@@ -22,7 +22,7 @@
  * an actionable configuration message.
  */
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { MigrationPlanProvider, Plugin, PluginContext } from '@objectstack/core';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import {
     SysMetadataObject,
@@ -43,6 +43,7 @@ import {
     backfillSeedTenancy,
     resolveSeedTenancySeam,
 } from './migrations/seed-tenancy-backfill.js';
+import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 
@@ -357,6 +358,48 @@ export function assembleMetadataProtocol(
                     }
                 });
             }
+
+            // [#21498] Hand this package's journal-backed migration plans
+            // (ADR-0119 D2) to the kernel's `migration-plans` registry, so a run
+            // the journal says was interrupted can be resumed — and described as
+            // resumable — in any process that loads this package.
+            //
+            // A journal holds a plan's HASH, never its callbacks, so recovery
+            // needs the code handed back by whoever owns it. This package owns
+            // `metadata.recorded-by-sentinel-to-null` (it rewrites
+            // `sys_metadata_history`, one of the objects above). Registering it
+            // here keeps `os migrate resume`'s refusal — "no loaded package
+            // registers" the plan — true exactly when it is: wherever this
+            // assembly ran, the owner IS loaded. The registry belongs to
+            // `MigrationRecoveryPlugin` (`@objectstack/runtime`), which the
+            // `os migrate` data boot and the `os serve` boot compose.
+            //
+            // At `kernel:ready`, not here: that plugin registers the registry in
+            // its `init()`, which the kernel orders AFTER this assembly's (it
+            // declares the engine an optional dependency), so asking now would
+            // read "absent" off a registry still filling. By `kernel:ready`
+            // every `init()` has run and absence is final — a kernel with no
+            // registry has nowhere to hand the plan, which is not a fault. The
+            // plan still lands before the recovery plugin's boot scan: that
+            // plugin hooks `kernel:ready` from its `start()` (Phase 2), this hook
+            // is registered in Phase 1, and `dispatchHookPropagating`
+            // (`@objectstack/core`) runs a hook's handlers in registration
+            // order — so the scan names the resume command instead of calling
+            // the run unresumable.
+            //
+            // ⛔ Not gated on `runPlatformMigrations`: that gate decides whether a
+            // boot REPAIRS rows. Registering a plan runs nothing — only an
+            // operator's `os migrate resume` does — it states that the plan's
+            // code is loaded here, which is true wherever this assembly ran.
+            (ctx as any)?.hook?.('kernel:ready', () => {
+                let plans: MigrationPlanProvider | undefined;
+                try {
+                    plans = ctx.getService('migration-plans') as MigrationPlanProvider;
+                } catch {
+                    return; // no registry composed on this kernel
+                }
+                plans?.register?.(createRecordedBySentinelPlan());
+            });
 
             // NO `analytics` fallback rides here anymore (#3891 / #3878). The
             // degraded shim this assembly used to register dropped the request's

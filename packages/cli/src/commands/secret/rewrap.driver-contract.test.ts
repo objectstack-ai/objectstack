@@ -31,10 +31,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
-import { ciphertextDerivationStatus, LocalCryptoProvider, SettingsServicePlugin } from '@objectstack/service-settings';
+import { ciphertextDerivationStatus, LocalCryptoProvider } from '@objectstack/service-settings';
 import type { CryptoContext } from '@objectstack/spec/contracts';
 import { bootSchemaStack, type SchemaStack } from '../../utils/schema-migrate.js';
 import type { SecretReferenceEngineLike } from '../../utils/secret-reference-union.js';
+import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
 import SecretRewrap from './rewrap.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -102,8 +103,10 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
     stack = await bootSchemaStack({
       jsonOutput: false,
       databaseUrl: `file:${dbFile}`,
-      // Byte-identical to `rewrap.ts`'s own list.
-      extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
+      // `rewrap.ts`'s own list: the one-shot settings composition, over the
+      // key this file declares in `OS_SECRET_KEY` (the command resolves the
+      // same key first and hands that instance in).
+      extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
     });
     const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
     if (!engine) throw new Error('no objectql engine on the booted stack — nothing to measure');
