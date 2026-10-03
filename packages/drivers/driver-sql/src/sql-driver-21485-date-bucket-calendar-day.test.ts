@@ -51,6 +51,20 @@
  * Every cell checks both doors that render the expression: `aggregate()`'s
  * GROUP BY, and `dateBucketSql()` — the text the analytics echo prints (#21441)
  * — run as SQL against the same rows.
+ *
+ * ## Reverse verification
+ *
+ * Measured with all three cells provisioned (PostgreSQL 16.14 at
+ * `Asia/Shanghai`, MySQL 8.0.46 at a global `+08:00`, process
+ * `TZ=America/New_York`), this file beside `sql-driver-temporal-dialect.test.ts`:
+ *
+ * - fix in place: 61 of 61 green;
+ * - `sql-driver.ts` reverted to its pre-fix text: 16 red, 45 green. The red
+ *   ones are the `date` axis at all five granularities on live postgres as
+ *   provisioned, live postgres at `+08:00`, and live mysql at `+08:00` (15),
+ *   plus the no-server pin in the dialect-gating file. Live mysql as
+ *   provisioned stayed green, because the driver's UTC session pin hides the
+ *   defect there. Every `datetime` cell and the sqlite cell stayed green.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
