@@ -65,11 +65,31 @@
  * (the job service and the engine have registered), while install-local's
  * doors are already past that point. One implementation, two moments.
  *
- * A job runs on a JSON door only through its `body`. Its deprecated `handler`
- * names a `defineStack({ functions })` entry, which is code: it travels in the
- * artifact's runtime module, which only `os start --artifact` loads, so no JSON
- * door can ever resolve it. {@link collectJobsWithoutBody} names those jobs, and
- * the install-local install route refuses a package that declares one enabled.
+ * A job runs on a JSON door only through a `body` that binds. Its deprecated
+ * `handler` names a `defineStack({ functions })` entry, which is code: it
+ * travels in the artifact's runtime module, which only `os start --artifact`
+ * loads, so no JSON door can ever resolve it. {@link collectJobsWithoutBody}
+ * names those jobs — and the ones whose `body` the declaration refuses
+ * (`judgeJobBody`) — and the install-local install route refuses a package that
+ * declares one enabled.
+ *
+ * ## A hook with no `body`, on a door that carries no runtime module (#21585)
+ *
+ * The same holds for a hook in the deprecated function-name `handler` form, with
+ * one difference that makes it worse than a job: the engine resolves a hook's
+ * `handler` against the bundle's `functions` AND, failing that, against every
+ * function already registered on the engine, by bare name (`HookSchema.handler`
+ * declares that fallback). A door that carries no runtime module brings no
+ * function of the package's own, so such a hook can never bind to the package's
+ * code — only to a function some other app registered, or to nothing.
+ *
+ * So a door that carries no runtime module — install-local — says so with
+ * {@link AppArtifactHandlerBindingOptions.withholdHooksWithoutBody}: every hook
+ * {@link collectHooksWithoutBody} names is withheld from `bindHooks`, warned and
+ * NOT bound. Its install route refuses a package that declares one, so this
+ * fires only on the rehydrate of an entry an older build installed. A boot
+ * (`AppPlugin`, `os start --artifact`, a `defineStack` config) carries its
+ * runtime module and passes no such option: its handler hooks bind unchanged.
  */
 
 import type { PluginContext } from '@objectstack/core';
@@ -77,7 +97,7 @@ import type { IJobService, IObjectQLEngine, JobHandler, Logger } from '@objectst
 import { resolveScheduledWorkEnabled, SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
 import { SEMCONV } from '@objectstack/observability';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
-import { hookBodyRunnerFactory, actionBodyRunnerFactory, jobBodyRunnerFactory } from './sandbox/body-runner.js';
+import { hookBodyRunnerFactory, actionBodyRunnerFactory, jobBodyRunnerFactory, judgeJobBody } from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import {
     collectBundleActions,
@@ -107,6 +127,14 @@ export interface AppArtifactHandlerBindingOptions {
     logger: Logger;
     /** Who is binding, for the log lines — `'AppPlugin'`, `'MarketplaceInstallLocal'`. */
     source?: string;
+    /**
+     * [#21585] Set by a door that carries NO runtime module (install-local): a
+     * hook with no `body` ({@link collectHooksWithoutBody}) is withheld from
+     * `bindHooks` — warned, NOT bound — because on such a door its `handler`
+     * can never name the package's own code. A boot, which carries its runtime
+     * module, leaves this unset and binds such hooks as it always did.
+     */
+    withholdHooksWithoutBody?: boolean;
 }
 
 /** What one {@link bindAppArtifactHandlers} call bound. */
@@ -119,6 +147,11 @@ export interface AppArtifactHandlerBinding {
     functions: number;
     /** Action handlers registered — one per bound declaration. */
     actions: number;
+    /**
+     * [#21585] Hooks withheld under `withholdHooksWithoutBody`, by name — empty
+     * when the option is unset or every hook carries a `body`.
+     */
+    withheldHooks: string[];
 }
 
 /**
@@ -138,7 +171,7 @@ export function bindAppArtifactHandlers(
     const { appId, logger } = options;
     const tag = `[${options.source ?? 'AppPlugin'}]`;
     const owner = appArtifactHandlerOwner(appId);
-    const out: AppArtifactHandlerBinding = { owner, hooks: 0, functions: 0, actions: 0 };
+    const out: AppArtifactHandlerBinding = { owner, hooks: 0, functions: 0, actions: 0, withheldHooks: [] };
 
     // ── Tear down the owner's previous set ──────────────────────────────
     try {
@@ -151,9 +184,23 @@ export function bindAppArtifactHandlers(
     // ── Hooks (and the functions a hook may name) ───────────────────────
     // Inline function handlers are resolved directly; string-named handlers
     // are looked up in `bundle.functions` (registered here too) or in any
-    // function previously registered on the engine.
+    // function previously registered on the engine — which is why a door with
+    // no runtime module withholds a hook that has no `body` (#21585).
     try {
-        const hooks = collectBundleHooks(bundle);
+        let hooks = collectBundleHooks(bundle);
+        if (options.withholdHooksWithoutBody) {
+            const withheld = hooksWithoutBodyOf(hooks);
+            if (withheld.length > 0) {
+                hooks = hooks.filter(hookCarriesBody);
+                out.withheldHooks = withheld.map((h) => h.name);
+                logger.warn(
+                    `${tag} ${withheld.length} hook(s) with no \`body\` NOT bound: ${describeHooks(withheld)}. `
+                    + 'This door carries no runtime module, so a hook\'s `handler` can never name the package\'s own code. '
+                    + 'Give each hook a `body` (sandboxed JS) and install the package again.',
+                    { appId, hooks: out.withheldHooks },
+                );
+            }
+        }
         // Entries, not bare handlers: each function's declared `effect`
         // (#4396) rides along to the registry, where a `script` node reads
         // it to report what its run actually did.
@@ -238,21 +285,35 @@ export function bindAppArtifactHandlers(
 // ─── The job half (#21489) ─────────────────────────────────────────────
 
 /**
- * An enabled job a JSON door cannot run: it carries no `body`. Its `handler`
- * (deprecated) names a `defineStack({ functions })` entry — code, which a JSON
- * artifact never carries (ADR-0088) — or it names nothing at all.
+ * An enabled job a JSON door cannot run: it carries no `body` — or, since
+ * #21585, a `body` that does not BIND (the declaration refuses it: an expression
+ * body, or one carrying `body.timeoutMs`), which no door can run either. "Without
+ * body" reads as "without a body that runs". Its `handler` (deprecated) names a
+ * `defineStack({ functions })` entry — code, which a JSON artifact never
+ * carries (ADR-0088) — or it names nothing at all.
  */
 export interface JobWithoutBody {
     /** The job's `name`. */
     name: string;
     /** The function name the job's `handler` declares, when it declares one. */
     handler?: string;
+    /**
+     * [#21585] Set when the job HAS a `body` and it does not bind: the
+     * declaration's refusal ({@link judgeJobBody}). Absent for a job with no
+     * `body` at all.
+     */
+    bodyRefusal?: string;
 }
 
 /**
- * The enabled jobs of an artifact that carry no `body` — the jobs no JSON door
- * can schedule (#21489). The install-local install route refuses a package
- * that declares one; see the module header.
+ * The enabled jobs of an artifact that no JSON door can schedule (#21489):
+ * those with no `body`, and (#21585) those whose `body` does not BIND — an
+ * expression (L1) body, or one carrying `body.timeoutMs`, or any other shape
+ * the declaration refuses. That second half is the judgement the binder's own
+ * {@link jobBodyRunnerFactory} makes ({@link judgeJobBody}, a parse against
+ * `JobSchema.body`), so the door and the binder cannot disagree; such a job is
+ * named with its `bodyRefusal`. The install-local install route refuses a
+ * package that declares one; see the module header.
  *
  * Reads the jobs the binder reads ({@link collectBundleJobs}), and calls a job
  * enabled exactly when the binder does: `enabled: false` is the one value that
@@ -263,13 +324,71 @@ export function collectJobsWithoutBody(bundle: unknown): JobWithoutBody[] {
     for (const job of collectBundleJobs(bundle)) {
         if (!job || typeof job !== 'object') continue;
         if (job.enabled === false) continue;
-        if (job.body) continue;
+        let bodyRefusal: string | undefined;
+        if (job.body) {
+            const judged = judgeJobBody(job.body);
+            if (judged.binds) continue;
+            bodyRefusal = judged.refusal;
+        }
         out.push({
             name: typeof job.name === 'string' ? job.name : String(job.name),
             ...(typeof job.handler === 'string' ? { handler: job.handler } : {}),
+            ...(bodyRefusal !== undefined ? { bodyRefusal } : {}),
         });
     }
     return out;
+}
+
+// ─── Hooks with no `body` (#21585) ─────────────────────────────────────
+
+/**
+ * A hook with no `body`: its code is only a `handler` (deprecated) — a
+ * function name — or nothing at all. See the module header for why a door that
+ * carries no runtime module neither installs nor binds one.
+ */
+export interface HookWithoutBody {
+    /** The hook's `name`. */
+    name: string;
+    /** The function name the hook's `handler` declares, when it declares one. */
+    handler?: string;
+}
+
+/**
+ * Does `hook` carry a `body` the engine's binder reads as one? The binder's own
+ * body-first test (`resolveHandler` in `@objectstack/objectql`'s hook binder):
+ * a `body` object is bound through the body runner and its `handler` is never
+ * consulted — whether or not the body then binds — while any other `body` value
+ * falls through to the `handler`. So exactly the hooks this answers `false` for
+ * are the ones whose `handler` the engine resolves by name.
+ */
+function hookCarriesBody(hook: any): boolean {
+    return Boolean(hook?.body) && typeof hook.body === 'object';
+}
+
+function hooksWithoutBodyOf(hooks: readonly any[]): HookWithoutBody[] {
+    return hooks.filter((h) => !hookCarriesBody(h)).map((h) => ({
+        name: typeof h?.name === 'string' ? h.name : String(h?.name ?? h),
+        ...(typeof h?.handler === 'string' ? { handler: h.handler } : {}),
+    }));
+}
+
+/** `'name' (handler 'fn')`, comma-joined — the same rendering the door's refusal uses. */
+function describeHooks(hooks: readonly HookWithoutBody[]): string {
+    return hooks.map((h) => `'${h.name}' (${h.handler !== undefined ? `handler '${h.handler}'` : 'no handler'})`).join(', ');
+}
+
+/**
+ * The hooks of an artifact that carry no `body` (#21585) — every one of them:
+ * a hook has no on/off switch (`HookSchema` refuses `enabled` / `active`). The
+ * install-local install route refuses a package that declares one, and
+ * {@link bindAppArtifactHandlers} withholds them under
+ * `withholdHooksWithoutBody`; both read this judgement, over the hooks the
+ * binder reads ({@link collectBundleHooks}), so the door and the binder cannot
+ * disagree. A hook carrying both a `body` and a `handler` binds its `body` and
+ * is not named.
+ */
+export function collectHooksWithoutBody(bundle: unknown): HookWithoutBody[] {
+    return hooksWithoutBodyOf(collectBundleHooks(bundle));
 }
 
 export interface AppArtifactJobSchedulingOptions {

@@ -84,9 +84,9 @@
  * `DateGranularity.options` — the spec's own list — and a granularity the spec
  * grows joins it without an edit here.
  *
- * ⚠️ A dialect that does not bucket a granularity natively (SQLite + `week`,
- * which is capped in `dateGranularityCapabilities` because `%V` needs SQLite
- * 3.46) is NOT a failure and is asserted as its own declared answer: the #6212
+ * ⚠️ A dialect that does not bucket a granularity natively (none of the three
+ * cells since SQLite gained `week` in #21595; a client `driver-sql` does not
+ * model declines every one) is NOT a failure and is asserted as its own declared answer: the #6212
  * `NOT_IMPLEMENTED`/501 capability refusal, which `engine.aggregate` reads off
  * `supports.queryDateGranularity` and serves in memory instead. The invariant
  * that spans both answers is the one this card is about: no shape answers

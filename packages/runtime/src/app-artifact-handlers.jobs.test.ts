@@ -2,8 +2,9 @@
 
 /**
  * #21489 — the binder's job half: `scheduleAppArtifactJobs`, the ONE place a
- * declared job becomes a scheduled one, and `collectJobsWithoutBody`, the
- * judgement the install-local door refuses on.
+ * declared job becomes a scheduled one, and `collectJobsWithoutBody`,
+ * the judgement the install-local door refuses on (#21585: no `body`, or a
+ * `body` the declaration refuses — the same judgement the binder binds by).
  *
  * Its callers are pinned where they live (`AppPlugin` below and in
  * `app-plugin.jobs.test.ts`; the install-local plugin in
@@ -408,6 +409,40 @@ describe('#21489: collectJobsWithoutBody — what no JSON door can run', () => {
     it('a package without jobs has nothing to refuse', () => {
         expect(collectJobsWithoutBody(pkg([]))).toEqual([]);
         expect(collectJobsWithoutBody({ id: APP_ID })).toEqual([]);
+    });
+});
+
+describe('#21585: a job body the declaration refuses is judged as unrunnable — by the judgement the binder binds by', () => {
+    const L1 = { name: 'l1_job', schedule: INTERVAL, body: { language: 'expression', source: '1 + 1' } };
+    const TWO_LIMITS = { name: 'two_limits', schedule: INTERVAL, body: { ...WRITE_BODY, timeoutMs: 100 } };
+    const GOOD = { name: 'good_job', schedule: INTERVAL, body: WRITE_BODY };
+
+    it('names an L1 expression body and a body carrying timeoutMs, each with the declaration\'s refusal', () => {
+        const named = collectJobsWithoutBody(pkg([L1, TWO_LIMITS, GOOD, { ...L1, name: 'l1_disabled', enabled: false }]));
+
+        expect(named.map((j) => j.name)).toEqual(['l1_job', 'two_limits']);
+        // The key the refusal names, so the author knows where to look.
+        expect(named[0].bodyRefusal).toMatch(/^body\.language: /);
+        expect(named[1].bodyRefusal).toMatch(/^body\.timeoutMs: /);
+        // The sentence is the spec's, not a paraphrase: it names the one limit.
+        expect(named[1].bodyRefusal).toContain("job's own `timeoutMs`");
+    });
+
+    it('a body with a handler beside it is judged by its body — the body wins, as it does in the binder', () => {
+        const named = collectJobsWithoutBody(pkg([{ ...L1, handler: 'tick' }, { ...GOOD, name: 'good_both', handler: 'tick' }]));
+
+        expect(named).toEqual([{ name: 'l1_job', handler: 'tick', bodyRefusal: expect.stringMatching(/^body\.language: /) }]);
+    });
+
+    it('the door and the binder agree: every job named is NOT scheduled, every enabled body job not named IS', async () => {
+        const h = harness();
+        const jobs = [L1, TWO_LIMITS, GOOD, { name: 'handler_only', schedule: INTERVAL, handler: 'tick' }];
+
+        const named = new Set(collectJobsWithoutBody(pkg(jobs)).map((j) => j.name));
+        await h.schedule(pkg(jobs));
+
+        expect([...named].sort()).toEqual(['handler_only', 'l1_job', 'two_limits']);
+        expect([...h.jobs.scheduled.keys()]).toEqual(['good_job']);
     });
 });
 

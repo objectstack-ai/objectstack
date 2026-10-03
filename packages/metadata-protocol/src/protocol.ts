@@ -17884,6 +17884,77 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
+    /**
+     * [#21558] The save door's refusal of a view container saved under a name
+     * its OWN expansion produces — `{ name: 'crm_lead.default', object:
+     * 'crm_lead', list }` saved as `crm_lead.default`, whose bare `list`
+     * expands to exactly that name.
+     *
+     * Both read doors give a name with a stored row of its own that row, and
+     * let an expansion fill only a name with no row (#21510's one predicate,
+     * `namesWithOwnStoredRow`). Such a container IS the row of that name, so
+     * its own expansion never fills it: the object door, which never
+     * enumerates a container, lists nothing under the name, and the by-name
+     * read answers the raw container. No door answers a view item for it, and
+     * nothing told the author why. Triage's ruling refuses the shape here, at
+     * authoring (Prime Directive 12), and keeps the readers' one predicate
+     * whole: ⛔ no second own-row test in the readers.
+     *
+     * "A name its own expansion produces" is answered by the readers' own
+     * expansion, {@link expandRuntimeViewContainer}, never by a copy of its
+     * naming, so the save door and the read doors cannot disagree about it:
+     * every member kind and the expander's de-duplication are covered as the
+     * readers place them. A container on another package's object expands
+     * under its own name (#21334), as `<object>.<container name>…`, which is
+     * never the container name itself, so that arm is never refused. The
+     * package binding is the request's, as the registry write-through
+     * registers the expansion.
+     *
+     * The body judged is the one the author sent, with the door's own `name`
+     * stamp ({@link normalizeViewMetadata}: a missing or falsy `name` becomes
+     * the save name) applied first, since the expansion of an unnamed
+     * container is placed by that name. It is asked BEFORE that function's
+     * identity patch: a container whose only member is `form` is not one of
+     * the shapes the patch leaves alone, so under the name of a registered
+     * view item it would take that item's `viewKind`, stop being a container,
+     * and reach the schema as a malformed view item instead of this refusal.
+     *
+     * A view item (`viewKind` set) is not a container, so a view item saved
+     * under an expanded name is untouched: it is the sanctioned override for
+     * that name. Rows already stored in this shape are untouched too: the
+     * read doors serve them as before, and only a new save is refused.
+     *
+     * `VALIDATION_ERROR` / 400, the envelope of the name check it sits beside
+     * (`savedItemNameRefusal`): an authoring refusal of the request's own
+     * name, decided from the body. The prescription is the ruling's: save the
+     * container under its object's name, or save a view item under the
+     * expanded name. Runtime words carry no tracker number.
+     */
+    private containerOwnExpansionNameRefusal(
+        type: string,
+        item: unknown,
+        saveName: string,
+        packageId: string | null | undefined,
+    ): (Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        const body = item as Record<string, unknown>;
+        const stamped = body.name ? body : { ...body, name: saveName };
+        const own = this.expandRuntimeViewContainer(type, stamped, { packageId })
+            .find((expanded) => expanded.name === saveName);
+        if (!own) return undefined;
+        const object = String(own.object);
+        const err = new Error(
+            `Invalid view container: it is saved under '${saveName}', which is a name its own expansion `
+            + `produces (its ${String(own.viewKind)} view on '${object}'). An expanded view fills only a name `
+            + `that has no stored row of its own, and this container would be that row, so no read would answer `
+            + `a view under '${saveName}'. Save the container under its object's name, '${object}', or save a `
+            + `view item (name, object, viewKind and config) under '${saveName}'.`,
+        ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+        err.code = 'VALIDATION_ERROR';
+        err.status = 400;
+        return err;
+    }
+
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
     // receipt served — and is compared in that form (`storedParentForToken`).
     // `storedParentVersion` is the in-process twin for a caller that read the
@@ -18364,6 +18435,16 @@ export class ObjectStackProtocolImplementation implements
             {
                 const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
+            }
+            // [#21558] …and a view container saved under a name its OWN
+            // expansion produces, with the same envelope. Asked of the body as
+            // authored, before the stamp below can take a registry entry's
+            // `viewKind` onto it. See {@link containerOwnExpansionNameRefusal}.
+            {
+                const ownExpansionRefusal = this.containerOwnExpansionNameRefusal(
+                    singularType, request.item, request.name, request.packageId,
+                );
+                if (ownExpansionRefusal) throw ownExpansionRefusal;
             }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'

@@ -44,8 +44,9 @@
  * ({@link warnDiscardedRecordWrites}) instead of silent.
  */
 
-import type { Hook } from '@objectstack/spec/data';
-import { HookBodySchema, ScriptBodySchema } from '@objectstack/spec/data';
+import type { Hook, ScriptBodyParsed } from '@objectstack/spec/data';
+import { HookBodySchema } from '@objectstack/spec/data';
+import { JobSchema } from '@objectstack/spec/system';
 import type { JobHandler, JobRunOutcome } from '@objectstack/spec/contracts';
 import type { ScriptRunner, ScriptContext, ScriptResult, ScriptOrigin } from './script-runner.js';
 // The record-title contract, imported rather than re-derived (#11293). The
@@ -477,6 +478,43 @@ export function actionBodyRunnerFactory(
   };
 }
 
+/** What {@link judgeJobBody} answers for a `body` that binds, and for one that does not. */
+export type JobBodyJudgement =
+  | { binds: true; body: ScriptBodyParsed }
+  | { binds: false; refusal: string; issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> };
+
+/**
+ * [#21585] The ONE judgement whether a job's present `body` binds — the
+ * declaration's own: `raw` is parsed against `JobSchema.body` (the L2 script
+ * body shape, with `body.timeoutMs` refused on a job), so this answers exactly
+ * what `os validate` answers about the same slot.
+ *
+ * Two readers, so they cannot disagree: {@link jobBodyRunnerFactory} binds
+ * nothing for a body this refuses, and the install-local door refuses a
+ * package whose enabled job carries one (`collectJobsWithoutBody` in
+ * `../app-artifact-handlers.ts`). Before the door asked, it judged only that a
+ * `body` was PRESENT — an L1 expression body, or one carrying `timeoutMs`,
+ * installed with a 200 and the job was never scheduled, with only a server
+ * `warn` to say so.
+ *
+ * `refusal` is the declaration's first refusal sentence, prefixed with the
+ * key it names — the text the author acts on. Call it on a PRESENT body: an
+ * absent one is a different fact (the job has no `body`), which the slot's
+ * `.optional()` would answer as binding.
+ */
+export function judgeJobBody(raw: unknown): JobBodyJudgement {
+  const parsed = JobSchema.shape.body.safeParse(raw);
+  if (parsed.success && parsed.data !== undefined) return { binds: true, body: parsed.data };
+  const issues = parsed.success ? [] : parsed.error.issues;
+  const first = issues[0];
+  const at = first && first.path.length > 0 ? `body.${first.path.map(String).join('.')}: ` : '';
+  return {
+    binds: false,
+    refusal: first ? `${at}${first.message}` : 'the job `body` is not a sandboxed JS body',
+    issues,
+  };
+}
+
 /**
  * Job body runner factory (#21489) — the ONE point a job's `body`
  * (`JobSchema.body`: the hook body shape, L2 only) becomes the `JobHandler`
@@ -503,8 +541,8 @@ export function actionBodyRunnerFactory(
  * The job's own `timeoutMs` reaches the runner as `opts.timeoutMs` — the ONE
  * limit of a body job (`JobSchema.timeoutMs`). `body.timeoutMs` is refused on a
  * job by the spec, so a body carrying one never parsed; it is refused here as
- * well, rather than run under a second limit. A job with no `timeoutMs` gets
- * the runner's job default.
+ * well ({@link judgeJobBody}), rather than run under a second limit. A job with
+ * no `timeoutMs` gets the runner's job default.
  *
  * ## What it resolves
  *
@@ -527,24 +565,16 @@ export function jobBodyRunnerFactory(
     const raw = job.body;
     if (!raw) return undefined;
 
-    const parsed = ScriptBodySchema.safeParse(raw);
-    if (!parsed.success) {
-      opts.logger?.warn?.('[BodyRunner] invalid job.body shape — the job is NOT scheduled', {
+    const judged = judgeJobBody(raw);
+    if (!judged.binds) {
+      opts.logger?.warn?.(`[BodyRunner] invalid job.body shape — the job is NOT scheduled: ${judged.refusal}`, {
         appId: opts.appId,
         job: job.name,
-        issues: parsed.error.issues.slice(0, 3),
+        issues: judged.issues.slice(0, 3),
       });
       return undefined;
     }
-    const body = parsed.data;
-    if (body.timeoutMs !== undefined) {
-      opts.logger?.warn?.(
-        `[BodyRunner] job '${job.name}' carries \`body.timeoutMs\`, which a job does not accept — the job is NOT `
-          + "scheduled. A job's time limit is the job's own `timeoutMs`: move the value there (milliseconds, unchanged).",
-        { appId: opts.appId, job: job.name },
-      );
-      return undefined;
-    }
+    const body = judged.body;
 
     return async function boundJobHandler(): Promise<void | JobRunOutcome> {
       const sandboxCtx = buildJobSandboxContext(
