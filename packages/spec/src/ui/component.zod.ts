@@ -803,10 +803,17 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
-     * `containers.tsx` is byte-identical across the hop from `31971ff1e`
-     * (`git diff --quiet`), so both anchors were re-READ in place, each still
-     * the read point this record names: `946-952` and `1005`. At `31971ff1e`
+     * (`.objectui-sha` = `ab1879721`; re-derived at that pin 2026-10-03 —
+     * `containers.tsx` changed across the hop from `89cad75d5` (23 insertions,
+     * 27 deletions: objectui#11445's i18next count family, which rewrote the
+     * tab-count translation table above both anchors and the count badge's
+     * `aria-label` between them, and objectui#11438 dropping the `page:header`
+     * registration's inert `breadcrumb` input below them), so both anchors were
+     * re-READ rather than carried, and BOTH MOVED up one line with their text
+     * byte-identical: `946-952` -> `945-951`, `1005` -> `1004`. At `89cad75d5`
+     * (2026-10-02) `containers.tsx` was byte-identical across the hop from
+     * `31971ff1e` (`git diff --quiet`), so both anchors were re-READ in place,
+     * each still the read point this record names: `946-952` and `1005`. At `31971ff1e`
      * (2026-10-01) `containers.tsx` was byte-identical across the hop from
      * `e420df310` (`git diff --quiet`), so both anchors were re-READ in place,
      * each still the read point this record names: `946-952` and `1005`. At `e420df310`
@@ -837,12 +844,12 @@ export const PageTabsProps = strictObject({
      * lines byte-identical and the registration input `789` -> `912` with its
      * LINE rewritten — it declares `of: 'object'` and carries a longer
      * description — while the member list this record cites stayed
-     * unchanged): `containers.tsx:946-952`
+     * unchanged): `containers.tsx:945-951`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:1005` (the `items` input,
+     * the key to the Studio block designer at `:1004` (the `items` input,
      * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
      * }]`).
      *
@@ -1004,7 +1011,10 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `89cad75d5570`, re-read there 2026-10-02: across the hop
+ * (`.objectui-sha` = `ab1879721595`, re-read there 2026-10-03: across the hop
+ * from `89cad75d5570` all four `record-*.tsx` renderers and the three
+ * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor
+ * below moved, and each was re-read in place. At `89cad75d5570`, 2026-10-02: across the hop
  * from `31971ff1e28f` `record-details.tsx`, `record-highlights.tsx`,
  * `record-quick-actions.tsx` and the three `permissions` files are
  * byte-identical, so NO anchor in those six moved; `record-related-list.tsx`
@@ -2286,10 +2296,18 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
-     * `containers.tsx` is byte-identical across the hop from `31971ff1e`
-     * (`git diff --quiet`), so both anchors were re-READ in place, each still
-     * the read point this record names: `1171-1177` and `1220`. At `31971ff1e`
+     * (`.objectui-sha` = `ab1879721`; re-derived at that pin 2026-10-03 —
+     * `containers.tsx` changed across the hop from `89cad75d5` (23 insertions,
+     * 27 deletions: objectui#11445's i18next count family for the `page:tabs`
+     * count badge, and objectui#11438 dropping the `page:header`
+     * registration's inert `breadcrumb` input below both anchors), so both
+     * anchors were re-READ rather than carried, and BOTH MOVED up one line with
+     * their text byte-identical (the tab-count translation table above them
+     * lost a net line): `1171-1177` -> `1170-1176`, `1220` -> `1219`. At
+     * `89cad75d5` (2026-10-02) `containers.tsx` was byte-identical across the
+     * hop from `31971ff1e` (`git diff --quiet`), so both anchors were re-READ in
+     * place, each still the read point this record names: `1171-1177` and
+     * `1220`. At `31971ff1e`
      * (2026-10-01) `containers.tsx` was byte-identical across the hop from
      * `e420df310` (`git diff --quiet`), so both anchors were re-READ in place,
      * each still the read point this record names: `1171-1177` and `1220`. At `e420df310`
@@ -2320,12 +2338,12 @@ export const PageAccordionProps = strictObject({
      * lines byte-identical and the registration input `966` -> `1116` with its
      * LINE rewritten — it declares `of: 'object'` and carries a longer
      * description — while the member list this record cites stayed
-     * unchanged): `containers.tsx:1171-1177`
+     * unchanged): `containers.tsx:1170-1176`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:1220` (the `items` input, documented as
+     * block designer at `:1219` (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
@@ -2567,11 +2585,12 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
+   * (`.objectui-sha` = `ab1879721`; re-derived at that pin 2026-10-03 —
    * `button.tsx`, `lib/lazy-icon.tsx`, `renderers/action/resolve-icon.ts` and the
-   * generated `lucide-record-icon-names.ts` are all byte-identical to `31971ff1e`
+   * generated `lucide-record-icon-names.ts` are all byte-identical to `89cad75d5`
    * across the hop onto this pin, so every anchor below holds unmoved and was
-   * re-checked in place; they were byte-identical to `e420df310` across the hop
+   * re-checked in place; they were byte-identical to `31971ff1e` across the hop
+   * onto `89cad75d5` (2026-10-02), byte-identical to `e420df310` across the hop
    * onto `31971ff1e` (2026-10-01), byte-identical to `db11afd49` across the hop
    * onto `e420df310` (2026-09-30), and byte-identical to `dd3f7e1be` across the hop
    * onto `db11afd49` (2026-09-29) as well. At `dd3f7e1be` (2026-09-28)
@@ -3042,12 +3061,27 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `89cad75d5`; first measured at `.objectui-sha`
+ * against, `.objectui-sha` = `ab1879721`; first measured at `.objectui-sha`
  * pin `f8a9d0fb0`, every read point below re-derived at the current pin
- * 2026-10-02: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, all
- * four `action-*.tsx` renderers, `basic/data-list.tsx` and `ui/button.tsx`
- * are byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor
- * below held unmoved and was re-read in place. At `31971ff1e` (2026-10-01):
+ * 2026-10-03: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
+ * `basic/data-list.tsx` and `ui/button.tsx` are byte-identical to `89cad75d5`
+ * (`git diff --quiet`), so their anchors held unmoved and were re-read in
+ * place, and all four `action-*.tsx` renderers changed in one way:
+ * objectui#11344 forwards the spec's `outcomeMessages` to the runner beside
+ * `successMessage` (+7 in `action-button.tsx`'s forward, +3 in each of the
+ * other three), and `action-button.tsx` / `action-icon.tsx` record in a
+ * registration comment why the input stays unpublished, and reword the
+ * `successMessage` input's description (+14/-1 and +7/-2 in all). So every
+ * anchor below the inserted forward line MOVED with its cited text
+ * byte-identical — by 7 then 13 in `action-button.tsx`, by 3 then 5 in
+ * `action-icon.tsx`, by 3 in `action-group.tsx` and `action-menu.tsx` — and
+ * every anchor above it held; each is cited below at this pin, and the one
+ * read the range added, `outcomeMessages`, is recorded on the rows. At
+ * `89cad75d5` (2026-10-02): `public-blocks.ts`, `auto-trigger.ts`,
+ * `static-params.ts`, all four `action-*.tsx` renderers,
+ * `basic/data-list.tsx` and `ui/button.tsx` are byte-identical to `31971ff1e`
+ * (`git diff --quiet`), so every anchor below held unmoved and was re-read in
+ * place. At `31971ff1e` (2026-10-01):
  * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
  * `action-group.tsx`, `action-menu.tsx` and `action-icon.tsx` are
  * byte-identical to `e420df310`, so their anchors held unmoved, and
@@ -3119,10 +3153,10 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  *
  * `objectName` IS declared on `action:button` / `action:icon`: absent at the
  * first measurement, it is forwarded to the runner at the current pin
- * (`action-button.tsx:311`, `action-icon.tsx:208`), and the console resolves
+ * (`action-button.tsx:318`, `action-icon.tsx:211`), and the console resolves
  * its dispatch target as `action.objectName || <page object>`. On
  * `action:group` / `action:menu` the forward is the MEMBER's
- * (`action-group.tsx:378`, `action-menu.tsx:324`), so it rides each member
+ * (`action-group.tsx:381`, `action-menu.tsx:327`), so it rides each member
  * object and the container rows gain no key.
  */
 
@@ -3206,14 +3240,14 @@ const ACTION_NODE_GUIDANCE = {
  *   page button is not a registered object action, and the runner takes a
  *   nameless action on its `type` leg. `UIActionSchema` declares it required;
  *   the read does not.
- * - `label` — `:387`, placed as a React child (so a literal string: an inline
+ * - `label` — `:394`, placed as a React child (so a literal string: an inline
  *   locale map is not resolved on this path; the translation bundle's
  *   `components.<id>.label` is the localization channel); also `:123`, `:220`.
  * - `icon` — `:138`, through the shared `resolveIcon`.
  * - `actionType` — `:215`, forwarded as the runner's `type`.
  * - `variant` / `size` — `:141` / `:142`: `primary` → the primitive's
  *   `default` and `md` → `default`, everything else handed to `Button` as-is.
- * - `visible` / `disabled` — `:121` + `:339` / `:134` + `:375`, evaluated
+ * - `visible` / `disabled` — `:121` + `:346` / `:134` + `:382`, evaluated
  *   against the row the host binds (`usePredicateRecordContext`).
  * - `params` — `:180-183`. An array is the input list, forwarded as
  *   `actionParams`; the static values are read off `properties.params`
@@ -3222,11 +3256,22 @@ const ACTION_NODE_GUIDANCE = {
  *   hoist makes `schema.params` the same object, so an array here is the input
  *   list and an object is the static values. (A node-level object `params`
  *   outside `properties` is ignored with a development warning.)
- * - Forwarded to the runner (`:215-311`): `description`, `target`, `openIn`,
+ * - Forwarded to the runner (`:215-318`): `description`, `target`, `openIn`,
  *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `undoable`, `recordIdField`, `locations`, `toast`, `resultDialog`,
- *   `onSuccess`, `objectName`.
+ *   `onSuccess`, `objectName` — and, since objectui#11344, `outcomeMessages`.
+ *
+ * ⚠️ New at this pin, and NOT a key of this row: objectui#11344 forwards
+ * `outcomeMessages` (`:261`), the success copy per handler outcome that
+ * `ActionSchema` declares, because an `action:bar` member is spread onto an
+ * `action:button` node whole and a registered action's map would otherwise
+ * never reach the success toast. objectui leaves the input unpublished
+ * (`:422-426`) until this row declares it. So the key reaches the renderer
+ * only on that member path; written on an `action:button` node, this strict
+ * row refuses it at save. The row stays as measured from the block's own
+ * authorable reads: declaring the key is a contract decision, not a pin
+ * re-measure.
  *
  * NOT declared, though forwarded: `endpoint`. Both console runtimes register
  * their own `api` handler, which reads `action.target || action.name` and
@@ -3235,12 +3280,12 @@ const ACTION_NODE_GUIDANCE = {
  * `target` (`ACTION_NODE_ALIASES` above) — one concept, one spelling, one
  * verdict on the action and on the block that runs it.
  *
- * The registration's `inputs` (`:414-559`) publish twenty-seven of the
+ * The registration's `inputs` (`:427-572`) publish twenty-seven of the
  * twenty-nine keys the renderer forwards or reads since objectui#11168 slice 1
  * (at `db11afd49` they published seven, `:395-416`), and since slice 2 the
  * `size` input publishes the same five values this row declares (`default`,
  * `sm`, `md`, `lg`, `icon`); the two left unpublished are `endpoint` (refused
- * here, above) and `undoable`, each still forwarded (`:215-311`), on
+ * here, above) and `undoable`, each still forwarded (`:215-318`), on
  * objectui's measurement that the console's own `api` handler reads `target`
  * and never `endpoint`, and that the runner offers Undo only with a host row
  * stash this block never writes. It also publishes `className`, which is read
@@ -3312,23 +3357,27 @@ export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
  *
  * - `size` is NOT read — `:120` pins the primitive's `icon` size — so it is
  *   not declared (the registration does not publish it either).
- * - `undoable` and `recordIdField` are NOT forwarded (`:147-209` lists the
+ * - `undoable` and `recordIdField` are NOT forwarded (`:147-212` lists the
  *   rest of `action:button`'s forward and not these two), so not declared.
  * - `label` is read five times at this pin (four at `db11afd49`):
  *   `:109` (the visibility-diagnostic label, `schema.name ?? schema.label`,
  *   new with objectui#11212's fail-closed `visible`), `:165` (forwarded),
- *   `:278` (`aria-label`, falling back to `name`), `:287` (its first letter
- *   when no icon resolves) and `:293` / `:299` (the tooltip). `description`
- *   is the tooltip's fallback (`:299`) as well as forwarded (`:166`).
- * - `visible` / `disabled` — `:107` + `:242` / `:115` + `:271`; `visible`
+ *   `:281` (`aria-label`, falling back to `name`), `:290` (its first letter
+ *   when no icon resolves) and `:296` / `:302` (the tooltip). `description`
+ *   is the tooltip's fallback (`:302`) as well as forwarded (`:166`).
+ * - `visible` / `disabled` — `:107` + `:245` / `:115` + `:274`; `visible`
  *   fails CLOSED on a faulting predicate since objectui#11212, as on
  *   `action:button`. `variant` — `:119`, `primary` mapped to `default`,
  *   renderer default `ghost`.
  * - `params` — `:143-146`, routed exactly as on `action:button`.
- * - Forwarded (`:160-208`): `actionType`, `name`, `target`, `openIn`,
+ * - Forwarded (`:160-211`): `actionType`, `name`, `target`, `openIn`,
  *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `locations`, `toast`, `resultDialog`, `onSuccess`, `objectName`.
+ * - `outcomeMessages` is forwarded too since objectui#11344 (`:189`) and NOT
+ *   declared, for `action:button`'s reason: it is an `ActionSchema` key that
+ *   reaches this renderer on the `action:bar` member path, and objectui
+ *   leaves its input unpublished until the row declares it.
  * - `endpoint` is forwarded too and NOT declared, for `action:button`'s
  *   reason: no console `api` handler reads it. Refused with `ActionSchema`'s
  *   rename onto `target`, through the same `ACTION_NODE_ALIASES` (#21005).
@@ -3424,23 +3473,23 @@ const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
  * - `actions` — `:303`, then filtered by `location` through `actionRendersAt`
  *   (`:304`); members are read at `:114-171` (inline), `:205-243` (dropdown),
  *   both through the shared `useMemberVisible` for `visible` (`:81-86`), and
- *   forwarded at `:329-379` (static values `:329-335`, `objectName`
- *   `:378`).
- * - `display` — `:401`, `inline` unless it is `dropdown`.
- * - `label` / `icon` — `:421` / `:405`: the DROPDOWN trigger's text (default
+ *   forwarded at `:329-382` (static values `:329-335`, `objectName`
+ *   `:381`; the member's `outcomeMessages` too since objectui#11344).
+ * - `display` — `:404`, `inline` unless it is `dropdown`.
+ * - `label` / `icon` — `:424` / `:408`: the DROPDOWN trigger's text (default
  *   `Actions`) and icon. Inline mode renders neither.
- * - `variant` — `:411` (dropdown trigger) and `:453` (each inline member's
+ * - `variant` — `:414` (dropdown trigger) and `:456` (each inline member's
  *   fallback); no `primary` mapping at group level, so the primitive's six.
- * - `size` — `:412` maps `md` → `default` for the dropdown trigger, but `:454`
+ * - `size` — `:415` maps `md` → `default` for the dropdown trigger, but `:457`
  *   hands the group size to each inline member raw, and `:124` maps only a
  *   member's OWN `md`. So `md` renders only in dropdown mode, and in the
  *   default inline mode reaches the Button primitive, which has no `md`.
  *   Declared: the primitive's four sizes. (Since objectui#11168 the
- *   registration publishes those same four, `:484-525`; through `db11afd49`
+ *   registration publishes those same four, `:487-528`; through `db11afd49`
  *   it published `sm` / `md` / `lg`. A stored `md` is still mapped in
  *   dropdown mode only, which objectui records as a back-compat read.)
- * - `visible` — `:290` + `:398`; `:290` fails CLOSED on a faulting predicate
- *   since objectui#11212. `:398` tests the raw value's truthiness, so a
+ * - `visible` — `:290` + `:401`; `:290` fails CLOSED on a faulting predicate
+ *   since objectui#11212. `:401` tests the raw value's truthiness, so a
  *   literal `false` is honoured by `SchemaRenderer`'s node gate, which also
  *   evaluates the hoisted value, rather than by this check.
  *
@@ -3448,7 +3497,7 @@ const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
  * consume the host's EVALUATED `disabled` verdict by name (`:274`), the one
  * `SchemaRenderer`'s generic enablement gate computes from a hoisted
  * `disabled` on any node, and apply it to every inline member (`:159`) or to
- * the dropdown trigger (`:415`). So a `properties.disabled` on this block now
+ * the dropdown trigger (`:418`). So a `properties.disabled` on this block now
  * greys it out at render while this strict row refuses the key at save. The
  * row stays as measured from the block's own reads: declaring the key is a
  * contract decision, not a pin re-measure.
@@ -3503,23 +3552,24 @@ export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
  * (`components/src/renderers/action/action-menu.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:339`; members are read at `:80`, `:108-147` and `:405`, run
- *   through `ActionAutoTrigger` (`:360-367`), and forwarded at `:264-325`
- *   (static values `:264-270`, `objectName` `:324`).
- * - `label` — `:386` (`aria-label`, default: the translated "More actions")
- *   and `:395-396` (trigger text; icon-only when omitted).
+ * - `actions` — `:342`; members are read at `:80`, `:108-147` and `:408`, run
+ *   through `ActionAutoTrigger` (`:363-370`), and forwarded at `:264-328`
+ *   (static values `:264-270`, `objectName` `:327`; the member's
+ *   `outcomeMessages` too since objectui#11344).
+ * - `label` — `:389` (`aria-label`, default: the translated "More actions")
+ *   and `:398-399` (trigger text; icon-only when omitted).
  * - `icon` — `:240`, default the `MoreHorizontal` glyph.
  * - `variant` / `size` — `:241` / `:242`, handed to the Button primitive
  *   unmapped (defaults `ghost` / `icon`): no `primary`, no `md` here.
- * - `visible` — `:235` + `:333`, fail-closed; the same truthiness note as
+ * - `visible` — `:235` + `:336`, fail-closed; the same truthiness note as
  *   `action:group`'s applies to a literal `false`.
  *
- * The registration's `inputs` (`:432-460`) publish `label`, `icon`,
+ * The registration's `inputs` (`:435-463`) publish `label`, `icon`,
  * `actions`, `variant`, `size`, `visible` and `className` since objectui#11168
  * slice 1, every key this row declares; through `db11afd49` (`:410-419`
  * there) `size` and `visible` were read and unpublished. ⚠️ As on
  * `action:group`, objectui#11182 has the trigger consume the host's evaluated
- * `disabled` verdict (`:219`, `:385`) — at `db11afd49` it already reached the
+ * `disabled` verdict (`:219`, `:388`) — at `db11afd49` it already reached the
  * trigger through the `...rest` spread — so a `properties.disabled` here greys
  * the trigger out while this row refuses it; recorded, not declared.
  */
