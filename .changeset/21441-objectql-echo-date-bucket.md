@@ -6,7 +6,7 @@
 
 fix(service-analytics): the ObjectQL face echoes a date-bucketed dimension in the bucket expression the driver itself groups by, so SQLite runs the statement it prints
 
-Clause-②: no
+Clause-②: yes (widening)
 
 **Before**, the ObjectQL strategy printed every date-bucketed dimension as `date_trunc('<granularity>', col)` in the `sql` it echoes and in the `POST /analytics/sql` body, on every dialect. The native strategy declines a granularity, so every bucketed query lands on this face. Measured through `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` in the default composition: the rows were right. On SQLite the echo failed with `no such function: date_trunc` (month, quarter and week). On PostgreSQL 16.14 it ran but answered `2026-01-01T00:00:00.000Z` where the face answers `2026-01`. The driver groups by `strftime('%Y-%m', …)` on SQLite and `to_char((…)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')` on PostgreSQL.
 
