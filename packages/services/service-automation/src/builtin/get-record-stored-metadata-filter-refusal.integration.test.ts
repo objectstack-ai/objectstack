@@ -21,7 +21,9 @@
  *  - nothing downstream runs: the record the flow would write is absent;
  *  - the failure carries the data door's code for the same filter, judged
  *    against the door's own answer (the control), as a flow reads it on
- *    `{$error.code}` inside a `try_catch` catch region.
+ *    `{$error.code}` inside a `try_catch` catch region;
+ *  - the failure is a guard failure: a `fault` edge on the node does not
+ *    route it.
  *
  * The filter the node judges is the INTERPOLATED one, the filter the engine
  * would run: a `{token}` that resolves to a whole condition list is refused
@@ -282,6 +284,7 @@ describe("flow get_record refuses a filter that evaluates the stored-metadata fa
     const shapes: Array<[string, Filter]> = [
       ['the parent-hash column', { previous_checksum: OTHER_HASH }],
       ['the hash column', { checksum: STORED_HASH }],
+      ['the change-note column, which can quote a hash', { change_note: { $contains: 'sha256' } }],
       ['a comparand reading the body column', { name: { $ne: { $field: 'metadata' } } }],
     ];
     for (const [label, filter] of shapes) {
@@ -291,6 +294,19 @@ describe("flow get_record refuses a filter that evaluates the stored-metadata fa
       expect(await refusalCodeAsAFlowReadsIt('sys_metadata_history', 'system', filter), label)
         .toEqual({ error: control.code, caught: control.code });
     }
+  });
+
+  it('the refusal is a guard failure: a fault edge on the node does not route it', async () => {
+    const def = readThenCopyFlow(`faulted_${seq++}`, 'sys_metadata', 'system', 'one', { checksum: STORED_HASH });
+    def.nodes.splice(3, 0, { id: 'handler', type: 'pin_capture_error', label: 'Handler' } as any);
+    def.edges.push(
+      { id: 'e_fault', source: 'read', target: 'handler', type: 'fault' } as any,
+      { id: 'e4', source: 'handler', target: 'end' },
+    );
+    captured.length = 0;
+    const run = await runWatched(def);
+    expectRefusedRun(run, 'a refused read with a fault edge');
+    expect(captured, 'the fault handler ran').toHaveLength(0);
   });
 
   for (const runAs of ['system', 'user'] as const) {
