@@ -151,6 +151,14 @@ Your entire business logic lives in:
 
 The Kernel simply **interprets** these definitions.
 
+In the enterprise-AI vocabulary, the ontology is the software. The ontology core is
+objects, relations, actions, permissions, flows, and agent and tool definitions; views,
+dashboards, apps, and translations are projections of it, not ontology. The ontology is
+executable, so it is validated rather than reasoned over — there is no inheritance, no
+axioms and no reasoner — and code does not disappear, it moves into the runtime (hooks,
+action bodies, CEL, constrained JSX). See
+[Business Ontology](/docs/getting-started/glossary#business-ontology).
+
 ### 4. The Tool Surface is Generated
 
 **Traditional:** Every AI tool is manually described and wired to custom queries  
