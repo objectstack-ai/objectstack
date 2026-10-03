@@ -54,9 +54,15 @@
  *    form of one row.
  * 3. **Serve what a WRITE verb RETURNS** ({@link serveStoredMetadataWriteReturn}):
  *    a write whose return carries the family's body or hash is served the same
- *    projected / keyed way a read is, since a returned row is a serve. Whether a
- *    body may write the family AT ALL is the write boundary (#21520), not this
- *    seam: the write itself passes through, only its RETURN is served.
+ *    projected / keyed way a read is, since a returned row is a serve. That
+ *    serve is for the contexts that may still write here (a host code
+ *    handler's `ctx.api`).
+ * 4. **Refuse a BODY's write** ({@link refuseStoredMetadataBodyWrites}, #21520):
+ *    a sandboxed hook or action body may not write the family's tables at all —
+ *    the metadata protocol is their only writer for an app-authored body — so
+ *    the API a body holds refuses every family-table write before it runs. A
+ *    separate layer, applied only where a body gets its API, because the served
+ *    repository is also a host handler's, and the boundary refuses bodies only.
  *
  * ## What it does not do
  *
@@ -68,6 +74,7 @@
  */
 
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import { storedMetadataBodyWriteRefusal } from './stored-metadata-body-boundary.js';
 import { isFilterAST, parseFilterAST, resolveSearchFieldResolution } from '@objectstack/spec/data';
 import { collectConditionFields } from '@objectstack/plugin-security';
 import {
@@ -248,8 +255,8 @@ export async function serveStoredMetadataRead<A>(
  * served — a returned row carrying the family's body or hash is a serve too.
  * A write whose return is a number (an affected-row count), `null`, or carries
  * no family column passes through by reference. ⛔ This serves the RETURN only;
- * it neither permits nor refuses the write, which is the write boundary's
- * question (#21520).
+ * it neither permits nor refuses the write: a body's write never gets here
+ * (the body layer, {@link refuseStoredMetadataBodyWrites}, refuses it first).
  */
 async function serveStoredMetadataWriteReturn<A>(object: string, answer: A, engine: unknown): Promise<A> {
   if (!isStoredMetadataBodyObject(object)) return answer;
@@ -296,13 +303,14 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
         };
       }
       if (WRITE_RETURN_VERBS.has(prop)) {
-        // [#21454] Serve what the write RETURNS. Measured on `main` (pre-#21520):
-        // an elevated body's family-table write is NOT refused — it runs and
-        // returns the stored row — so this serve carries real family content.
-        // [#21520, option A] The write-verb REFUSAL (an elevated body may not
-        // write a family table at all) attaches HERE, on these same verbs, as a
-        // throw BEFORE `value.apply` — it needs no reshaping of this branch. This
-        // seam serves the return and leaves that policy to #21520.
+        // [#21454] Serve what the write RETURNS — for the contexts that may
+        // still write here: a host code handler's `ctx.api` (deployer code, the
+        // same trust as platform code). A sandboxed BODY never reaches this
+        // branch for a family table: its API carries the body layer
+        // ({@link refuseStoredMetadataBodyWrites}, #21520), which refuses the
+        // write before it gets here. The refusal is not attached HERE because
+        // this repository is also a host handler's, and the boundary refuses
+        // bodies only.
         return async (...args: unknown[]) =>
           serveStoredMetadataWriteReturn(objectName, await value.apply(target, args), engine);
       }
@@ -328,17 +336,84 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
  * A value that is not an object is returned as is.
  */
 export function serveStoredMetadataReadsThrough<T>(api: T, engine: unknown): T {
+  return deriveThroughSeam(api, SERVED_THROUGH_SEAM, (name, repo) => serveRepository(name, repo, engine));
+}
+
+/** Marks a scoped context whose family-table writes are already refused for a body. */
+const BODY_WRITES_REFUSED = Symbol.for('objectstack.runtime.storedMetadataBodyWritesRefused');
+
+/** The repository verbs a body may still call on a family table: the reads this seam serves. */
+const BODY_FAMILY_READS: ReadonlySet<PropertyKey> = new Set([...ROW_SERVING_READS, COUNT_READ]);
+
+/**
+ * A family table's repository as a sandboxed BODY holds it: the served reads
+ * pass through, and every other verb — each write alias, and anything not
+ * known to be a read — is refused before it runs, with the boundary's
+ * `PERMISSION_DENIED` / 403 and the metadata-API prescription
+ * ({@link storedMetadataBodyWriteRefusal}). Fail-closed by construction: a verb
+ * added to the repository later is refused here until it is named a read.
+ * Refused before the underlying verb is called, so a refused write changes
+ * nothing and answers the same whatever its payload or predicate names. Any
+ * other object's repository is returned untouched.
+ */
+function refuseBodyRepositoryWrites(objectName: string, repo: unknown): unknown {
+  if (!isStoredMetadataBodyObject(objectName) || repo === null || typeof repo !== 'object') return repo;
+  return new Proxy(repo as Record<PropertyKey, unknown>, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== 'function') return value;
+      if (BODY_FAMILY_READS.has(prop)) return value.bind(target);
+      return async () => {
+        throw storedMetadataBodyWriteRefusal(objectName, String(prop));
+      };
+    },
+  });
+}
+
+/**
+ * [#21520, ruling A] The scoped API a sandboxed BODY (a hook body or an action
+ * body) holds, with every write of a stored-metadata family table refused: for
+ * an app-authored body, the metadata protocol is the family's only writer.
+ * Reads are untouched here — they are served by
+ * {@link serveStoredMetadataReadsThrough}, which this layers over — and every
+ * other object writes as before.
+ *
+ * Applied at ONE place, the sandbox's `buildSandboxApi`, which only the two body
+ * runners reach. It is a separate layer rather than a branch of the served
+ * repository because that repository is also a host code handler's `ctx.api`,
+ * and the boundary refuses bodies only: the platform's own writers and the
+ * deployer's host code reach the store through their own imports. Every
+ * context the API derives is refused the same way (the same walk as the read
+ * seam). Idempotent, and transparent to the read seam's own marker, so a body
+ * API served at the action door is still served exactly once.
+ */
+export function refuseStoredMetadataBodyWrites<T>(api: T): T {
+  return deriveThroughSeam(api, BODY_WRITES_REFUSED, refuseBodyRepositoryWrites);
+}
+
+/**
+ * The walk both layers share: `api`, and every context it can derive —
+ * `object(name)`, `sudo()`, `withRunAs(...)`, the context a `transaction(fn)`
+ * callback receives, and the `ctx` `beginTransaction()` returns — with each
+ * repository passed through `wrapRepository`. One definition of what a scoped
+ * API can derive, so neither layer can leave a route around it.
+ */
+function deriveThroughSeam<T>(
+  api: T,
+  marker: symbol,
+  wrapRepository: (name: string, repo: unknown) => unknown,
+): T {
   if (api === null || typeof api !== 'object') return api;
-  if ((api as Record<PropertyKey, unknown>)[SERVED_THROUGH_SEAM] === true) return api;
-  const wrap = (derived: unknown) => serveStoredMetadataReadsThrough(derived, engine);
+  if ((api as Record<PropertyKey, unknown>)[marker] === true) return api;
+  const wrap = (derived: unknown) => deriveThroughSeam(derived, marker, wrapRepository);
   return new Proxy(api as unknown as Record<PropertyKey, unknown>, {
     get(target, prop) {
-      if (prop === SERVED_THROUGH_SEAM) return true;
+      if (prop === marker) return true;
       const value = Reflect.get(target, prop, target);
       if (typeof value !== 'function') return value;
       switch (prop) {
         case 'object':
-          return (name: string, ...rest: unknown[]) => serveRepository(name, value.call(target, name, ...rest), engine);
+          return (name: string, ...rest: unknown[]) => wrapRepository(name, value.call(target, name, ...rest));
         case 'sudo':
         case 'withRunAs':
           return (...args: unknown[]) => wrap(value.apply(target, args));

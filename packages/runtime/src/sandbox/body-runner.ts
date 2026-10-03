@@ -57,7 +57,7 @@ import {
   resolveRecordTitle,
   resolveRelatedTitleTarget,
 } from '@objectstack/objectql';
-import { serveStoredMetadataReadsThrough } from '../stored-metadata-reader-seam.js';
+import { refuseStoredMetadataBodyWrites, serveStoredMetadataReadsThrough } from '../stored-metadata-reader-seam.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import {
   isWildcardHookTarget,
@@ -832,9 +832,17 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
  * place both body faces get their API, so the hook face, the action face and
  * every fallback below are served alike, and a body can copy only what it was
  * served.
+ *
+ * [#21520] And, layered over that, a body may not WRITE a stored-metadata table
+ * at all: every write of one is refused before it runs, whatever the body's
+ * elevation. Applied HERE and nowhere else because this is the one place a
+ * body gets its API — a host code handler's `ctx.api` is served by the read
+ * seam but keeps its writes (deployer code, outside the boundary).
  */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
-  return serveStoredMetadataReadsThrough(buildSandboxApiSource(engineCtx, ql, errLabel), ql);
+  return refuseStoredMetadataBodyWrites(
+    serveStoredMetadataReadsThrough(buildSandboxApiSource(engineCtx, ql, errLabel), ql),
+  );
 }
 
 function buildSandboxApiSource(engineCtx: any, ql: any, errLabel: string) {
