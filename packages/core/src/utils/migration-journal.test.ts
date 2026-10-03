@@ -599,7 +599,11 @@ describe('a resume compares what the run started over, not what load() returns n
     expect(await chunkEvents(restarted, runId, 'compensated')).toEqual([1]);
     const failure = (await readRunJournal(asEngine(restarted), runId)).at(-1)!;
     expect(failure).toMatchObject({ kind: 'run_failed', chunk_index: 0 });
-    expect(JSON.parse(failure.detail!)).toMatchObject({ phase: 'compensate', step: 'shrinking' });
+    const detail = JSON.parse(failure.detail!);
+    expect(detail).toMatchObject({ phase: 'compensate', step: 'shrinking' });
+    // A halt that says why — not a compensate() that was handed no rows and threw.
+    expect(detail).toHaveProperty('reason');
+    expect(detail).not.toHaveProperty('error');
   });
 });
 

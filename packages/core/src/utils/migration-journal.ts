@@ -610,7 +610,7 @@ function planResumedRun(
  * step's preflight fails; the plan declares `onCrash: 'compensate'` but some
  * step cannot compensate; or a resume's plan disagrees with what its run
  * started over — its hash, or rows that bind to that chunk plan under neither
- * reading `planResumedRun` accepts.
+ * reading {@link MigrationPlanStep.load} documents.
  */
 export async function runMigrationJournal(
   engine: IObjectQLEngine,
