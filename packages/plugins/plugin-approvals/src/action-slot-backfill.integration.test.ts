@@ -8,9 +8,12 @@
  * the person who decided. The writers now put the person in `actor_id` and the
  * slot in `acted_as`, and every slot reader reads `acted_as` with no fallback.
  * Rows written before that are moved by `backfillActionSlots`, wired on
- * `kernel:ready`. This pins what it moves, what it leaves alone, that it is
- * idempotent, and — end to end — that an in-flight multi-approver tally still
- * counts the votes it had already collected.
+ * `kernel:ready`. The same column also held the two machine sweeps' sentinels
+ * (`system:sla`, `system:dead-run`); a machine now records null (ADR-0118 D1),
+ * and the same pass nulls the stored ones. This pins what it moves, what it
+ * clears, what it leaves alone, that it is idempotent, and — end to end — that
+ * an in-flight multi-approver tally still counts the votes it had already
+ * collected.
  *
  * ## Why this file boots the real engine
  *
@@ -27,8 +30,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
-import { ApprovalService, SLA_ACTOR_ID, DEAD_RUN_ACTOR_ID } from './approval-service.js';
-import { backfillActionSlots, RESERVED_MACHINE_ACTORS } from './action-slot-backfill.js';
+import { ApprovalService, SLA_ACTOR_ID } from './approval-service.js';
+import { backfillActionSlots, LEGACY_MACHINE_SENTINELS } from './action-slot-backfill.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -86,11 +89,14 @@ describe('the boot-time action-slot backfill (#21411)', () => {
     await engine.insert('crm_deal', { id: 'D1', title: 'Deal' }, { context: SYSTEM } as any);
   });
 
-  it('the reserved machine actors it leaves alone are the service\'s own sentinels', () => {
-    expect([...RESERVED_MACHINE_ACTORS].sort()).toEqual([SLA_ACTOR_ID, DEAD_RUN_ACTOR_ID].sort());
+  /** The value the dead-run sweep stored in `actor_id` before it recorded null. */
+  const DEAD_RUN_SENTINEL = 'system:dead-run';
+
+  it('the sentinels it clears are the two the machine sweeps stored — the SLA one is still the sweep\'s acting identity', () => {
+    expect([...LEGACY_MACHINE_SENTINELS].sort()).toEqual([SLA_ACTOR_ID, DEAD_RUN_SENTINEL].sort());
   });
 
-  it('moves slot literals out of actor_id, stamps the votes a pending tally counts, leaves everything else — and a second run writes nothing', async () => {
+  it('moves slot literals out of actor_id, nulls the machine sentinels, stamps the votes a pending tally counts, leaves everything else — and a second run writes nothing', async () => {
     // A request still collecting votes, opened by the real service: unanimous
     // over a position nobody holds (a literal slot) and two user-id slots.
     const open = await svc.openNodeRequest({
@@ -103,6 +109,10 @@ describe('the boot-time action-slot backfill (#21411)', () => {
     // and the slate the old tally then left.
     await legacy('aact_vote_literal', open.id, 'approve', 'position:finance');
     await legacy('aact_vote_user', open.id, 'approve', 'u9');
+    // A sentinel row on the still-pending request, in the very shape pass 2
+    // stamps (an approve at step 0): it took no slot, so it is cleared and
+    // never stamped as a vote.
+    await legacy('aact_sla_vote', open.id, 'approve', SLA_ACTOR_ID);
     await engine.update('sys_approval_request', { id: open.id, pending_approvers: 'u8' }, { context: SYSTEM } as any);
 
     // A finished request's history.
@@ -116,7 +126,7 @@ describe('the boot-time action-slot backfill (#21411)', () => {
     await legacy('aact_role', done, 'comment', 'role:finance');
     await legacy('aact_user_done', done, 'approve', 'u7');
     await legacy('aact_sla', done, 'escalate', SLA_ACTOR_ID);
-    await legacy('aact_dead', done, 'recall', DEAD_RUN_ACTOR_ID);
+    await legacy('aact_dead', done, 'recall', DEAD_RUN_SENTINEL);
     await legacy('aact_system', done, 'ooo_substitute', null);
     // A row the NEW writer wrote: already two facts.
     await engine.insert('sys_approval_action', {
@@ -125,9 +135,9 @@ describe('the boot-time action-slot backfill (#21411)', () => {
     }, { context: SYSTEM } as any);
 
     const first = await backfillActionSlots(engine as any, { pageSize: 2 });
-    // Pass 1 moved three literals (two finished, one pending); pass 2 stamped
-    // the one user-id vote still being counted.
-    expect(first).toEqual({ literalsMoved: 3, votesStamped: 1 });
+    // Pass 1 moved three literals (two finished, one pending) and nulled three
+    // sentinels; pass 2 stamped the one user-id vote still being counted.
+    expect(first).toEqual({ literalsMoved: 3, sentinelsCleared: 3, votesStamped: 1 });
 
     // Slot literals: the slot moves to acted_as, the person is unknown — null.
     expect(await recorded('aact_vote_literal')).toEqual([null, 'position:finance']);
@@ -138,14 +148,23 @@ describe('the boot-time action-slot backfill (#21411)', () => {
     // A finished request's user-id row: no guessed slot (it might be an
     // override that predates via_override). Found by its person instead.
     expect(await recorded('aact_user_done')).toEqual(['u7', null]);
-    // The machine sentinels, the system row and the new row: untouched.
-    expect(await recorded('aact_sla')).toEqual([SLA_ACTOR_ID, null]);
-    expect(await recorded('aact_dead')).toEqual([DEAD_RUN_ACTOR_ID, null]);
+    // The machine sentinels: null, and no slot — the sweep took none.
+    expect(await recorded('aact_sla')).toEqual([null, null]);
+    expect(await recorded('aact_dead')).toEqual([null, null]);
+    expect(await recorded('aact_sla_vote')).toEqual([null, null]);
+    // Their kind and comment are what say a sweep acted, and stay as stored.
+    expect((await action('aact_dead'))?.action).toBe('recall');
+    // The system row and the new row: untouched.
     expect(await recorded('aact_system')).toEqual([null, null]);
     expect(await recorded('aact_new')).toEqual(['u5', 'position:legal']);
+    // No sentinel is left anywhere in the lookup.
+    const leftover = (await engine.find('sys_approval_action', {
+      where: { actor_id: { $in: [...LEGACY_MACHINE_SENTINELS] } }, context: SYSTEM,
+    } satisfies EngineQueryOptions)) as any[];
+    expect(leftover).toEqual([]);
 
     // Idempotent: nothing left that either predicate matches.
-    expect(await backfillActionSlots(engine as any, { pageSize: 2 })).toEqual({ literalsMoved: 0, votesStamped: 0 });
+    expect(await backfillActionSlots(engine as any, { pageSize: 2 })).toEqual({ literalsMoved: 0, sentinelsCleared: 0, votesStamped: 0 });
 
     // ⭐ End to end: the last slot holder's approval finalizes the request,
     // because the tally counts the two votes the old writer recorded.

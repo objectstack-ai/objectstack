@@ -164,22 +164,18 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
   'action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: \':\' }': {
     count: 1,
     role: 'migration',
-    why: 'the boot-time repair finds rows whose actor_id still holds a type:value slot literal — a shape scan, no identity',
+    why: 'the boot-time repair finds rows whose actor_id still holds a non-id — a type:value slot literal or a stored '
+      + 'machine sentinel — a shape scan, no identity',
   },
   "action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: '@' }": {
     count: 1,
     role: 'migration',
     why: 'the same scan, for an email slot left in actor_id',
   },
-  'action-slot-backfill.ts · backfillActionSlots · actor_id: { $nin: [...RESERVED_MACHINE_ACTORS] }': {
-    count: 1,
-    role: 'migration',
-    why: 'the same scan leaves the reserved machine sentinels alone',
-  },
   'action-slot-backfill.ts · backfillActionSlots · row.actor_id': {
     count: 2,
     role: 'migration',
-    why: 'the value the repair moves to acted_as (pass 1) or copies there (pass 2)',
+    why: 'the value the repair moves to acted_as or clears (pass 1), or copies to acted_as (pass 2)',
   },
 };
 const PREDICATE_NAMES = new Set(['where', 'filter']);

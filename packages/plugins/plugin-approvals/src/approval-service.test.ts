@@ -1681,15 +1681,19 @@ describe('ApprovalService (node era)', () => {
     expect(emitted.map(e => e.topic)).toEqual(['approval.sla_breached', 'approval.sla_breached']);
     expect(emitted[0].audience).toEqual(['u9', 'boss']);
     expect(emitted[1].audience).toEqual(['u1']); // submitter
+    // ADR-0118 D1: the sweep is no user, so neither the row nor the
+    // notifications name an actor. The row's KIND says the SLA acted.
+    expect(emitted.every(e => !('actorId' in e))).toBe(true);
     const actions = await svc.listActions(req.id, SYS);
-    expect(actions.at(-1)).toMatchObject({ action: 'escalate', actor_id: 'system:sla', comment: 'notify → boss' });
+    expect(actions.at(-1)).toMatchObject({ action: 'escalate', comment: 'notify → boss' });
+    expect(actions.at(-1)?.actor_id).toBeUndefined();
     // Single-shot: second sweep is a no-op.
     const second = await svc.runEscalations();
     expect(second.escalated).toBe(0);
     expect(emitted).toHaveLength(2);
   });
 
-  it('runEscalations: auto_approve decides as system:sla and resumes the flow', async () => {
+  it('runEscalations: auto_approve decides as the SLA sweep, records no person, and resumes the flow', async () => {
     const resumed: any[] = [];
     svc.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
     const req = await svc.openNodeRequest(
@@ -1703,10 +1707,13 @@ describe('ApprovalService (node era)', () => {
     expect(resumed[0]).toMatchObject({ runId: 'run_1', signal: { branchLabel: 'approve' } });
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.map(a => a.action)).toEqual(['submit', 'escalate', 'approve']);
-    expect(actions.at(-1)?.actor_id).toBe('system:sla');
+    // The escalate row right before it names the policy that decided; the
+    // decision itself records no person (ADR-0118 D1).
+    expect(actions[1]?.comment).toBe('auto_approve');
+    expect(actions.slice(1).map(a => a.actor_id)).toEqual([undefined, undefined]);
   });
 
-  it('runEscalations: auto_reject decides as system:sla', async () => {
+  it('runEscalations: auto_reject decides as the SLA sweep', async () => {
     const req = await svc.openNodeRequest(
       openInput(['u9'], {}, { escalation: { timeoutHours: 1, action: 'auto_reject', notifySubmitter: false } }), CTX,
     );
@@ -2560,9 +2567,12 @@ describe('ApprovalService — dead-run release (#3456)', () => {
   it('audits the release as a dead-run abandonment, not a submitter recall', async () => {
     withRunStatus('failed');
     await svc.releaseDeadRunRequests();
-    const action = engine._tables['sys_approval_action'].find((a: any) => a.actor_id === 'system:dead-run');
+    const action = engine._tables['sys_approval_action'].find((a: any) => a.action === 'recall');
     expect(action).toBeTruthy();
-    expect(action.action).toBe('recall');
+    // ADR-0118 D1: a sweep is no user — no person, never a sentinel. What sets
+    // it apart from a submitter's recall (which records the submitter) is that
+    // it records nobody and names the dead run and its status.
+    expect(action.actor_id).toBeNull();
     expect(action.comment).toMatch(/run_1/);
     expect(action.comment).toMatch(/failed/);
   });
@@ -4038,7 +4048,7 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
     expect([...recorded(act), act.via_override]).toEqual(['root', null, true]);
   });
 
-  it('a system context that vouches for nobody records nobody; the SLA sweep keeps its reserved sentinel', async () => {
+  it('a system context that vouches for nobody records nobody — the SLA sweep\'s acting identity included', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
     const named = await open(svc, [{ type: 'user', value: 'u9' }]);
@@ -4046,9 +4056,11 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
     // The slot test still runs on the named address; the PERSON is the context's.
     expect(recorded(actionsOf(engine, named.id, 'approve')[0])).toEqual([null, 'u9']);
 
+    // ADR-0118 D1: the sweep's acting identity admits the call and is never
+    // recorded — a machine has no `sys_user` id, so the lookup holds null.
     const sla = await open(svc, [{ type: 'user', value: 'u9' }]);
     await svc.decideNode(sla.id, { decision: 'approve', actorId: SLA_ACTOR_ID }, SYS);
-    expect(recorded(actionsOf(engine, sla.id, 'approve')[0])).toEqual([SLA_ACTOR_ID, null]);
+    expect(recorded(actionsOf(engine, sla.id, 'approve')[0])).toEqual([null, null]);
   });
 
   it('the multi-approver tally and decision_progress count SLOTS from acted_as, never actor_id', async () => {
@@ -4381,8 +4393,8 @@ describe('status mirror identity (#3783)', () => {
     raw.created_at = new Date(baseTime - 3 * 60 * 60 * 1000).toISOString();
     await svc.runEscalations();
     expect(engine._tables['opportunity'][0].approval_status).toBe('approved');
-    // `system:sla` is a reserved audit actor, not a user — it must never be
-    // presented as one. The cascade stays user-less on purpose; a flow that
+    // The sweep's acting identity (`system:sla`) is not a user — it must never
+    // be presented as one. The cascade stays user-less on purpose; a flow that
     // wants to react to an SLA auto-decision declares runAs:'system'.
     expect(mirrorContext()?.userId).toBeUndefined();
     expect(mirrorContext()).toMatchObject({ isSystem: true });
