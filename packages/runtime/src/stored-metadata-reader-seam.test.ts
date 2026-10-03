@@ -10,7 +10,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import {
+  assertEngineFindOnePredicate,
+  assertEngineUpdateDispatch,
+  assertEngineDeleteDispatch,
+} from '@objectstack/metadata-core';
 import { ephemeralStoredHashDigest } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 
@@ -51,9 +55,11 @@ function scopedApi(seen: { fields: unknown[]; reads: number } = { fields: [], re
     async count() { seen.reads += 1; return 1; },
     async aggregate() { seen.reads += 1; return [{ type: 'datasource', metadata: storedRow().metadata, checksum: STORED_HASH, count: 1 }]; },
     // Write returns: a family row comes back from a write too, and is served.
+    // update/delete route through the engine's own dispatch predicates so this
+    // double cannot be looser than ObjectQL's (check:engine-double-contract).
     async insert(_data?: any) { return name.startsWith('sys_metadata') ? storedRow() : { id: 'n1' }; },
-    async update(_data?: any, _opts?: any) { return name.startsWith('sys_metadata') ? storedRow() : 1; },
-    async delete(_opts?: any) { return 1; },
+    async update(data?: any, opts?: any) { assertEngineUpdateDispatch(data, opts); return name.startsWith('sys_metadata') ? storedRow() : 1; },
+    async delete(opts?: any) { assertEngineDeleteDispatch(opts); return 1; },
   });
   return {
     object: repo,
