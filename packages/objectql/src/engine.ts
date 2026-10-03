@@ -3657,10 +3657,11 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private readonly actionActivation = new ActionActivationProjection();
 
-  // Function registry: name → handler. Used by `bindHooksToEngine` to
-  // resolve string-named hook handlers (the JSON-safe form). Populated by
-  // `defineStack({ functions })` via `AppPlugin`, or directly via
-  // `engine.registerFunction(...)`.
+  // Function registry: name → handler, each entry stamped with its owning
+  // package. Used by `bindHooksToEngine` to resolve string-named hook
+  // handlers (the JSON-safe form) — only against entries the hook's OWN
+  // package registered. Populated by `defineStack({ functions })` via
+  // `AppPlugin`, or directly via `engine.registerFunction(...)`.
   private functions = new Map<string, FunctionEntry>();
 
   // Realtime service for event publishing
@@ -3867,7 +3868,8 @@ export class ObjectQL implements IObjectQLEngine {
    * string from a `Hook.handler` field, an `Action.target`, or a flow
    * `script` node's `config.function`. This is the JSON-safe form of
    * handler binding — declarative metadata persisted to disk or shipped
-   * over the wire only carries the name.
+   * over the wire only carries the name. A `Hook.handler` reaches the entry
+   * only from a hook of the same `packageId` (`bindHooksToEngine`).
    *
    * The third parameter accepts either the owning `packageId` (its original
    * shape, unchanged for every existing caller) or a
