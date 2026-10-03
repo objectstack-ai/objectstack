@@ -429,8 +429,9 @@ describe('[#21454] ① a sandboxed body\'s object API (ctx.api.object)', () => {
     expect(authored.status).toBeLessThan(300);
     let res: Response | undefined;
     const bound = await waitFor(async () => {
-      res = await as(adminToken, 'POST', '/actions/pin_note/authored_reads_family', { params: {} });
-      return res.status < 300;
+      const attempt: Response = await as(adminToken, 'POST', '/actions/pin_note/authored_reads_family', { params: {} });
+      res = attempt;
+      return attempt.status < 300;
     });
     expect(bound, 'the runtime-authored action never bound').toBe(true);
     expectServedLikeTheDoor('runtime-authored body (administrator)', await readJson(res as Response));
