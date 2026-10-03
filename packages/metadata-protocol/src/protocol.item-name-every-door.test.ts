@@ -182,8 +182,21 @@ function makeStubEngine() {
             return { deleted: 1 };
         },
         async count() { return 0; },
+        // A transaction that ROLLS BACK, the property `publishPackageDrafts`'
+        // Phase 1 stands on (ADR-0067 D2): a throw restores the rows and the
+        // history it started with. The registry is not part of it — Phase 1
+        // defers every registry mutation to Phase 2 — so it is not snapshotted.
         async transaction<T>(cb: (ctx: unknown, info: { owned: boolean }) => Promise<T>): Promise<T> {
-            return cb(undefined, { owned: true });
+            const rowsAtBegin = new Map(rows);
+            const historyAtBegin = historyRows.slice();
+            try {
+                return await cb(undefined, { owned: true });
+            } catch (error) {
+                rows.clear();
+                for (const [k, r] of rowsAtBegin) rows.set(k, r);
+                historyRows.splice(0, historyRows.length, ...historyAtBegin);
+                throw error;
+            }
         },
         async syncObjectSchema() { return true; },
         async dropObjectSchema() { return true; },
