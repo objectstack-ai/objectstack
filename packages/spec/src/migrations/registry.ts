@@ -6252,6 +6252,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ui-object-master-detail-form-details-closed`.',
   },
   {
+    id: 'ui-object-metric-aggregate-trend-typed',
+    order: 68,
+    text:
+      'It also types two members of the `object-metric` page block (#21464, the fourth stage of the '
+      + '`ComponentPropsMap` `z.unknown()` close-out): `aggregate` and `trend` were `z.unknown()`, although '
+      + 'the tile reads each with one shape, so `aggregate: \'count\'` and a trend with no `value` passed '
+      + 'every door, and the tile asked the server for a measure it does not have, or painted a lone `%`. '
+      + '`aggregate` takes the chart aggregate\'s own `field` and `function` members and `groupBy` union by '
+      + 'reference, with `groupBy` optional because a metric is one number; `trend` takes the badge\'s '
+      + 'measured shape. `drillDown` and `compareTo` stay open: each by-reference candidate declares a key '
+      + 'the tile never reads (the chart drill-down\'s `filter`, the dashboard comparison\'s `dimension`), and '
+      + 'the chart drill-down refuses the `report` the tile draws, so each waits on a ruling. Read by the '
+      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'registered. Its D3 record is the semantic entry `ui-object-metric-aggregate-trend-typed`.',
+  },
+  {
     id: 'ui-record-line-items-props-closed',
     order: 57,
     text:
