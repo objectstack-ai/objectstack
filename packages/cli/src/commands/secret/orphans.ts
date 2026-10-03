@@ -279,7 +279,7 @@ export default class SecretOrphans extends Command {
       // real; its one write goes through the unwrapped driver.
       // ⛔ Only a table the boot MEASURED absent: any other refused read still
       // lands in the catch below, and an empty answer is never invented for it.
-      const reads = absentTableReads(stack);
+      const reads = absentTableReads(stack, (object) => engine.getConfigs()[object]);
       const rawSecrets: Record<string, unknown>[] = reads.absent('sys_secret')
         ? []
         : await secretDriver.find('sys_secret', {});

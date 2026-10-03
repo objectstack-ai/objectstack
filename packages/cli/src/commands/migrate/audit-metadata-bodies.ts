@@ -188,12 +188,17 @@ export default class MigrateAuditMetadataBodies extends Command {
       // a failed read and the dry run exited 1 over rows that do not exist.
       // `--apply` booted plain, so there every table exists and every read is
       // real; its writes go to the engine itself.
-      // ⛔ Only a table the boot MEASURED absent: any other refused read is
+      // ⚠️ `sys_activity` is the exception the boot cannot measure: it is
+      // rotation-managed, its base name a view over time-sharded tables, and the
+      // deferred sync lists a view as a table to create. It is read, and only
+      // the refusal of a table that is not there reads as no rows
+      // (`absentTableReads`). Believing the measurement would skip the very rows
+      // this command exists to reach.
+      // ⛔ Only a table that is MEASURED absent: any other refused read is
       // still counted in `failures` and still exits non-zero.
-      const reads = absentTableReads(stack);
+      const reads = absentTableReads(stack, (object) => engine.getObject(object));
       const readView: Pick<IObjectQLEngine, 'find' | 'findOne' | 'update'> = {
-        find: (object, query, options) =>
-          reads.absent(object) ? Promise.resolve([]) : engine.find(object, query, options),
+        find: (object, query, options) => reads.rows(object, () => engine.find(object, query, options)),
         findOne: (object, query, options) =>
           reads.absent(object) ? Promise.resolve(null) : engine.findOne(object, query, options),
         update: (object, data, options) => engine.update(object, data, options),

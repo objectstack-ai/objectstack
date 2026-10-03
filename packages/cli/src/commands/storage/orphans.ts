@@ -160,7 +160,7 @@ export default class StorageOrphans extends Command {
       // throws into the catch below and still exits 1.
       const reads = absentTableReads(stack);
       const readView: StrandedOrphanInventoryEngine = {
-        find: (object, query) => (reads.absent(object) ? Promise.resolve([]) : engine.find(object, query)),
+        find: (object, query) => reads.rows(object, () => engine.find(object, query)),
       };
       const report = await inventoryStrandedFileOrphans(readView, {
         maxCandidates: flags['max-candidates'],

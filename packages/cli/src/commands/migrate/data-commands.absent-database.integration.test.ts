@@ -346,7 +346,10 @@ describe('[#21529] the control: a booted database is read, and its work is repor
  *  - `sys_account`: a two-row table in the legacy shape, with its `issuer`
  *    column. The door's boot composes no auth plugin, so the table is made
  *    here by hand, the way a deployment that ran the auth plugin left it;
- *  - `sys_audit_log`: an old audit copy of a datasource body, in cleartext;
+ *  - `sys_audit_log` and `sys_activity`: an old audit copy of a datasource
+ *    body, in cleartext, in each. `sys_activity` is rotation-managed, so its
+ *    base name is a VIEW over a `sys_activity__r<key>` shard table, and the
+ *    boot's deferred sync lists it as a table to create all the same;
  *  - `sys_metadata`: one stored `object` row, already on protocol;
  *  - `sys_secret`: one row no producer references;
  *  - `sys_file`: one committed attachments-scope file nothing holds.
@@ -395,6 +398,18 @@ await k('sys_audit_log').insert({
   new_value: JSON.stringify({
     id: 'm_21552', name: 'ds', type: 'datasource', scope: 'platform',
     metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: 'cleartext-21552' } }),
+  }),
+});
+const shard = (await k.raw("select name from sqlite_master where type = 'table' and name glob 'sys_activity__r*'"))[0];
+if (!shard) throw new Error('the control has no sys_activity shard: the rotation did not run');
+await k(shard.name).insert({
+  id: 'act_21552', object_name: 'sys_metadata', record_id: 'm_21552', action: 'create',
+  metadata: JSON.stringify({
+    old: null,
+    new: {
+      id: 'm_21552', name: 'ds', type: 'datasource', scope: 'platform',
+      metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: 'cleartext-21552-activity' } }),
+    },
   }),
 });
 await k('sys_secret').insert({
@@ -446,6 +461,9 @@ const DOORS: readonly Door[] = [
       // copy of the control's `sys_metadata` insert is read too, and is already clean.
       expect(doc.report.byObject.sys_audit_log.scanned).toBeGreaterThanOrEqual(1);
       expect(doc.report.byObject.sys_audit_log.rewritten).toBe(1);
+      // The rotation-managed table's rows are READ, though the boot listed its base name as a
+      // table to create: skipping it would answer "nothing to rewrite" over this row.
+      expect(doc.report.byObject.sys_activity).toMatchObject({ scanned: 1, rewritten: 1 });
     },
   },
   {
