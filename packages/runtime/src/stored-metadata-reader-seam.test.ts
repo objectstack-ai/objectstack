@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ephemeralStoredHashDigest } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 
@@ -41,7 +42,10 @@ function scopedApi(seen: { fields: unknown[] } = { fields: [] }): any {
       seen.fields.push(query?.fields);
       return name.startsWith('sys_metadata') ? [storedRow()] : [{ id: 'n1', metadata: 'ordinary', checksum: STORED_HASH }];
     },
-    async findOne() { return name.startsWith('sys_metadata') ? storedRow() : null; },
+    async findOne(query?: any) {
+      assertEngineFindOnePredicate(name, query);
+      return name.startsWith('sys_metadata') ? storedRow() : null;
+    },
     async count() { return 1; },
     async aggregate() { return [{ type: 'datasource', metadata: storedRow().metadata, checksum: STORED_HASH, count: 1 }]; },
   });
