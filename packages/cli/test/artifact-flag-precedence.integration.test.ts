@@ -9,7 +9,8 @@
  * ## The defect, measured at the public door before the fix
  *
  * Two artifacts that differ in ONE served value — the label of object
- * `fx_widget` — read back through `GET /api/v1/meta/object/fx_widget`:
+ * `fx_widget` — read back through `GET /api/v1/meta/object/fx_widget`, booted
+ * through the BUILT entry (`bin/run.js`, the published CLI's shape):
  *
  *   | boot                                                        | served       |
  *   |-------------------------------------------------------------|--------------|
@@ -21,10 +22,11 @@
  *   | `OS_ARTIFACT_URL=…BRAVO os dev -a ALPHA`                    | Widget BRAVO |
  *   | `OS_ARTIFACT_PATH=ALPHA os start --artifact ./dist/…` (BRAVO) | Widget ALPHA |
  *
- * Every one of them printed `Artifact: …ALPHA.json`. The `serve` child read the
- * supervisor's answer only when the cwd held no config, and `dev` had no
- * `OS_ARTIFACT_URL` rung, so the reference stayed in the child env and the
- * child read it first.
+ * Every row but the control printed `Artifact:` naming what its flag named,
+ * and served something else. The `serve` child read the supervisor's answer
+ * only when the cwd held no config (and its config boot re-derived the artifact
+ * from the environment instead), and `dev` had no `OS_ARTIFACT_URL` rung, so the
+ * reference stayed in the child env and the child read it first.
  *
  * ## What each case pins
  *
@@ -33,8 +35,14 @@
  *   with its no-config control: all three serve the named artifact, so the
  *   config's presence changes nothing.
  * - a HOST config (its `plugins` hold an instance) composes its own app, so
- *   only the child declining to load the config at all serves the named
- *   artifact there — the case that holds `cwdConfigJoinsBoot` itself.
+ *   only the child declining to load the config at all keeps it out — the case
+ *   that holds `cwdConfigJoinsBoot` itself. Read off the boot's plugin roster:
+ *   the config's marker plugin is absent beside a named artifact, and PRESENT
+ *   when the artifact is the config's own compiled output (the marker's
+ *   positive control, and the path a host app's own `os dev` / `os start`
+ *   takes). The served label alone cannot tell these apart under the source
+ *   entry: it runs `NODE_ENV=development`, where the dev metadata door over
+ *   the supervisor's answer serves ALPHA even with the config loaded beside it.
  * - flag over env — `dev -a` under an `OS_ARTIFACT_URL` naming the other one.
  * - the documented first-project path — `start --artifact
  *   ./dist/objectstack.json` beside its config — is the one boot a config
@@ -75,8 +83,10 @@ import { defineStackSourceFromLiteral, linkSpec, writeDefineStackConfig } from '
 /** The banner's tail — every row above it has printed. */
 const READY = /Press Ctrl\+C to stop/;
 const BOOT_TIMEOUT_MS = 180_000;
-/** Seven boots, one after another, each well under its own budget when healthy. */
-const ALL_BOOTS_TIMEOUT_MS = 7 * (BOOT_TIMEOUT_MS + 30_000);
+/** Eight boots, one after another, each well under its own budget when healthy. */
+const ALL_BOOTS_TIMEOUT_MS = 8 * (BOOT_TIMEOUT_MS + 30_000);
+/** The host config's plugin — on the boot's plugin roster iff the config was loaded. */
+const HOST_MARKER = 'com.example.fx.host-marker';
 
 /** The development dev-admin seed — the operator on every boot here. */
 const EMAIL = 'admin@objectos.ai';
@@ -212,6 +222,8 @@ interface Reading {
   served?: string;
   status?: number;
   artifactRow?: string;
+  /** Everything the boot printed, supervisor and `serve` child both. */
+  output?: string;
   error?: Error;
 }
 
@@ -226,7 +238,12 @@ async function measure(argv: string[], cwd: string, env: Record<string, string |
       throw new Error(`sign-in answered ${signIn.status}: ${JSON.stringify(signIn.body)}\n--- output ---\n${live.output().slice(-3000)}`);
     }
     const meta = await http(live, 'GET', `/api/v1/meta/object/${OBJECT}`, token);
-    return { served: widgetLabel(meta.body), status: meta.status, artifactRow: artifactRow(live.output()) };
+    return {
+      served: widgetLabel(meta.body),
+      status: meta.status,
+      artifactRow: artifactRow(live.output()),
+      output: live.output(),
+    };
   } catch (err) {
     return { error: err as Error };
   } finally {
@@ -266,10 +283,10 @@ beforeAll(async () => {
       // config boot composes this module's own app instead of a standalone
       // stack over `dist/` — no artifact path handed to it can reach it.
       const literal = JSON.stringify(stack('CONFIG'), null, 2).replace(/\n}$/, `,
-  "plugins": [{ name: 'com.example.fx.host-marker', version: '1.0.0', init: async () => {}, start: async () => {} }]
+  "plugins": [{ name: '${HOST_MARKER}', version: '1.0.0', init: async () => {}, start: async () => {} }]
 }`);
       // The splice must have landed, or this fixture silently stops being a host.
-      if (!literal.includes('host-marker')) throw new Error(`host-config fixture lost its plugin:\n${literal}`);
+      if (!literal.includes(HOST_MARKER)) throw new Error(`host-config fixture lost its plugin:\n${literal}`);
       writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSourceFromLiteral(literal));
       linkSpec(dir);
     } else if (opts.config) {
@@ -297,6 +314,10 @@ beforeAll(async () => {
   readings.leg2NoDist = await measure([...startArgs(join(root, 'h-leg2-nodist')), '--artifact', alpha], configOnly);
   readings.leg2Control = await measure([...startArgs(join(root, 'h-leg2-ctl')), '--artifact', alpha], noConfig);
   readings.hostConfig = await measure([...startArgs(join(root, 'h-host')), '--artifact', alpha], hostConfig);
+  readings.hostConfigOwn = await measure(
+    [...startArgs(join(root, 'h-host-own')), '--artifact', './dist/objectstack.json'],
+    hostConfig,
+  );
   readings.flagOverEnv = await measure([...devArgs, '-a', alpha], bare, {
     OS_ARTIFACT_URL: pathToFileURL(bravo).href,
   });
@@ -336,19 +357,27 @@ describe('#21501 — the named artifact is the served stack, beside a config or 
     expect(r.artifactRow).toContain('ALPHA.json');
   });
 
-  it('leg 2 control: the same command with NO config serves ALPHA — the config changes nothing', () => {
+  it('leg 2 control: the same command with NO config serves ALPHA — what the two legs above must equal', () => {
+    // The positive control: this harness reads ALPHA when ALPHA is what boots.
+    // It asserts its own reading only, so it stays green when the fix is gone.
     const r = reading('leg2Control');
     expect(r.status).toBe(200);
     expect(r.served).toBe('Widget ALPHA');
-    expect(r.served).toBe(reading('leg2').served);
-    expect(r.served).toBe(reading('leg2NoDist').served);
+    expect(r.artifactRow).toContain('ALPHA.json');
   });
 
-  it('a HOST config: `os start --artifact ALPHA` beside one serves ALPHA, not the config\'s own app', () => {
+  it('a HOST config: `os start --artifact ALPHA` beside one serves ALPHA and never loads the config', () => {
     const r = reading('hostConfig');
     expect(r.status).toBe(200);
     expect(r.served).toBe('Widget ALPHA');
     expect(r.artifactRow).toContain('ALPHA.json');
+    expect(r.output).not.toContain(HOST_MARKER);
+  });
+
+  it('a HOST config still boots ITSELF when the artifact is its own compiled output (the marker\'s positive control)', () => {
+    const r = reading('hostConfigOwn');
+    expect(r.status).toBe(200);
+    expect(r.output).toContain(HOST_MARKER);
   });
 
   it('flag over env: `os dev -a ALPHA` under OS_ARTIFACT_URL naming BRAVO serves ALPHA', () => {
