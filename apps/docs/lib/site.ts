@@ -83,5 +83,5 @@ export const HERO_COVER = {
   url: '/hero-cover-dark.webp',
   width: 2400,
   height: 1200,
-  alt: 'ObjectStack — the metadata framework for AI-written apps',
+  alt: 'ObjectStack: the ontology is the software. One executable business ontology, written by AI, run by the runtime, operated by agents, owned by you.',
 } as const;

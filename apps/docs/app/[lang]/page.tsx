@@ -31,7 +31,7 @@ const mono = IBM_Plex_Mono({
   variable: '--font-l-mono',
 });
 
-const HOME_TITLE = 'Metadata framework for AI-written apps';
+const HOME_TITLE = 'The ontology is the software';
 const HOME_DESCRIPTION =
   'One executable business ontology. AI writes it, the runtime runs it, agents operate it, you own it. The whole app — data model, UI, workflows, permissions — is typed metadata small enough for AI to hold whole.';
 
