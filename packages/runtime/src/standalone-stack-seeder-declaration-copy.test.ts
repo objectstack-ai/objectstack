@@ -34,7 +34,7 @@
 //
 // REAL: `createStandaloneStack` and every plugin it composes (the artifact door
 // `MetadataPlugin({ artifactSource })`, `ObjectQLPlugin` with its real
-// SchemaRegistry, the real default datasource over `memory://`), the real
+// SchemaRegistry, the real default datasource over SQLite `:memory:`), the real
 // `SecurityPlugin` and `SharingServicePlugin` — so the seeders under
 // measurement are the production ones, running in their production `start()`,
 // writing through the real engine into the real `sys_*` tables. No engine
@@ -210,7 +210,7 @@ beforeAll(async () => {
   const stack = await createStandaloneStack({
     artifactPath,
     projectRoot: dir,
-    databaseUrl: 'memory://issue-14491-measure',
+    databaseUrl: ':memory:',
     skipSeedData: true,
     runPlatformMigrations: false,
   });

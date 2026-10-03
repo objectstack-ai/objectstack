@@ -61,11 +61,37 @@ describe('resolveDevDatabase — objectstack dev persists by default (#6469 unif
       .toEqual({ url: 'libsql://t', source: 'env' });
   });
 
-  it('respects an explicit in-memory driver opt-out (no file default imposed)', async () => {
-    expect(await resolveDevDatabase({ databaseDriverFlag: 'memory', env: {}, cwd }))
-      .toEqual({ url: 'memory://', source: 'memory-driver' });
-    expect(await resolveDevDatabase({ env: { OS_DATABASE_DRIVER: 'memory' }, cwd }))
-      .toEqual({ url: 'memory://', source: 'memory-driver' });
+  // The in-memory (mingo) engine is no longer a boot store, so the old
+  // "explicit in-memory opt-out" is a refusal that names the SQLite
+  // replacements. `--database-driver memory` never gets this far (the flag's
+  // allowlist is the spec's selection face; `database-driver-allowlist.pin`),
+  // so the env spelling is the dev door this seam owns.
+  it('refuses the retired in-memory driver, naming the SQLite replacements', async () => {
+    for (const opts of [
+      { databaseDriverFlag: 'memory', env: {} },
+      { env: { OS_DATABASE_DRIVER: 'memory' } },
+      { env: { OS_DATABASE_DRIVER: 'mingo' } },
+    ]) {
+      const err = await resolveDevDatabase({ ...opts, cwd }).then(() => null, (e: unknown) => e as Error);
+      expect(err, `resolveDevDatabase accepted ${JSON.stringify(opts)}`).toBeInstanceOf(Error);
+      expect(err!.message).toContain('--fresh');
+      expect(err!.message).toContain(':memory:');
+    }
+  });
+
+  // The banner finding, pinned at the seam that feeds it. Before the retirement
+  // `OS_DATABASE_DRIVER=memory os dev --fresh` resolved the fresh FILE here, so
+  // the parent printed `Database: file:…/objectstack.db` while the child served
+  // the in-memory engine — one boot naming two stores. The refusal stands ahead
+  // of the --fresh URL, so the parent stops before it prints any Database row.
+  it('refuses OS_DATABASE_DRIVER=memory even beside --fresh — no Database row for a store never opened', async () => {
+    const err = await resolveDevDatabase({
+      freshDbUrl: 'file:/tmp/x/objectstack.db',
+      env: { OS_DATABASE_DRIVER: 'memory' },
+      cwd,
+    }).then(() => null, (e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toContain('OS_DATABASE_DRIVER "memory"');
   });
 
   it('treats blank env values as unset (still defaults to the unified file)', async () => {

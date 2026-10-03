@@ -14,12 +14,22 @@
  * `DatasourceConnectionService` used for declared/runtime datasources.
  *
  * Auto-detects the appropriate driver from the database URL scheme:
- *   - `memory://*`              → InMemoryDriver
  *   - `postgres[ql]://`, `pg://` → SqlDriver (pg)
  *   - `mysql[2]://`             → SqlDriver (mysql2)
  *   - `mongodb[+srv]://`        → MongoDBDriver (optional `@objectstack/driver-mongodb`)
  *   - `libsql://`, `http(s)://*.turso.*` → TursoDriver (optional `@objectstack/driver-turso`)
- *   - `file:` / `sqlite://` (alias, #6469) / no scheme → SqlDriver (better-sqlite3)
+ *   - `file:` / `sqlite://` (alias, #6469) / no scheme → SqlDriver (better-sqlite3);
+ *     the bare `:memory:` is SQLite's own in-memory database
+ *
+ * `memory://` and `mingo://` are RECOGNISED and REFUSED: they name the
+ * in-memory (mingo) engine, which is no longer a boot store — it refuses every
+ * tenant-scoped read, so a server booted on it answered data requests with 503.
+ * The spec's driver table withdrew the engine's spellings from its selection
+ * face, and both hosts refuse the two schemes with one sentence naming the
+ * SQLite replacements ({@link retiredMemoryEngineMessage}). Recognising
+ * `mingo://` here, where it used to fall to the unsupported-scheme refusal, is
+ * what makes this host and the CLI answer it alike: the CLI's inference has
+ * always classified both schemes as the one engine.
  *
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
@@ -59,8 +69,8 @@ import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
 import { resolveArtifactCollections } from './artifact-collections.js';
 import {
-    BUILTIN_DRIVER_IDS,
     DATABASE_DRIVER_SELECTION_ALIASES,
+    DATABASE_DRIVER_SELECTION_IDS,
     driverHasLocalDefault,
     resolveDatabaseDriverId,
 } from '@objectstack/spec/data';
@@ -68,7 +78,9 @@ import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
 import {
+    namesRetiredMemoryEngine,
     resolveProjectDatabaseUrl,
+    retiredMemoryEngineMessage,
     type ProjectDatabaseUrlSource,
 } from './resolve-project-database.js';
 
@@ -111,13 +123,23 @@ export function resolveObjectStackHome(): string {
  * `libsql`, `wasm`, `sql`, `mingo`, … — measured on `main`, **10 of 21 spellings
  * disagreed**, so `OS_DATABASE_DRIVER=pg` booted under `os start` and was
  * refused here. The enum's VALUES are therefore no longer written here either:
- * they are `BUILTIN_DRIVER_IDS` from `@objectstack/spec`, the one driver
- * vocabulary both hosts read, and the accepted spellings are that table's
- * aliases via {@link resolveExplicitDriver}. A driver added to the spec table
- * appears on both hosts at once, which is the only shape in which this fork
- * cannot re-open.
+ * they come from `@objectstack/spec`, the one driver vocabulary both hosts
+ * read, and the accepted spellings are that table's aliases via
+ * {@link resolveExplicitDriver}. A driver added to the spec table appears on
+ * both hosts at once, which is the only shape in which this fork cannot
+ * re-open.
+ *
+ * The values are the table's SELECTION face reduced to canonical ids
+ * (`DATABASE_DRIVER_SELECTION_IDS`), not every id it ships a config contract
+ * for (`BUILTIN_DRIVER_IDS`). The two differed for the first time when the
+ * in-memory engine was withdrawn as a boot store: `memory` keeps its config
+ * contract, so a stored `datasource.driver: memory` still parses, but no boot
+ * door accepts it. Enumerating the contract face here would have kept offering
+ * an id every door of this stack refuses. The TYPE is still the contract
+ * union, because the URL detection below classifies the engine's schemes as
+ * `memory` before {@link refuseRetiredMemoryEngine} refuses them.
  */
-export const StandaloneDatabaseDriverSchema = z.enum(BUILTIN_DRIVER_IDS);
+export const StandaloneDatabaseDriverSchema = z.enum(DATABASE_DRIVER_SELECTION_IDS);
 
 /**
  * The `databaseDriver` CONFIG key's schema — an alias-accepting front door onto
@@ -145,6 +167,12 @@ const DatabaseDriverSelectionSchema = z.string().transform((raw, ctx) => {
  * maintained beside them.
  */
 function unsupportedDriverMessage(raw: string, source: 'OS_DATABASE_DRIVER' | 'databaseDriver'): string {
+    // A spelling of the retired in-memory engine is not a typo, and "Supported
+    // drivers: …" would not tell the operator what replaced it — so it gets the
+    // retirement's own sentence, the same one every other memory door gives.
+    if (namesRetiredMemoryEngine(raw)) {
+        return `[StandaloneStack] ${retiredMemoryEngineMessage(`${source} "${raw}"`)}`;
+    }
     return (
         `[StandaloneStack] Unsupported ${source} value: "${raw}". ` +
         `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. ` +
@@ -337,7 +365,13 @@ export interface StandaloneStackResult {
 type ResolvedDriverKind = z.infer<typeof StandaloneDatabaseDriverSchema>;
 
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
-    if (/^memory:\/\//i.test(dbUrl)) return 'memory';
+    // The in-memory (mingo) engine's two schemes — character-for-character the
+    // CLI's `inferDriverTypeFromUrl` regex, for the reason the mysql and turso
+    // arms below give. Classified here and REFUSED by the caller
+    // ({@link refuseRetiredMemoryEngine}), which knows where the URL came from
+    // and so can name the cause; `mingo://` used to fall to the unsupported-
+    // scheme refusal below while the CLI classified it as this engine.
+    if (/^(memory|mingo):\/\//i.test(dbUrl)) return 'memory';
     if (/^(postgres(ql)?|pg):\/\//i.test(dbUrl)) return 'postgres';
     // MySQL / MariaDB (commit cfb549db8). Character-for-character the regex the CLI uses
     // (`utils/storage-driver.ts` `inferDriverTypeFromUrl`), for the same reason
@@ -365,10 +399,10 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(dbUrl)) return 'sqlite';
     throw new Error(
         `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
-        `Supported schemes: memory://, postgres://, pg://, mysql://, mysql2://, ` +
+        `Supported schemes: postgres://, pg://, mysql://, mysql2://, ` +
         `mongodb://, mongodb+srv://, ` +
         `libsql:// (optional @objectstack/driver-turso), file: ` +
-        `(sqlite:// is accepted as an alias of file:)`
+        `(sqlite:// is accepted as an alias of file:; :memory: is SQLite's in-memory database)`
     );
 }
 
@@ -445,6 +479,39 @@ function assertUrlNamedForRemoteDriver(
     );
 }
 
+/** Every kind a boot can actually open — the resolution's answer once the retired engine is refused. */
+type BootDriverKind = Exclude<ResolvedDriverKind, 'memory'>;
+
+/**
+ * Refuse the in-memory (mingo) engine wherever the URL ladder produced it — the
+ * standalone half of the retirement's URL door.
+ *
+ * Three places can hand this stack a `memory://` / `mingo://` URL, and the
+ * refusal names the one that did: `databaseUrl` / `--database` (`explicit`),
+ * `OS_DATABASE_URL` / `DATABASE_URL` (`env`), or the project's declared
+ * default datasource (`config-datasource`, whose `driver: memory` the spec's
+ * contract face still parses). The explicit DRIVER spellings never reach here:
+ * the shared resolver and {@link unsupportedDriverMessage} refuse them first,
+ * with the same sentence.
+ *
+ * Returning the narrowed kind is what lets the dispatch below drop its `memory`
+ * arm and keep its `never` exhaustiveness check honest: past this line no
+ * resolution can name the engine.
+ */
+function refuseRetiredMemoryEngine(
+    driver: ResolvedDriverKind,
+    url: string,
+    resolution: { source: ProjectDatabaseUrlSource; datasourceName?: string },
+): BootDriverKind {
+    if (driver !== 'memory') return driver;
+    const selection = resolution.source === 'config-datasource'
+        ? `The project's default datasource "${resolution.datasourceName ?? 'default'}" (driver: memory, URL "${url}")`
+        : resolution.source === 'env'
+            ? `OS_DATABASE_URL "${url}"`
+            : `The database URL "${url}"`;
+    throw new Error(`[StandaloneStack] ${retiredMemoryEngineMessage(selection)}`);
+}
+
 /** URL→filename for the two sqlite kinds. Throws on a URL that isn't a path. */
 function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
     if (kind === 'sqlite-wasm') {
@@ -465,7 +532,11 @@ function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): s
 /** Which database a standalone boot would talk to, and how. */
 export interface ResolvedStandaloneDatabase {
     url: string;
-    driver: ResolvedDriverKind;
+    /**
+     * The engine this boot opens. Never `memory`: the in-memory engine is
+     * refused by every door of this resolution (see the module header).
+     */
+    driver: BootDriverKind;
     /**
      * The sqlite file this boot would open, or `null` for every non-sqlite
      * target and for `:memory:`. Callers that must inspect the file BEFORE a
@@ -510,8 +581,8 @@ function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSche
  * Since #6469 the URL comes from the ONE shared resolution
  * ({@link resolveProjectDatabaseUrl}) that `os dev` / `os start` also use:
  * explicit config → `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` →
- * explicit `memory` driver → the config-declared default datasource (read from
- * the compiled artifact) → the unified default file
+ * the config-declared default datasource (read from the compiled artifact) →
+ * the unified default file
  * (`<state dir>/data/objectstack.db`, with a compat-read of the legacy
  * `dev.db`/`standalone.db`). State-dir precedence is unchanged: `OS_HOME` →
  * project root → user home. No longer purely env-derived: the legacy probe and
@@ -524,8 +595,12 @@ function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSche
  *
  * Throws on a selection this stack cannot dispatch — an unknown URL scheme
  * (`detectDriverFromUrl`) or, since commit cfb549db8, an unknown `OS_DATABASE_DRIVER` value
- * ({@link resolveExplicitDriver}). Both refusals happen HERE rather than at boot
- * so `os migrate`'s pre-boot probe reads the same verdict the boot would.
+ * ({@link resolveExplicitDriver}) — and on every door to the retired in-memory
+ * engine: its driver spellings (the shared resolver, ahead of every rung) and
+ * its `memory://` / `mingo://` schemes, typed or declared
+ * ({@link refuseRetiredMemoryEngine}). All of these refusals happen HERE rather
+ * than at boot so `os migrate`'s pre-boot probe reads the same verdict the boot
+ * would.
  */
 export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
@@ -537,7 +612,7 @@ export function resolveStandaloneDatabase(config?: StandaloneStackConfig): Resol
     });
     const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
-    const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
+    const driver = refuseRetiredMemoryEngine(explicitDriver || detectDriverFromUrl(url), url, resolution);
     // Fork 2 (commit e2798fab7) — refuse before deriving a sqlite filename from a URL the
     // selected driver was never going to open.
     assertUrlNamedForRemoteDriver(driver, resolution.source);
@@ -622,10 +697,10 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
      * case; everything else about the connect stays shared.
      */
     let hostFactory: IDatasourceDriverFactory | undefined;
-    if (dbDriver === 'memory') {
-        driverId = 'memory';
-        driverConfig = {};
-    } else if (dbDriver === 'postgres') {
+    // No `memory` arm: the in-memory engine is not a boot store, and
+    // `resolveStandaloneDatabase` refuses every door to it, so `dbDriver` cannot
+    // name it here (its type says so, which keeps the `never` check below honest).
+    if (dbDriver === 'postgres') {
         // Factory applies the pg pool default ({ min: 0, max: 5 }) internally.
         driverId = 'postgres';
         driverConfig = { url: dbUrl };

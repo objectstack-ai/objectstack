@@ -54,10 +54,14 @@ import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
  * onto the ONE shared resolution (`resolveProjectDatabaseUrl`, #6469) that
  * `os start` and `os migrate` resolve through too. Priority: `--database` /
  * `--fresh`'s ephemeral file → `OS_DATABASE_URL` / `DATABASE_URL` /
- * `TURSO_DATABASE_URL` → explicit in-memory driver (`--database-driver memory`
- * / `OS_DATABASE_DRIVER=memory`) → the config-declared default datasource →
- * the unified default `<state dir>/data/objectstack.db` (legacy `dev.db` /
- * `standalone.db` still compat-read, with the loud `notice` line).
+ * `TURSO_DATABASE_URL` → the config-declared default datasource → the unified
+ * default `<state dir>/data/objectstack.db` (legacy `dev.db` / `standalone.db`
+ * still compat-read, with the loud `notice` line). The in-memory (mingo)
+ * engine is no longer a boot store: `--database-driver memory` is refused by
+ * the flag's allowlist, and `OS_DATABASE_DRIVER=memory` by the shared
+ * resolution ahead of every rung — so this seam never hands `dev` a Database
+ * row for a store its serve child would refuse. `--fresh` (a throwaway file)
+ * and `--database :memory:` (SQLite's own in-memory database) replace it.
  *
  * `dev` keeps a persistent default on purpose — the historical serve default
  * of `:memory:` wipes all data (and AI-authored metadata) on every restart,
@@ -259,7 +263,7 @@ export default class Dev extends Command {
     }),
     database: Flags.string({
       char: 'd',
-      description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL)',
+      description: 'Database URL: file:./db.sqlite | :memory: | libsql://... | postgres://... | mongodb://... (overrides $OS_DATABASE_URL)',
     }),
     // Enforced allowlist, not a help string — see `utils/database-driver-flag.ts`.
     // Both the choices and the enumerated list in the description come from the

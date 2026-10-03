@@ -237,7 +237,7 @@ describe('probeMigrationTarget', () => {
   // which dwarfs the probe itself. Warm it once so the per-test budgets measure
   // the gate rather than module resolution.
   beforeAll(async () => {
-    await probeMigrationTarget('memory://warmup');
+    await probeMigrationTarget('postgres://localhost:5432/warmup');
   }, 60_000);
 
   it('resolves --database-url to the file it names and probes THAT file', async () => {
@@ -253,12 +253,17 @@ describe('probeMigrationTarget', () => {
   it('has nothing to say about a non-SQLite target', async () => {
     expect(await probeMigrationTarget('postgres://localhost:5432/app'))
       .toEqual({ status: 'not_applicable' });
-    expect(await probeMigrationTarget('memory://gate'))
+    expect(await probeMigrationTarget('mysql://localhost:3306/app'))
       .toEqual({ status: 'not_applicable' });
   });
 
   it('never fails the command over an unusable URL', async () => {
     expect(await probeMigrationTarget('nonsense://not-a-database'))
+      .toEqual({ status: 'not_applicable' });
+    // The retired in-memory engine's scheme is refused by the resolution this
+    // probe mirrors; the probe still steps aside and leaves the refusal — with
+    // its replacement-naming message — to the boot.
+    expect(await probeMigrationTarget('memory://gate'))
       .toEqual({ status: 'not_applicable' });
   });
 });

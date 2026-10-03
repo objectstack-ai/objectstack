@@ -1,7 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Storage-driver resolution for `objectstack serve`.
+ * Storage-driver resolution for `objectstack serve`'s LEGACY path — the CLI
+ * host of the driver vocabulary.
+ *
+ * Which boots reach it, measured rather than assumed: only a `serve` that does
+ * NOT boot through the runtime library — `OS_MODE=off|none|legacy`,
+ * `bootMode: 'off'`, or a host config carrying instantiated plugins
+ * (`shouldBootWithLibrary` in `utils/plugin-detection.ts`), and then only when
+ * no plugin already provides a driver. Every ordinary `os dev` / `os start` /
+ * `os serve` boot (over a config or an artifact) and every `os migrate`
+ * subcommand resolve their store in `@objectstack/runtime` instead
+ * (`resolveStandaloneDatabase`), which is the OTHER host
+ * `driver-vocabulary-parity.test.ts` holds this one equal to.
  *
  * Extracted from serve.ts so the driver dispatch is unit-testable in isolation
  * (mirrors utils/telemetry-datasource.ts and utils/plugin-detection.ts). Two
@@ -17,20 +28,34 @@
  *      the same connect path, failure verdict, and escape hatch as every other
  *      datasource.
  *
- * ## #3276 — the `memory` driver was advertised but had no dispatch branch
+ * ## #3276, and then the retirement — the `memory` driver is no longer a boot store
  *
- * `os dev` / `os start` / `os serve` all advertise a `memory` driver
- * (`--database-driver memory`, `OS_DATABASE_DRIVER=memory`, and a `memory://`
- * URL scheme). But the old inline dispatch had no `memory` case, so selecting it
- * silently fell through to the dev SQLite `:memory:` default — SQLite-in-memory,
- * a *different* engine — or, in production, registered no driver at all. The
- * URL-inference and construction branches below close that "declared ≠ enforced"
- * gap: `memory` now yields the mingo `InMemoryDriver`, in dev AND production,
- * exactly as requested.
+ * #3276 found the `memory` driver advertised (`--database-driver memory`,
+ * `OS_DATABASE_DRIVER=memory`, a `memory://` URL scheme) with no dispatch arm,
+ * so selecting it silently became SQLite's `:memory:` default — a *different*
+ * engine — or, in production, no driver at all. It closed that "declared ≠
+ * enforced" gap the honouring way: `memory` built the mingo `InMemoryDriver`, in
+ * dev AND production, and never SQLite `:memory:`.
  *
- * Note the deliberate distinction from SQLite's own `:memory:` pseudo-file:
- * `OS_DATABASE_URL=:memory:` stays `sqlite` (SQLite's in-memory mode), whereas
- * the `memory://` scheme and the `memory` driver select the mingo engine.
+ * The engine was later RETIRED as a boot store, the other way to close the same
+ * kind of gap. It refuses every tenant-scoped read by design, so a boot on it
+ * signed in a seeded admin and then answered 503 to every data request: a whole
+ * advertised mode that could not serve data, with no committed user to keep it
+ * for. The retirement lives at the DECLARATION, never at this consumer: the
+ * spec's driver table withdrew `memory`, `mingo` and `in-memory` from its
+ * selection face and kept them on the config-contract face (a stored
+ * `datasource.driver: memory` still parses), so the `--database-driver`
+ * allowlist and this resolver's selection lookup drop the spellings by
+ * derivation. What this file still owes is the refusal's WORDING and its two
+ * doors — {@link inferDriverTypeFromUrl} for the `memory://` / `mingo://`
+ * schemes, and {@link resolveStorageDefinition} for the spellings — both of
+ * which name the replacement instead of reading as a typo. The sentence itself
+ * is the runtime's (`retiredMemoryEngineMessage`), so the two hosts cannot
+ * describe the retirement differently.
+ *
+ * #3276's distinction survives as the replacement: `OS_DATABASE_URL=:memory:`
+ * was always `sqlite` (SQLite's in-memory mode), and it is now the way to ask
+ * for an in-memory database at all.
  *
  * ## #5602 — `libsql://` is now WIRED, through an optional package
  *
@@ -77,6 +102,8 @@ import type {
 } from '@objectstack/service-datasource';
 import {
   loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
+  namesRetiredMemoryEngine,
+  retiredMemoryEngineMessage,
   type LoadTursoDriverFactoryOptions,
 } from '@objectstack/runtime';
 import {
@@ -156,7 +183,10 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
  *
  *  - a spelling no builtin claims (`--database-driver sqlite3`), which used to
  *    fall through to the dev SQLite default while `os migrate` refused the same
- *    value by name;
+ *    value by name. A spelling of the retired in-memory engine (`memory`,
+ *    `mingo`, `in-memory`) is this case too, with the retirement's own wording,
+ *    and so is its `memory://` / `mingo://` scheme, which
+ *    {@link inferDriverTypeFromUrl} refuses;
  *  - a recognized kind with **no local default** selected with **no URL**
  *    (`postgres` / `mysql` / `mongodb` / `turso`). Only `turso` refused before;
  *    the other three guessed — `url: undefined` into `pg`, an invented
@@ -213,6 +243,13 @@ export class UnsupportedDriverError extends Error {
  * Infer a canonical driver kind from an `OS_DATABASE_URL` scheme.
  * Returns `''` when the URL is absent or its scheme is unrecognized (the caller
  * then falls back to the dev default / registers nothing in production).
+ *
+ * Throws {@link UnsupportedDriverError} for `memory://` and `mingo://`: they name
+ * the in-memory engine, which is no longer a boot store. Returning `''` instead
+ * would let a dev boot fall through to the SQLite default in silence — the
+ * #3276 shape again — and returning a kind would leave the refusal to
+ * {@link resolveStorageDefinition}, whose spelling refusal names
+ * `OS_DATABASE_DRIVER`, a variable this operator never set.
  */
 export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (!url) return '';
@@ -230,11 +267,20 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (/^libsql:\/\//i.test(u)) return 'turso';
   if (/^https?:\/\//i.test(u) && /\.turso\./i.test(u)) return 'turso';
   if (/^wasm-sqlite:\/\//i.test(u) || /\.wasm\.db$/i.test(u)) return 'sqlite-wasm';
-  // #3276: the mingo in-memory engine has its own URL scheme (`memory://`,
-  // advertised in `os dev` / `os start` help). Kept ABOVE the sqlite test so it
-  // is not shadowed, and deliberately distinct from sqlite's `:memory:`
-  // pseudo-file below (which stays SQLite's own in-memory mode).
-  if (/^(memory|mingo):\/\//i.test(u)) return 'memory';
+  // The retired in-memory engine's two schemes — character-for-character the
+  // runtime's `detectDriverFromUrl` arm, so the two hosts recognise and refuse
+  // the same URLs. Kept ABOVE the sqlite test so it is not shadowed, and
+  // deliberately distinct from sqlite's `:memory:` pseudo-file below, which is
+  // the replacement this refusal names.
+  if (/^(memory|mingo):\/\//i.test(u)) {
+    throw new UnsupportedDriverError(
+      u,
+      retiredMemoryEngineMessage(`OS_DATABASE_URL "${u}"`),
+      // Not a kind this resolver can produce — `database-driver-allowlist.pin`
+      // reads `recognized` to tell the two apart.
+      { recognized: false },
+    );
+  }
   if (/^file:/i.test(u) || /^sqlite:/i.test(u) || u === ':memory:' || /\.(db|sqlite|sqlite3)$/i.test(u)) return 'sqlite';
   return '';
 }
@@ -295,7 +341,7 @@ export interface StorageDefinitionResolution {
   trackName: string;
   /** Human label for the startup banner's "driver" row (requested engine). */
   label: string;
-  /** Display-shaped database URL for the startup banner (e.g. `(in-memory)`). */
+  /** Display-shaped database URL for the startup banner (e.g. `:memory:`). */
   displayUrl: string | undefined;
   /** On-disk sqlite path the telemetry datasource is provisioned next to. */
   sqliteFilePath?: string;
@@ -340,6 +386,15 @@ export function resolveStorageDefinition(
   // the same value by name. Commit cfb549db8 killed that silent fallback on the standalone
   // side; this is its mirror, and it is what makes the two hosts answer the same
   // question the same way for EVERY input rather than only for the legal ones.
+  if (driverType && !kind && namesRetiredMemoryEngine(driverType)) {
+    // The retired in-memory engine: not a typo, so not "Supported drivers: …" —
+    // the operator is told what replaced it, in the sentence every host uses.
+    throw new UnsupportedDriverError(
+      driverType,
+      retiredMemoryEngineMessage(`OS_DATABASE_DRIVER / --database-driver "${driverType}"`),
+      { recognized: false },
+    );
+  }
   if (driverType && !kind) {
     throw new UnsupportedDriverError(
       driverType,
@@ -452,19 +507,6 @@ export function resolveStorageDefinition(
       trackName: 'TursoDriver',
       label: 'TursoDriver(libsql)',
       displayUrl: url,
-    };
-  }
-
-  // #3276: explicit in-memory (mingo) driver. Honored in dev AND production — an
-  // operator asking for `memory` gets the mingo InMemoryDriver (ephemeral, not
-  // real SQL), never the SQLite `:memory:` default.
-  if (kind === 'memory') {
-    return {
-      driverId: 'memory',
-      config: {},
-      trackName: 'MemoryDriver',
-      label: 'InMemoryDriver',
-      displayUrl: '(in-memory)',
     };
   }
 
