@@ -478,6 +478,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698), row-level-security predicates (#4983) | ✓ | ✓ | ✓ | — |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
+| Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -594,11 +595,17 @@ The fourth door does not weaken that, because it is held to the CLI's verdicts
 rather than to its own: a test fails if a rule runs at the runtime publish gate
 but not on `os build` — the two publish verbs must not disagree. What that
 column narrows is which *types* it judges, never which *verdict* it reaches. The
-one deliberate exception is the platform-schedule row (#6285), runtime-only by ruling:
-both of its inputs are facts about the **deployment** (the organization this
-write lands in, and whether this deployment walls organizations), and a build
-machine's environment is a false signal for them — so `os build` must not judge
-it at all.
+deliberate exceptions are the two rows whose inputs are facts about the
+**deployment**, and a build machine's environment is a false signal for those —
+so `os build` must not judge them at all. The platform-schedule row (#6285) is
+runtime-only by ruling: its inputs are the organization this write lands in and
+whether this deployment walls organizations. The public-form intake row (#21476)
+reads the tenancy posture **in force**: on a walled posture, an open public form
+whose object is walled by an organization column cannot take an anonymous
+submission, so the anonymous form endpoints do not offer it, and a save or
+publish of the view answers success with a `public-form-intake-unavailable`
+warning in `advisories`, located at the form's `sharing`. It never refuses the
+write.
 
 Some rows are deliberately not universal across the three commands, and each is
 one-directional (none lets a stack through a gate another command enforces):

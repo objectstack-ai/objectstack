@@ -1062,6 +1062,129 @@ describe('#21334 a container on another package\'s object never takes that packa
             });
         }
     });
+
+    /**
+     * #21511 — an expansion inherits its container's authorship, so the
+     * unscoped kernel answers an expanded view as `env_local` does.
+     *
+     * Registry hydration (an unscoped kernel's environment-wide rows only)
+     * registered each expansion of a stored container under its bare name with
+     * no tenant marker, while the container itself carries one
+     * (`_provenance: 'org'`). Measured on `origin/main` before this change, with
+     * this harness and the card's probe: `getMetaItem(...).resettable` answered
+     * `true` for a package-bound container (`env_local`: `false`), and
+     * `getMetaItemLayered` answered the hydrated expansion as the `code` layer
+     * for a package-bound and a package-less container alike (`env_local`:
+     * `null`). Triage's ruling: each expansion carries its container's marker,
+     * and the save door's acceptance of a write by an expanded name is
+     * unchanged.
+     */
+    describe('#21511 an expanded view of a stored container answers as tenant-authored on both kernels', () => {
+        /** The arms registry hydration registers: environment-wide rows. */
+        const ENV_WIDE = CONTAINERS.filter((c) => c.organizationId === undefined);
+        /** What the two reads tell a caller about an item's code layer and its affordances. */
+        const answer = async (protocol: Protocol, name: string) => {
+            const meta = (await protocol.getMetaItem({ type: 'view', name } as any)) as any;
+            const layered = (await protocol.getMetaItemLayered({ type: 'view', name })) as any;
+            return {
+                resettable: meta.resettable, editable: meta.editable, deletable: meta.deletable, lock: meta.lock,
+                provenance: meta.provenance, packageId: meta.packageId, code: layered.code,
+            };
+        };
+        const kernelName = (environmentId: string | undefined) => environmentId ?? 'unscoped';
+
+        for (const c of ENV_WIDE) {
+            for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                it(`${c.arm}, member ${kind}: the expanded view is not resettable and has no code layer, on both kernels alike`, async () => {
+                    const answers = [];
+                    for (const [, environmentId] of KERNELS) {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                        const a = await answer(protocol, m.servedAs);
+                        expect(a.resettable, `${kernelName(environmentId)}: no package ships it`).toBe(false);
+                        expect(a.code, `${kernelName(environmentId)}: no artifact, so no code layer`).toBeNull();
+                        answers.push(a);
+                    }
+                    expect(answers[1], 'the unscoped kernel answers as env_local does').toEqual(answers[0]);
+                });
+            }
+
+            it(`${c.arm}: on an unscoped kernel each registered expansion carries its container's tenant marker`, async () => {
+                const { protocol, registry } = showcaseHarness(undefined);
+                const m = MEMBER_CASES['listViews.*'];
+                await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                const container = registry.getItem('view', OWN);
+                expect(container?._provenance, 'the container is registered as tenant-authored').toBe('org');
+                const expansions = registry.listItems('view').filter((it) => String(it.name).startsWith(`${TASK}.${OWN}`));
+                expect(expansions.map((it) => it.name), 'hydration registered the expansion').toEqual([m.servedAs]);
+                for (const it of expansions) {
+                    expect(it._provenance, `${it.name} inherits the container's marker`).toBe(container?._provenance);
+                    expect(it._packageId, `${it.name} keeps its container's package`).toBe(c.ownPackage);
+                    expect(isCodeArtifactBody(it), `${it.name} is no code artifact`).toBe(false);
+                }
+            });
+
+            it(`${c.arm}: the save door still accepts a write by an expanded name, alike on both kernels, and that row then answers the name`, async () => {
+                const m = MEMBER_CASES['listViews.*'];
+                const byName = {
+                    name: m.servedAs, object: TASK, viewKind: 'list', label: 'ByName',
+                    config: { type: 'grid', data, columns: [{ field: 'title' }] },
+                };
+                const outcomes = [];
+                for (const [, environmentId] of KERNELS) {
+                    const { protocol, rows } = showcaseHarness(environmentId);
+                    await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                    const saved = (await save(protocol, m.servedAs, byName, c)) as any;
+                    const stored = [...rows.values()]
+                        .filter((r) => r.name === m.servedAs)
+                        .map((r) => ({ package_id: r.package_id, organization_id: r.organization_id, state: r.state }));
+                    expect(stored, `${kernelName(environmentId)}: stored once, in the container's scope`)
+                        .toEqual([{ package_id: c.packageId ?? null, organization_id: null, state: 'active' }]);
+                    expect((await byNameDoor(protocol, m.servedAs))?.label).toBe('ByName');
+                    expect(named(await objectDoor(protocol), m.servedAs).map((v) => v.label)).toEqual(['ByName']);
+                    outcomes.push({ success: saved?.success, stored, ...(await answer(protocol, m.servedAs)) });
+                }
+                expect(outcomes[0].success).toBe(true);
+                expect(outcomes[1], 'the unscoped kernel answers the write as env_local does').toEqual(outcomes[0]);
+            });
+        }
+
+        it('CONTROL — an expansion its own package ships keeps that artifact\'s envelope over the marker (ADR-0010 §3.3): resettable, with the packaged code layer, on both kernels alike', async () => {
+            const overlay = {
+                name: TASK,
+                list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
+                listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+            };
+            const shipped = [DEFAULT, `${TASK}.in_progress`];
+            const answers: Record<string, unknown>[][] = [];
+            for (const [, environmentId] of KERNELS) {
+                const { protocol, registry } = showcaseHarness(environmentId);
+                // A package-less overlay OF the showcase's own container (ADR-0005,
+                // name-keyed): it expands to names the showcase ships, in its slot.
+                await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any);
+                const perKernel = [];
+                for (const name of shipped) {
+                    const a = await answer(protocol, name);
+                    expect(a.resettable, `${kernelName(environmentId)}, ${name}: the showcase ships it`).toBe(true);
+                    expect((a.code as any)?.label, `${kernelName(environmentId)}, ${name}: the packaged code layer`)
+                        .toBe(PACKAGED.find((v) => v.name === name)?.label);
+                    perKernel.push(a);
+                    if (environmentId === undefined) {
+                        const hydrated = registry.listItems('view')
+                            .filter((it) => it.name === name && String(it.label).startsWith('Customized'));
+                        expect(hydrated, `${name}: hydration registered the overlay's expansion`).toHaveLength(1);
+                        expect(
+                            { _provenance: hydrated[0]._provenance, _packageId: hydrated[0]._packageId },
+                            `${name}: the artifact's envelope is merged over the marker, not under it`,
+                        ).toEqual({ _provenance: 'package', _packageId: SHOWCASE });
+                    }
+                }
+                answers.push(perKernel);
+            }
+            expect(answers[1], 'the unscoped kernel answers as env_local does').toEqual(answers[0]);
+        });
+    });
 });
 
 /**

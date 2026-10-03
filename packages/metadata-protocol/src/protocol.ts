@@ -9,7 +9,7 @@ import { declaredUserMessage, readEnvWithDeprecation, resolveTenancyPosture, res
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
 // the posture, is what the runtime authoring gate is told.
-import { postureEnforcesWall } from '@objectstack/spec/security';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
@@ -92,6 +92,10 @@ import {
     // The one rule for which forms a `view` body opens to anonymous intake —
     // the same rule the anonymous form doors in `@objectstack/rest` serve by.
     anonymousFormIntakeSlugs,
+    // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
+    // the anonymous form doors read it — the runtime authoring gate's input for
+    // its public-form intake advisory (see `tenancyPostureInForce()`).
+    anonymousFormIntakePosture,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -1717,8 +1721,10 @@ function stripDerivedProvenance(item: unknown): unknown {
  * the same verdict from the same row (cloud#970's shape, for non-`object`
  * types).
  *
- * ⚠️ Its ONE caller applies it BEFORE {@link mergeArtifactProtection}, and the
- * order is the whole contract: where a real artifact exists the artifact's
+ * ⚠️ Both callers — the container in `hydrateOverlayIntoRegistry` and, since
+ * #21511, each view expansion it registers (`expandRuntimeViewContainer`
+ * under `tenantAuthored`) — apply it BEFORE {@link mergeArtifactProtection},
+ * and the order is the whole contract: where a real artifact exists the artifact's
  * envelope still overwrites `_provenance` (and `_packageId` /
  * `_packageVersion` / `_lock*`) on the way out, so package protection is
  * untouched — ADR-0010 §3.3 precedence is unchanged in both directions.
@@ -5662,6 +5668,10 @@ export class ObjectStackProtocolImplementation implements
         // #6285 kind, read here per publish and passed in so the gate stays pure.
         const sduiManifest = this.resolveSduiManifest();
 
+        // [#21476] The tenancy posture in force — a host fact of the same kind,
+        // read here per publish and passed in so the gate stays pure.
+        const tenancyPostureInForce = this.tenancyPostureInForce();
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -5677,6 +5687,10 @@ export class ObjectStackProtocolImplementation implements
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
+            // [#21476] The posture IN FORCE, for the public-form intake
+            // advisory — a separate input from the requested one above, on
+            // purpose: see `tenancyPostureInForce()`.
+            ...(tenancyPostureInForce !== undefined ? { tenancyPostureInForce } : {}),
             ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
             ...(restoredCredentialPaths !== undefined ? { restoredCredentialPaths } : {}),
             // [#20312] The deployment's component manifest, read per publish;
@@ -6007,6 +6021,40 @@ export class ObjectStackProtocolImplementation implements
             return postureEnforcesWall(resolveTenancyPosture());
         } catch {
             return true;
+        }
+    }
+
+    /**
+     * [#21476] The tenancy posture IN FORCE, as this kernel's `tenancy` service
+     * reports it (`anonymousFormIntakePosture`, `@objectstack/metadata-core`) —
+     * the runtime authoring gate's input for its public-form intake advisory.
+     * `undefined` when no tenancy service is registered.
+     *
+     * The doors that advisory speaks for read exactly this: both anonymous form
+     * doors in `@objectstack/rest` ask the same service through the same
+     * reader, and it is the posture SecurityPlugin hands the engine. So a
+     * DEGRADED walled deployment (a wall requested and not enforceable, which
+     * the service reports as `single`) gets no advisory, because its doors do
+     * serve the form and its engine does take the insert.
+     *
+     * ⛔ It does NOT replace {@link orgWallEnforced}. That input is the
+     * REQUESTED posture, read fail-closed: #6155 Q3=A names
+     * `postureEnforcesWall(resolveTenancyPosture())` as the #6285 refusal's
+     * input verbatim, and an unrecognized `OS_TENANCY_POSTURE` reads as walled
+     * (ADR-0105). Feeding that refusal this reading instead would narrow it —
+     * off on a degraded deployment, on a composition with no tenancy service,
+     * and on an unrecognized posture value — which is a ruling's to make, not
+     * an advisory's. Two rules, two questions, two inputs.
+     *
+     * Read per publish, as {@link resolveSduiManifest} reads its service, and
+     * never allowed to fail the write: a service whose posture cannot be read
+     * reports none, and the advisory is simply not raised.
+     */
+    private tenancyPostureInForce(): TenancyPosture | undefined {
+        try {
+            return anonymousFormIntakePosture(this.getServicesRegistry?.().get('tenancy'));
+        } catch {
+            return undefined;
         }
     }
 
@@ -16790,7 +16838,18 @@ export class ObjectStackProtocolImplementation implements
     private expandRuntimeViewContainer(
         type: string,
         data: unknown,
-        options: { packageId?: string | null },
+        options: {
+            packageId?: string | null;
+            /**
+             * [#21511] State each expansion's authorship the way
+             * {@link hydrateOverlayIntoRegistry} states its container's:
+             * {@link stateTenantAuthorship} first, then the item's own
+             * artifact envelope merged over it. Set only by the caller that
+             * REGISTERS the expansions ({@link hydrateExpandedViewItems}); the
+             * registry-free reads serve exactly what they served before.
+             */
+            tenantAuthored?: boolean;
+        },
     ): Record<string, unknown>[] {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
         if (!isAggregatedViewContainer(data)) return [];
@@ -16824,7 +16883,11 @@ export class ObjectStackProtocolImplementation implements
             const ownArtifact = (viArtifact as { _packageId?: unknown } | undefined)?._packageId === ownPackageId
                 ? viArtifact
                 : undefined;
-            out.push(mergeArtifactProtection(item, ownArtifact) as Record<string, unknown>);
+            // [#21511] The marker goes on BEFORE the envelope, never after:
+            // where the item's own artifact exists, its `_provenance` still
+            // wins (ADR-0010 §3.3), as it does on the container.
+            const authored = options.tenantAuthored ? stateTenantAuthorship(item) : item;
+            out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
     }
@@ -16991,6 +17054,21 @@ export class ObjectStackProtocolImplementation implements
      * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
      * combination #7736's own pin ever exercised), now with the corrected
      * derivation chain.
+     *
+     * ## [#21511] An expansion inherits its container's authorship
+     *
+     * Every expansion registered here is derived from a stored row, so it is
+     * tenant-authored exactly as its container is, and it carries the same
+     * marker {@link hydrateOverlayIntoRegistry} stamps on the container
+     * ({@link stateTenantAuthorship}, applied before the item's own artifact
+     * envelope). Without it, an expansion of a package-bound container sat
+     * under its bare name wearing that package's `_packageId` and no tenant
+     * marker, so `SchemaRegistry.getArtifactItem`'s bare-key fallback took it
+     * for a code artifact: on an unscoped kernel the by-name read reported
+     * the expanded view `resettable` and the layers read reported it as its
+     * own `code` layer (for a package-less container too, through the
+     * runtime-only `getItem` arm), where `env_local`, which registers nothing,
+     * reported neither. With the marker both kernels give one answer.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -16998,7 +17076,7 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
-        for (const item of this.expandRuntimeViewContainer(type, data, options)) {
+        for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
             registry.registerItem(type, item, 'name' as any);
         }
     }

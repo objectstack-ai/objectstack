@@ -4,7 +4,6 @@ import { afterAll, describe, it, expect } from 'vitest';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ViewSchema } from '@objectstack/spec/ui';
 import {
   authorWarnedProperties,
@@ -1632,45 +1631,40 @@ describe('a per-type ledger that could not be READ is reported once (#19276)', (
 // These pins test it, against the real ledgers, so a ledger change that leaves
 // either id with no reachable row fails here by name.
 describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () => {
-  // `rowLevelSecurity.label` / `.description` are `dead` rows (no mounted
-  // surface draws a policy's label or description) that an author really
-  // writes: the fixture parses through the shipped `PermissionSetSchema`, so
-  // neither key is a tombstone. If either row changes verdict, re-subject this
-  // pin to another `dead` row of a type the walk visits; if none is left, the
-  // rule id is unreachable again and that is what this pin exists to say.
-  const permissionSet = {
-    name: 'fx_reader',
-    label: 'Fx Reader',
-    objects: { fx_account: { allowRead: true, readScope: 'org' } },
-    rowLevelSecurity: [
-      // The first policy authors neither dead key, so the findings below can
-      // only come from the second: the dotted path fans out past index 0.
-      { name: 'fx_any_rows', object: 'fx_account', operation: 'select', using: 'name == current_user.email' },
-      {
-        name: 'fx_own_rows',
-        label: 'Own rows',
-        description: 'Readers see their own rows.',
-        object: 'fx_account',
-        operation: 'select',
-        using: 'name == current_user.email',
-      },
-    ],
-  };
+  // The `view` container's own `name` / `label` are `dead` rows (Studio
+  // enumerates view items, never the aggregated container, so nothing draws or
+  // keys on them) that an author really writes: the fixture parses through the
+  // shipped `ViewSchema`, so neither key is a tombstone. If either row changes
+  // verdict, re-subject this pin to another `dead` row of a type the walk
+  // visits; if none is left, the rule id is unreachable again and that is what
+  // this pin exists to say. (It was re-subjected here when
+  // `permission.rowLevelSecurity.label` / `.description` went `live`, #20299.)
+  const list = (object: string) => ({
+    type: 'grid',
+    data: { provider: 'object', object },
+    columns: [{ field: 'name' }],
+  });
+  const views = [
+    // The first container authors neither dead key, so the findings below can
+    // only come from the second: the collection walk reaches past index 0.
+    { object: 'fx_account', list: list('fx_account') },
+    { name: 'fx_contact', label: 'Contacts', object: 'fx_contact', list: list('fx_contact') },
+  ];
 
   it('the fixture is authorable — it parses through the shipped schema (the keys are not tombstones)', () => {
-    expect(PermissionSetSchema.safeParse(permissionSet).success).toBe(true);
+    for (const view of views) expect(ViewSchema.safeParse(view).success, view.object).toBe(true);
   });
 
   it('END TO END: an authored dead key produces liveness-dead-property, and the live keys beside it stay silent', () => {
-    const findings = lintLivenessProperties({ permissions: [permissionSet] });
-    expect(ruleOf(findings, 'rowLevelSecurity.label')).toBe(LIVENESS_DEAD_PROPERTY);
-    expect(ruleOf(findings, 'rowLevelSecurity.description')).toBe(LIVENESS_DEAD_PROPERTY);
-    // `live` is silent — same policy, same ledger load, so this is a verdict
-    // and not a walk that never ran.
-    for (const live of ['rowLevelSecurity.name', 'rowLevelSecurity.object', 'rowLevelSecurity.operation', 'rowLevelSecurity.using']) {
+    const findings = lintLivenessProperties({ views });
+    expect(ruleOf(findings, 'name')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'label')).toBe(LIVENESS_DEAD_PROPERTY);
+    // `live` is silent — same container, same ledger load, so this is a
+    // verdict and not a walk that never ran.
+    for (const live of ['object', 'list.type', 'list.data', 'list.columns']) {
       expect(ruleOf(findings, live), live).toBeUndefined();
     }
-    expect(findings.map((f) => f.where)).toEqual(["permission 'fx_reader'", "permission 'fx_reader'"]);
+    expect(findings.map((f) => f.where)).toEqual(["view 'fx_contact'", "view 'fx_contact'"]);
   });
 
   // The control the triage notes asked for: a TOMBSTONED key is still refused
@@ -1838,20 +1832,16 @@ describe('the hint a warned row shows an author (#16094, #21096)', () => {
     }
   });
 
-  it('END TO END: the authored dead RLS keys show the dead default hint, not the ledger note', () => {
-    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'permission.json'), 'utf8'));
-    const rls = ledger.props.rowLevelSecurity.children;
+  it('END TO END: the authored dead view-container keys show the dead default hint, not the ledger note', () => {
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'view.json'), 'utf8'));
     const findings = lintLivenessProperties({
-      permissions: [{
-        name: 'fx_reader',
-        rowLevelSecurity: [{ name: 'p', label: 'Own rows', description: 'Readers see their own rows.', object: 'fx_account' }],
-      }],
+      views: [{ name: 'fx_contact', label: 'Contacts', object: 'fx_contact' }],
     });
     const deadDefault = checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", gizmoEntry({ status: 'dead' }))[0].hint;
-    for (const key of ['label', 'description']) {
-      const f = findings.find((x) => x.message.includes(`sets \`rowLevelSecurity.${key}\``));
+    for (const key of ['name', 'label']) {
+      const f = findings.find((x) => x.message.includes(`sets \`${key}\``));
       expect(f, key).toBeDefined();
-      expect(f!.hint, key).not.toBe(rls[key].note);
+      expect(f!.hint, key).not.toBe(ledger.props[key].note);
       expect(f!.hint, key).toBe(deadDefault);
     }
   });

@@ -76,6 +76,20 @@ import {
 } from '@objectstack/sdui-parser';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { TenancyPosture } from '@objectstack/spec/security';
+// [#21476] The ONE answer to "can this open public form take anonymous intake
+// on this posture, and why not" — the same export both anonymous form doors and
+// the administrator's read of the view call (`@objectstack/rest`), so the
+// advisory below is raised exactly when the doors withhold the form, at the
+// location and in the words the admin read uses.
+import {
+    anonymousFormIntakeCandidates,
+    anonymousFormIntakeUnavailability,
+    anonymousFormIntakeUnavailableMessage,
+    anonymousFormIntakeUnavailableRemedy,
+    anonymousFormObjectName,
+    anonymousFormSharingPath,
+} from '@objectstack/metadata-core';
 
 /**
  * The structured issue shape a 422 carries — D3's "reuse the Zod envelope".
@@ -350,6 +364,95 @@ export function findPlatformScheduleOrgGaps(args: {
         });
     }
 
+    return issues;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #21476 — the save/publish advisory for an open public form this deployment's
+// posture cannot take anonymous intake for.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A `view` opens a form to anonymous intake, and on this deployment's posture
+ * the object it submits into cannot take an anonymous submission.
+ *
+ * ## What the author is told, and why on this channel
+ *
+ * An anonymous submission carries no organization, and on a walled posture the
+ * engine refuses an insert without one into an object walled by an organization
+ * column. So both anonymous form doors withhold such a form (they answer it as
+ * a withdrawn form), and the administrator's read of the view states why. This
+ * is the third reader of the same answer: the author who SAVES or PUBLISHES the
+ * form is told on the response the write earns, before any visitor meets the
+ * not-found. One predicate, `anonymousFormIntakeUnavailability`
+ * (`@objectstack/metadata-core`), decides for all three, and the advisory's
+ * `message` is the admin read's reason byte for byte.
+ *
+ * ## Why a warning, never a refusal
+ *
+ * The write is legitimate: the form is valid metadata, and it becomes servable
+ * the moment the posture or the object's tenancy changes. Refusing it would
+ * make a deployment fact block an authoring act — the triage ruling asks for
+ * the reason to be stated, located and named, and nothing more.
+ *
+ * ## Why it is gate-local, beside the #6285 rule
+ *
+ * Its input is a fact about the DEPLOYMENT (the posture in force), which a
+ * build machine cannot know, so `AUTHORING_RULES` must not judge it — the
+ * reason {@link findPlatformScheduleOrgGaps} lives here (#6155 Q3=A).
+ */
+export const PUBLIC_FORM_INTAKE_UNAVAILABLE = 'public-form-intake-unavailable';
+
+/**
+ * Judge one about-to-be-published `view` body: one `warning` per open public
+ * form whose object cannot take anonymous intake on `tenancyPostureInForce`.
+ *
+ * PURE — the posture arrives as an argument and the object schemas come from
+ * the resolution universe the gate already holds (`objects`, the live universe
+ * plus this batch's pending drafts). It reads no service, no store and no
+ * environment.
+ *
+ * The location is the form's `sharing` as `anonymousFormSharingPath` places it,
+ * under the write's own root: a `view` write is the sole member of its
+ * snapshot collection, so `views[0]` IS this write (`RuntimeAuthoringIssue.path`).
+ */
+export function findPublicFormIntakeGaps(args: {
+    /** Singular metadata type of the item being written. */
+    type: string;
+    /** Metadata name, for the diagnostic `where`. */
+    name: string;
+    /** The body as it will be persisted. */
+    body: unknown;
+    /** The object declarations a form's target resolves against. */
+    objects: readonly unknown[];
+    /** The tenancy posture IN FORCE (`anonymousFormIntakePosture`); absent = no tenancy service. */
+    tenancyPostureInForce?: TenancyPosture;
+}): RuntimeAuthoringIssue[] {
+    if (args.type !== 'view' || !isRec(args.body)) return [];
+    const view = args.body;
+    const candidates = anonymousFormIntakeCandidates(view);
+    if (candidates.length === 0) return [];
+
+    const viewName = typeof view.name === 'string' && view.name ? view.name : args.name;
+    const issues: RuntimeAuthoringIssue[] = [];
+    for (const candidate of candidates) {
+        const object = anonymousFormObjectName(view, candidate.form);
+        if (!object) continue;
+        const unavailable = anonymousFormIntakeUnavailability(
+            object,
+            args.tenancyPostureInForce,
+            (): unknown => args.objects.find((o) => isRec(o) && o.name === object),
+        );
+        if (!unavailable) continue;
+        issues.push({
+            severity: 'warning',
+            rule: PUBLIC_FORM_INTAKE_UNAVAILABLE,
+            where: `view "${viewName}" · public form "/forms/${candidate.slug}"`,
+            path: `views[0].${anonymousFormSharingPath(view, candidate)}`,
+            message: anonymousFormIntakeUnavailableMessage(candidate.slug, unavailable),
+            hint: anonymousFormIntakeUnavailableRemedy(unavailable),
+        });
+    }
     return issues;
 }
 
@@ -887,6 +990,19 @@ export function evaluateRuntimeAuthoringGate(args: {
      */
     orgWallEnforced?: boolean;
     /**
+     * [#21476] The tenancy posture IN FORCE — what the `tenancy` service reports
+     * (`anonymousFormIntakePosture`), the value the anonymous form doors and the
+     * engine read. Absent ⇒ no tenancy service, so no wall to judge against.
+     *
+     * ⛔ Deliberately NOT {@link orgWallEnforced}, and the two are not to be
+     * merged. That input is the REQUESTED posture (#6155 Q3=A names
+     * `postureEnforcesWall(resolveTenancyPosture())` verbatim), read fail-closed,
+     * and it arms a refusal. This one feeds an advisory that must agree with
+     * what the doors do, and the doors read the posture in force: on a degraded
+     * walled deployment the two differ, and each is the input its rule names.
+     */
+    tenancyPostureInForce?: TenancyPosture;
+    /**
      * [#20158] The host engine's judge-only filter admission
      * (`IObjectQLEngine.judgeFilter`, #19995 ruling C), BOUND to that engine.
      *
@@ -920,6 +1036,10 @@ export function evaluateRuntimeAuthoringGate(args: {
     // No rules ran, so there is nothing to report on either half.
     if (args.state !== 'active') return { error: null, advisories: [] };
 
+    // The object universe, folded once: the shared rules resolve names against
+    // it and the #21476 rule reads a form's target object out of it.
+    const objects = mergePendingDeclarations(args.objects ?? [], args.pending?.objects);
+
     const result = runRuntimeAuthoringRules({
         type: args.type,
         item: args.body,
@@ -931,7 +1051,7 @@ export function evaluateRuntimeAuthoringGate(args: {
         // had been threaded, `datasets` had not, and the difference was
         // invisible until an error-severity rule landed on the un-threaded one.
         context: {
-            objects: mergePendingDeclarations(args.objects ?? [], args.pending?.objects),
+            objects,
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
@@ -970,6 +1090,19 @@ export function evaluateRuntimeAuthoringGate(args: {
         body: args.body,
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
     });
+    // [#21476] The gate-local advisory for an open public form this posture
+    // cannot take anonymous intake for. Warning-only by construction, so it
+    // joins the advisory half and never the refusal: the write lands, and the
+    // author reads why the anonymous doors withhold the form on the response.
+    const publicFormIntakeGaps = findPublicFormIntakeGaps({
+        type: args.type,
+        name: args.name,
+        body: args.body,
+        objects,
+        ...(args.tenancyPostureInForce !== undefined
+            ? { tenancyPostureInForce: args.tenancyPostureInForce }
+            : {}),
+    });
     const localIssues = [
         ...scheduleOrgGaps,
         ...(pageSourceFindings ?? []).filter((f) => f.severity === 'error').map(toIssue),
@@ -977,6 +1110,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     const advisoryFindings = [
         ...result.advisories,
         ...(pageSourceFindings ?? []).filter((f) => f.severity !== 'error'),
+        ...publicFormIntakeGaps,
     ];
 
     // [#4717] The advisory half of D3, now with somewhere to go. The deduped
@@ -1031,6 +1165,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     const rulesRun = [
         ...result.rulesRun,
         ...(args.type === 'flow' ? [PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
+        ...(args.type === 'view' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
         ...(pageSourceFindings !== null ? [HTML_PAGE_SOURCE_COMPILE, PAGE_REQUIRES_DISAGREES_WITH_SOURCE] : []),
     ];
 

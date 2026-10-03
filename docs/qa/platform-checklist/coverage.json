@@ -9,7 +9,8 @@
         "api-backend.packaged-action-disabled-dispatch",
         "api-backend.action-activation-door-contract",
         "automation.setup-packaged-automation-board",
-        "platform-core.activation-ledger-registration-home"
+        "platform-core.activation-ledger-registration-home",
+        "records-forms.script-action-hook-refusal-toast"
       ]
     },
     "agent": {
@@ -154,7 +155,8 @@
       "items": [
         "records-forms.object-hook-lifecycle",
         "cli.hook-body-extraction-gates",
-        "access-security.record-view-read-audit"
+        "access-security.record-view-read-audit",
+        "records-forms.script-action-hook-refusal-toast"
       ]
     },
     "job": {
