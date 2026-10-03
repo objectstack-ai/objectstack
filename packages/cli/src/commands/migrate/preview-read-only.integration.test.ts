@@ -24,7 +24,8 @@
  *     the vacuous one of a walk that never read anything;
  *  2. the control: `--apply` still applies that work;
  *  3. (SQLite) a preview pointed at a file that does not exist creates no file,
- *     and exits 1 with the refusal its changeset declared (#21391).
+ *     and answers empty work with exit 0: the boot measured the table absent,
+ *     so the preview does not read it (#21552; #21391 had it refuse with exit 1).
  *
  * ## The driver axis
  *
@@ -479,34 +480,38 @@ for (const cell of DIALECT_CELLS) {
         }
       }, cell.timeout);
 
-      // [#21391] The edge #21349's changeset declared BREAKING: a preview whose
-      // database lacks the table it reads used to create the table and answer
-      // "nothing to examine" with exit 0. It now refuses with exit 1 and names
-      // what it could not read. Both halves are asserted: the exit code a
-      // script reads, and the refusal the payload carries.
-      it('meta --stored without --apply on a database that does not exist exits 1 with the driver\'s refusal for sys_metadata', async () => {
+      // [#21552] The edge #21349's changeset declared BREAKING, and #21391 pinned
+      // as a refusal: a preview whose database lacks the table it reads used to
+      // create the table and answer "nothing to examine" with exit 0, then
+      // refused with exit 1 and a driver message. The read-only boot has
+      // already measured which tables the database lacks, so the preview does
+      // not read them: a table that does not exist holds nothing, and the
+      // preview says so with exit 0. Both halves are asserted: the exit code a
+      // script reads, and the empty-work document the payload carries.
+      it('meta --stored without --apply on a database that does not exist answers empty work with exit 0', async () => {
         const absent = join(fixture!.dir, 'data', 'never-started.db');
         const { payload, exitCode } = await runJson(meta, ['--stored', '--database-url', `file:${absent}`]);
 
-        expect(exitCode).toBe(1);
-        expect(payload.code).toBe('DATABASE_ERROR');
-        expect(payload.error).toContain("'sys_metadata'");
+        expect(exitCode).toBe(0);
+        expect(payload).toMatchObject({ apply: false, scanned: 0, pending: 0, failed: 0, rows: [], clean: true });
+        expect(payload.error).toBeUndefined();
       }, cell.timeout);
 
       // [#21207] The audit reads a third table: the decision-audit trail, whose
-      // conflict notes named stored content hashes. The #21391 intent is
-      // unchanged — EVERY audited table is counted unread — so the expected set
-      // is the whole audited set, stated literally: a widening that is not
-      // carried here turns this case red instead of passing on a stale count.
-      it('audit-metadata-bodies without --apply on a database that does not exist exits 1 with every audited table counted unread', async () => {
+      // conflict notes named stored content hashes. EVERY audited table is in
+      // the report, so the expected set is the whole audited set, stated
+      // literally: a widening that is not carried here turns this case red
+      // instead of passing on a stale count. None of them counts as an unread
+      // table (`failures`): each was measured absent, and a table that does not
+      // exist holds no copy to rewrite.
+      it('audit-metadata-bodies without --apply on a database that does not exist answers empty work with exit 0 over every audited table', async () => {
         const absent = join(fixture!.dir, 'data', 'never-started.db');
         const { payload, exitCode } = await runJson(auditBodies, ['--database-url', `file:${absent}`]);
         const audited = ['sys_activity', 'sys_audit_log', 'sys_metadata_audit'];
 
-        expect(exitCode).toBe(1);
+        expect(exitCode).toBe(0);
         expect(payload.apply).toBe(false);
-        // `failures` counts the tables whose rows were NOT examined.
-        expect(payload.report.failures).toBe(audited.length);
+        expect(payload.report.failures).toBe(0);
         expect(payload.report.scanned).toBe(0);
         expect(Object.keys(payload.report.byObject).sort()).toEqual(audited);
       }, cell.timeout);

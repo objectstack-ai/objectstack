@@ -33,6 +33,8 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { absentTableReads } from '../../utils/absent-table-reads.js';
+import type { StoredMigrationReport } from '@objectstack/metadata-protocol';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 
@@ -876,18 +878,45 @@ export default class MigrateMeta extends Command {
       // be a second route to one capability, and the two would drift.
       // Absent (an older stack, or a boot that skipped it), flow rows keep
       // reporting `skipped` with the reason rather than being counted done.
-      const report = await protocol.migrateStoredMetadata({
+      // [#21552] Not asked: the preview's read-only boot measured whether
+      // `sys_metadata` exists, and a table that does not exist stores no row to
+      // canonicalize. The protocol reads that table through an engine this
+      // command cannot wrap, so the preview answers the true contents of an
+      // absent table itself: a walk over zero rows, the report the protocol
+      // returns for a booted database that holds none. Read anyway, a project
+      // whose database does not exist yet was refused here with exit 1.
+      // `--apply` booted plain, so there the table exists and the read is real.
+      // ⛔ Only a table the boot MEASURED absent: any other refused read still
+      // lands in the catch below and still exits 1.
+      const reads = absentTableReads(stack);
+      const noStoredRows: StoredMigrationReport = {
         apply,
-        ...(flags.type && flags.type.length > 0 ? { types: flags.type } : {}),
-        actor: 'os migrate meta --stored',
-      });
+        protocol: PROTOCOL_VERSION,
+        scanned: 0,
+        canonical: 0,
+        pending: 0,
+        rewritten: 0,
+        skipped: 0,
+        failed: 0,
+        rows: [],
+        decisionModeReview: [],
+      };
+      const report: StoredMigrationReport = reads.absent('sys_metadata')
+        ? noStoredRows
+        : await protocol.migrateStoredMetadata({
+            apply,
+            ...(flags.type && flags.type.length > 0 ? { types: flags.type } : {}),
+            actor: 'os migrate meta --stored',
+          });
       const clean = storedMigrationClean(report);
       if (!clean) exitCode = 1;
 
       if (flags.json) {
+        reads.notice(true);
         await emitJson({ database: stack.dbLabel, ...report, clean, duration: timer.elapsed() });
       } else {
         printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+        reads.notice(false);
         console.log('');
         console.log(formatStoredMigrationReport(report).join('\n'));
         console.log('');
