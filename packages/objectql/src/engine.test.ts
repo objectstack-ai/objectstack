@@ -2565,6 +2565,20 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
   let engine: ObjectQL;
   let driver: IDataDriver;
 
+  // [#21571] The flag columns the real `sys_migration` declares
+  // (`platform-objects` sys-migration.object.ts). A read serves only declared
+  // columns, so a double declaring `id` alone would read every flag row as
+  // empty — the fixture declares what the production object declares.
+  const SYS_MIGRATION_DEF = {
+    name: 'sys_migration',
+    fields: {
+      id: { type: 'text' },
+      last_run_at: { type: 'datetime' },
+      verified_at: { type: 'datetime' },
+      blocking: { type: 'number' },
+    },
+  };
+
   const verifiedRow = {
     id: 'adr-0104-file-references',
     last_run_at: '2026-07-27T00:00:00.000Z',
@@ -2594,7 +2608,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
   const withMediaObject = () => {
     vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => {
       if (name === 'note') return { name: 'note', fields: { doc: { type: 'file' } } } as any;
-      if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
+      if (name === 'sys_migration') return SYS_MIGRATION_DEF as any;
       return undefined;
     });
   };
@@ -2636,7 +2650,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
   it('costs no query for an object that declares no media field', async () => {
     vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => {
       if (name === 'invoice') return { name: 'invoice', fields: { amount: { type: 'number' } } } as any;
-      if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
+      if (name === 'sys_migration') return SYS_MIGRATION_DEF as any;
       return undefined;
     });
     vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
@@ -2736,7 +2750,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
       vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => objects[name]);
       vi.mocked((SchemaRegistry as any).getAllObjects).mockImplementation(() => Object.values(objects));
     };
-    const SYS_MIGRATION = { name: 'sys_migration', fields: { id: { type: 'text' } } };
+    const SYS_MIGRATION = SYS_MIGRATION_DEF;
     const lines = (info: any) => info.mock.calls.map((c: any[]) => String(c[0])).join('\n');
 
     it('names the command that closes an open value-shape gate', async () => {
