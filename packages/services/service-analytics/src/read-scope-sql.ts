@@ -642,6 +642,28 @@ import {
  * has no arm for: still `READ_SCOPE_COMPILE_FAILED` / 500, withheld, per the
  * #5367 section above. The note at {@link compileOperator}'s `default:` arm
  * records why a 400 would be the wrong class here.
+ *
+ * ## A temporal comparand binds in the column's storage form (#21505, ADR-0053 D-A1 / D-A2)
+ *
+ * D-A1 binds every surface that puts a filter comparand into raw SQL to the
+ * driver's dialect-aware temporal coercion. This compiler bound the comparand
+ * as written, so the database read it by its own rules instead of the
+ * engine's: PostgreSQL cast a bare day in the SESSION's zone, and SQLite
+ * compared it as text against the canonical instant. The read scope and the
+ * engine then admitted different rows for one policy, on some cells in the
+ * admitting direction.
+ *
+ * The caller now hands the driver's pair, bound to the object
+ * ({@link ReadScopeCompileOptions.coerceTemporalFilterValue} and
+ * {@link ReadScopeCompileOptions.coerceTemporalFilterColumn}): the engine
+ * door's own functions, never a second copy of the storage rule. Every value
+ * comparison in {@link compileOperator} and {@link compileField} binds its
+ * comparand through the first and reads its column through the second. The
+ * order is D-E3's by construction: the shared lowering at the entry widens a
+ * bare day first, and the arms convert the bound they are handed. The null
+ * tests, `$empty` and the text arms read the column as stored, as the native
+ * `where` face does. An absent member is identity, the contract's own reading
+ * for a driver whose storage form is the wire form.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -746,6 +768,29 @@ export interface ReadScopeCompileOptions {
    * consumers fill it from the context's `declaredValueShape` hook.
    */
   declaredValueShape?: (field: string) => ValueShapeFieldDef | undefined;
+  /**
+   * [#21505, ADR-0053 D-A1] The comparand half of the driver's temporal
+   * coercion, bound to the object this scope reads: `field`'s comparand in
+   * the form the column is STORED in. It is the engine door's own function
+   * (`IDataDriver.temporalFilterValue`, which `StrategyContext.coerceTemporalFilterValue`
+   * reaches), so a read scope and the engine compare one value. Applied after
+   * the shared lowering, to every comparand a value comparison binds
+   * (equality, `$ne`, the four orderings, `$in`, `$nin`, `$between`), never to
+   * a text pattern or a null test. Absent is identity: the comparand binds as
+   * written. Both of this compiler's consumers fill it from the context.
+   */
+  coerceTemporalFilterValue?: (field: string, value: unknown) => unknown;
+  /**
+   * [#21505, ADR-0053 D-A2] The column half of the same coercion, and its
+   * required pair: given the column reference a value comparison was going
+   * to emit, the expression it must emit instead so the column reads in the
+   * form {@link ReadScopeCompileOptions.coerceTemporalFilterValue} put the
+   * comparand in (`IDataDriver.temporalFilterColumnSql`). It answers the
+   * reference unchanged for every column that needs no repair. The
+   * expression binds nothing: the consumers renumber every `?` in this
+   * compiler's output. Absent is identity: the column reads as written.
+   */
+  coerceTemporalFilterColumn?: (field: string, columnSql: string) => string;
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
@@ -1310,11 +1355,11 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
   // "not a field reference".
   assertNoFieldReferenceComparand(field, value);
 
-  // Scalar / null → implicit equality.
+  // Scalar / null → implicit equality. [#21505] A value is compared in the
+  // column's storage form, like `$eq` below; the null test reads it as stored.
   if (value === null) return `${col} IS NULL`;
   if (typeof value !== 'object' || value instanceof Date) {
-    params.push(value);
-    return `${col} = ?`;
+    return `${comparisonColumn(col, field, opts)} = ${bindComparand(params, field, value, opts)}`;
   }
   // The implicit spelling of the equality slot {@link assertNoListInEqualitySlot}
   // guards under `$eq` — the shape a CEL `field == <list>` lowers to.
@@ -1359,6 +1404,25 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
 function bind(params: unknown[], v: unknown): string {
   params.push(v);
   return '?';
+}
+
+/**
+ * [#21505] Bind a value comparison's comparand in the column's storage form,
+ * through the caller's {@link ReadScopeCompileOptions.coerceTemporalFilterValue}
+ * (identity when absent). See the module header's #21505 section.
+ */
+function bindComparand(params: unknown[], field: string, v: unknown, opts: ReadScopeCompileOptions): string {
+  return bind(params, opts.coerceTemporalFilterValue ? opts.coerceTemporalFilterValue(field, v) : v);
+}
+
+/**
+ * [#21505] A value comparison's column, read in the form its comparand was
+ * coerced into, through {@link ReadScopeCompileOptions.coerceTemporalFilterColumn}
+ * (identity when absent). Null tests, `$empty` and the text arms read the
+ * column as stored, as the native `where` face does.
+ */
+function comparisonColumn(col: string, field: string, opts: ReadScopeCompileOptions): string {
+  return opts.coerceTemporalFilterColumn ? opts.coerceTemporalFilterColumn(field, col) : col;
 }
 
 /**
@@ -2014,24 +2078,30 @@ function compileOperator(
   params: unknown[],
   opts: ReadScopeCompileOptions,
 ): string {
+  // [#21505] The value comparisons below compare in the column's STORAGE form:
+  // each comparand through {@link bindComparand}, the column through
+  // {@link comparisonColumn} — the driver's pair, identity when the caller
+  // passes none. The null tests and the text arms read the column as stored.
+  const vcol = (): string => comparisonColumn(col, field, opts);
+  const vbind = (v: unknown): string => bindComparand(params, field, v, opts);
   switch (op) {
     // [#19975] `val` is never a list here: {@link assertNoListInEqualitySlot}
     // refused one at {@link compileField}, before this emitter runs.
-    case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
+    case '$eq': return val === null ? `${col} IS NULL` : `${vcol()} = ${vbind(val)}`;
     // [#5298] `$ne: null` is `IS NOT NULL` — already total, and "has any
     // value" is false for a row that has none. A `$ne` of a value arrives
     // inside the NULL escape the shared lowering wrote around it (see the
     // module header), so the comparison compiles as written here.
-    case '$ne': return val === null ? `${col} IS NOT NULL` : `${col} <> ${bind(params, val)}`;
-    case '$gt': return `${col} > ${bind(params, val)}`;
-    case '$gte': return `${col} >= ${bind(params, val)}`;
-    case '$lt': return `${col} < ${bind(params, val)}`;
-    case '$lte': return `${col} <= ${bind(params, val)}`;
+    case '$ne': return val === null ? `${col} IS NOT NULL` : `${vcol()} <> ${vbind(val)}`;
+    case '$gt': return `${vcol()} > ${vbind(val)}`;
+    case '$gte': return `${vcol()} >= ${vbind(val)}`;
+    case '$lt': return `${vcol()} < ${vbind(val)}`;
+    case '$lte': return `${vcol()} <= ${vbind(val)}`;
     case '$in': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return FALSE_CLAUSE; // IN () matches nothing — safe
       assertCompilableMembers(op, field, val);
-      return `${col} IN (${val.map((v) => bind(params, v)).join(', ')})`;
+      return `${vcol()} IN (${val.map(vbind).join(', ')})`;
     }
     case '$nin': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
@@ -2046,12 +2116,12 @@ function compileOperator(
       assertCompilableMembers(op, field, val);
       // [#5298] "Not among this list" holds vacuously for a value that is not
       // there: the shared lowering's NULL escape around this leaf says so.
-      return `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`;
+      return `${vcol()} NOT IN (${val.map(vbind).join(', ')})`;
     }
     case '$between': {
       if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
       assertCompilableMembers(op, field, val);
-      return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
+      return `${vcol()} BETWEEN ${vbind(val[0])} AND ${vbind(val[1])}`;
     }
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
     // character is bound with it. See {@link textMatch}.
