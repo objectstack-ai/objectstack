@@ -339,7 +339,8 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
     field: 'stage',
     expected: [{ group: null, value: 2 }],
     note:
-      '#6409: `won` twice collapses to one and the two nulls contribute nothing — '
+      'count_distinct was kept and enforced on every face, as distinct non-null values: '
+      + '`won` twice collapses to one and the two nulls contribute nothing — '
       + '4 means the dedup was dropped, 3 means NULL was counted as a value, '
       + '6 means the lowering fell through to count(*).',
   },
@@ -395,8 +396,10 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
     field: 'flag',
     expected: [{ group: null, value: 3 }],
     note:
-      '#11065/#11151: an arithmetic accumulator that drops booleans answers its '
-      + 'identity 0 here — a plausible number, which is why this case exists.',
+      'A boolean aggregand is worth 1 or 0 on every face — driver-memory and then '
+      + 'driver-mongodb were both moved onto that answer: an arithmetic accumulator '
+      + 'that drops booleans answers its identity 0 here — a plausible number, which '
+      + 'is why this case exists.',
   },
   {
     name: 'avg(flag) is the true-rate',
@@ -404,8 +407,9 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
     field: 'flag',
     expected: [{ group: null, value: 0.5 }],
     note:
-      '#11065: the rate-over-a-flag-column shape (an SLA-violation rate, a win '
-      + 'rate). A face that drops booleans answers null — a blank tile, '
+      'The rate-over-a-flag-column shape (an SLA-violation rate, a win rate) '
+      + 'that driver-memory answered null for until it counted a boolean as 1 or 0. '
+      + 'A face that drops booleans answers null — a blank tile, '
       + 'indistinguishable from "no matching rows".',
   },
   {
@@ -414,9 +418,10 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
     field: 'flag',
     expected: [{ group: null, value: 0 }],
     note:
-      '#11152 ruling (2026-08-28): booleans aggregate as numbers with no '
+      'Ruled 2026-08-28: booleans aggregate as numbers with no '
       + 'per-aggregate exception, so the order statistics answer 0/1 in the '
-      + 'same domain sum/avg answer in — not false/true (#11249, superseded).',
+      + 'same domain sum/avg answer in — not the false/true an earlier ruling '
+      + 'had chosen, which this one superseded.',
   },
   {
     name: 'max(flag) answers the NUMBER 1',
@@ -532,7 +537,8 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
       { group: 'west', value: 40 },
     ],
     note:
-      '#15546: `east` has two rows and nothing to add. A face that hands SQL\'s '
+      'Ruled: a non-empty group whose aggregand is NULL in every row sums to 0. '
+      + '`east` has two rows and nothing to add. A face that hands SQL\'s '
       + 'NULL through answers null here (a blank tile, indistinguishable from '
       + '"not computed"), and `west` at 40 keeps a face that folded EVERY sum '
       + 'to 0 from passing.',
@@ -547,7 +553,7 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
       { group: 'west', value: 2 },
     ],
     note:
-      '#15546: the reachability control for the case above. COUNT(col) is '
+      'The reachability control for the all-NULL-sums-to-0 case above. COUNT(col) is '
       + 'defined over non-null values on every backend, so `east` at 0 proves '
       + 'the seed stored NULLs — a harness that wrote 0 in place of a null '
       + 'answers 2 here and turns the sum cell green for the wrong reason.',
@@ -558,7 +564,7 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
     field: 'amount',
     expected: [{ group: null, value: 40 }],
     note:
-      '#15546: the partial-null control. Four nulls among six rows contribute '
+      'The partial-null control for the same ruling. Four nulls among six rows contribute '
       + 'nothing and the two values add to 40 on every face — the case that was '
       + 'always green, which is why the all-null cell went unmeasured.',
   },
@@ -574,7 +580,9 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
       { group: 'west', value: 4 },
     ],
     note:
-      '#6401: the VALUES are the `count(*) grouped by region` case verbatim — only '
+      'A structured group node\'s `alias` names the projected group column on every '
+      + 'face — the SQL faces that ignored it were made to honour it. '
+      + 'The VALUES are the `count(*) grouped by region` case verbatim — only '
       + 'the key moves. A face that ignores `alias` returns the same two numbers '
       + 'under `region`, so this case can only fail on the KEY, which is the whole '
       + 'point: every wrong answer here is a valid query returning plausible rows. '
@@ -593,7 +601,8 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
       { group: 'west', value: 100 },
     ],
     note:
-      '#6401: the degenerate alias. Its twin above cannot see a face that emits '
+      'The degenerate alias, under the same every-face `alias` rule. Its twin above '
+      + 'cannot see a face that emits '
       + '`"region" AS "region"` and breaks on the self-rename, and a face that '
       + 'special-cases `alias === field` needs the case that exercises the '
       + 'special case.',
