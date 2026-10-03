@@ -4013,8 +4013,12 @@ function collectFilterFieldKeys(
  * (`{ function: 'count', alias: 'metadata' }`) is a legitimate count.
  *
  * What counts as a read, and why it is more than the ingress gate's
- * {@link collectFilterFieldKeys} collects — each rule a measured reach at the
- * generic data door before this collector existed:
+ * {@link collectFilterFieldKeys} collects. The first two rules are measured
+ * reaches at the generic data door before this collector existed (a family
+ * column evaluated, unrefused); the rest are the stricter collector's rules,
+ * adopted whole so the door and the seam agree — where measured, the door
+ * already refused those shapes elsewhere (its dotted-path rule, the engine's
+ * filter doors), and now the family's own refusal answers them first:
  *
  * - **A cross-field comparand is a read.** `{ name: { $eq: { $field: 'metadata' } } }`
  *   compares each row's `name` with its stored body, and the SQL drivers
