@@ -30,7 +30,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineUpdateDispatch,
+    assertEngineFindOnePredicate,
+    // [#21476] The reason the admin read of a view states — the advisory must carry the same bytes.
+    anonymousFormIntakeUnavailableMessage,
+} from '@objectstack/metadata-core';
 // [#4716] The advisory-tier rule the Q2 fence test proves its body WOULD trip
 // — imported from the full barrel deliberately: this is a TEST, not the gate
 // (the gate itself may only reach the registry through `@objectstack/lint/runtime`,
@@ -39,7 +45,7 @@ import { validateSemanticRoles } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 import { SDUI_MANIFEST_SERVICE } from './index.js';
-import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
+import { PUBLIC_FORM_INTAKE_UNAVAILABLE, stampHtmlPageRequires } from './runtime-authoring-gate.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
@@ -1452,5 +1458,133 @@ describe('stored html page `requires` at load and at draft promotion (#20312)', 
             .resolves.toMatchObject({ success: true });
 
         expect(storedPage(rows)?.requires).toEqual(['plugin-absent']);
+    });
+});
+
+/**
+ * [#21476] The public-form intake advisory, end to end through the two write
+ * doors: `saveMetaItem` (REST `PUT /meta/view/:name`) and the draft → active
+ * promotion `publishMetaItem` (REST `POST /meta/view/:name/publish`).
+ *
+ * The posture is read off a `tenancy` service in the protocol's own services
+ * table — the service, and the reader (`anonymousFormIntakePosture`), the
+ * anonymous form doors read. The rows pin both halves: on a walled posture in
+ * force the write SUCCEEDS with exactly one warning, located at the form's
+ * `sharing` and carrying the admin read's reason byte for byte; every control
+ * the doors serve the form on raises nothing, the degraded deployment included
+ * — whose REQUESTED posture (`OS_TENANCY_POSTURE`) walls while its in-force
+ * posture does not.
+ */
+describe('public-form intake advisory on save and publish (#21476)', () => {
+    const SLUG = 'contact-us';
+    const NAME = 'showcase_inquiry';
+    /** The showcase's contact form: a container whose public form is `formViews.contact`. */
+    const contactContainer = () => ({
+        list: { type: 'grid', data: { provider: 'object', object: NAME }, columns: [{ field: 'name' }] },
+        formViews: {
+            contact: {
+                type: 'simple',
+                data: { provider: 'object', object: NAME },
+                sections: [{ name: 'about', fields: [{ field: 'name' }, { field: 'email' }] }],
+                sharing: { enabled: true, allowAnonymous: true, publicLink: `/forms/${SLUG}` },
+            },
+        },
+    });
+    /** The bound object as the live registry holds it — `organization_id` injected at registration. */
+    const inquiry = (tenancyDisabled: boolean) => ({
+        name: NAME,
+        label: 'Inquiry',
+        ...(tenancyDisabled ? { tenancy: { enabled: false } } : {}),
+        fields: {
+            organization_id: { type: 'lookup', reference: 'sys_organization' },
+            name: { type: 'text', label: 'Name' },
+            email: { type: 'email', label: 'Email' },
+        },
+    });
+
+    type Tenancy = 'isolated' | 'group' | 'degraded' | 'single' | 'no-service';
+    /** A `tenancy` service as plugin-auth registers it: `posture` is the posture IN FORCE. */
+    const tenancyService = (t: Exclude<Tenancy, 'no-service'>) => ({
+        posture: t === 'degraded' ? 'single' : t,
+        requestedPosture: t === 'degraded' ? 'isolated' : t,
+        defaultOrgId: async () => (t === 'single' ? 'org_alpha' : null),
+    });
+
+    function hostOn(tenancy: Tenancy, tenancyDisabled = false) {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [inquiry(tenancyDisabled)] : []);
+        const services = new Map<string, unknown>(
+            tenancy === 'no-service' ? [] : [['tenancy', tenancyService(tenancy)]],
+        );
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_test') as any;
+        return { protocol, rows };
+    }
+
+    const put = (protocol: any, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'view', name: NAME, item: contactContainer(), ...extra });
+    const publish = async (protocol: any) => {
+        await expect(put(protocol, { mode: 'draft' })).resolves.toMatchObject({ success: true });
+        return protocol.publishMetaItem({ type: 'view', name: NAME });
+    };
+    const intake = (response: { advisories?: Array<{ rule: string }> }) =>
+        (response.advisories ?? []).filter((a) => a.rule === PUBLIC_FORM_INTAKE_UNAVAILABLE);
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    const savedPosture = process.env.OS_TENANCY_POSTURE;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+        else process.env.OS_TENANCY_POSTURE = savedPosture;
+    });
+
+    for (const posture of ['isolated', 'group'] as const) {
+        for (const [door, write] of [['PUT', put], ['publish', publish]] as const) {
+            it(`'${posture}' in force, walled object — ${door} succeeds with exactly one warning, the admin read's reason at the form's sharing`, async () => {
+                const { protocol, rows } = hostOn(posture);
+                const response = await write(protocol);
+                expect(response.success).toBe(true);
+                expect(response.advisories).toEqual([{
+                    severity: 'warning',
+                    rule: PUBLIC_FORM_INTAKE_UNAVAILABLE,
+                    where: `view "${NAME}" · public form "/forms/${SLUG}"`,
+                    path: 'views[0].formViews.contact.sharing',
+                    message: anonymousFormIntakeUnavailableMessage(SLUG, {
+                        object: NAME, posture, tenantField: 'organization_id',
+                    }),
+                    hint: expect.stringContaining('tenancy: { enabled: false }'),
+                }]);
+                // Never a refusal: the row landed active.
+                expect([...rows.values()].filter((r) => r.type === 'view' && r.state === 'active')).toHaveLength(1);
+            });
+        }
+    }
+
+    it.each<[string, Tenancy, boolean]>([
+        ['walled posture, object declared tenancy: { enabled: false }', 'isolated', true],
+        ["the 'single' posture", 'single', false],
+        ['no tenancy service registered', 'no-service', false],
+    ])('CONTROL — %s: PUT and publish raise no intake advisory', async (_label, tenancy, tenancyDisabled) => {
+        const { protocol } = hostOn(tenancy, tenancyDisabled);
+        const saved = await put(protocol);
+        expect(saved.success).toBe(true);
+        expect(intake(saved)).toEqual([]);
+        const published = await publish(protocol);
+        expect(published.success).toBe(true);
+        expect(intake(published)).toEqual([]);
+    });
+
+    it('CONTROL — a degraded walled deployment: the REQUESTED posture walls, the posture in force does not; the doors serve, so nothing is raised', async () => {
+        process.env.OS_TENANCY_POSTURE = 'isolated';
+        const { protocol } = hostOn('degraded');
+        const saved = await put(protocol);
+        expect(saved.success).toBe(true);
+        expect(intake(saved)).toEqual([]);
+        const published = await publish(protocol);
+        expect(published.success).toBe(true);
+        expect(intake(published)).toEqual([]);
     });
 });
