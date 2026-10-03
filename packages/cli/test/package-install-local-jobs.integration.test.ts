@@ -401,7 +401,7 @@ describe('#21489: install-local runs job bodies and refuses handler-only jobs', 
     // The CLI names the code the runtime answered with, and the remedy.
     expect(run.output).toMatch(/Install failed \(422 VALIDATION_ERROR\)/);
     expect(run.output).toContain(HANDLER_JOB);
-    expect(run.output).toMatch(/give the job a `body`/);
+    expect(run.output).toMatch(/give the job a `body`/i);
     expect(run.output).toMatch(/os start --artifact/);
     const listing = readings.installed!;
     expect(listing.status, JSON.stringify(listing.body)).toBe(200);

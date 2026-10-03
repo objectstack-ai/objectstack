@@ -114,11 +114,21 @@ export type ScriptUser = ActorUser | HookContext['user'];
  * gating, and audit logs.
  */
 export interface ScriptOrigin {
-  /** Whether the body is attached to a Hook or an Action. */
-  kind: 'hook' | 'action';
-  /** Object the hook/action targets, when applicable. */
+  /**
+   * What the body is attached to: a Hook, an Action, or a scheduled Job
+   * (`JobSchema.body`, #21489).
+   *
+   * The kind decides three things in the engine and nothing else: the
+   * per-invocation CPU budget a body gets when the caller states none (each
+   * kind has its own default), the wrapper the source runs in (an action body
+   * is `(input, ctx)`; a hook or a job body is `(ctx)` — a job has no input),
+   * and the hook-only `ctx.input` write recorder. A job body's `ctx` is
+   * `api` / `log` / `crypto`: no record, no caller, no trigger payload.
+   */
+  kind: 'hook' | 'action' | 'job';
+  /** Object the hook/action targets, when applicable. A job targets none. */
   object?: string;
-  /** Hook/Action name, used in error messages and traces. */
+  /** Hook/Action/Job name, used in error messages and traces. */
   name: string;
 }
 
@@ -479,7 +489,13 @@ export interface ScriptResult {
 
 export interface ScriptRunOptions {
   origin: ScriptOrigin;
-  /** Hard timeout for this invocation. The smaller of body.timeoutMs and this wins. */
+  /**
+   * Hard timeout for this invocation. The smaller of body.timeoutMs and this wins.
+   *
+   * For a job body this is the job's own `timeoutMs` (`JobSchema.timeoutMs`,
+   * the ONE limit of a body job — `body.timeoutMs` is refused on a job), so it
+   * is the only explicit value and it decides the budget alone.
+   */
   timeoutMs?: number;
   /** Optional abort signal from the surrounding kernel. */
   signal?: AbortSignal;
