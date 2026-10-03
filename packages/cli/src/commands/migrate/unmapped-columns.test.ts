@@ -49,22 +49,31 @@ function finding(partial: Partial<ManagedDriftEntry> & { kind: ManagedDriftEntry
 /**
  * A reader over in-memory rows that honours what the keyset walk asks of a
  * driver: the `id > cursor` seek, ascending order, the page limit and the
- * projection. Every query it was asked is recorded.
+ * projection. A condition is an equality or a `$gt`; any other operator is
+ * refused rather than read as a match. Every query it was asked is recorded.
  */
 function rowsReader(rows: Array<Record<string, unknown>>): UnmappedColumnReader & { queries: Array<Record<string, any>> } {
   const queries: Array<Record<string, any>> = [];
+  const holds = (row: Record<string, unknown>, key: string, cond: unknown): boolean => {
+    if (cond !== null && typeof cond === 'object') {
+      const ops = Object.keys(cond);
+      if (ops.length === 1 && ops[0] === '$gt') return String(row[key]) > String((cond as { $gt: unknown }).$gt);
+      throw new Error(`this double implements equality and $gt only, not ${JSON.stringify(cond)}`);
+    }
+    return row[key] === cond;
+  };
   return {
     queries,
     async find(_object, query) {
       queries.push(query);
-      const where = query.where as { id?: { $gt?: string } } | undefined;
-      const after = where?.id?.$gt;
-      const fields = query.fields as string[];
-      return rows
-        .filter((r) => after === undefined || String(r.id) > after)
-        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
-        .slice(0, query.limit as number)
-        .map((r) => Object.fromEntries(fields.filter((f) => f in r).map((f) => [f, r[f]])));
+      const where = (query?.where ?? {}) as Record<string, unknown>;
+      const matched = rows
+        .filter((r) => Object.entries(where).every(([key, cond]) => holds(r, key, cond)))
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      // The caller's bound, by presence, after the filter: a driver applies it there too.
+      const page = typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+      const fields = Array.isArray(query?.fields) ? (query.fields as string[]) : null;
+      return fields ? page.map((r) => Object.fromEntries(fields.filter((f) => f in r).map((f) => [f, r[f]]))) : page;
     },
   };
 }
