@@ -759,6 +759,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // moves the census verdict, so a change to it has to re-run this suite.
       // Per-file, not `packages/**`, for the price the `scripts/**` entry records.
       'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+      // [#21441] Declared by name for the same reason: the census LEDGER
+      // carries a NOT_SDK row for service-analytics' date-bucket echo pin,
+      // which calls `analytics.query(` on the real AnalyticsService (receiver
+      // `service`). A call added to or removed from that file moves the census
+      // verdict, so a change to it has to re-run this suite.
+      'packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts',
     ],
     heldBy: {
       // `scripts/**` is rostered TODAY through the census's own
