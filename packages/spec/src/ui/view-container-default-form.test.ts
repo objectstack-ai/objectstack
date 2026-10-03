@@ -94,4 +94,10 @@ describe('expandViewContainerWithDiagnostics — the list family collapses `list
     expect(lists(items).map((i) => i.name)).toEqual([`${OBJ}.all`]);
     expect(defaults(lists(items))).toEqual([`${OBJ}.all`]);
   });
+
+  it('the default list\'s own `name` is its identity, not its body: a restatement that differs only there still collapses', () => {
+    const { items } = expandViewContainerWithDiagnostics(OBJ, { list: { ...list, name: 'all_leads' }, listViews: { all: list } });
+    expect(lists(items).map((i) => i.name)).toEqual([`${OBJ}.all`]);
+    expect(defaults(lists(items))).toEqual([`${OBJ}.all`]);
+  });
 });

@@ -6751,12 +6751,15 @@ export function isAggregatedViewContainer(item: any): boolean {
  *  key for key (the "default == listViews.all" authoring pattern) is found
  *  whatever order its keys were written in. A restatement is the WHOLE body:
  *  two lists that differ in anything (a filter, a sort, a kanban setting) are
- *  two views, never one. `undefined` when the body cannot be serialised; such
- *  a body restates nothing. */
+ *  two views, never one. The view's own `name` is its identity, not its body,
+ *  and is left out. `undefined` when the body cannot be serialised; such a body
+ *  restates nothing. */
 function listViewBody(v: any): string | undefined {
   if (!v || typeof v !== 'object') return undefined;
+  const body = { ...v };
+  delete body.name;
   try {
-    return JSON.stringify(v, (_key, value) =>
+    return JSON.stringify(body, (_key, value) =>
       value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, value[k]]))
         : value,
@@ -6841,8 +6844,9 @@ export interface ExpandViewResult {
  *
  * List family: `listViews` entries first (keys taken from the author), then the
  * default `list`. A `listViews` entry whose whole body restates `list` key for
- * key collapses with it into that one named item; a named list that differs from
- * `list` in anything is its own view, and `list` is then served as its own item.
+ * key (its own `name` aside) collapses with it into that one named item; a named
+ * list that differs from `list` in anything else is its own view, and `list` is
+ * then served as its own item.
  * The item carrying the declared default list is flagged `isDefault`; with no
  * `list`, the first named list is.
  *

@@ -346,8 +346,8 @@ function viewObjectName(view: any): string | undefined {
  *     named one keeps the author's `list.name`;
  *  2. a default list whose STRUCTURE merely restates a `listViews` entry is
  *     **collapsed into that entry** and has no key of its own — the
- *     `examples/app-crm` shape, where `list` is signature-identical to
- *     `listViews.all` and the live key is therefore `all`. This returns `all`
+ *     `examples/app-crm` shape, where `list` restates `listViews.all` key for
+ *     key and the live key is therefore `all`. This returns `all`
  *     there, and the caller skips the emit because the `listViews` loop
  *     already covered it. Emitting a second key for the collapsed view would
  *     scaffold a translation no lookup can reach — the same defect one shape
