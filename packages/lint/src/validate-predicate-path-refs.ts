@@ -649,7 +649,8 @@ function checkPredicate(
             `predicate references \`${full}\`, which the target schema does not declare — `
             + `\`${segment}\` is not a key of \`${container}\`. The reference resolves to nothing, `
             + `so the predicate can never evaluate and the console falls OPEN: the element renders `
-            + `unconditionally and looks exactly like one carrying no predicate at all (#5149).`,
+            + `unconditionally and looks exactly like one carrying no predicate at all (failing open is the `
+            + `console's settled behaviour).`,
           hint:
             `${formatSuggestion(findClosestMatches(segment, step.declared))
             || `\`${container}\` declares: ${step.declared.slice(0, 12).sort().join(', ')}`}`
@@ -691,7 +692,7 @@ function checkPredicate(
           + `this form edits — the binding root was dropped. Values are bound under \`${ROOT}\` and are `
           + `never flattened to top level, so \`${id}\` resolves to nothing, the predicate can never `
           + `evaluate and the console falls OPEN: the element renders unconditionally and looks exactly `
-          + `like one carrying no predicate at all (#5149, #6254).`,
+          + `like one carrying no predicate at all (failing open is the console's settled behaviour).`,
         hint:
           `Write \`${ROOT}.${id}\` instead of \`${id}\`. A metadata-editing form binds the row under `
           + `edit as \`${ROOT}\` at every depth — inside a repeater \`${ROOT}\` is the ROW, but it is `
@@ -728,15 +729,16 @@ function checkPredicate(
           + `literal string "${text}". The verdict therefore does not depend on the right-hand path `
           + `at all: \`a == ${text}\` is FALSE even when both sides hold the same value, and `
           + `\`a != ${text}\` is correspondingly TRUE. An \`==\` written this way hides the element `
-          + `on every row, and nothing in the console says why (objectui#4049).`
+          + `on every row: the form evaluator keeps its right-hand side a literal by design, and says `
+          + `why only in a development build.`
         : `predicate compares against the unquoted word \`${text}\` on the RIGHT of \`${op}\`. The `
           + `right-hand side of \`${op}\` is a literal, never a reference, so this is read as the `
           + `literal string "${text}" — which is probably what you meant, and is why it appears to `
           + `work. It is outside the declared subset all the same (\`path == 'literal'\`), and it `
           + `stops working when this surface moves to the real CEL evaluator, where a bare `
-          + `\`${text}\` resolves to nothing (objectui#4049). The token also reads as a \`${ROOT}.\` `
+          + `\`${text}\` resolves to nothing. The token also reads as a \`${ROOT}.\` `
           + `root someone dropped, so this one finding carries BOTH readings: which one you meant `
-          + `is the thing no linter can know, and it changes the fix (#7696).`,
+          + `is the thing no linter can know, and it changes the fix.`,
       hint: dotted
         ? `Two sanctioned spellings. (1) If you meant the TEXT, quote it: \`${op} '${text}'\`. `
           + `(2) If you meant the PATH, restructure so the path is on the LEFT and a literal is on `

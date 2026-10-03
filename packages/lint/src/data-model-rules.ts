@@ -341,7 +341,8 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
           `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
           `unstated (ADR-0120). Today the bare spelling materializes over exactly its \`fields\`, i.e. installation-wide; ` +
           `an author who meant "unique per organization" gets no per-organization constraint and no error. ` +
-          `Protocol 18 rejects this spelling (#5082).`,
+          `Protocol 18 rejects this spelling, and stored metadata that still carries it converts to ` +
+          `\`unique: 'global'\`, which builds the same physical index.`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
           `State the scope: \`unique: 'global'\` (installation-wide — exactly today's behavior) or ` +
@@ -518,7 +519,7 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
           `"${obj.name}" declares index${indexLabel} [${cols.join(', ')}] with ${spelling} and lists the organization ` +
           `column '${tenantColumn}' itself — the hand-written per-organization composite that predates the scope ` +
           `vocabulary (ADR-0120 S6). It reads as "unique per organization" but materializes as a plain composite, and ` +
-          `SQL UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing (#5030) — which ` +
+          `SQL UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing — which ` +
           `on a single-organization deployment is every row.`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
