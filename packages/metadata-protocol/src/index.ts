@@ -220,6 +220,13 @@ export {
   storedMetadataHashEvaluateRefusal,
   storedMetadataSearchRefusal,
 } from './metadata-redaction.js';
+// [#21544] …and what those refusals are FED: the door's one default-search
+// narrowing and its one filter-field collector, module functions the door
+// itself calls. Exported so the reader-context seam calls the same two
+// functions rather than re-stating either — a second control flow over the
+// same columns is where the two doors would drift.
+export { collectStoredMetadataFilterFields, narrowStoredMetadataSearch } from './protocol.js';
+export type { StoredMetadataSearchSchema } from './protocol.js';
 
 export type { MetadataHostEngine } from './host-engine.js';
 

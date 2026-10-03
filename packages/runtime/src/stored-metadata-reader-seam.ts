@@ -37,14 +37,18 @@
  *    (`storedMetadataBodyGroupingRefusal`, `storedMetadataBodyPredicateRefusal`,
  *    `storedMetadataHashEvaluateRefusal`, `storedMetadataSearchRefusal`,
  *    `@objectstack/metadata-protocol`), in the door's own order — a copy of any
- *    of them here would be a second definition of which shapes leak. A `count`
- *    with such a predicate is an oracle too, so it is guarded the same way (it
- *    serves no row, so only the refusal applies to it). A default `$search`
- *    is NARROWED to the door's served set — the body and hash columns removed,
- *    judged field by field by the door's own search predicate — rather than
- *    refused, so a body may still search a family table by `name` exactly as
- *    the door serves it; a search that would scan nothing after the removal is
- *    refused.
+ *    of them here would be a second definition of which shapes leak. What the
+ *    predicates are fed is the door's own too (#21544): the columns a filter
+ *    reads come from the door's ONE filter-field collector
+ *    (`collectStoredMetadataFilterFields`: every key's head and every
+ *    cross-field `{ $field }` comparand, at any depth), and a default `$search`
+ *    is NARROWED by the door's ONE narrowing (`narrowStoredMetadataSearch`) —
+ *    the body and hash columns removed, judged field by field by the door's own
+ *    search predicate — rather than refused, so a body may still search a
+ *    family table by `name` exactly as the door serves it; a search that would
+ *    scan nothing after the removal is refused. A `count` with such a predicate
+ *    is an oracle too, so it is guarded the same way and runs the guarded query
+ *    (it serves no row, so only the refusal applies to it).
  * 2. **Serve the body projected and the hash keyed** ({@link serveStoredMetadataRead}),
  *    using the door's `storedMetadataBodyProjection`, `redactStoredMetadataRows`
  *    (the family's ONE redactor in `@objectstack/spec/kernel`) and
@@ -75,18 +79,18 @@
 
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import { storedMetadataBodyWriteRefusal } from './stored-metadata-body-boundary.js';
-import { isFilterAST, parseFilterAST, resolveSearchFieldResolution } from '@objectstack/spec/data';
-import { collectConditionFields } from '@objectstack/plugin-security';
 import {
+  collectStoredMetadataFilterFields,
   ephemeralStoredHashDigest,
+  narrowStoredMetadataSearch,
   redactStoredMetadataRows,
   serveStoredMetadataHashColumnRows,
   storedMetadataBodyProjection,
   storedMetadataBodyGroupingRefusal,
   storedMetadataBodyPredicateRefusal,
   storedMetadataHashEvaluateRefusal,
-  storedMetadataSearchRefusal,
   type StoredHashDigest,
+  type StoredMetadataSearchSchema,
 } from '@objectstack/metadata-protocol';
 
 /**
@@ -106,27 +110,6 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Every column a filter NAMES, structure discarded — lowering a `FilterArray`
- * to a `FilterCondition` first so the array door a direct engine call still
- * honours (`lowerWhereFilterArray`) is read the same as the object door.
- *
- * The walk is the generic data door's sibling, `collectConditionFields`
- * (`@objectstack/plugin-security`): the door's own `collectFilterFieldKeys` is
- * internal to `protocol.ts` and cannot be imported here, and restating it would
- * be the second definition the family rule forbids. This collector gates on a
- * dotted head and also reads a cross-field `{ $field }` comparand, so it refuses
- * a DOTTED or COMPARAND reference to the body or hash columns the door's own
- * collector would miss — strictly MORE than the door, never a legitimate
- * scalar-column query, since the family columns are the only ones these
- * predicates name.
- */
-function filterHeadFields(where: unknown): string[] {
-  if (where == null) return [];
-  const lowered = isFilterAST(where) ? parseFilterAST(where) : where;
-  return [...collectConditionFields(lowered)];
-}
-
 /** The fields an `orderBy` names (`[{ field }]`, or a bare string entry). */
 function sortFieldsOf(orderBy: unknown): unknown[] {
   if (!Array.isArray(orderBy)) return [];
@@ -134,73 +117,32 @@ function sortFieldsOf(orderBy: unknown): unknown[] {
 }
 
 /**
- * Narrow or refuse a `$search` on a family table the way the data door's
- * `narrowStoredMetadataSearch` does, consuming the door's own search predicate
- * ({@link storedMetadataSearchRefusal}) as the authority on which columns a
- * search may never scan:
- *
- *  - an EXPLICIT field list (`searchFields`, or the object-form `search.fields`)
- *    naming an unscannable column is refused;
- *  - a DEFAULT search is narrowed to the resolved searchable set minus the
- *    columns the predicate refuses, field by field, and the query runs with that
- *    `searchFields`; a set that narrows to empty is refused.
- *
- * Returns the query the read should run — the same reference when nothing
- * changed, a shallow copy carrying the narrowed `searchFields` otherwise.
+ * The object definition the default-`$search` narrowing reads, from the
+ * engine's registry — the registry the data door reads the same definition
+ * from. `undefined` when the engine exposes none.
  */
-function narrowFamilySearch(object: string, query: Record<string, unknown>, engine: unknown): Record<string, unknown> {
-  const search = query.search;
-  const objectForm = search !== null && typeof search === 'object';
-  const explicitRaw = query.searchFields != null
-    ? query.searchFields
-    : objectForm ? (search as Record<string, unknown>).fields : undefined;
-  const param = query.searchFields != null ? 'searchFields' : 'search';
-  const names: string[] = typeof explicitRaw === 'string'
-    ? explicitRaw.split(',').map((s) => s.trim()).filter(Boolean)
-    : Array.isArray(explicitRaw)
-      ? explicitRaw.filter((f): f is string => typeof f === 'string')
-      : [];
-  if (names.length > 0) {
-    const refusal = storedMetadataSearchRefusal(object, names, param);
-    if (refusal) throw refusal;
-    return query;
-  }
-  if (search == null) return query;
-  const schema = typeof (engine as { getObject?: (n: string) => unknown })?.getObject === 'function'
-    ? (engine as { getObject: (n: string) => any }).getObject(object)
+function searchSchemaOf(object: string, engine: unknown): StoredMetadataSearchSchema | undefined {
+  const getObject = (engine as { getObject?: (name: string) => unknown } | null | undefined)?.getObject;
+  return typeof getObject === 'function'
+    ? (getObject.call(engine, object) as StoredMetadataSearchSchema | undefined)
     : undefined;
-  const fields = schema?.fields;
-  if (!fields) return query;
-  const { allowed } = resolveSearchFieldResolution({
-    fields,
-    searchableFields: schema?.searchableFields,
-    displayField: schema?.nameField ?? schema?.displayNameField,
-  });
-  const narrowed = allowed.filter((field) => !storedMetadataSearchRefusal(object, [field], 'search'));
-  if (narrowed.length === 0) {
-    const refusal = storedMetadataSearchRefusal(object, allowed, 'search');
-    if (refusal) throw refusal;
-    return query;
-  }
-  return { ...query, searchFields: narrowed };
 }
 
 /**
  * Refuse every EVALUATE shape on a family read, in the data door's own order
  * (search, grouping, body filter / sort, hash filter / sort / grouping), each
- * through the door's own predicate. Returns the query the read should run,
- * which may carry a narrowed `$search` field set. A non-family object, and a
- * query that is not a record, pass through untouched.
+ * through the door's own predicate, fed by the door's own narrowing and
+ * collector. Returns the query the read should run: the caller's own, or a
+ * shallow copy carrying the narrowed `searchFields` of a default `$search`. A
+ * non-family object, and a query that is not a record, pass through untouched.
  */
 function refuseOrNarrowStoredMetadataEvaluate(object: string, query: unknown, engine: unknown): unknown {
   if (!isStoredMetadataBodyObject(object) || !isPlainRecord(query)) return query;
-  const next = narrowFamilySearch(object, query, engine);
+  const narrowedSearchFields = narrowStoredMetadataSearch(object, query, searchSchemaOf(object, engine));
+  const next = narrowedSearchFields ? { ...query, searchFields: narrowedSearchFields } : query;
   const grouping = storedMetadataBodyGroupingRefusal(object, next.groupBy);
   if (grouping) throw grouping;
-  const aggregationFilterFields = Array.isArray(next.aggregations)
-    ? (next.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) => filterHeadFields(a?.filter))
-    : [];
-  const filterFields = [...filterHeadFields(next.where), ...filterHeadFields(next.filter), ...aggregationFilterFields];
+  const filterFields = collectStoredMetadataFilterFields(object, next);
   const sortFields = sortFieldsOf(next.orderBy);
   const bodyPredicate = storedMetadataBodyPredicateRefusal(object, { filterFields, sortFields });
   if (bodyPredicate) throw bodyPredicate;
@@ -296,11 +238,10 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
       if (prop === COUNT_READ) {
         // `async` so a refusal leaves as a rejected promise, the shape every
         // other verb's refusal takes — `count` answers a number, nothing to
-        // serve, so only the evaluate guard runs.
-        return async (query?: unknown, ...rest: unknown[]) => {
-          refuseOrNarrowStoredMetadataEvaluate(objectName, query, engine);
-          return value.call(target, query, ...rest);
-        };
+        // serve, so only the evaluate guard runs, and the count runs the query
+        // the guard returns, exactly as a row-serving read does.
+        return async (query?: unknown, ...rest: unknown[]) =>
+          value.call(target, refuseOrNarrowStoredMetadataEvaluate(objectName, query, engine), ...rest);
       }
       if (WRITE_RETURN_VERBS.has(prop)) {
         // [#21454] Serve what the write RETURNS — for the contexts that may

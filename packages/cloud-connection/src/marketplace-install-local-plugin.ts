@@ -27,10 +27,13 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
- *            A package declaring an enabled job with no `body` answers
- *            `VALIDATION_ERROR` (422) the same way: a job's function-name
- *            `handler` is code no JSON door carries. The package's job bodies
- *            are scheduled on install and on every rehydrate.
+ *            A package declaring code this door cannot run answers
+ *            `VALIDATION_ERROR` (422) the same way: an enabled job with no
+ *            `body`, or one whose `body` the declaration refuses (#21585), and
+ *            a hook with no `body` (#21585) — a function-name `handler` is code
+ *            no JSON door carries. The package's job bodies are scheduled on
+ *            install and on every rehydrate; on a rehydrate, a hook with no
+ *            `body` that an older build installed is warned and NOT bound.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -162,44 +165,89 @@ const REGISTRY_WITHDRAWAL = 'registry.uninstallPackage';
 const INSTALL_LOCAL_CAPABILITY = 'manage_metadata';
 
 /**
- * [#21489] The refusal of a package that declares an enabled job no JSON door
- * can run: `VALIDATION_ERROR` / 422.
+ * [#21489, #21585] The refusal of a package that declares code this door cannot
+ * run — an enabled job with no `body` or with a `body` the declaration refuses,
+ * a hook with no `body`: `VALIDATION_ERROR` / 422.
  *
  * The code is the standard catalog's input-validation member. The condition is
  * that the install payload fails this door's acceptance rule — every enabled
- * job carries a `body` — and the ledger's admission rule sends a generic
- * validation condition to the standard member rather than to a registered
- * synonym (`error-code-ledger.zod.ts`, "Registering a new code"). What the
- * author does instead is the prescription the message carries.
- * `PLUGIN_MANIFEST_INVALID` is deliberately not it: the manifest is valid —
- * `os validate` passes it and `os start --artifact` runs it.
+ * job carries a `body` that binds, and every hook carries a `body` — and the
+ * ledger's admission rule sends a generic validation condition to the standard
+ * member rather than to a registered synonym (`error-code-ledger.zod.ts`,
+ * "Registering a new code"). What the author does instead is the prescription
+ * the message carries. `PLUGIN_MANIFEST_INVALID` is deliberately not it: that
+ * code answers the manifest's identity at this door, and a handler-form job or
+ * hook is a valid manifest — `os validate` passes it and `os start --artifact`
+ * runs it. One acceptance rule answers one code, so the off-spec job `body`
+ * (which `os validate` does refuse) is answered by the same refusal as the rest
+ * of the rule rather than splitting it.
  *
  * The status is 422, not the 400 / 502 split this door uses for an invalid
- * manifest: the package is well-formed and this door cannot process it, which
+ * manifest id: the package is well-formed JSON this door cannot process, which
  * holds whichever branch supplied it — a catalog package declaring a handler job
  * is no upstream fault. 422 derives `VALIDATION_ERROR`
  * (`standardErrorCodeForHttpStatus`), so code and status agree.
  */
-const JOB_WITHOUT_BODY_REFUSAL_CODE = 'VALIDATION_ERROR';
-const JOB_WITHOUT_BODY_REFUSAL_STATUS = 422;
+const UNRUNNABLE_REFUSAL_CODE = 'VALIDATION_ERROR';
+const UNRUNNABLE_REFUSAL_STATUS = 422;
+
+/** What this door cannot run in a package, as the runtime binder judges it. */
+interface UnrunnableCode {
+    jobs: ReadonlyArray<{ name: string; handler?: string; bodyRefusal?: string }>;
+    hooks: ReadonlyArray<{ name: string; handler?: string }>;
+}
+
+/** `'name' (handler 'fn')` / `'name' (no handler)`, comma-joined. */
+function describeNamedHandlers(items: ReadonlyArray<{ name: string; handler?: string }>): string {
+    return items.map((i) => `'${i.name}' (${i.handler !== undefined ? `handler '${i.handler}'` : 'no handler'})`).join(', ');
+}
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
- * The refusal sentence: which jobs, why this door cannot run them, and the two
- * remedies — a `body` (every door), or an `--artifact` boot (which loads the
- * runtime module a `handler` lives in). Names each job and the function its
- * `handler` declares, so the author fixes them all in one pass.
+ * The refusal sentence: everything the door cannot run, why, and the remedies,
+ * one clause per kind — a job with no `body`, a job whose `body` the
+ * declaration refuses, a hook with no `body` — in one answer, so the author
+ * fixes them all in one pass. Each names the item and the function its
+ * `handler` declares (or the declaration's refusal of its `body`).
  */
-function describeJobsWithoutBody(manifestId: string, jobs: ReadonlyArray<{ name: string; handler?: string }>): string {
-    const list = jobs
-        .map((j) => `'${j.name}' (${j.handler !== undefined ? `handler '${j.handler}'` : 'no handler'})`)
-        .join(', ');
-    const one = jobs.length === 1;
-    return `Package ${manifestId} was not installed: ${one ? 'its enabled job' : `${jobs.length} of its enabled jobs`} `
-        + `${list} ${one ? 'has' : 'have'} no \`body\`, so this install door cannot run ${one ? 'it' : 'them'}. `
-        + "A job's `handler` names a `defineStack({ functions })` entry, which is code: it travels in the artifact's "
-        + 'runtime module, never in the package JSON this door installs, so the job would be installed and never run. '
-        + 'Give the job a `body` (sandboxed JS, the form hooks and actions use, which travels with the package and runs '
-        + 'on every door), or boot the artifact with `os start --artifact`, which loads its runtime module.';
+function describeUnrunnable(manifestId: string, what: UnrunnableCode): string {
+    const clauses: string[] = [];
+    const jobsWithoutBody = what.jobs.filter((j) => j.bodyRefusal === undefined);
+    const jobsWithBadBody = what.jobs.filter((j) => j.bodyRefusal !== undefined);
+    if (jobsWithoutBody.length > 0) {
+        const one = jobsWithoutBody.length === 1;
+        clauses.push(
+            `${one ? 'its enabled job' : `${jobsWithoutBody.length} of its enabled jobs`} `
+            + `${describeNamedHandlers(jobsWithoutBody)} ${one ? 'has' : 'have'} no \`body\`, so this install door cannot run ${one ? 'it' : 'them'}. `
+            + "A job's `handler` names a `defineStack({ functions })` entry, which is code: it travels in the artifact's "
+            + 'runtime module, never in the package JSON this door installs, so the job would be installed and never run. '
+            + 'Give the job a `body` (sandboxed JS, the form hooks and actions use, which travels with the package and runs '
+            + 'on every door), or boot the artifact with `os start --artifact`, which loads its runtime module.',
+        );
+    }
+    if (jobsWithBadBody.length > 0) {
+        const one = jobsWithBadBody.length === 1;
+        const list = jobsWithBadBody.map((j) => `'${j.name}' (${j.bodyRefusal})`).join('; ');
+        clauses.push(
+            `${one ? 'its enabled job' : `${jobsWithBadBody.length} of its enabled jobs`} ${list} `
+            + `${one ? 'has' : 'have'} a \`body\` the declaration refuses, so this install door cannot run ${one ? 'it' : 'them'}: `
+            + 'the job would be installed and never scheduled. Correct the `body` to the declared shape (a sandboxed JS '
+            + "body; the job's time limit is the job's own `timeoutMs`) — `os validate` reports the same refusal.",
+        );
+    }
+    if (what.hooks.length > 0) {
+        const one = what.hooks.length === 1;
+        clauses.push(
+            `${one ? 'its hook' : `${what.hooks.length} of its hooks`} ${describeNamedHandlers(what.hooks)} `
+            + `${one ? 'has' : 'have'} no \`body\`, so this install door cannot run ${one ? 'it' : 'them'}. `
+            + "A hook's `handler` names a function, which is code: it travels in the artifact's runtime module, never in "
+            + "the package JSON this door installs, so this door can never bind it to the package's own code. "
+            + 'Give the hook a `body` (sandboxed JS, the form actions and jobs use, which travels with the package and '
+            + 'runs on every door), or boot the artifact with `os start --artifact`, which loads its runtime module.',
+        );
+    }
+    return `Package ${manifestId} was not installed: ${clauses.map((c, i) => (i === 0 ? c : capitalize(c))).join(' ')}`;
 }
 
 /**
@@ -908,7 +956,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
-        // 1c. [#21489] ⭐ A JOB THIS DOOR CANNOT RUN IS REFUSED, not installed.
+        // 1c. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
         //     A job runs on a JSON door only through its sandboxed `body`; its
         //     deprecated `handler` names a `defineStack({ functions })` entry,
         //     which is code and travels only in the artifact's runtime module —
@@ -916,22 +964,36 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     package installed with a 200 and its job was declared and never
         //     scheduled, hot or after a restart, with nothing anywhere saying so.
         //
+        //     [#21585] The same rule, completed:
+        //       - a job whose `body` the declaration refuses (an expression body,
+        //         a `body.timeoutMs`) is judged by whether it BINDS, not by
+        //         whether it is present — it used to install and never run;
+        //       - a hook with no `body`: its function-name `handler` can never
+        //         name the package's own code on this door, so it installed and
+        //         either never fired or bound by name to code the package does
+        //         not ship.
+        //     The judgements are the runtime binder's own, so the door and the
+        //     binder cannot disagree about what this door can run.
+        //
         //     Answered here, beside the id gate and ahead of the collision check,
         //     the posture gate, the hot-register and the ledger write, so a
         //     refused install leaves the runtime exactly as it found it and the
         //     author can add the body and retry. Only an ENABLED job is judged:
-        //     a disabled one is never scheduled on any door. ⛔ Rehydrate is not
+        //     a disabled one is never scheduled on any door; every hook is
+        //     judged, since a hook has no on/off switch. ⛔ Rehydrate is not
         //     gated, for the id gate's reason: an entry an older build installed
-        //     still rehydrates (its handler-only job is reported, not run).
-        const withoutBody = await this.jobsWithoutBody(ctx, manifest, manifestId);
-        if (withoutBody.length > 0) {
+        //     still rehydrates — its unrunnable job is reported, not run, and its
+        //     hook with no `body` is warned and NOT bound
+        //     ({@link bindArtifactHandlers}).
+        const unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        if (unrunnable.jobs.length > 0 || unrunnable.hooks.length > 0) {
             return c.json({
                 success: false,
                 error: {
-                    code: JOB_WITHOUT_BODY_REFUSAL_CODE,
-                    message: describeJobsWithoutBody(manifestId, withoutBody),
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: describeUnrunnable(manifestId, unrunnable),
                 },
-            }, JOB_WITHOUT_BODY_REFUSAL_STATUS);
+            }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
         // 2. Conflict check — refuse to overwrite user-authored apps
@@ -1696,8 +1758,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * binder's job half and the call `AppPlugin` makes on `kernel:ready`: a job
      * `body` runs sandboxed on its schedule, hot and after a restart. A
      * handler-only job never reaches here on an install — the install route
-     * refuses it ({@link jobsWithoutBody}) — and on a rehydrate of an entry an
+     * refuses it ({@link unrunnableCode}) — and on a rehydrate of an entry an
      * older build installed it is reported at `warn` and not run.
+     *
+     * [#21585] This door carries no runtime module, and says so to the binder
+     * (`withholdHooksWithoutBody`): a hook with no `body` is warned and NOT
+     * bound, because its function-name `handler` can never name the package's
+     * own code here. The install route refuses such a hook, so this fires only
+     * on the rehydrate of an entry an older build installed — which before this
+     * bound the hook by name to whatever function the engine held under it.
      *
      * Before this, `manifest.register` was the whole install: the package's
      * actions and hooks were DECLARED and never bound, so every door refused
@@ -1736,7 +1805,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 + 'every door refuses those actions and the hooks never fire. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
         } else {
-            bind(ql, manifest, { appId: manifestId, logger: ctx.logger, source: 'MarketplaceInstallLocal' });
+            const bound = bind(ql, manifest, {
+                appId: manifestId,
+                logger: ctx.logger,
+                source: 'MarketplaceInstallLocal',
+                withholdHooksWithoutBody: true,
+            });
+            // A runtime that predates the option binds a hook with no `body` by
+            // name, as before — say so rather than answer as if it withheld it.
+            if (!Array.isArray((bound as { withheldHooks?: unknown } | undefined)?.withheldHooks)) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] this runtime's binder predates withholdHooksWithoutBody — a hook of ${manifestId} with no \`body\` `
+                    + 'is bound by its handler name, not withheld. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+                );
+            }
         }
         if (!schedule) {
             ctx.logger?.warn?.(
@@ -1749,33 +1831,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#21489] The enabled jobs of `manifest` that carry no `body` — the jobs
-     * no JSON door can run, which the install route refuses. The judgement is
-     * the runtime binder's own (`collectJobsWithoutBody`, which reads the jobs
-     * the binder schedules), so the door and the binder cannot disagree about
-     * what this door can run.
+     * [#21489, #21585] The code in `manifest` this door cannot run, which the
+     * install route refuses:
      *
-     * A runtime that predates the judgement judges nothing and says so: the
-     * install proceeds as it did before this gate existed.
+     *   - the enabled jobs with no `body`, or with a `body` the declaration
+     *     refuses (`collectJobsWithoutBody`, which reads the jobs the
+     *     binder schedules and judges a body by the parse the binder binds by);
+     *   - the hooks with no `body` (`collectHooksWithoutBody`, the judgement the
+     *     binder withholds by on this door's rehydrate).
+     *
+     * Both judgements are the runtime binder's own, so the door and the binder
+     * cannot disagree about what this door can run. A runtime that predates a
+     * judgement judges nothing for it and says so: the install proceeds as it
+     * did before that gate existed.
      */
-    private jobsWithoutBody = async (
+    private unrunnableCode = async (
         ctx: PluginContext,
         manifest: unknown,
         manifestId: string,
-    ): Promise<ReadonlyArray<{ name: string; handler?: string }>> => {
-        let collect: typeof import('@objectstack/runtime')['collectJobsWithoutBody'] | undefined;
+    ): Promise<UnrunnableCode> => {
+        let collectJobs: typeof import('@objectstack/runtime')['collectJobsWithoutBody'] | undefined;
+        let collectHooks: typeof import('@objectstack/runtime')['collectHooksWithoutBody'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
-            if (typeof mod?.collectJobsWithoutBody === 'function') collect = mod.collectJobsWithoutBody;
+            if (typeof mod?.collectJobsWithoutBody === 'function') collectJobs = mod.collectJobsWithoutBody;
+            if (typeof mod?.collectHooksWithoutBody === 'function') collectHooks = mod.collectHooksWithoutBody;
         } catch { /* reported below */ }
-        if (!collect) {
+        if (!collectJobs) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] this runtime has no collectJobsWithoutBody — the jobs of ${manifestId} are not judged, `
-                + 'so a job with no `body` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+                + 'so a job with no runnable `body` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
-            return [];
         }
-        return collect(manifest);
+        if (!collectHooks) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] this runtime has no collectHooksWithoutBody — the hooks of ${manifestId} are not judged, `
+                + 'so a hook with no `body` installs. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+            );
+        }
+        return { jobs: collectJobs ? collectJobs(manifest) : [], hooks: collectHooks ? collectHooks(manifest) : [] };
     };
 
     /**

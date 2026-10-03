@@ -365,7 +365,7 @@ export const SysUserDetailPage: Page = {
               {
                 type: 'element:text',
                 properties: {
-                  variant: 'subheading',
+                  variant: 'h3',
                   content: {
                     en: 'Password & Sign-in',
                     'zh-CN': '密码与登录',
@@ -398,7 +398,7 @@ export const SysUserDetailPage: Page = {
               {
                 type: 'element:text',
                 properties: {
-                  variant: 'subheading',
+                  variant: 'h3',
                   content: {
                     en: 'Two-Factor Authentication',
                     'zh-CN': '两步验证',
@@ -431,7 +431,7 @@ export const SysUserDetailPage: Page = {
               {
                 type: 'element:text',
                 properties: {
-                  variant: 'subheading',
+                  variant: 'h3',
                   content: {
                     en: 'Email Verification',
                     'zh-CN': '邮箱验证',
@@ -464,7 +464,7 @@ export const SysUserDetailPage: Page = {
               {
                 type: 'element:text',
                 properties: {
-                  variant: 'subheading',
+                  variant: 'h3',
                   content: {
                     en: 'Danger Zone',
                     'zh-CN': '危险操作',

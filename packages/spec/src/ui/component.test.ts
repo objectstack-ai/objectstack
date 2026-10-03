@@ -1757,23 +1757,22 @@ describe('ElementTextPropsSchema', () => {
   it('should accept full text props', () => {
     const props = ElementTextPropsSchema.parse({
       content: '# Welcome',
-      variant: 'heading',
+      variant: 'h2',
       align: 'center',
     });
-    expect(props.variant).toBe('heading');
+    expect(props.variant).toBe('h2');
     expect(props.align).toBe('center');
   });
 
   /**
-   * The accept set, measured rather than described. Release 1 of the
-   * objectui#7450 convergence (maintainer 2026-09-09, option B) is additive
-   * only, so the assertion has two halves and BOTH are load-bearing: the nine
-   * published values are accepted, and the two legacy spellings are STILL
-   * accepted. A pin that only checked the nine would stay green through the
-   * release-2 retirement this card explicitly does not carry.
+   * The accept set, measured rather than described. Release 2 of the
+   * objectui#7450 convergence (#21015; maintainer 2026-09-09, option B) is the
+   * narrowing, so the assertion has two halves and BOTH are load-bearing: the
+   * nine published values are accepted, and the two pre-convergence spellings
+   * are refused BY NAME with their prescription. A pin that only checked the
+   * nine would stay green if the retirement were reverted.
    */
   const PUBLISHED_NINE = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline'] as const;
-  const STILL_ACCEPTED = ['heading', 'subheading'] as const;
 
   it.each(PUBLISHED_NINE)('accepts the published variant %s', variant => {
     const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant });
@@ -1781,31 +1780,70 @@ describe('ElementTextPropsSchema', () => {
     expect(parsed.success && parsed.data.variant).toBe(variant);
   });
 
-  it.each(STILL_ACCEPTED)('release 1 refuses nothing — %s is still accepted', variant => {
-    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant });
-    expect(parsed.success).toBe(true);
-    expect(parsed.success && parsed.data.variant).toBe(variant);
+  /**
+   * The envelope a schema refusal carries: a ZodError issue with `code` and
+   * `path`. There is no ADR-0112 `status` here — that envelope belongs to the
+   * API error surface — so these pin the code, the path naming the position,
+   * the prescription's first sentence (the FROM → TO an upgrading author greps
+   * for) and the house `os migrate meta` sentence.
+   */
+  const MIGRATE_SENTENCE =
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+  it.each([
+    ['heading', 'h2'],
+    ['subheading', 'h3'],
+  ] as const)('refuses `variant: %s` by name, naming `%s`', (retired, level) => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant: retired });
+    expect(parsed.success).toBe(false);
+    const issues = parsed.success ? [] : parsed.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('invalid_value');
+    expect(issues[0]!.path).toEqual(['variant']);
+    const message = issues[0]!.message;
+    expect(message.split(' — ')[0]).toBe(
+      `\`${retired}\` was removed from \`element:text\` \`variant\` (\`ElementTextPropsSchema.variant\`) in @objectstack/spec 17.7.0`,
+    );
+    expect(message).toContain(`Write \`${level}\``);
+    expect(message.endsWith(MIGRATE_SENTENCE)).toBe(true);
+  });
+
+  it('refuses a retired spelling through the `ComponentPropsMap` row the props gate parses', () => {
+    const parsed = ComponentPropsMap['element:text'].safeParse({ content: 'Test', variant: 'subheading' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.code)).toEqual(['invalid_value']);
+  });
+
+  it('tsc refuses each retired spelling at its typed position', () => {
+    // @ts-expect-error — `heading` left `element:text` `variant`.
+    const heading: z.input<typeof ElementTextPropsSchema>['variant'] = 'heading';
+    // @ts-expect-error — `subheading` left `element:text` `variant`.
+    const subheading: z.input<typeof ElementTextPropsSchema>['variant'] = 'subheading';
+    // The parse half of the same fact, so neither local is unused.
+    expect(ElementTextPropsSchema.safeParse({ content: 'Test', variant: heading }).success).toBe(false);
+    expect(ElementTextPropsSchema.safeParse({ content: 'Test', variant: subheading }).success).toBe(false);
   });
 
   /**
-   * The lit control for the two tests above: the enum is still a CLOSED set,
-   * so a zero-refusal reading on the eleven is a reading and not a schema that
-   * stopped judging `variant` at all.
+   * The lit control for the refusals above: a value that was never legal keeps
+   * zod's own message (which lists the legal tokens) — telling its author the
+   * value "was removed" would misinform.
    */
-  it('still refuses a value outside the eleven, with invalid_value', () => {
+  it('still refuses a value outside the nine, with zod\'s own invalid_value message', () => {
     const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant: 'small' });
     expect(parsed.success).toBe(false);
     expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.code)).toContain('invalid_value');
     expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.path.join('.'))).toContain('variant');
+    expect(parsed.success ? '' : parsed.error.issues[0]!.message).not.toContain('was removed');
   });
 
   /**
-   * Absence is the one thing this widening must not move (objectui#6942 keeps
+   * Absence is the one thing neither release may move (objectui#6942 keeps
    * the `ui:text` side from synthesising `body`; the spec side always has).
    * `.optional().default('body')` is kept deliberately, so an absent `variant`
    * still materialises `'body'` — pinned here as well as in the minimal-props
    * test above, because that test would keep passing if the default moved to
-   * some other member of the widened enum.
+   * some other member of the enum.
    */
   it('leaves absence exactly where it was — no variant materialises body', () => {
     const parsed = ElementTextPropsSchema.safeParse({ content: 'Test' });
