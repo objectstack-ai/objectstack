@@ -276,7 +276,7 @@ export const en: TranslationData = {
     // The platform's own record pages (`@objectstack/platform-objects/pages`,
     // contributed by plugin-auth and plugin-security). Their page-level `label`
     // is the only key the extractor reaches -- everything else on them is
-    // authored as an inline locale map under `slots.*` (#14817). English
+    // authored as an inline locale map under `slots.*` (commit 5529a374e). English
     // mirrors the literal in the page metadata, as above.
     sys_user_detail: { label: 'User' },
     sys_organization_detail: { label: 'Organization' },

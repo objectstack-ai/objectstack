@@ -488,7 +488,7 @@ Sort field and direction pair
 | **staticData** | `any[]` | optional | Static inline records |
 | **locale** | `string` | optional | Locale override for the calendar chrome |
 | **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
-| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectCalendarProps.filter[number]`
 
@@ -608,8 +608,8 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectGanttProps.data[provider='value']`
 
@@ -895,7 +895,7 @@ Sort field and direction pair
 | **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key; `object-kanban` offers no quick-add control. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
-| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectKanbanProps.filter[number]`
 
@@ -911,7 +911,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectKanbanProps.navigation`
 
@@ -955,8 +955,8 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectMapProps.data[provider='value']`
 
@@ -1107,7 +1107,7 @@ View filter rule
 | **maxDate** | `string` | optional | Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
 | **descriptionField** | `string` | optional | Field rendered as each entry's description (renderer default `description`). Declared FLAT because the `timeline` block has no member for it — it is the only spelling this binding has |
 | **mapping** | `any` | optional | Record-to-entry field mapping (`{ title, date, description, variant }`) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has |
-| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 
 ### Nested Shape: `ObjectTimelineProps.timeline`
 
@@ -1178,8 +1178,8 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectTreeProps.data[provider='value']`
 
@@ -1224,7 +1224,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `{ label: string \| Record<string, string>; icon?: string; collapsed: boolean; children: any[] }[]` | ✅ |  |
+| **items** | `{ label: string \| Record<string, string>; icon?: string; collapsed?: boolean; children: any[] }[]` | ✅ |  |
 | **allowMultiple** | `boolean` | optional (default: `false`) | Allow multiple panels to be expanded simultaneously |
 | **variant** | `Enum<'flush' \| 'card'>` | optional (default: `"flush"`) | Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -1428,7 +1428,7 @@ View filter rule
 | **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") — side positions (`right`/`left`) only. |
 | **collapsible** | `boolean` | optional | Whether the panel can be collapsed (renderer default: off). |
 | **defaultCollapsed** | `boolean` | optional | Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`). |
-| **feed** | `{ types?: (Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
+| **feed** | `{ types?: (Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]; filterMode?: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle?: boolean; limit?: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordChatterProps.feed`
@@ -1755,7 +1755,7 @@ Sort field and direction pair
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
 | **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
-| **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
@@ -1773,7 +1773,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **picker** | `{ object: string; valueField: string; labelField?: string; filter?: object[] }` | ✅ | Where the Add affordance sources records from. |
+| **picker** | `{ object: string; valueField?: string; labelField?: string; filter?: object[] }` | ✅ | Where the Add affordance sources records from. |
 | **linkField** | `string` | optional | Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent. |
 | **label** | `string \| Record<string, string>` | optional | Label for the Add button (default "Add"). |
 

@@ -64,11 +64,11 @@ const result = DataTypeMappingSchema.parse(data);
 | **type** | `'sql'` | ✅ | Driver type must be "sql" |
 | **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; transactionsUnsupported?: boolean }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
-| **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
+| **poolConfig** | `{ min?: number; max?: number; idleTimeoutMillis?: number; connectionTimeoutMillis?: number }` | optional | Connection pool configuration |
 | **dialect** | `Enum<'postgresql' \| 'mysql' \| 'sqlite' \| 'mssql' \| 'oracle' \| 'mariadb'>` | ✅ | SQL database dialect |
 | **dataTypeMapping** | `{ text: string; number: string; boolean: string; date: string; … }` | ✅ | SQL data type mapping configuration |
 | **ssl** | `boolean` | optional (default: `false`) | Enable SSL/TLS connection |
-| **sslConfig** | `{ rejectUnauthorized: boolean; ca?: string; cert?: string; key?: string }` | optional | SSL/TLS configuration (required when ssl is true) |
+| **sslConfig** | `{ rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string }` | optional | SSL/TLS configuration (required when ssl is true) |
 
 ### Nested Shape: `SQLDriverConfig.capabilities`
 

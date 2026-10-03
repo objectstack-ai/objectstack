@@ -210,9 +210,11 @@ export function isBindableComparand(value: unknown): boolean {
  * type face now answers first, in its own sentence and at its own path, with
  * the same verdict and envelope. #6386's gate stays as `fieldLeaves`'
  * invariant and still answers the two positions the face steps around: an
- * `undefined` inside an ARRAY comparand (`{d: {$contains: ['a', undefined]}}`)
- * and the comparand of an operator outside the vocabulary (`{d: {$wat:
- * undefined}}`). Either way, nothing reaches this predicate holding one.
+ * `undefined` inside an ARRAY comparand and the comparand of an operator
+ * outside the vocabulary (`{d: {$wat: undefined}}`). [#21448] The array arm is
+ * reached under an operator outside the vocabulary alone (`{d: {$wat: ['a',
+ * undefined]}}`): a list at a declared scalar operator is the shared
+ * comparand-SHAPE face's refusal first. Either way, nothing reaches this predicate holding one.
  *
  * So `comparand()`'s normalise-to-`null` is itself a deliberately-kept dead arm
  * (its own TSDoc says so, and says reopening it is #5526's call, not a
@@ -530,7 +532,8 @@ export function shapePreview(value: unknown): string {
  *
  * [#20035] On the `where` door this sentence now answers only what the shared
  * comparand-TYPE face steps around — an ARRAY comparand and a `{ $field }`
- * reference. A plain object, a `Map`, a binary or a class instance is refused
+ * reference. [#21448] And of those only the reference: an ARRAY there is a list
+ * at a scalar operator, which the shared comparand-SHAPE face refuses first. A plain object, a `Map`, a binary or a class instance is refused
  * there first by that face, in its own sentence. The read-scope lowering still
  * says this sentence for every object, because its own gates run before the
  * face (#20018).

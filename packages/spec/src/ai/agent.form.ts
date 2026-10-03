@@ -41,7 +41,8 @@ export const agentForm = defineForm({
         { field: 'model', type: 'composite', helpText: 'AI model configuration (provider, model name, temperature, etc.)' },
         { field: 'planning', type: 'composite', helpText: 'Autonomous reasoning configuration: the maximum number of reasoning iterations before the agent stops (1–100, default 10).' },
         { field: 'memory', type: 'composite', helpText: 'Long-term memory: distilled notes kept per user, recalled before each conversation and written by a reflection every reflectionInterval delivered interactions. When long-term memory is enabled, maxEntries and reflectionInterval are required. Enforced by the cloud AI runtime.' },
-        { field: 'lifecycle', type: 'composite', helpText: 'State machine defining conversation flow' },
+        // `lifecycle` input removed with the key (#21320): the conversation state
+        // machine was parsed and never read — a form for it was false compliance.
         { field: 'structuredOutput', type: 'composite', helpText: "Output contract for the agent's final answer: JSON format, the JSON Schema it is checked against, retries, fallback format and transform steps. Enforced by the cloud AI runtime." },
       ],
     },

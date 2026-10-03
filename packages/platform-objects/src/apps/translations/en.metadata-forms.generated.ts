@@ -2400,10 +2400,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Memory",
         helpText: "Long-term memory: distilled notes kept per user, recalled before each conversation and written by a reflection every reflectionInterval delivered interactions. When long-term memory is enabled, maxEntries and reflectionInterval are required. Enforced by the cloud AI runtime."
       },
-      lifecycle: {
-        label: "Lifecycle",
-        helpText: "State machine defining conversation flow"
-      },
       structuredOutput: {
         label: "Structured Output",
         helpText: "Output contract for the agent's final answer: JSON format, the JSON Schema it is checked against, retries, fallback format and transform steps. Enforced by the cloud AI runtime."

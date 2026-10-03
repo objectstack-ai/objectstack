@@ -4720,9 +4720,16 @@ export const ViewSchema = lazySchema(() => strictObject({
   //
   // `name`, `label` and `object` are NOT in this list, and the first draft had
   // all three — wrongly. A container carries its own identity and its object
-  // binding: `saveMetaItem` sends the name, artifact-shipped containers do
-  // (`service-ai/ai_traces`), the validation sweep injects it, and a
-  // stack-level `views: [...]` entry needs `object` to say which object it
+  // binding. Its `name` is written by the metadata door itself: `saveMetaItem`
+  // stamps the save name onto a body that has none (`normalizeViewMetadata`)
+  // and serves it back, so a read-then-write round trip sends it. That stamp is
+  // the only platform writer of the key — artifact-shipped containers carry
+  // none, and the validation sweep passes its name as the request name, not in
+  // the body. An authored `name` is held to one rule at every door that files a
+  // container: when set, it equals the key that door files it under (the object
+  // key the source registrars derive from the binding; the save name at
+  // `saveMetaItem`), or the door refuses it (`@objectstack/metadata/view-container-name`).
+  // And a stack-level `views: [...]` entry needs `object` to say which object it
   // belongs to (this file's own note on `ObjectListViewSchema` calls the
   // container "view definitions for a specific object", and `getViewsByObject()`
   // is what reads that binding). Tombstoning them rejected shapes the platform

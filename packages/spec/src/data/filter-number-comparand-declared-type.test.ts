@@ -502,8 +502,11 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     const judged = new Set(NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[position]')).map((c) => c.position));
     for (const p of judged) {
       const forms = onNumber.filter((c) => c.position === p && isRefusal(c)).map((c) => (c as NumberComparandDoorRefusalCase).form);
-      const equality = /^f_number(?:\.\$(?:eq|ne))?$/.test(p);
-      expect(sorted(forms), p).toEqual(sorted(equality ? ['boolean', 'date'] : ['array', 'boolean', 'date']));
+      // [#21448] An array is the comparand-shape door's refusal at every
+      // one-value slot (implicit and each scalar operator), so the array rows
+      // sit at the list members alone.
+      const listMember = /\[\d\]$/.test(p);
+      expect(sorted(forms), p).toEqual(sorted(listMember ? ['array', 'boolean', 'date'] : ['boolean', 'date']));
     }
   });
 

@@ -29,7 +29,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
-import { expandViewContainer, ViewSchema } from '@objectstack/spec/ui';
+import { expandViewContainer, isAggregatedViewContainer, ViewSchema } from '@objectstack/spec/ui';
+import { MetadataPlugin } from '@objectstack/metadata';
+import { savedViewContainerNameRefusal } from '@objectstack/metadata/view-container-name';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
@@ -771,5 +773,124 @@ describe('#21334 a container on another package\'s object never takes that packa
         const served = await objectDoor(protocol);
         expect(served.filter((v) => v._packageId === REPAIR)).toEqual([]);
         await expectEveryPackagedNameIntact(protocol);
+    });
+});
+
+/**
+ * #21412 — the runtime save door refuses a view container whose own `name`
+ * disagrees with the name it is saved under, through the one judge the source
+ * registrars call (`@objectstack/metadata/view-container-name`).
+ *
+ * Before: the card's probe was ACCEPTED — stored as row `crm_lead` with body
+ * `name` `lead_views`, and registered as `lead_views` (the container, keyed by
+ * `body.name` in `hydrateOverlayIntoRegistry`) plus `crm_lead.default`: one
+ * document answering under a name its row does not have. The two source
+ * registrars refuse the same document.
+ *
+ * The key judged here is the SAVE name, not the binding: this door keeps a
+ * container saved under a name other than its object (the #13407 case above,
+ * #21334's arm), so the body it stamps for such a container must pass when it
+ * is sent back. Shapes as the card's measurement named them (row = save name):
+ * P1 row crm_lead / `name` lead_views; P2 row lead_views / `name` lead_views,
+ * bound to crm_lead; P2b P2 with no `name`; P3 row lead_views / `name`
+ * crm_lead; P4 row crm_lead / `name` lead_views, no other binding.
+ */
+describe('#21412 the save door refuses a container whose own name disagrees with the name it is saved under', () => {
+    const named = (name: string | undefined, body: Record<string, unknown>) =>
+        (name === undefined ? { ...body } : { name, ...body });
+    /** Bound to crm_lead through its own `object`, no `data` on any arm. */
+    const objectBound = { object: 'crm_lead', list: { label: 'All Leads', type: 'grid', columns: [{ field: 'name' }] } };
+    /** No binding but whatever `name` it carries. */
+    const unbound = { list: { label: 'All', type: 'grid', columns: [{ field: 'name' }] } };
+
+    async function save(name: string, item: unknown) {
+        const harness = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(harness.engine);
+        let error: any = null;
+        try {
+            await protocol.saveMetaItem({ type: 'view', name, item });
+        } catch (e) {
+            error = e;
+        }
+        const viewRows = Array.from(harness.rows.values()).filter((r) => r.type === 'view');
+        // The keys the registry holds a CONTAINER under — its expansions carry
+        // `viewKind` and are the container's derived items, not a second key
+        // for the document (seat answer Q4).
+        const containerKeys = Array.from(harness.registered.get('view')?.entries() ?? [])
+            .filter(([, v]) => isAggregatedViewContainer(v))
+            .map(([k]) => k);
+        return { ...harness, protocol, error, viewRows, containerKeys };
+    }
+
+    function expectRefused(outcome: Awaited<ReturnType<typeof save>>) {
+        // The minimum a rejection pin asserts: the ADR-0112 envelope.
+        expect(outcome.error).toBeInstanceOf(Error);
+        expect(outcome.error.code).toBe('VALIDATION_ERROR');
+        expect(outcome.error.status).toBe(400);
+        // ...and the refused document reached nothing.
+        expect(outcome.viewRows).toEqual([]);
+        expect(outcome.registered.get('view')?.size ?? 0).toBe(0);
+    }
+
+    it('P1, the card\'s probe: refused VALIDATION_ERROR / 400, nothing stored, nothing registered', async () => {
+        expectRefused(await save('crm_lead', named('lead_views', leadContainer)));
+    });
+
+    it('P1 is refused THROUGH the judge: the door throws exactly what it returns for that document', async () => {
+        const body = named('lead_views', leadContainer);
+        const { error } = await save('crm_lead', body);
+        expect(error.message).toBe(savedViewContainerNameRefusal(body, 'crm_lead')!.message);
+    });
+
+    it('P1 answers the envelope a source registrar answers for the same document', async () => {
+        const body = named('lead_views', objectBound);
+        const { error: saveDoor } = await save('crm_lead', body);
+        const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } }) as any;
+        const ctx = {
+            logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+            registerService: () => {}, getService: () => undefined, trigger: async () => {},
+        } as any;
+        const registrar = await plugin._parseAndRegisterArtifact(ctx, JSON.parse(JSON.stringify({
+            manifest: { id: 'com.acme.crm', name: 'CRM', version: '1.0.0', type: 'app' },
+            views: [body],
+        })), 'fixture-21412').then(() => null, (e: any) => e);
+        expect(registrar).toBeInstanceOf(Error);
+        expect([saveDoor.code, saveDoor.status]).toEqual([registrar.code, registrar.status]);
+        expect([saveDoor.code, saveDoor.status]).toEqual(['VALIDATION_ERROR', 400]);
+    });
+
+    it('P3: a `name` equal to the binding but not to the row is refused', async () => {
+        expectRefused(await save('lead_views', named('crm_lead', leadContainer)));
+    });
+
+    it('P4: a `name` that is the only binding, but not the row, is refused', async () => {
+        expectRefused(await save('crm_lead', named('lead_views', unbound)));
+    });
+
+    it('P2: a `name` equal to the row passes though the container binds elsewhere — one key, the row\'s', async () => {
+        const outcome = await save('lead_views', named('lead_views', objectBound));
+        expect(outcome.error).toBeNull();
+        expect(outcome.viewRows.map((r) => [r.name, JSON.parse(r.metadata).name])).toEqual([['lead_views', 'lead_views']]);
+        expect(outcome.containerKeys).toEqual(['lead_views']);
+        const list: any = await outcome.protocol.getMetaItems({ type: 'view' });
+        expect(switcherMatches(list.items, 'crm_lead').map((v: any) => v.name)).toEqual(['crm_lead.default']);
+    });
+
+    it('P2b: an absent `name` passes and is stamped with the row name — and the stamped body passes when sent back', async () => {
+        const outcome = await save('lead_views', named(undefined, objectBound));
+        expect(outcome.error).toBeNull();
+        expect(outcome.viewRows.map((r) => JSON.parse(r.metadata).name)).toEqual(['lead_views']);
+        expect(outcome.containerKeys).toEqual(['lead_views']);
+
+        const read: any = await outcome.protocol.getMetaItem({ type: 'view', name: 'lead_views' });
+        expect(read.item.name).toBe('lead_views');
+        const { _diagnostics: _drop, ...sentBack } = read.item;
+        await expect(outcome.protocol.saveMetaItem({ type: 'view', name: 'lead_views', item: sentBack })).resolves.toBeTruthy();
+    });
+
+    it('CONTROL: a `name` equal to the row and the binding passes, under one key', async () => {
+        const outcome = await save('crm_lead', named('crm_lead', leadContainer));
+        expect(outcome.error).toBeNull();
+        expect(outcome.containerKeys).toEqual(['crm_lead']);
     });
 });

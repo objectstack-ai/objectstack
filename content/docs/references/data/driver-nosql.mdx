@@ -143,13 +143,13 @@ const result = AggregationPipelineSchema.parse(data);
 | **type** | `'nosql'` | ✅ | Driver type must be "nosql" |
 | **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; transactionsUnsupported?: boolean }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
-| **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
+| **poolConfig** | `{ min?: number; max?: number; idleTimeoutMillis?: number; connectionTimeoutMillis?: number }` | optional | Connection pool configuration |
 | **databaseType** | `Enum<'mongodb' \| 'couchdb' \| 'dynamodb' \| 'cassandra' \| 'redis' \| 'elasticsearch' \| 'neo4j' \| 'orientdb'>` | ✅ | Specific NoSQL database type |
 | **dataTypeMapping** | `{ text: string; number: string; boolean: string; date: string; … }` | ✅ | NoSQL data type mapping configuration |
 | **consistency** | `Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>` | optional | Consistency level for operations |
-| **replication** | `{ enabled: boolean; replicaSetName?: string; replicas?: integer; readPreference?: Enum<'primary' \| 'primaryPreferred' \| 'secondary' \| 'secondaryPreferred' \| 'nearest'>; … }` | optional | Replication configuration |
-| **sharding** | `{ enabled: boolean; shardKey?: string; shardingStrategy?: Enum<'hash' \| 'range' \| 'zone'>; numShards?: integer }` | optional | Sharding configuration |
-| **schemaValidation** | `{ enabled: boolean; validationLevel?: Enum<'strict' \| 'moderate' \| 'off'>; validationAction?: Enum<'error' \| 'warn'>; jsonSchema?: Record<string, any> }` | optional | Document schema validation |
+| **replication** | `{ enabled?: boolean; replicaSetName?: string; replicas?: integer; readPreference?: Enum<'primary' \| 'primaryPreferred' \| 'secondary' \| 'secondaryPreferred' \| 'nearest'>; … }` | optional | Replication configuration |
+| **sharding** | `{ enabled?: boolean; shardKey?: string; shardingStrategy?: Enum<'hash' \| 'range' \| 'zone'>; numShards?: integer }` | optional | Sharding configuration |
+| **schemaValidation** | `{ enabled?: boolean; validationLevel?: Enum<'strict' \| 'moderate' \| 'off'>; validationAction?: Enum<'error' \| 'warn'>; jsonSchema?: Record<string, any> }` | optional | Document schema validation |
 | **region** | `string` | optional | AWS region (for managed NoSQL services) |
 | **accessKeyId** | `string` | optional | AWS access key ID |
 | **secretAccessKey** | `string` | optional | AWS secret access key |

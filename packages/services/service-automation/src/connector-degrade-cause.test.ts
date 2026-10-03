@@ -182,7 +182,7 @@ describe('#5636 — the degrade announcement is ONE record, cause in meta', () =
         expect(record.msg).toContain("'gh_mcp'");
         expect(record.msg).toContain("provider 'fake'");
         expect(record.msg).toContain('instance registered degraded (no actions)');
-        expect(record.msg).toContain('attempt 1 (#3017)');
+        expect(record.msg).toContain('retrying with backoff, attempt 1.');
         // Not a validation rejection → `error`, not `issues`; and the full text
         // survives, newlines escaped by the logger's JSON.stringify.
         expect(record.issues).toBeUndefined();
@@ -271,7 +271,7 @@ describe('#5636 — a husk-registration rejection reports its issues, on one lin
         };
         expect(record.msg).not.toContain('\n');
         expect(record.msg).toContain("'gh_mcp'");
-        expect(record.msg).toContain('#3017');
+        expect(record.msg).toContain('stays absent from the connector registry until a retry succeeds');
         // The facts a reader came for.
         const issues = record.issues;
         expect(Array.isArray(issues)).toBe(true);
@@ -373,7 +373,7 @@ describe('#5636 — what the interpolated rendering cost, measured', () => {
         expect(before.length - beforeKept.length, 'lines the buffer drops').toBeGreaterThan(1);
 
         const after = await captureStream('stdout', async () => {
-            log.warn(`[Automation] could not register degraded husk for 'gh_mcp' (#3017).`, {
+            log.warn(`[Automation] could not register degraded husk for 'gh_mcp'.`, {
                 issues: [{ code: 'invalid_value', path: 'type', message: 'Invalid option' }],
             });
         });
@@ -393,7 +393,7 @@ describe('#5636 — what the interpolated rendering cost, measured', () => {
         const before = await captureStream('stderr', async () => {
             log.error(
                 `[Automation] connector instance 'gh_mcp' (provider 'fake') upstream unavailable — ` +
-                    `instance registered degraded (no actions); retrying with backoff, attempt 1 (#3017): ${MULTILINE_UPSTREAM}`,
+                    `instance registered degraded (no actions); retrying with backoff, attempt 1: ${MULTILINE_UPSTREAM}`,
             );
         });
         expect(before).toHaveLength(3);
@@ -404,7 +404,7 @@ describe('#5636 — what the interpolated rendering cost, measured', () => {
         const after = await captureStream('stderr', async () => {
             log.error(
                 `[Automation] connector instance 'gh_mcp' (provider 'fake') upstream unavailable — ` +
-                    `instance registered degraded (no actions); retrying with backoff, attempt 1 (#3017).`,
+                    `instance registered degraded (no actions); retrying with backoff, attempt 1.`,
                 undefined,
                 { error: MULTILINE_UPSTREAM },
             );

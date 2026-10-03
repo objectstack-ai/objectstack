@@ -5075,6 +5075,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'nothing refuses at publish: the upgrade signal is behavioural and belongs here.',
   },
   {
+    id: 'agent-lifecycle-retired',
+    order: 62,
+    text:
+      'It also retires an agent\'s conversation state machine, `agent.lifecycle` (ADR-0049 '
+      + 'enforce-or-remove). It was parsed and never read: no runtime moved an agent through a declared '
+      + 'state or refused an undeclared transition, and enforcing it would have meant a statechart '
+      + 'interpreter beside Flow, the two-engine shape ADR-0020 rejected. What it reached for is served '
+      + 'elsewhere — a conversation phase is a skill selected by its `triggerConditions`, a multi-step '
+      + 'process is a Flow, a record\'s status transitions are the `state_machine` validation rule — so '
+      + 'authoring refuses the key with that prescription, and the D2 conversion `agent-lifecycle-removed` '
+      + 'deletes it, losslessly, retired from the load path. The XState `StateMachineSchema` family, '
+      + 'kept by ADR-0020 only for this door, left the package with it.',
+  },
+  {
     id: 'agent-memory-store-retired-and-limits-required',
     order: 61,
     text:
@@ -6629,6 +6643,50 @@ const step18: MigrationStep = {
         + '`HotReloadManager` stay exported from `@objectstack/core` with their '
         + 'tests green. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing '
         + 'ever read the container, so removing it removes no behaviour.',
+    },
+    // #21320 — ADR-0049 enforce-or-remove (ruled D, retire, on
+    // objectstack-ai/cloud#2569) — the D3 entry of the `agent.lifecycle`
+    // retirement, one entry for the one family: the key and the XState
+    // `StateMachineSchema` exports that only it still reached leave for the same
+    // reason. The key's deletion is mechanical (the D2 conversion
+    // `agent-lifecycle-removed`); where the intent behind a deleted machine goes —
+    // a skill, a Flow, or a `state_machine` validation rule — is not, and that
+    // judgement is what this entry carries.
+    {
+      id: 'agent-lifecycle-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
+      surface:
+        'agent.lifecycle — the agent conversation state machine left the shape; with it the XState '
+        + 'StateMachineSchema family left @objectstack/spec/automation (StateMachineSchema, StateNodeSchema, '
+        + 'TransitionSchema, ActionRefSchema, GuardRefSchema and their types), and StateNodeConfig left the '
+        + 'root and /ai entries',
+      replacement:
+        'no key: delete `lifecycle` from every agent. Put what the machine meant where the platform enforces '
+        + 'it — a phase of a conversation is a skill with its own `instructions` and `tools`, selected by its '
+        + '`triggerConditions` and attached through the agent\'s `skills`; a multi-step process is a Flow; a '
+        + 'record\'s status transitions are a `state_machine` validation rule on the object (a flat table of '
+        + 'each state\'s allowed next states). Code that imported the state machine exports declares the shape '
+        + 'it needs itself, or drops it',
+      reason:
+        'ADR-0049 enforce-or-remove: `agent.lifecycle` was parsed and never read. No runtime — not this '
+        + 'repository, not the cloud AI runtime that executes agents — moved an agent through a declared '
+        + 'state or refused an undeclared transition, so an authored machine changed nothing an agent did. '
+        + 'Enforcing it would have meant a statechart interpreter beside Flow, the two-engine shape ADR-0020 '
+        + 'rejected, and what it reached for is already served: conversation phases by skills (ADR-0064), '
+        + 'orchestration by Flow (ADR-0019), record transitions by the `state_machine` validation rule '
+        + '(ADR-0020). Authoring now refuses the key with that prescription, and TypeScript rejects it. The '
+        + 'D2 conversion `agent-lifecycle-removed` deletes it from existing sources and stored agent rows, '
+        + 'losslessly. `StateMachineSchema` had kept its file only for this door (ADR-0020 implementation '
+        + 'note 1), so the family left with it — which of the three destinations each deleted machine meant '
+        + 'is the author\'s judgement, not a mechanical rewrite',
+      acceptanceCriteria:
+        'No agent declares `lifecycle`; it is refused at parse with its prescription, and TypeScript rejects '
+        + 'it. Every conversation phase a deleted machine described is a skill the agent lists in `skills`, '
+        + 'with its own `instructions`, `tools` and `triggerConditions`; every multi-step process it described '
+        + 'is a Flow; every record status transition it described is a `state_machine` validation rule on that '
+        + 'object. No source imports StateMachineSchema, StateNodeSchema, TransitionSchema, ActionRefSchema, '
+        + 'GuardRefSchema or their types from @objectstack/spec. Every agent parses under the new schema.',
+      conversionIds: ['agent-lifecycle-removed'],
     },
     // #20274 — ADR-0049 enforce-or-remove (ruling record 5950198150, letter A′) —
     // the D3 entry of the `agent.memory` contract: one entry for the one decision,
@@ -20631,6 +20689,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #21320 — ADR-0049 enforce-or-remove, ruled D (retire) on
+    // objectstack-ai/cloud#2569: `agent.lifecycle`, the agent conversation state
+    // machine, was parsed and never read — no runtime in this repository or in
+    // cloud moved an agent through a declared state, and every enforcement design
+    // measured there was a subset statechart interpreter beside Flow (the
+    // two-engine shape ADR-0020 rejected). Tombstoned with `retiredKey()` on the
+    // strict `AgentSchema`; D2 conversion `agent-lifecycle-removed` (lossless
+    // delete, retired from the load path); D3 semantic entry
+    // `agent-lifecycle-retired`. Its value schema, `automation/StateMachine`, left
+    // with it (RETIRED_DEFS_BY_MAJOR). Registered under 18 for the launch-window
+    // reason its neighbours state.
+    'ai/Agent:lifecycle',
     // #20274 — ADR-0049 enforce-or-remove, ruling record 5950198150 (letter A′,
     // maintainer 「同意」): the `agent.memory` contract states exactly what the
     // runtime honours, and the memory store is platform infrastructure, not agent
@@ -25059,6 +25129,18 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ScheduledExport',
+    // #21320 — `automation/ActionRef` (a named side effect, by name or parameterised) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/ActionRef',
+    // #21320 — `automation/GuardRef` (a named transition condition) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/GuardRef',
     // #17158 — `automation/ScheduleState`, retired whole with the export-job API family
     // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
     // retired its side first in objectui#10247). It declared
@@ -25072,6 +25154,32 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'automation/ScheduleState',
+    // #21320 — `automation/state-machine.zod.ts` `StateMachineSchema`, the
+    // XState-style machine (hierarchical and parallel states, guarded transitions,
+    // entry/exit actions), retired whole with its last authorable door, the
+    // tombstoned `agent.lifecycle` (ADR-0049 enforce-or-remove, ruled D on
+    // objectstack-ai/cloud#2569). ADR-0020 had already retired it as a
+    // record-lifecycle declaration — the `workflow` type and `object.stateMachines`
+    // went, and a record's legal transitions are the `state_machine` validation
+    // rule — and kept the file only because the agent door still imported it
+    // (ADR-0020 implementation note 1). The rest of the family — `StateNode`,
+    // `Transition`, `ActionRef`, `GuardRef` — left with it, each registered in its
+    // own entry file beside this one. Upgraders get the D3 semantic entry
+    // `agent-lifecycle-retired`. Registered under 18 for the launch-window reason
+    // its neighbours state.
+    'automation/StateMachine',
+    // #21320 — `automation/StateNode` (one state of a machine, recursive) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/StateNode',
+    // #21320 — `automation/Transition` (a guarded transition between states) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/Transition',
     // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
     // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the

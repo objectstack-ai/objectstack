@@ -49,7 +49,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **rows** | `Record<string, any>[]` | optional | Row objects (when format = json) |
 | **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
 | **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
-| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
+| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
 | **mappingName** | `string` | optional | Name of a registered `mapping` metadata artifact to apply; the server resolves it (org-scoped rows first, then env-wide) and projects columns through it. Mutually exclusive with an inline `mapping` — supplying both is refused (400 CONFLICTING_MAPPING). |
 | **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
@@ -128,7 +128,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **object** | `string` | ✅ | Target object name |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | ✅ | Template direction |
 | **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional | Default file format for this template |
-| **mappings** | `{ sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | ✅ | Field mapping entries |
+| **mappings** | `{ sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | ✅ | Field mapping entries |
 | **createdAt** | `string` | optional | Template creation timestamp |
 | **updatedAt** | `string` | optional | Last update timestamp |
 | **createdBy** | `string` | optional | User who created the template |
@@ -285,7 +285,7 @@ Type: `Record<string, string>`
 
 #### Option 2
 
-Type: `{ sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' | 'uppercase' | 'lowercase' | 'trim' | 'date_format' | 'lookup'>; … }[]`
+Type: `{ sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' | 'uppercase' | 'lowercase' | 'trim' | 'date_format' | 'lookup'>; … }[]`
 
 ---
 
@@ -303,7 +303,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **rows** | `Record<string, any>[]` | optional | Row objects (when format = json) |
 | **xlsxBase64** | `string` | optional | Base64-encoded .xlsx workbook bytes (when format = xlsx); parsed server-side |
 | **sheet** | `string \| integer` | optional | Worksheet name or 1-based index to read (xlsx; defaults to the first sheet) |
-| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
+| **mapping** | `Record<string, string> \| { sourceField: string; targetField: string; targetLabel?: string; transform?: Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>; … }[]` | optional | Source column → target field mapping |
 | **mappingName** | `string` | optional | Name of a registered `mapping` metadata artifact to apply; the server resolves it (org-scoped rows first, then env-wide) and projects columns through it. Mutually exclusive with an inline `mapping` — supplying both is refused (400 CONFLICTING_MAPPING). |
 | **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
@@ -407,7 +407,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'strict' \| 'lenient' \| 'dry_run'>` | optional (default: `"strict"`) | Validation mode for the import |
-| **deduplication** | `{ strategy: Enum<'skip' \| 'update' \| 'create_new' \| 'fail'>; matchFields: string[] }` | optional | Deduplication configuration |
+| **deduplication** | `{ strategy?: Enum<'skip' \| 'update' \| 'create_new' \| 'fail'>; matchFields: string[] }` | optional | Deduplication configuration |
 | **maxErrors** | `integer` | optional (default: `100`) | Maximum validation errors before aborting |
 | **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string fields |
 | **dateFormat** | `string` | optional | Expected date format in import data (e.g., "YYYY-MM-DD") |

@@ -2400,10 +2400,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "记忆",
         helpText: "长期记忆：按用户保存的提炼笔记，在每次会话前召回，并每隔 reflectionInterval 次已送达的交互由一次反思写入。启用长期记忆时，maxEntries 与 reflectionInterval 为必填。由云端 AI 运行时强制执行。"
       },
-      lifecycle: {
-        label: "生命周期",
-        helpText: "定义会话流程的状态机"
-      },
       structuredOutput: {
         label: "结构化输出",
         helpText: "代理最终回答的输出契约：JSON 格式、用于校验回答的 JSON Schema、重试、回退格式与转换步骤。由云端 AI 运行时强制执行。"

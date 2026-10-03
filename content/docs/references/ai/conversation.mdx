@@ -94,9 +94,9 @@ const result = CodeContentSchema.parse(data);
 | **id** | `string` | ✅ | Unique message ID |
 | **timestamp** | `string` | ✅ | ISO 8601 timestamp |
 | **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>` | ✅ |  |
-| **content** | `({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language: string; metadata?: Record<string, any> })[]` | ✅ | Message content (multimodal array) |
+| **content** | `({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail?: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language?: string; metadata?: Record<string, any> })[]` | ✅ | Message content (multimodal array) |
 | **functionCall** | `{ name: string; arguments: string; result?: string }` | optional | Legacy function call |
-| **toolCalls** | `{ id: string; type: Enum<'function'>; function: object }[]` | optional | Tool calls |
+| **toolCalls** | `{ id: string; type?: Enum<'function'>; function: object }[]` | optional | Tool calls |
 | **toolCallId** | `string` | optional | Tool call ID this message responds to |
 | **name** | `string` | optional | Name of the function/user |
 | **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Token usage for this message |
@@ -179,9 +179,9 @@ const result = CodeContentSchema.parse(data);
 | **name** | `string` | optional | Session name/title |
 | **context** | `{ sessionId: string; userId?: string; agentId?: string; object?: string; … }` | ✅ |  |
 | **modelId** | `string` | optional | AI model ID |
-| **tokenBudget** | `{ maxTokens: integer; maxPromptTokens?: integer; maxCompletionTokens?: integer; reserveTokens: integer; … }` | ✅ |  |
+| **tokenBudget** | `{ maxTokens: integer; maxPromptTokens?: integer; maxCompletionTokens?: integer; reserveTokens?: integer; … }` | ✅ |  |
 | **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: (object \| … +3 more)[]; … }[]` | optional (default: `[]`) |  |
-| **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer; budgetLimit: integer; … }` | optional |  |
+| **tokens** | `{ promptTokens?: integer; completionTokens?: integer; totalTokens?: integer; budgetLimit: integer; … }` | optional |  |
 | **totalTokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Total tokens across all messages |
 | **totalCost** | `number` | optional | Total cost for this session in USD |
 | **status** | `Enum<'active' \| 'paused' \| 'completed' \| 'archived'>` | optional (default: `"active"`) |  |
@@ -228,9 +228,9 @@ const result = CodeContentSchema.parse(data);
 | **id** | `string` | ✅ | Unique message ID |
 | **timestamp** | `string` | ✅ | ISO 8601 timestamp |
 | **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>` | ✅ |  |
-| **content** | `({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language: string; metadata?: Record<string, any> })[]` | ✅ | Message content (multimodal array) |
+| **content** | `({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail?: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language?: string; metadata?: Record<string, any> })[]` | ✅ | Message content (multimodal array) |
 | **functionCall** | `{ name: string; arguments: string; result?: string }` | optional | Legacy function call |
-| **toolCalls** | `{ id: string; type: Enum<'function'>; function: object }[]` | optional | Tool calls |
+| **toolCalls** | `{ id: string; type?: Enum<'function'>; function: object }[]` | optional | Tool calls |
 | **toolCallId** | `string` | optional | Tool call ID this message responds to |
 | **name** | `string` | optional | Name of the function/user |
 | **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Token usage for this message |

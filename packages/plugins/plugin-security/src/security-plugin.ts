@@ -4482,6 +4482,45 @@ export class SecurityPlugin implements Plugin {
       void runBootstrap();
     }
 
+    // ── Project the permission sets of a package that arrives AFTER the boot ──
+    //
+    // [#21322, ADR-0086 D5 — a package's sets are seeded ON INSTALL] The
+    // declared-permission seeding above runs once, at
+    // `kernel:ready`, over whatever the engine registry holds by then. A package
+    // registered later — `os package install` into a running runtime (the
+    // install-local plugin), an artifact reload — was never projected: its sets
+    // resolved for the evaluator (`/meta/permission` listed them) while
+    // `sys_permission_set` had no row, so no admin could grant them until a
+    // restart re-ran this pass. Every such door announces `metadata:reloaded`,
+    // the platform's one post-boot re-sync signal (the automation engine
+    // re-binds flows off the same event), so re-run the SAME step here: the
+    // same function, the same organization passes, the same provenance rules.
+    // Idempotent and upgrade-aware by construction (it re-seeds only rows it
+    // owns and never clobbers env-authored ones), so a reload that changed no
+    // permission set writes nothing.
+    //
+    // Only once the boot's own pass has run: it is what lets
+    // `bootstrapPlatformAdmin` write the platform defaults first, in their
+    // insert-once shape, and a reload cannot arrive ahead of it on a real
+    // kernel anyway. Never throws — `trigger` dispatch PROPAGATES, and a
+    // subscriber failure must not fail the install or publish that announced.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('metadata:reloaded', async () => {
+        if (!bootstrapRanOnce) return;
+        try {
+          for (const organizationId of await catalogSeedPasses()) {
+            await seedCatalogPermissions(organizationId);
+          }
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] declared permission sets were NOT re-projected after a metadata reload — a package ' +
+              'registered after boot has no sys_permission_set row until the next restart',
+            { error: (e as Error).message },
+          );
+        }
+      });
+    }
+
     // ── Re-run the seed-ownership CLAIM when the seed actually settles ────────
     //
     // The claim used to run exactly once per database lifetime, inside the one
