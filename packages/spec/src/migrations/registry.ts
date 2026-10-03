@@ -5906,7 +5906,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'page-requires-non-compiled-kind-refused',
-    order: 65,
+    order: 66,
     text:
       'It also narrows page `requires` to the kinds whose source is compiled at save (ADR-0080 §5; '
       + 'maintainer ruling 2026-10-03, letter A): the plugin-namespace list is derived from an html '

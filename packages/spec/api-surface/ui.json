@@ -4,7 +4,6 @@
   "exports": [
     "ACTION_LOCATIONS (const)",
     "ACTION_PARAM_BUILTIN_KEYS (const)",
-    "AIChatWindowProps (const)",
     "ASSEMBLED_VIEW_ITEMS_KEY (const)",
     "Action (const)",
     "Action (type)",
