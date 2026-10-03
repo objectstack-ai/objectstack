@@ -21,7 +21,12 @@
  *   - the job's `timeoutMs` is the body's one limit; with none, the runner's
  *     JOB default applies — not the hook's, not the action's;
  *   - the body's return is read as a `JobRunOutcome`, in that shape only;
- *   - a body's `ctx` carries no job name and no trigger data.
+ *   - a body's `ctx` carries no job name and no trigger data;
+ *   - (#21602) two packages' jobs of the same name each keep their own identity
+ *     on the job service — the first its authored name, a later one the
+ *     registry's package-scoped key — so neither replaces the other, and a
+ *     replace or an uninstall cancels only its own package's job; a package
+ *     whose names collide with no other's is scheduled under its authored names.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -311,16 +316,17 @@ describe('#21489: re-scheduling replaces — a job the new version does not sche
         expect(h.jobs.scheduled.size).toBe(0);
     });
 
-    it("another app's jobs are never cancelled — not even one that took over a name this app once scheduled", async () => {
+    it("another app's jobs are never cancelled — not even its job of the same name", async () => {
         const h = harness();
         await h.schedule(pkg([job('shared_name'), job('mine_only')]), APP_ID);
         await h.schedule(pkg([job('shared_name'), job('theirs_only')]), 'com.example.other');
 
-        // This app's next version drops both: only its own remaining job stops.
+        // This app's next version drops both: its own two stop, the other app's two run on.
         const out = await h.schedule(pkg([]), APP_ID);
 
-        expect(out.cancelled).toEqual(['mine_only']);
-        expect([...h.jobs.scheduled.keys()].sort()).toEqual(['shared_name', 'theirs_only']);
+        expect(out.cancelled.sort()).toEqual(['mine_only', 'shared_name']);
+        expect(h.jobs.cancels.sort()).toEqual(['mine_only', 'shared_name']);
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual(['com.example.other:shared_name', 'theirs_only']);
     });
 
     it('a cancel that throws is said at error, and the job stays on the record for the next attempt', async () => {
@@ -379,6 +385,152 @@ describe('#21489: the uninstall cleanup cancels the uninstalled package\'s jobs'
         expect(result.success).toBe(false);
         expect(result.removed).toBe(1);
         expect(result.error).toContain('stuck_job');
+    });
+});
+
+describe('#21602: two packages declaring the same job name — each job keeps its own identity on the job service', () => {
+    const OTHER = 'com.example.other';
+    const THIRD = 'com.example.third';
+    /** A body job whose run writes a row carrying `marker`, so a run is attributable to its package. */
+    const markedJob = (name: string, marker: string) => ({
+        name,
+        schedule: INTERVAL,
+        body: { ...WRITE_BODY, source: `await ctx.api.object('${TICK}').insert({ name: '${marker}' });` },
+    });
+    /** Run whatever the job service holds under `key` once; the marker its body wrote. */
+    const runKey = async (h: ReturnType<typeof harness>, key: string) => {
+        const before = h.engine.writes.length;
+        await h.jobs.scheduled.get(key)!.run({ jobId: key });
+        return h.engine.writes.slice(before).map((w) => (w.data as { name: string }).name);
+    };
+
+    it('a single package: every job is scheduled under its AUTHORED name, and a reinstall keeps it (control)', async () => {
+        const h = harness();
+
+        const first = await h.schedule(pkg([markedJob('a_job', 'a'), markedJob('b_job', 'b')]));
+        const again = await h.schedule(pkg([markedJob('a_job', 'a'), markedJob('b_job', 'b')]));
+
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual(['a_job', 'b_job']);
+        expect(first.bodies.sort()).toEqual(['a_job', 'b_job']);
+        expect(again.bodies.sort()).toEqual(['a_job', 'b_job']);
+        expect(again.cancelled).toEqual([]);
+        expect(h.jobs.cancels).toEqual([]);
+        expect(h.logger.info.mock.calls.some((c) => String(c[0]).includes('package-scoped identity'))).toBe(false);
+    });
+
+    it('the second package is scheduled under the registry\'s package-scoped key — the first package\'s job is NOT replaced', async () => {
+        const h = harness();
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+
+        const out = await h.schedule(pkg([markedJob('shared_tick', 'theirs')]), OTHER);
+
+        // Both are scheduled; nothing was cancelled or replaced.
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual([`${OTHER}:shared_tick`, 'shared_tick']);
+        expect(h.jobs.cancels).toEqual([]);
+        // Each key runs its OWN package's body.
+        expect(await runKey(h, 'shared_tick')).toEqual(['mine']);
+        expect(await runKey(h, `${OTHER}:shared_tick`)).toEqual(['theirs']);
+        // The binder's own answer keeps the authored name.
+        expect(out.bodies).toEqual(['shared_tick']);
+        // Said once, naming the package that holds the name and the key it is catalogued under.
+        const said = h.logger.info.mock.calls.filter((c) => String(c[0]).includes('package-scoped identity'));
+        expect(said).toHaveLength(1);
+        expect(said[0][1]).toEqual({ appId: OTHER, job: 'shared_tick', scheduledAs: `${OTHER}:shared_tick`, heldBy: APP_ID });
+    });
+
+    it('a reinstall of either package replaces its OWN job under the key it holds — never the other package\'s', async () => {
+        const h = harness();
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs')]), OTHER);
+
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs_v2')]), OTHER);
+        await h.schedule(pkg([markedJob('shared_tick', 'mine_v2')]), APP_ID);
+
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual([`${OTHER}:shared_tick`, 'shared_tick']);
+        expect(h.jobs.cancels).toEqual([]);
+        expect(await runKey(h, 'shared_tick')).toEqual(['mine_v2']);
+        expect(await runKey(h, `${OTHER}:shared_tick`)).toEqual(['theirs_v2']);
+    });
+
+    it('uninstalling the scoped holder cancels only its scoped key; the holder of the authored name runs on', async () => {
+        const h = harness({ withProtocol: true });
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs')]), OTHER);
+
+        const result = await h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: OTHER });
+
+        expect(result).toEqual({ success: true, removed: 1 });
+        expect(h.jobs.cancels).toEqual([`${OTHER}:shared_tick`]);
+        expect([...h.jobs.scheduled.keys()]).toEqual(['shared_tick']);
+        expect(await runKey(h, 'shared_tick')).toEqual(['mine']);
+    });
+
+    it('uninstalling the holder of the authored name cancels only that; the scoped holder runs on', async () => {
+        const h = harness({ withProtocol: true });
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs')]), OTHER);
+
+        const result = await h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: APP_ID });
+
+        expect(result).toEqual({ success: true, removed: 1 });
+        expect(h.jobs.cancels).toEqual(['shared_tick']);
+        expect([...h.jobs.scheduled.keys()]).toEqual([`${OTHER}:shared_tick`]);
+        expect(await runKey(h, `${OTHER}:shared_tick`)).toEqual(['theirs']);
+    });
+
+    it('a version of the scoped holder that drops the job cancels its scoped key only', async () => {
+        const h = harness();
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs'), markedJob('other_only', 'o')]), OTHER);
+
+        const out = await h.schedule(pkg([markedJob('other_only', 'o')]), OTHER);
+
+        expect(out.cancelled).toEqual(['shared_tick']);
+        expect(h.jobs.cancels).toEqual([`${OTHER}:shared_tick`]);
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual(['other_only', 'shared_tick']);
+    });
+
+    it('a third package is scoped too; once the holder of the authored name is gone, a newcomer takes it', async () => {
+        const h = harness({ withProtocol: true });
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs')]), OTHER);
+        await h.schedule(pkg([markedJob('shared_tick', 'third')]), THIRD);
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual([`${OTHER}:shared_tick`, `${THIRD}:shared_tick`, 'shared_tick']);
+
+        await h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: APP_ID });
+        await h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: THIRD });
+        await h.schedule(pkg([markedJob('shared_tick', 'fresh')]), 'com.example.fresh');
+
+        // The scoped holder keeps its key: a running job's catalogue name never moves under it.
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual([`${OTHER}:shared_tick`, 'shared_tick']);
+        expect(await runKey(h, 'shared_tick')).toEqual(['fresh']);
+        expect(await runKey(h, `${OTHER}:shared_tick`)).toEqual(['theirs']);
+    });
+
+    it("a handler job scheduled under a scoped key still hands its handler the AUTHORED name as jobId", async () => {
+        const h = harness();
+        let seen: any;
+        const tick = vi.fn(async (c: any) => { seen = c; });
+        await h.schedule(pkg([{ name: 'shared_tick', schedule: INTERVAL, handler: 'tick' }], { functions: { tick } }), APP_ID);
+        await h.schedule(pkg([{ name: 'shared_tick', schedule: INTERVAL, handler: 'tick' }], { functions: { tick } }), OTHER);
+
+        await h.jobs.scheduled.get(`${OTHER}:shared_tick`)!.run({ jobId: `${OTHER}:shared_tick` });
+
+        expect(seen.jobId).toBe('shared_tick');
+    });
+
+    it('a scoped job the uninstall could not cancel is named with the key it is scheduled under', async () => {
+        const h = harness({ withProtocol: true, failCancel: `${OTHER}:shared_tick` });
+        await h.schedule(pkg([markedJob('shared_tick', 'mine')]), APP_ID);
+        await h.schedule(pkg([markedJob('shared_tick', 'theirs')]), OTHER);
+
+        const result = await h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: OTHER });
+
+        expect(result.success).toBe(false);
+        expect(result.removed).toBe(0);
+        expect(result.error).toContain(`shared_tick (scheduled as ${OTHER}:shared_tick)`);
+        // The holder of the authored name was never touched.
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual([`${OTHER}:shared_tick`, 'shared_tick']);
     });
 });
 
