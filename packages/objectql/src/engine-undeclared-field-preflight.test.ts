@@ -235,14 +235,17 @@ describe('#8682 half A — the declared-field door', () => {
     expect(writes.map((w) => w.data.account_number)).toEqual(['0001', '0002']);
   });
 
-  it('a registry-less host gets no verdict — the driver stays the backstop', async () => {
+  it('a registry-less host gets no field verdict — [#21516] the object itself is refused, nothing is written', async () => {
     // Same discipline as the read path's doors: a door that cannot see the
     // field map must not invent an opinion about it.
     const { engine, writes } = await makeEngine({ registerObject: false, missingColumns: ['zzz_nonexistent_field'] });
 
-    const refusal = await refusalOf(() => engine.insert('acct', { name: 'x', zzz_nonexistent_field: 'x' } as any));
+    const refusal: any = await refusalOf(() => engine.insert('acct', { name: 'x', zzz_nonexistent_field: 'x' } as any));
 
-    expect(writes).toHaveLength(1);
-    expect(String(refusal?.message)).toContain('has no column named zzz_nonexistent_field');
+    // [#21516] The engine refuses the unresolved OBJECT first, with the data
+    // door's own envelope: still no field verdict, and nothing reaches the
+    // driver by that raw name.
+    expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
+    expect(writes).toHaveLength(0);
   });
 });

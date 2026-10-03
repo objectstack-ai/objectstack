@@ -1197,7 +1197,11 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         const bare = new ObjectQL();
         bare.registerDriver(makeStubDriver().driver, true);
         await bare.init();
-        await expect(bare.find('unregistered_object', { where: { anything: true } })).resolves.toEqual([]);
+        // [#21516] The engine now refuses the OBJECT first — the door's own
+        // `OBJECT_NOT_FOUND` — so the field door still invents no verdict about
+        // `anything`: the answer is about the object, never `INVALID_FIELD`.
+        await expect(bare.find('unregistered_object', { where: { anything: true } }))
+            .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
     });
 
     // ─────────────────────────────────────────────────────────────
@@ -1803,8 +1807,10 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // the ingress gate makes when `resolveQueryFields` cannot answer).
         // For that host the driver-side #3821 ladder is the documented
         // backstop — which is exactly why the ruling KEEPS the ladder.
+        // [#21516] The object itself is now refused first, with the door's own
+        // `OBJECT_NOT_FOUND` — still no dotted verdict invented about `a.b`.
         await expect(engine.find('unregistered_thing', { fields: ['a.b'] }))
-            .resolves.toEqual([]);
+            .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
     });
 
     it('an `expand` sub-read raises the refusal, which the expand backstop downgrades to a warning', async () => {

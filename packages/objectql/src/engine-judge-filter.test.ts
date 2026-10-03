@@ -312,16 +312,21 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
   });
 
   describe('an object the registry does not know', () => {
-    it('the field-map doors answer nothing and the schema-free doors still judge, as at execution', async () => {
+    it('the field-map doors answer nothing and the schema-free doors still judge the filter', () => {
       // A virtual-field verdict needs the field map; with none, it is ok.
       expect(engine.judgeFilter('judge_unregistered', { is_open: true })).toEqual({ ok: true });
       // The list-comparand shape gate needs no field map.
-      const where = (): Where => ({ status: { $in: 'open' } });
-      const verdict = refused(engine.judgeFilter('judge_unregistered', where()));
-      const thrown = await refusalOf(engine.find('judge_unregistered', { where: where() }));
+      const verdict = refused(engine.judgeFilter('judge_unregistered', { status: { $in: 'open' } }));
       expect({ code: verdict.code, status: verdict.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
-      expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
-      expect(verdict.message).toBe(thrown!.message);
+    });
+
+    it('[#21516] execution refuses the OBJECT before admission — an answer about the object, not the filter', async () => {
+      // The contract: execution refuses an object the registry does not know
+      // (`OBJECT_NOT_FOUND`, 404) before any `where` door runs, and that
+      // refusal is not the judge's verdict. So the same filter the judge
+      // refuses as INVALID_FILTER is answered OBJECT_NOT_FOUND at execution.
+      const thrown = await refusalOf(engine.find('judge_unregistered', { where: { status: { $in: 'open' } } }));
+      expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
     });
   });
 });
