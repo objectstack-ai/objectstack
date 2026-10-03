@@ -18,7 +18,7 @@
  *
  * The shape was character-identical across every override, so narrowing a subset
  * would read to the next person as a *verdict* on the rest. That is not
- * hypothetical: #6075 (PR #6210) narrowed `count`'s `query` and deliberately left
+ * hypothetical: commit d367f03d6 (PR #6210) narrowed `count`'s `query` and deliberately left
  * its `options`, and #6212 batch B did the same on `aggregate` — each leaving a
  * comment saying so. This file is the pin for the sweep that closed all of them
  * together, so no half-narrowed state exists to be misread.
@@ -63,8 +63,8 @@ import type { DriverOptions } from '@objectstack/spec/data';
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
- * [#17879] MEASURED — `Door<T>` below asks `IsAny`, which is a PHANTOM half
- * against a NESTED regression, and swapping in `ContainsAny` (#17876) does
+ * [commit eb9334915] MEASURED — `Door<T>` below asks `IsAny`, which is a PHANTOM half
+ * against a NESTED regression, and swapping in `ContainsAny` (commit be5c60291) does
  * NOT close it. Measured on the `find` row, on disk:
  *
  *   every one of the 17 doors resolves to `DriverOptions | undefined`
@@ -76,7 +76,7 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
  * `ContainsAny` distributes over the `| undefined` every optional parameter
  * carries, so the regressed door answers `boolean`, and `boolean extends true`
  * is `false` — the detector reads it as "no `any` here". No swap was made;
- * the two measured repairs are in the #17879 report.
+ * the two measured repairs are in commit eb9334915's message.
  */
 
 /**
