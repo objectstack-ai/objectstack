@@ -136,7 +136,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
           all: { label: '全部商机' },
           pipeline: { label: '商机看板' },
         },
-        // Form section heading of `ui/views/opportunity.view.ts` `default`.
+        // Form section heading of `ui/views/opportunity.view.ts` `form`.
         // Declares a stable `name`, which is the only thing that makes the
         // heading translatable — otherwise it renders the English `label` in
         // every locale (#8231). Bare object word, matching this bundle's own
@@ -162,7 +162,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
           pipeline: { label: '线索看板' },
         },
         // Form section headings of `ui/views/lead.view.ts` (public web-to-lead
-        // `contact_us`, plus the four `default` groups). Each section declares
+        // `contact_us`, plus the four `form` groups). Each section declares
         // a stable `name`, the only thing that makes the heading translatable
         // (#8231). `conversion` reuses this bundle's own `messages` vocabulary
         // for "convert" (`crm.lead.convert.success` already reads 转化).
@@ -190,7 +190,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
           all: { label: '全部活动' },
           calendar: { label: '活动日历' },
         },
-        // Form section headings of `ui/views/activity.view.ts` `default`. Each
+        // Form section headings of `ui/views/activity.view.ts` `form`. Each
         // declares a stable `name`, the only thing that makes the heading
         // translatable (#8231).
         _sections: {

@@ -46,25 +46,24 @@ export const OpportunityViews = defineView({
       },
     },
   },
-  formViews: {
-    default: {
-      type: 'simple',
-      data: { provider: 'object', object: 'crm_opportunity' },
-      sections: [
-        {
-          name: 'opportunity',
-          label: 'Opportunity',
-          columns: 2,
-          fields: [
-            { field: 'name', required: true },
-            { field: 'account', required: true },
-            { field: 'stage', required: true },
-            { field: 'amount' },
-            { field: 'probability' },
-            { field: 'close_date' },
-          ],
-        },
-      ],
-    },
+  // The default form — what the create and edit surfaces render.
+  form: {
+    type: 'simple',
+    data: { provider: 'object', object: 'crm_opportunity' },
+    sections: [
+      {
+        name: 'opportunity',
+        label: 'Opportunity',
+        columns: 2,
+        fields: [
+          { field: 'name', required: true },
+          { field: 'account', required: true },
+          { field: 'stage', required: true },
+          { field: 'amount' },
+          { field: 'probability' },
+          { field: 'close_date' },
+        ],
+      },
+    ],
   },
 });
