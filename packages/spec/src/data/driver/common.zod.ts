@@ -55,9 +55,10 @@ export const SCHEMA_MODE_BELONGS_ON_DATASOURCE =
 export const READ_ONLY_BELONGS_ON_DATASOURCE =
   '`readOnly` is not driver config, and there is no datasource key that makes a connection '
   + 'read-only. For a FEDERATED datasource use `external.allowWrites: false`, which the ObjectQL '
-  + 'engine enforces before every write. For a managed (local) datasource there is currently no '
-  + 'read-only gate — grant the connection SELECT-only at the database instead, which is a real '
-  + 'boundary rather than an application-layer flag (#4584).';
+  + 'engine enforces before every write. For a managed (local) datasource the platform offers no '
+  + 'read-only gate, by decision: a flag only the application checks cannot stop direct '
+  + 'connections, migrations or DDL. Grant the connection SELECT-only at the database instead, '
+  + 'which is a real boundary rather than an application-layer flag.';
 
 /**
  * TLS on/off for a SQL driver — the shorthand, and deliberately ONLY the

@@ -190,6 +190,23 @@ export {
   redactMetadataItems,
 } from './metadata-redaction.js';
 
+// [#21454] The generic data door's serve of a stored-metadata ROW: the body
+// projected (`storedMetadataBodyProjection` plus this package's
+// `redactStoredMetadataRows`, the `dropType` wrinkle included) and the stored
+// content hash keyed (`serveStoredMetadataHashColumnRows`, under the crypto
+// provider's digest or, while none is registered, `ephemeralStoredHashDigest`,
+// this module's ONE process-scoped key). Exported so the in-process reader
+// contexts in `@objectstack/runtime` serve the family exactly as the door does
+// by consuming these functions, never a copy: a second ephemeral key would
+// serve a second keyed form of the same row.
+export {
+  ephemeralStoredHashDigest,
+  redactStoredMetadataRows,
+  serveStoredMetadataHashColumnRows,
+  storedMetadataBodyProjection,
+} from './metadata-redaction.js';
+export type { StoredHashDigest } from './metadata-redaction.js';
+
 export type { MetadataHostEngine } from './host-engine.js';
 
 // [#7560] ADR-0070's read-only-package rule. The authoring path (`saveMetaItem`

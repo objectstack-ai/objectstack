@@ -49,6 +49,7 @@ import type { FlowRunSummary } from '@objectstack/spec/automation';
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
 import { recordNotFoundError } from '@objectstack/metadata-protocol';
+import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
@@ -1496,16 +1497,22 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * via `engine.createContext()`, which the action path never called), so the
  * facade proxied every call context-less. Returns `undefined` when the engine
  * predates `createContext`, leaving the sandbox's own fallback in charge.
+ *
+ * [#21454] Served through the stored-metadata reader seam
+ * (`stored-metadata-reader-seam.ts`): this context is elevated, and it is the
+ * `ctx.api` a host code handler receives as well as an action body, so a read
+ * of the stored-metadata-body family answers the generic data door's form
+ * (the body projected, the content hash keyed) and never the stored row.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
     try {
-        return ql.createContext(buildActionExecutionContext(ec));
+        return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
         // the bare elevated context (the same shape hooks default to).
         try {
-            return ql.createContext({ isSystem: true });
+            return serveStoredMetadataReadsThrough(ql.createContext({ isSystem: true }), ql);
         } catch {
             return undefined;
         }
@@ -1677,8 +1684,14 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
             // (`assertActionEngineFindEnvelope` above says why the engine's own
             // check cannot be the whole of it).
             assertActionEngineFindEnvelope(object, query);
-            const rows = await ql.find(object, { ...(query ?? {}), context } as any);
-            return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
+            // [#21454] The answer is served through the stored-metadata reader
+            // seam: this read is elevated, so a read of the stored-metadata-body
+            // family answers the generic data door's form (the body projected,
+            // the content hash keyed), never the stored row.
+            return serveStoredMetadataRead(object, query, ql, async (q) => {
+                const rows = await ql.find(object, { ...((q as Record<string, unknown> | undefined) ?? {}), context } as any);
+                return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
+            });
         },
     };
 }

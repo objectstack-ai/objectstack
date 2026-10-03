@@ -298,15 +298,18 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
   bulkCreate: retiredKey(capRemoved('bulkCreate',
     'The bulk methods (`bulkCreate`/`bulkUpdate`/`bulkDelete`) are REQUIRED `IDataDriver` '
     + 'methods and the engine calls them directly; wire-level batch capability is advertised '
-    + 'by REST discovery from the live composition (#3298), never from this record.')),
+    + 'by REST discovery as its `transactionalBatch` bit, derived from the live composition so '
+    + 'a client negotiates instead of probing, never from this record.')),
   bulkUpdate: retiredKey(capRemoved('bulkUpdate',
     'The bulk methods are REQUIRED `IDataDriver` methods and the engine calls them directly; '
-    + 'wire-level batch capability is advertised by REST discovery from the live composition '
-    + '(#3298), never from this record.')),
+    + 'wire-level batch capability is advertised by REST discovery as its `transactionalBatch` '
+    + 'bit, derived from the live composition so a client negotiates instead of probing, never '
+    + 'from this record.')),
   bulkDelete: retiredKey(capRemoved('bulkDelete',
     'The bulk methods are REQUIRED `IDataDriver` methods and the engine calls them directly; '
-    + 'wire-level batch capability is advertised by REST discovery from the live composition '
-    + '(#3298), never from this record.')),
+    + 'wire-level batch capability is advertised by REST discovery as its `transactionalBatch` '
+    + 'bit, derived from the live composition so a client negotiates instead of probing, never '
+    + 'from this record.')),
 
   transactions: retiredKey(capRemoved('transactions',
     'Transaction use is gated on the DRIVER\'S DECLARATION, no longer on METHOD PRESENCE '
@@ -358,7 +361,8 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
     '`$search` is compiled by the engine into an `$or` of `$icontains` predicates over the '
     + 'searchable fields (ADR-0061) and removed from the AST before the driver sees it — no '
     + 'driver-side full-text path exists. The operator is `$icontains`, NOT `$contains`: '
-    + 'textual search is case-insensitive by ruling (#7641).')),
+    + 'textual search is case-insensitive by ruling, while `$contains` itself stays '
+    + 'case-sensitive.')),
   jsonQuery: retiredKey(capRemoved('jsonQuery',
     'No engine path ever branched on driver-side JSON querying.')),
   geospatialQuery: retiredKey(capRemoved('geospatialQuery',

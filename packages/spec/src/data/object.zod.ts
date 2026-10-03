@@ -54,8 +54,8 @@ export const LEGACY_API_METHOD_GUIDANCE: Record<LegacyApiMethod, string> = {
   aggregate: "declare ['list'] — `aggregate` derives from list",
   history: "declare ['get'] with `enable.trackHistory: true` — `history` derives from get ∧ trackHistory",
   search: "declare ['list'] (with `searchable` not false) — `search` derives from list ∧ searchable",
-  restore: "delete the value — `restore` never derives (`enable.trash` retired, #2377); it returns only with a real recycle bin (#3146, parked)",
-  purge: "delete the value — `purge` never derives (`enable.trash` retired, #2377)",
+  restore: "delete the value — `restore` never derives (`enable.trash` was retired because no runtime ever read it); it returns only with a real recycle bin, and that soft-delete work is parked",
+  purge: "delete the value — `purge` never derives (`enable.trash` was retired because no runtime ever read it)",
   import: "declare ['create'] and/or ['update'] — `import` derives from create ∨ update (writeMode-precise at the gate)",
   export: "declare ['list'] — `export` derives from list",
 };

@@ -746,14 +746,17 @@ export async function bootstrapSystemCapabilities(
                 'at all), so it most likely arrived as app seed data replayed per organization, or a legacy ' +
                 'import. Fix it AT ITS SOURCE: Setup cannot, because ADR-0066 asset ownership refuses every ' +
                 'admin-door edit and delete on a platform-stamped row. Note the platform bucket stays empty ' +
-                "either way — that is the #8552 posture for an occupied name, not a consequence of the stamp."
+                'either way, and not because of the stamp: when a row the seeder cannot prove is its own ' +
+                'already holds the name, the seeder declines rather than adopting that row or backfilling a stamp.'
               : " The organization's row is a supported extension (ADR-0066 D1 — admins EXTEND the " +
                 'registry), so there is nothing for an operator to remove; the platform bucket is left empty ' +
-                'deliberately, and adopting or backfilling it was rejected in #8552.';
+                'deliberately: the seeder does not adopt a row it cannot prove is its own, and does not ' +
+                "backfill provenance on the operator's behalf.";
         options.logger?.warn?.(
           `[security] derived capability "${def.name}" has no platform placeholder and none was seeded. ` +
             `The row this pass found for the name is ${provenance} ${locality}, and its label and ` +
-            'description were left as their author wrote them (#5876 — unchanged). In the platform ' +
+            'description were left as their author wrote them (the derivation refreshes them only on a row ' +
+            "it can prove is the platform's own). In the platform " +
             `(NULL-organization) bucket, where the declared unique key admits one row per name: ${bucket}. ` +
             "The platform's own derived placeholder is therefore missing from sys_capability " +
             'installation-wide. Grants and requiredPermissions referencing the name are unaffected — ' +

@@ -43,7 +43,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Gestionado por",
-        help: "Procedencia del registro: platform (integrado) / package (declarado) / admin (creado por el inquilino).",
+        help: "Procedencia del registro, en el único vocabulario platform / package / admin que comparten capacidades, conjuntos de permisos y puestos: platform (integrado) / package (declarado) / admin (creado por el inquilino).",
         options: {
           platform: "Plataforma",
           package: "Paquete",
@@ -230,7 +230,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Gestionado por",
-        help: "Procedencia del registro: platform (distribuido) / package (empaquetado) / admin (creado en el entorno).",
+        help: "Procedencia del registro, en el único vocabulario platform / package / admin que comparten capacidades, conjuntos de permisos y puestos: platform (distribuido) / package (empaquetado) / admin (creado en el entorno).",
         options: {
           platform: "Plataforma",
           package: "Paquete",

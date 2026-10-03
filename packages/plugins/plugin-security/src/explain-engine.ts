@@ -1406,7 +1406,7 @@ async function applyRecordAttribution(
             rowFilter: null,
             rules: [],
             detail: `View/Modify All Data via [${vamaSets.join(', ')}] admits this record regardless of ownership — ` +
-              'the same bypass the write path consults (#4647).',
+              'the same bypass the write path consults.',
           }
         : { outcome: 'not_evaluated', rules: [], detail: 'No View/Modify All Data bypass applies to this record.' };
   }
@@ -1865,13 +1865,13 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
         (delegatorVama ? ` AND by the delegator [${delegatorVama.join(', ')}]` : '') +
         ` — ownership and sharing checks are skipped` +
         (vamaBit === 'modify'
-          ? ` (Modify All Data: the write path consults this SAME bypass, #4647).`
+          ? ` (Modify All Data: the write path consults this SAME bypass).`
           : `.`)
       : agentVama.length > 0 && delegatorVama !== null && delegatorVama.length === 0
         ? `Agent holds View/Modify All Data via [${agentVama.join(', ')}] but the DELEGATOR does not — D10 intersection strips the bypass.`
         : viewOnlySets.length > 0
           ? `View All Data held via [${viewOnlySets.join(', ')}] does NOT bypass ownership for ${operation} — ` +
-            `a write bypass requires Modify All Data (modifyAllRecords), so ownership and sharing still decide (#4647).`
+            `a write bypass requires Modify All Data (modifyAllRecords), so ownership and sharing still decide.`
           : 'No View/Modify All Data bypass.',
     contributors: vamaEffective ? vamaSets.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })) : [],
   });
