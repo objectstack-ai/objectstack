@@ -82,8 +82,8 @@ function envelope(cause: unknown): Error {
   const err = new Error(
     `The database refused to run this query for object '${OBJECT}'. The driver could not ` +
       'attribute the failure to any part of the request, so no verdict about the query is ' +
-      "claimed here. The backend's own diagnostic and the compiled statement were written " +
-      'to the server log for an operator to read.',
+      "claimed here. The backend's own diagnostic was written to the server log for an " +
+      'operator to read, with the compiled statement and its bound values cut.',
   ) as Error & { code?: string; status?: number };
   err.code = 'DATABASE_ERROR';
   Object.defineProperty(err, 'cause', {

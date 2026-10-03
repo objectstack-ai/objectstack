@@ -151,7 +151,8 @@ describe('ApprovalEscalation.timeoutHours is calendar (wall-clock) hours', () =>
     expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
 
     const actions = await svc.listActions(req.id, SYS);
-    expect(actions.at(-1)).toMatchObject({ action: 'escalate', actor_id: 'system:sla' });
+    expect(actions.at(-1)).toMatchObject({ action: 'escalate' });
+    expect(actions.at(-1)?.actor_id).toBeUndefined();
   });
 
   it('a 168-hour deadline spans the weekend: due the next Friday at the same hour, 7 × 24 elapsed hours', async () => {

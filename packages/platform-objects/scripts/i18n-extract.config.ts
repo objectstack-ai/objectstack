@@ -14,7 +14,7 @@
  *     --out=packages/platform-objects/src/apps/translations
  *
  * `--source-hashes` also emits `<locale>.source-hashes.generated.ts` — the
- * provenance companion from maintainer ruling #12069 Option A (#11671). Without
+ * provenance companion from maintainer ruling #12069 Option A (commit 09b4f4e4e). Without
  * it, a leaf filled from the source and then left behind when the source was
  * revised is indistinguishable BY VALUE from a real translation, so it publishes
  * a superseded draft under a green `check:i18n` forever. This package opts in;
@@ -280,7 +280,7 @@ const config: ObjectStackDefinition = defineStack({
     SysSsoProvider,
     // Stable @better-auth/scim 1.7.x model set + the ObjectStack-owned
     // credential store (#3653). The rc.1-era SysScimProvider retired under
-    // #11757.
+    // commit 4d25d22d4.
     SysScimConnectionBinding,
     SysScimConnectionCredential,
     SysScimGroup,

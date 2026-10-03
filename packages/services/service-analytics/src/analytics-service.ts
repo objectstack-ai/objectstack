@@ -3171,7 +3171,9 @@ export class AnalyticsService implements IAnalyticsService {
       if (cube.measures[m] || extraMeasures[m]) continue;
       const key = mintableMeasureKey(m, name);
       if (cube.measures[key] || extraMeasures[key]) continue;
-      extraMeasures[key] = inferMeasure(key);
+      // [#21437] A spelling whose source names no field (`_sum`, `*`) is
+      // refused by the mint itself, naming `m` as the request spelled it.
+      extraMeasures[key] = inferMeasure(key, { member: m, cube: name });
     }
     if (Object.keys(extraMeasures).length > 0) {
       const augmented: Cube = {
@@ -3736,7 +3738,9 @@ export class AnalyticsService implements IAnalyticsService {
       // registry. Maintainer ruling, 2026-08-07 (#5918).
       const key = mintableMeasureKey(m, cubeName);
       if (measures[key]) continue;
-      const inferred = inferMeasure(key);
+      // [#21437] Same mint rule as `ensureCube`'s loop: a source that names no
+      // field is refused here, before the cube is built.
+      const inferred = inferMeasure(key, { member: m, cube: cubeName });
       measures[key] = inferred;
     }
 
@@ -3972,6 +3976,25 @@ function mintableMeasureKey(member: string, cubeName: string): string {
 }
 
 /**
+ * The aggregation suffixes {@link inferMeasure} strips, in the order it tries
+ * them — the ONE list. `_count_distinct` precedes the shorter suffixes so the
+ * longest spelling wins. Exported (not from the package index) for the
+ * enumeration pin `__tests__/caller-measure-no-field-door.test.ts`, which
+ * iterates this list rather than restating it, so a suffix added here is
+ * pinned on arrival.
+ */
+export const INFERRED_MEASURE_SUFFIXES: ReadonlyArray<
+  readonly [suffix: string, type: 'sum' | 'avg' | 'min' | 'max' | 'count_distinct']
+> = [
+  ['_count_distinct', 'count_distinct'],
+  ['_sum', 'sum'],
+  ['_avg', 'avg'],
+  ['_average', 'avg'],
+  ['_min', 'min'],
+  ['_max', 'max'],
+];
+
+/**
  * Infer a Metric definition from a measure key name.
  *
  * Recognised suffix conventions (matches dashboard widget translators that
@@ -3988,28 +4011,78 @@ function mintableMeasureKey(member: string, cubeName: string): string {
  *
  * Anything else is treated as a `sum(<key>)` — best-effort default for an
  * unknown numeric measure.
+ *
+ * ## The source must name a field (#21437)
+ *
+ * The bare `count` is the ONE spelling that mints the row wildcard `'*'`, and
+ * it mints it under `count`. Every other spelling's source — the part before
+ * the suffix, or the whole key when no suffix matches — must name a field, so
+ * a source that is EMPTY (`_sum`, `''`) or the row wildcard itself (`*`,
+ * `*_sum`) is refused here, `INVALID_FIELD` / 400 naming the member as the
+ * request spelled it, before any statement is built. The predecessor minted
+ * `'*'` for an empty prefix (`key.slice(…) || '*'`) and minted `*` / `''`
+ * verbatim, so `SUM(*)` / `AVG(*)` / `COUNT(DISTINCT *)` / `SUM()` reached the
+ * database and the door answered `500 DATABASE_ERROR` on both strategies
+ * (measured on `origin/main` `713b0fa76`).
+ *
+ * That is why {@link AnalyticsService.assertCallerMembersResolvable}'s `'*'`
+ * pass-through decides nothing about aggregates: a `'*'` this function returns
+ * comes with `count`, by construction — and the enumeration pin asserts it
+ * over every caller spelling it generates. Authored members are never minted
+ * here; #21409 refuses a non-`count` `'*'` on them at parse.
+ *
+ * `spelling` is the request's own entry (`member`, any `<cube>.` qualifier
+ * included) and the cube it names — what the refusal reports.
  */
-export function inferMeasure(key: string): { label: string; type: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'; sql: string } {
+export function inferMeasure(
+  key: string,
+  spelling: { member: string; cube: string },
+): { label: string; type: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'; sql: string } {
   // No inner `name`: the caller files the result under `key`, and the record
   // key IS the measure's name (#20300 retired the inner copy).
   if (key === 'count') {
     return { label: 'Count', type: 'count', sql: '*' };
   }
-  const suffixes: Array<[string, 'sum' | 'avg' | 'min' | 'max' | 'count_distinct']> = [
-    ['_count_distinct', 'count_distinct'],
-    ['_sum', 'sum'],
-    ['_avg', 'avg'],
-    ['_average', 'avg'],
-    ['_min', 'min'],
-    ['_max', 'max'],
-  ];
-  for (const [suffix, type] of suffixes) {
-    if (key.endsWith(suffix)) {
-      const field = key.slice(0, -suffix.length) || '*';
-      return { label: key, type, sql: field };
-    }
+  const matched = INFERRED_MEASURE_SUFFIXES.find(([suffix]) => key.endsWith(suffix));
+  const type = matched ? matched[1] : 'sum';
+  const source = matched ? key.slice(0, -matched[0].length) : key;
+  if (source === '' || source === '*') {
+    throw measureNamesNoFieldError(spelling, source, type, matched?.[0]);
   }
-  return { label: key, type: 'sum', sql: key };
+  return { label: key, type, sql: source };
+}
+
+/**
+ * [#21437] The refusal {@link inferMeasure} raises for a caller-named measure
+ * whose source names no field. The envelope is the mint's own — the
+ * constructor #5918's dotted-measure refusal uses: `INVALID_FIELD` / 400 with
+ * `member` / `param` / `cube`, the code and status the missing-field refusal
+ * (`assertMeasureFields`, #4437) answers. It carries no `field`, because there
+ * is no field to name.
+ */
+function measureNamesNoFieldError(
+  spelling: { member: string; cube: string },
+  source: string,
+  type: string,
+  suffix: string | undefined,
+): Error {
+  const why =
+    source === '*'
+      ? `it aggregates the row wildcard '*' under '${type}', and only a count reads '*'`
+      : suffix
+        ? `nothing precedes the suffix '${suffix}'`
+        : spelling.member === ''
+          ? 'the spelling is empty'
+          : `nothing follows the '${spelling.cube}.' qualifier`;
+  const suffixes = INFERRED_MEASURE_SUFFIXES.map(([s]) => `'${s}'`).join(' / ');
+  return invalidMemberError(
+    `[Analytics] Measure '${spelling.member}' on cube '${spelling.cube}' names no field to ` +
+      `aggregate: ${why}. A measure the cube does not declare is either 'count', which ` +
+      `counts rows, or one of the object's OWN field names followed by an aggregation ` +
+      `suffix (${suffixes}), so the sum of 'amount' is 'amount_sum'. Ask for 'count' to ` +
+      `count rows, or put the field's name before the suffix.`,
+    { member: spelling.member, param: 'measures', cube: spelling.cube },
+  );
 }
 
 /**
@@ -4020,15 +4093,21 @@ export function inferMeasure(key: string): { label: string; type: 'count' | 'sum
  * `mintableMeasureKey`'s qualifier strip WITHOUT its throw (that refusal has
  * already happened), then reads {@link inferMeasure}'s source. The gate judges
  * whether the result is a column reference.
+ *
+ * [#21437] Exported (not from the package index) so the enumeration pin can
+ * assert what this gate input carries: a `'*'` only for a spelling that
+ * reduces to `count`. A spelling whose source names no field throws
+ * {@link inferMeasure}'s refusal here too, though `ensureCube` has refused it
+ * at the mint before the gate runs.
  */
-function inferredCallerMeasureSql(measure: string, cubeName: string): string | null {
+export function inferredCallerMeasureSql(measure: string, cubeName: string): string | null {
   let key = measure;
   const dot = measure.indexOf('.');
   if (dot >= 0) {
     if (measure.slice(0, dot) === cubeName) key = measure.slice(dot + 1);
     else return null;
   }
-  return inferMeasure(key).sql;
+  return inferMeasure(key, { member: measure, cube: cubeName }).sql;
 }
 
 /**

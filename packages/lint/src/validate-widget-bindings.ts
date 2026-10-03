@@ -979,7 +979,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
               message:
                 `${provenance}${unprovisionedAnchorCause(leafObject, leafField)}. The filter is ANDed ` +
-                `into this widget's analytics query (#2501), so it can never match a real value — ` +
+                `into this widget's analytics query, so it can never match a real value — ` +
                 `on SQLite it silently degrades to constant-false and the widget renders empty ` +
                 `(HTTP 200, zero rows, no error).`,
               hint:

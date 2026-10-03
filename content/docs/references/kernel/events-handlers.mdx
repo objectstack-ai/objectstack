@@ -33,7 +33,7 @@ const result = EventHandlerSchema.parse(data);
 | **handler** | `any` | ✅ | Handler function |
 | **priority** | `integer` | optional (default: `0`) | Execution priority (lower numbers execute first) |
 | **async** | `boolean` | optional (default: `true`) | Execute in background (true) or block (false) |
-| **retry** | `{ maxRetries: integer; backoffMs: integer; backoffMultiplier: number }` | optional | Retry policy for failed handlers |
+| **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy for failed handlers |
 | **timeoutMs** | `integer` | optional | Handler timeout in milliseconds |
 | **filter** | `any` | optional | Optional filter to determine if handler should execute |
 

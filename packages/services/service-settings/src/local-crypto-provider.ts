@@ -203,6 +203,9 @@ export class KeyedDigestKeyUnavailableError extends Error {
 /** The AAD derivations this provider knows (see "AAD binding" above). */
 type AadDerivation = 1 | 2;
 
+/** The derivation every seal uses — the one a re-wrap leaves a ciphertext under. */
+const SEALING_DERIVATION: AadDerivation = 2;
+
 /** Separates a ciphertext's derivation marker from its base64 body. */
 const CIPHERTEXT_MARKER_SEPARATOR = ':';
 
@@ -321,6 +324,46 @@ function readCiphertext(ciphertext: string): { derivation: AadDerivation; body: 
   const marker = ciphertext.slice(0, at);
   if (marker === CIPHERTEXT_V2_MARKER) return { derivation: 2, body: ciphertext.slice(at + 1) };
   throw new UnknownCiphertextVersionError(marker);
+}
+
+/**
+ * What a stored ciphertext records about the AAD derivation that sealed it,
+ * relative to the one this provider seals with. See
+ * {@link ciphertextDerivationStatus}.
+ *
+ *  - `'current'` — sealed under the derivation every new seal uses (version
+ *    2). A re-wrap has nothing to do.
+ *  - `'superseded'` — sealed under a derivation this provider still opens but
+ *    no longer seals with (version 1, no marker).
+ *    {@link LocalCryptoProvider.rotateKey} re-seals it under the current one.
+ *  - `'unknown'` — a marker this provider does not know, or a value that is not
+ *    a ciphertext string at all. `decrypt` and `rotateKey` refuse it.
+ */
+export type CiphertextDerivationStatus = 'current' | 'superseded' | 'unknown';
+
+/**
+ * Read a stored ciphertext's derivation off its marker, WITHOUT opening it: no
+ * key and no context are involved, so nothing is decrypted.
+ *
+ * It is the same reading `decrypt` and `rotateKey` dispatch on
+ * (`readCiphertext`), published so that the at-rest re-wrap (ADR-0128 §4.2)
+ * classifies stored rows with this provider's own grammar. ⛔ A consumer that
+ * restated the marker grammar would drift from that dispatch, and the drift
+ * shows up as a row skipped as done that was never re-wrapped.
+ *
+ * `'superseded'` is a statement about the marker only. Whether the ciphertext
+ * really opens is known only by opening it under its producer's context.
+ */
+export function ciphertextDerivationStatus(ciphertext: unknown): CiphertextDerivationStatus {
+  if (typeof ciphertext !== 'string') return 'unknown';
+  let derivation: AadDerivation;
+  try {
+    derivation = readCiphertext(ciphertext).derivation;
+  } catch (error) {
+    if (error instanceof UnknownCiphertextVersionError) return 'unknown';
+    throw error;
+  }
+  return derivation === SEALING_DERIVATION ? 'current' : 'superseded';
 }
 
 type EnvMap = Record<string, string | undefined>;

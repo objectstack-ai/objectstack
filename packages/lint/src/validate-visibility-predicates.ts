@@ -998,7 +998,8 @@ function checkElement(
         `visibility predicate is syntactically valid CEL but overruns ${bound} ` +
         `(${refusal.overrun.summary}) (predicate: \`${quoteSource(source)}\`). The canonical front ` +
         `end refuses it, so it can never evaluate, and the console falls OPEN: the element renders ` +
-        `unconditionally and looks exactly like one with no predicate at all (#5149).`,
+        `unconditionally and looks exactly like one with no predicate at all (failing open is the ` +
+        `console's settled behaviour).`,
       hint:
         `There is no syntax or dialect error to correct here — this is a SIZE fault, not a dialect ` +
         `mistake, so re-spelling the predicate will not fix it. Make it smaller, or move the work ` +
@@ -1020,7 +1021,7 @@ function checkElement(
         `visibility predicate is not valid CEL — ${refusal.detail} ` +
         `(predicate: \`${quoteSource(source)}\`). A predicate that does not parse can never ` +
         `evaluate, and the console falls OPEN: the element renders unconditionally and looks ` +
-        `exactly like one with no predicate at all (#5149).`,
+        `exactly like one with no predicate at all (failing open is the console's settled behaviour).`,
       hint: refusal.token
         ? `\`${refusal.token.wrote}\` is not a CEL operator — CEL spells it ` +
           `\`${refusal.token.cel}\`. Replace \`${refusal.token.wrote}\` with ` +
@@ -1123,7 +1124,8 @@ function checkElement(
           `Values are bound under a namespace on this surface — they are never ` +
           `flattened to top level — so \`${bare}\` resolves to nothing, the predicate ` +
           `can never evaluate, and the console falls OPEN: the element renders ` +
-          `unconditionally and looks exactly like one with no predicate at all (#5149).`,
+          `unconditionally and looks exactly like one with no predicate at all (failing open is the ` +
+          `console's settled behaviour).`,
         hint:
           `Write \`${root}.${bare}\` instead of \`${bare}\`` +
           (layer === 'runtime'

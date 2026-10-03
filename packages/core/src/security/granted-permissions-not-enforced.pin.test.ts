@@ -1,17 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ── [#17147] The granted permission set is REGISTERED and refuses nothing ──
+ * ── [commit aaacf1d5c] The granted permission set is REGISTERED and refuses nothing ──
  *
  * #13457 / PR #17137 gave `PluginPermissionEnforcer.registerGrantedPermissions`
  * its first production caller: `AppPlugin.init()` binds an artifact's
  * install-time `grantedPermissions` to the packages that artifact carries. What
- * it did NOT do — deliberately, and fenced by maintainer ruling `5486840233`,
+ * it did NOT do — deliberately, and fenced by the maintainer ruling ADR-0025 §3.7 records,
  * which assigns the per-plugin context to the ADR-0025 install-flow design
  * effort — is make anything QUERY that registry.
  *
  * Maintainer ruling 2026-09-12, option B (the same option ruled for the sibling
- * half of this very sentence in #11330): **say it truthfully now.** Enforcing is
+ * half of this very sentence, executed by commit a9ee98992): **say it truthfully now.** Enforcing is
  * a later, separately designed direction. This file is the mechanical half of
  * that ruling — without it, "registered, not enforced" is prose that rots the
  * moment someone edits around it, which is exactly how the retracted sentence
@@ -175,7 +175,7 @@ describe('[#17147] the install-time granted permission set is registered, not en
     expect(text).toMatch(/ZERO production construction\s+\*?\s*sites/);
     // The negative pin. Without it a future edit could re-add the retracted
     // sentence beside the truthful one and every positive assertion above
-    // would stay green — the same failure mode #11330 closed on the tier half.
+    // would stay green — the same failure mode commit a9ee98992 closed on the tier half.
     expect(
       text,
       'the retracted sentence must not come back beside the truthful one',
@@ -183,7 +183,7 @@ describe('[#17147] the install-time granted permission set is registered, not en
   });
 
   it('the retracted phrasing is absent from the WHOLE repo, not just its own file', () => {
-    // [#17147 follow-up] The single-file version above missed one: the runtime's
+    // [commit 65481183b, the follow-up] The single-file version above missed one: the runtime's
     // own seam test carried `a CONSENTED entry enforces exactly the consented
     // surface` as a CASE TITLE. Nothing in it asserted a refusal — it reads a
     // permission bag and checks what the bag answers — but a case title is read

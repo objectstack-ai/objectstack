@@ -101,10 +101,13 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     // keeping it would have asserted the survival of a layer this repo
     // deliberately removed. Re-pointing it at another `automation/` export
     // would have preserved the line and lost the meaning. What survives as the
-    // "did not over-reach" witness is `StateMachineSchema` plus the >50 export
+    // "did not over-reach" witness is `FlowSchema` plus the >50 export
     // floor above — and, one layer out, the surviving sync surfaces are
-    // asserted by name in section 4 below.
-    expect(automationNames).toContain('StateMachineSchema');
+    // asserted by name in section 4 below. (The witness was `StateMachineSchema`
+    // until #21320 retired that family with `agent.lifecycle`; `FlowSchema` is
+    // the `/automation` export least likely to ever leave, which is the only
+    // property a non-over-reach witness needs.)
+    expect(automationNames).toContain('FlowSchema');
     for (const alsoRetired of [
       'ETLPipeline', 'ETLPipelineSchema', 'ETLPipelineRun', 'ETLPipelineRunSchema',
       'ETLSource', 'ETLSourceSchema', 'ETLDestination', 'ETLDestinationSchema',

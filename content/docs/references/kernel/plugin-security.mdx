@@ -44,7 +44,7 @@ Complete dependency graph for a package and its transitive dependencies
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **root** | `{ id: string; version: string }` | ✅ | Root package of the dependency graph |
-| **nodes** | `{ id: string; version: string; dependencies: object[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
+| **nodes** | `{ id: string; version: string; dependencies?: object[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
 | **edges** | `{ from: string; to: string; constraint: string }[]` | ✅ | Directed edges representing dependency relationships |
 | **stats** | `{ totalDependencies: integer; directDependencies: integer; maxDepth: integer }` | ✅ | Summary statistics for the dependency graph |
 
@@ -63,7 +63,7 @@ A node in the dependency graph representing a resolved package
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier of the package |
 | **version** | `string` | ✅ | Resolved version of the package |
-| **dependencies** | `{ name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]` | optional (default: `[]`) | Dependencies required by this package |
+| **dependencies** | `{ name: string; versionConstraint: string; type?: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]` | optional (default: `[]`) | Dependencies required by this package |
 | **depth** | `integer` | ✅ | Depth level in the dependency tree (0 = root) |
 | **isDirect** | `boolean` | ✅ | Whether this is a direct (top-level) dependency |
 | **metadata** | `{ name: string; description?: string; license?: string; homepage?: string }` | optional | Additional metadata about the package |
@@ -97,7 +97,7 @@ A node in the dependency graph representing a resolved package
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier of the package |
 | **version** | `string` | ✅ | Resolved version of the package |
-| **dependencies** | `{ name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]` | optional (default: `[]`) | Dependencies required by this package |
+| **dependencies** | `{ name: string; versionConstraint: string; type?: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]` | optional (default: `[]`) | Dependencies required by this package |
 | **depth** | `integer` | ✅ | Depth level in the dependency tree (0 = root) |
 | **isDirect** | `boolean` | ✅ | Whether this is a direct (top-level) dependency |
 | **metadata** | `{ name: string; description?: string; license?: string; homepage?: string }` | optional | Additional metadata about the package |
@@ -178,7 +178,7 @@ Result of a dependency resolution process
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **root** | `{ id: string; version: string }` | ✅ | Root package of the dependency graph |
-| **nodes** | `{ id: string; version: string; dependencies: object[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
+| **nodes** | `{ id: string; version: string; dependencies?: object[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
 | **edges** | `{ from: string; to: string; constraint: string }[]` | ✅ | Directed edges representing dependency relationships |
 | **stats** | `{ totalDependencies: integer; directDependencies: integer; maxDepth: integer }` | ✅ | Summary statistics for the dependency graph |
 
@@ -398,12 +398,12 @@ Security policy governing plugin scanning and enforcement
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for the security policy |
 | **name** | `string` | ✅ | Human-readable name of the security policy |
-| **autoScan** | `{ enabled: boolean; frequency: Enum<'on-publish' \| 'daily' \| 'weekly' \| 'monthly'> }` | ✅ | Automatic security scanning configuration |
-| **thresholds** | `{ maxCritical: integer; maxHigh: integer; maxMedium: integer }` | ✅ | Vulnerability count thresholds for policy enforcement |
+| **autoScan** | `{ enabled?: boolean; frequency?: Enum<'on-publish' \| 'daily' \| 'weekly' \| 'monthly'> }` | ✅ | Automatic security scanning configuration |
+| **thresholds** | `{ maxCritical?: integer; maxHigh?: integer; maxMedium?: integer }` | ✅ | Vulnerability count thresholds for policy enforcement |
 | **allowedLicenses** | `string[]` | optional (default: `["MIT","Apache-2.0","BSD-3-Clause","BSD-2-Clause","ISC"]`) | List of SPDX license identifiers that are permitted |
 | **prohibitedLicenses** | `string[]` | optional (default: `["GPL-3.0","AGPL-3.0"]`) | List of SPDX license identifiers that are prohibited |
-| **codeSigning** | `{ required: boolean; allowedSigners: string[] }` | optional | Code signing requirements for plugin artifacts |
-| **sandbox** | `{ networkAccess: Enum<'none' \| 'localhost' \| 'allowlist' \| 'all'>; allowedDestinations: string[]; filesystemAccess: Enum<'none' \| 'read-only' \| 'temp-only' \| 'full'>; maxMemoryMB?: integer; … }` | optional | Sandbox restrictions for plugin execution |
+| **codeSigning** | `{ required?: boolean; allowedSigners?: string[] }` | optional | Code signing requirements for plugin artifacts |
+| **sandbox** | `{ networkAccess?: Enum<'none' \| 'localhost' \| 'allowlist' \| 'all'>; allowedDestinations?: string[]; filesystemAccess?: Enum<'none' \| 'read-only' \| 'temp-only' \| 'full'>; maxMemoryMB?: integer; … }` | optional | Sandbox restrictions for plugin execution |
 
 ### Nested Shape: `SecurityPolicy.autoScan`
 
@@ -454,9 +454,9 @@ Result of a security scan performed on a plugin
 | **scanner** | `{ name: string; version: string }` | ✅ | Information about the scanner tool used |
 | **status** | `Enum<'passed' \| 'failed' \| 'warning'>` | ✅ | Overall result status of the security scan |
 | **vulnerabilities** | `{ cve?: string; id: string; title: string; description: string; … }[]` | ✅ | List of vulnerabilities discovered during the scan |
-| **summary** | `{ critical: integer; high: integer; medium: integer; low: integer; … }` | ✅ | Summary counts of vulnerabilities by severity |
+| **summary** | `{ critical?: integer; high?: integer; medium?: integer; low?: integer; … }` | ✅ | Summary counts of vulnerabilities by severity |
 | **licenseIssues** | `{ package: string; license: string; reason: string; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | optional (default: `[]`) | License compliance issues found during the scan |
-| **codeQuality** | `{ score?: number; issues: object[] }` | optional | Code quality analysis results |
+| **codeQuality** | `{ score?: number; issues?: object[] }` | optional | Code quality analysis results |
 | **nextScanAt** | `string` | optional | ISO 8601 timestamp for the next scheduled scan |
 
 ### Nested Shape: `SecurityScanResult.plugin`

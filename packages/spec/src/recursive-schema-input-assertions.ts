@@ -51,7 +51,6 @@
 import type { z } from 'zod';
 
 import type { FormFieldInput, FormFieldSchema } from './ui/view.zod';
-import type { StateNodeConfig, StateNodeSchema } from './automation/state-machine.zod';
 import type { BaseValidationRuleShape, ValidationRuleSchema } from './data/validation.zod';
 import type {
   FilterCondition,
@@ -155,23 +154,11 @@ export const normalizedNotAString: NormalizedFilter = 'nope';
 // @ts-expect-error — only `$and` / `$or` / `$not` are declared at this level
 export const normalizedBadKey: NormalizedFilter = { $nand: [] };
 
-/* ── automation/state-machine.zod.ts ───────────────────────────────────────── */
-
-/** Every key is optional; `states` recurses. */
-export const stateInput: StateNodeConfig = {
-  type: 'compound',
-  initial: 'draft',
-  states: {
-    draft: { type: 'atomic', on: { SUBMIT: 'review' } },
-    review: { type: 'final' },
-  },
-};
-
-// @ts-expect-error — a state node is not a string
-export const stateNotAString: StateNodeConfig = 'draft';
-
-// @ts-expect-error — `type` must be one of the five declared state kinds
-export const stateBadType: StateNodeConfig = { type: 'pending' };
+/* ── automation/state-machine.zod.ts — REMOVED (#21320) ──────────────────────
+ * The recursive `StateNodeSchema` left the package with the `StateMachineSchema`
+ * family when its last authorable door, `agent.lifecycle`, was tombstoned. Its
+ * probes went with it; there is no schema left for them to pin.
+ * ──────────────────────────────────────────────────────────────────────────── */
 
 /* ── data/validation.zod.ts ────────────────────────────────────────────────── */
 
@@ -234,9 +221,6 @@ export const wiredFilter: z.input<typeof FilterConditionSchema> = 42;
 
 // @ts-expect-error — NormalizedFilterSchema's input is checked
 export const wiredNormalized: z.input<typeof NormalizedFilterSchema> = 42;
-
-// @ts-expect-error — StateNodeSchema's input is checked
-export const wiredState: z.input<typeof StateNodeSchema> = 42;
 
 // @ts-expect-error — ValidationRuleSchema's input is checked
 export const wiredValidation: z.input<typeof ValidationRuleSchema> = 42;

@@ -1140,7 +1140,10 @@ export class AutomationServicePlugin implements Plugin {
             if (ql?.registry && typeof ql.registry.getObject === 'function') {
                 this.engine.setObjectSchemaResolver((objectName) =>
                     parseObjectFieldSchema((ql.registry!.getObject!(objectName) as { fields?: unknown } | undefined)?.fields));
-                ctx.logger.debug('[Automation] object-schema resolver bridged to objectql.registry (#1928 condition checks)');
+                ctx.logger.debug(
+                    '[Automation] object-schema resolver bridged to objectql.registry ' +
+                    '(flow conditions are checked against object fields at registration)',
+                );
             }
         } catch {
             ctx.logger.debug('[Automation] objectql registry not present — flow-condition checks limited to syntax');
@@ -1178,7 +1181,10 @@ export class AutomationServicePlugin implements Plugin {
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
-                ctx.logger.debug('[Automation] runAs:user grant resolver bridged to @objectstack/core resolveUserAuthzGrants (#3356)');
+                ctx.logger.debug(
+                    '[Automation] runAs:user grant resolver bridged to @objectstack/core resolveUserAuthzGrants ' +
+                    '(a user-mode run carries the triggering user\'s positions and permission sets)',
+                );
 
                 // #3475 — bridge the lookup expander for record-change flow
                 // templates. Re-reads the relations a flow declares in its start
@@ -1205,7 +1211,10 @@ export class AutomationServicePlugin implements Plugin {
                         const full = await expandQl.findOne!(objectName, query);
                         return full && typeof full === 'object' ? (full as Record<string, unknown>) : undefined;
                     });
-                    ctx.logger.debug('[Automation] record-change lookup expander bridged (#3475)');
+                    ctx.logger.debug(
+                        '[Automation] record-change lookup expander bridged ' +
+                        '(a lookup the start node declares in expand is read with the run\'s own identity)',
+                    );
                 }
             } else {
                 ctx.logger.debug('[Automation] objectql not present — runAs:user runs keep the trigger-supplied identity');
@@ -1670,12 +1679,14 @@ export class AutomationServicePlugin implements Plugin {
         ctx.logger.warn(
             `[Automation] ${inert.length} declarative connector(s) declare actions but are not registered ` +
                 `in the connector registry — the connector_action node cannot dispatch them: ${inert.join(', ')}. ` +
-                `Declarative \`connectors:\` entries are catalog descriptors (descriptor-only contract, #2612); ` +
-                `runtime connectors are contributed by plugins via engine.registerConnector() — e.g. ` +
+                `Declarative \`connectors:\` entries without a \`provider\` are catalog descriptors ` +
+                `(descriptor-only contract); runtime connectors are contributed by plugins via ` +
+                `engine.registerConnector() — e.g. ` +
                 `@objectstack/connector-rest, @objectstack/connector-slack, @objectstack/connector-openapi, ` +
                 `@objectstack/connector-mcp. Install/instantiate the matching connector plugin, or mark a ` +
                 `deliberate catalog-only entry with \`enabled: false\` to silence this warning. ` +
-                `Declarative provider-bound connector instances are tracked in #2977 (ADR-0097).`,
+                `An entry that names a \`provider\` is a connector instance instead: that provider's ` +
+                `installed executor materializes it into a live connector (ADR-0097).`,
         );
     }
 
@@ -1817,7 +1828,7 @@ export class AutomationServicePlugin implements Plugin {
                 // the live connector is already the desired one: cancel it.
                 if (this.degradedInstances.delete(name)) {
                     ctx.logger.info(
-                        `[Automation] connector instance '${name}' reverted to its live configuration; pending retry cancelled (#3017)`,
+                        `[Automation] connector instance '${name}' reverted to its live configuration; pending retry cancelled`,
                     );
                 }
                 continue;
@@ -2060,7 +2071,7 @@ export class AutomationServicePlugin implements Plugin {
                 // cause goes there.
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
-                        `connector registry until a retry succeeds (#3017).`,
+                        `connector registry until a retry succeeds.`,
                     describeThrownForLog(err),
                 );
             }
@@ -2072,7 +2083,7 @@ export class AutomationServicePlugin implements Plugin {
                 (info.hasLive
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
-                `; retrying with backoff, attempt ${attempts} (#3017).`,
+                `; retrying with backoff, attempt ${attempts}.`,
             undefined,
             describeThrownForLog(info.cause),
         );
@@ -2129,7 +2140,7 @@ export class AutomationServicePlugin implements Plugin {
         (timer as unknown as { unref?: () => void }).unref?.();
         this.declarativeRetryTimer = timer;
         ctx.logger.info(
-            `[Automation] ${this.degradedInstances.size} degraded connector instance(s); next retry in ${delay}ms (#3017)`,
+            `[Automation] ${this.degradedInstances.size} degraded connector instance(s); next retry in ${delay}ms`,
         );
     }
 

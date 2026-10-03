@@ -154,9 +154,9 @@ const NON_BOOLEANS: ReadonlyArray<readonly [string, unknown, string]> = [
   ['"false" (truthy)', 'false', 'string ("false")'],
   ['0', 0, 'number (0)'],
   ['null', null, 'null (null)'],
-  // Not one of the card's five, but reaching the same gate: no earlier door
-  // refuses a list here, so it met the old `!!target` read like any other value.
-  ['[true] (a list)', [true], 'array ([true])'],
+  // [#21448] `[true] (a list)` stood here, reaching this gate because no
+  // earlier door refused a list at a flag. The shared comparand-shape face
+  // does now, one door earlier, in its own words — pinned in the block below.
 ];
 
 describe('[#20981] a non-boolean $exists / $null — refused before any driver read, on both positions', () => {
@@ -183,6 +183,25 @@ describe('[#20981] a non-boolean $exists / $null — refused before any driver r
       });
     }
   }
+
+  it('[#21448] a LIST flag is the shared comparand-shape face\'s refusal, one door earlier, at both positions — no read', async () => {
+    for (const op of OPS) {
+      const sentence = `Operator "${op}" on field "name" requires a single comparable value, but received an array ([true])`;
+      const { engine, reads } = await makeEngine('rows', ROWS);
+      const filtered = await refusalOf(() => engine.aggregate(OBJECT, filterQuery({ name: { [op]: [true] } })));
+      expect({ code: filtered.code, status: filtered.status }, op).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(filtered.message, op).toContain(`${sentence} at aggregations[1].filter.name.${op}.`);
+      expect(filtered.message, op).not.toContain('requires a boolean comparand');
+      expect(reads, `${op}: no row was read`).toEqual({ aggregate: 0, find: 0 });
+      for (const path of ['native', 'rows'] as const) {
+        const grouped = await makeEngine(path, ROWS);
+        const having = await refusalOf(() => grouped.engine.aggregate(OBJECT, havingQuery(path, { name: { [op]: [true] } })));
+        expect({ code: having.code, status: having.status }, `${op} ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(having.message, `${op} ${path}`).toContain(`${sentence} at having.name.${op}.`);
+        expect(grouped.reads, `${op} ${path}: no row was read`).toEqual({ aggregate: 0, find: 0 });
+      }
+    }
+  });
 
   // Where the flag sits must not change the verdict: the walk is row-independent,
   // so a branch the per-row walk would short-circuit past is judged too.

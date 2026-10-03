@@ -134,21 +134,23 @@ export { defineSkill } from './ai/skill.zod';
 // ObjectStackDefinitionSchema>` — a generic instantiation the declaration
 // emitter does not preserve as an alias — so an un-annotated
 // `export default defineStack(...)` is emitted as the STRUCTURAL expansion,
-// and that expansion mentions these three types. Without root re-exports, tsc
+// and that expansion mentions these types. Without root re-exports, tsc
 // can only name them through the hash-named internal dist chunk that declares
 // them (unaddressable through the package's `exports` map → TS2883 in every
-// consumer inferring through a root-entry function). All three are already
-// public on their domain subpaths (`/ui`, `/automation`); this block makes the
+// consumer inferring through a root-entry function). Both are already
+// public on their domain subpath (`/ui`); this block makes the
 // root entry self-consistent. Invariant (maintainer ruling 2026-08-23,
 // recorded in commit ece4dad31): a type that appears structurally in an entry's public
-// declarations must be nameable from that same entry.
+// declarations must be nameable from that same entry. The third name this
+// block carried, `/automation`'s `StateNodeConfig`, left the package with the
+// `StateMachineSchema` family (#21320): its one structural mention was the
+// tombstoned `agent.lifecycle`.
 export type { FormFieldInput } from './ui/view.zod';
 export type { NavigationItemInput } from './ui/app.zod';
-export type { StateNodeConfig } from './automation/state-machine.zod';
 // [#11709] Commit ece4dad31's recorded premise delta, ruled the same way (maintainer
 // decision 2026-08-25, recorded on #11709): the MINIMAL one-file consumer —
 // no `/data` subpath import anywhere in its program — leaks two more
-// structural mentions of `defineStack`'s return type that the three lines
+// structural mentions of `defineStack`'s return type that the lines
 // above do not cover. Same invariant, same fix shape: re-export from the
 // declaring module (both already public on `/data`).
 export type { BaseValidationRuleShape } from './data/validation.zod';

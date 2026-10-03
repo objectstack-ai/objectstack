@@ -26,6 +26,17 @@ import {
   PREDICATE_RHS_PATH_SHAPED,
 } from './validate-predicate-path-refs.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
+// The published barrel is loaded HERE, at module top, and not by a dynamic
+// import inside the case that reads the id off it. That import loads the whole
+// `@objectstack/lint` index graph, and inside a case the load is charged to
+// vitest's per-case budget (5000ms by default), so the case's verdict would
+// turn on how loaded the machine is. At module top the same load is charged to
+// the COLLECT phase, where no per-case budget applies. The case loses nothing:
+// it asserts an id's value and identity only. `lazy-deps.test.ts` is the one
+// file here that keeps its barrel load inside a case, because that load is its
+// subject. Same reasoning as the core precedent
+// `packages/core/src/service-resolution-discriminator.contract.test.ts`.
+import * as barrel from './index.js';
 
 // ── A miniature target schema, so the traversal is pinned against a shape the
 // test fully controls rather than against whatever `FieldSchema` happens to
@@ -372,8 +383,7 @@ describe('validatePredicatePathRefs — path-shaped right-hand side (#7659)', ()
     expect(rhs('data.name == $b')).toEqual([]);
   });
 
-  it('emits the id the published barrel exports', async () => {
-    const barrel = await import('./index.js');
+  it('emits the id the published barrel exports', () => {
     expect(barrel.PREDICATE_RHS_PATH_SHAPED).toBe('predicate-rhs-path-shaped');
     expect(rhs('data.name == data.type')[0].rule).toBe(barrel.PREDICATE_RHS_PATH_SHAPED);
   });

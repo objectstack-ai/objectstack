@@ -101,10 +101,10 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   // protocol 17 (#3855) but is still DECLARED on FieldSchema as a `retiredKey()`
   // tombstone, so the schema rejects it with its own prescription. An entry here
   // would be dead weight the lint never reaches — the test below enforces that.
-  index: { why: 'field-level index flags built no index and were removed in the 16.x line (#2377, ADR-0049) — declare the index in the object\'s `indexes[]` instead.' },
+  index: { why: 'field-level index flags built no index and were removed in the 16.x line under ADR-0049 enforce-or-remove, which deletes a key no runtime reads — declare the index in the object\'s `indexes[]` instead.' },
 
   // ── Retired: no successor key ──
-  indexed: { why: 'never a FieldSchema key; a field-level index flag built no index (#2377). Declare the index in the object\'s `indexes[]`.' },
+  indexed: { why: 'never a FieldSchema key; the field-level `index` flag built no index and was removed for it. Declare the index in the object\'s `indexes[]`.' },
   immutable: { why: 'never a FieldSchema key. Use the `readonlyWhen` predicate to lock a field after creation.' },
   filterable: { why: 'never a FieldSchema key — every declared column is filterable. `sortable` and `searchable` are the real knobs.' },
   // NOTE: no entry for `placeholder`. It sat here as a retirement ("never a
@@ -120,7 +120,7 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   audit: { why: 'the `auditTrail` family was pruned in 2026-06 as dead in both layers. Use `trackHistory` for the activity timeline.' },
   auditTrail: { why: 'pruned in 2026-06 as dead in both layers. Use `trackHistory` for the activity timeline.' },
   pii: { why: 'the `dataQuality` governance family was pruned in 2026-06 as dead in both layers — it enforced nothing.' },
-  dataQuality: { why: 'pruned in 2026-06 as dead in both layers (#3726) — it enforced nothing.' },
+  dataQuality: { why: 'pruned in 2026-06 as dead in both layers, and its leftover `DataQualityRules` schema was deleted from the public API too — it enforced nothing.' },
   encrypted: { why: 'the `encryptionConfig` family was pruned in 2026-06: it implied at-rest protection that never happened. The real channel is `type: \'secret\'`.' },
   encryptionConfig: { why: 'pruned in 2026-06 — it implied at-rest protection that never happened. The real channel is `type: \'secret\'`.' },
   // NOTE: no entry for `maskingRule`. It sat here as a retirement ("pruned in
@@ -130,7 +130,7 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   // the read/export path), so `FieldSchema` now declares it and an entry here
   // would be advice to delete a live key — the "no guidance entry names a key
   // the schema now declares" test enforces the absence.
-  cached: { why: 'computed-field caching was pruned in 2026-06 (#3733); nothing read it.' },
+  cached: { why: 'computed-field caching was pruned in 2026-06 and its leftover `ComputedFieldCache` schema was deleted with it; nothing read it, and it returns only together with a runtime consumer.' },
   // The one snake_case key in this table, and the spelling is LOAD-BEARING.
   // The two channels this table feeds do not agree on the key face: a `to`
   // becomes a `strictObject` ALIAS, matched through `aliasProbe` (case folded,

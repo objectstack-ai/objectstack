@@ -187,7 +187,7 @@ export async function normalizeManagedByVocab(
   const permissionSets = await normalizeObject(ql, 'sys_permission_set', PERMISSION_SET_MAP, options.logger);
   const total = positions + permissionSets;
   if (total > 0) {
-    options.logger?.info?.('[security] managed_by vocab normalized to platform/package/admin (A4 #2920)', {
+    options.logger?.info?.('[security] managed_by vocab normalized to platform/package/admin, the one vocabulary every RBAC catalog shares', {
       positions,
       permissionSets,
     });

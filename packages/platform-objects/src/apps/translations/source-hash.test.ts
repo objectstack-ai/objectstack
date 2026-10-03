@@ -232,7 +232,7 @@ describe('the shipped bundles', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// The GENERATED half (#11671, maintainer ruling #12069 Option A)
+// The GENERATED half (commit 09b4f4e4e, maintainer ruling #12069 Option A)
 //
 // Same mechanism, different predicate: these leaves got their text by being
 // COPIED from the source, so the bytes are evidence and the record only says

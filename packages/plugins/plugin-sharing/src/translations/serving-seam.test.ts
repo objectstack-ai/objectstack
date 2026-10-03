@@ -35,11 +35,20 @@
 // the seam is wired. The source has to be MOVED for the two to differ, which is
 // what the mock below does.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { withSourceFallback, findStaleFills } from '@objectstack/platform-objects/apps';
 import { enObjects } from './en.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+// The barrel as committed, loaded HERE, at module top. Both of this file's
+// barrel loads happen at module top and neither inside a case: a fresh load of
+// the barrel and its bundles inside a case is charged to vitest's per-case
+// budget (5000ms by default), so the verdict would turn on how loaded the
+// machine is, while at module top the same load is charged to the COLLECT
+// phase, where no per-case budget applies. The second load, against a moved
+// source, is below `revisedSource`. Same reasoning as the core precedent
+// `packages/core/src/service-resolution-discriminator.contract.test.ts`.
+import { SharingTranslations } from './index.js';
 
 /** The leaf the gap was measured on: recorded in es-ES only. */
 const PATH = ['objects', 'sys_share_link', 'fields', 'token', 'label'] as const;
@@ -64,12 +73,18 @@ function revisedObjects() {
 /** The same thing as a `TranslationData` — what the barrel passes as `source`. */
 const revisedSource = () => ({ objects: revisedObjects() });
 
-describe('SharingTranslations — the provenance companion is read at serving time', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.doUnmock('./en.objects.generated.js');
-  });
+// The SAME barrel, evaluated a second time with the source string behind the
+// recorded leaf revised. This setup has to run before the load it shapes, which
+// is why it sits here at module top rather than in a hook: `resetModules` drops
+// the copy the static import above cached, so the import below evaluates the
+// barrel afresh against the mock, and `doUnmock` takes the mock straight back
+// out, so the static bindings and every case see the committed bundles.
+vi.resetModules();
+vi.doMock('./en.objects.generated.js', () => ({ enObjects: revisedObjects() }));
+const { SharingTranslations: servedAfterSourceMoved } = await import('./index.js');
+vi.doUnmock('./en.objects.generated.js');
 
+describe('SharingTranslations — the provenance companion is read at serving time', () => {
   it('the leaf under test is recorded in es-ES and is a byte copy of the current source', () => {
     const path = PATH.join('.');
     expect(esESGeneratedSourceHashes[path]).toBeTypeOf('string');
@@ -81,14 +96,12 @@ describe('SharingTranslations — the provenance companion is read at serving ti
     expect(stale.map((s) => s.path)).toEqual([PATH.join('.')]);
   });
 
-  it('SERVES the current source when the source moves under the recorded leaf', async () => {
-    vi.doMock('./en.objects.generated.js', () => ({ enObjects: revisedObjects() }));
-    const { SharingTranslations } = await import('./index.js');
-    expect(read(SharingTranslations['es-ES'])).toBe(REVISED);
+  it('SERVES the current source when the source moves under the recorded leaf', () => {
+    expect(read(servedAfterSourceMoved['es-ES'])).toBe(REVISED);
     // The locales with no record for this path are legacy-trusted and untouched —
     // recovery is per-locale, which is the half of ruling #8765 Option B that a
     // blanket "fall back to source" would have destroyed.
-    expect(read(SharingTranslations['zh-CN'])).toBe('令牌');
+    expect(read(servedAfterSourceMoved['zh-CN'])).toBe('令牌');
   });
 
   it('NEGATIVE CONTROL: the same bundle with no companion serves the superseded draft', () => {
@@ -96,8 +109,7 @@ describe('SharingTranslations — the provenance companion is read at serving ti
     expect(read(unserved)).toBe('Token');
   });
 
-  it('substitutes nothing while the source has not moved', async () => {
-    const { SharingTranslations } = await import('./index.js');
+  it('substitutes nothing while the source has not moved', () => {
     expect(read(SharingTranslations['es-ES'])).toBe(read({ objects: enObjects }));
   });
 });

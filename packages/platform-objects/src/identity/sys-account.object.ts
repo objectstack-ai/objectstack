@@ -167,7 +167,7 @@ export const SysAccount = ObjectSchema.create({
     provider_id: Field.text({
       label: 'Provider ID',
       required: true,
-      // [#11374] Transitive bound: SSO-registered providers are the widest
+      // [commit 3954fb7df] Transitive bound: SSO-registered providers are the widest
       // producer, and sys_sso_provider.provider_id declares maxLength: 255;
       // better-auth's built-in social providers are short fixed slugs.
       maxLength: 255,
@@ -177,7 +177,7 @@ export const SysAccount = ObjectSchema.create({
     account_id: Field.text({
       label: 'Provider Account ID',
       required: true,
-      // [#11374] Bound from the identity-provider norms for the two federated
+      // [commit 3954fb7df] Bound from the identity-provider norms for the two federated
       // shapes this column stores: an OIDC `sub` MUST NOT exceed 255 ASCII
       // chars (OIDC Core §2) and a SAML persistent/transient NameID MUST NOT
       // exceed 256 chars (SAML Core 2.0 §8.3.7/§8.3.8) — 256 is the wider of
@@ -276,7 +276,7 @@ export const SysAccount = ObjectSchema.create({
       required: false,
     }),
     
-    // [#8676] `internal: true` — never returned on the generic data path.
+    // [commit d6e80b28b] `internal: true` — never returned on the generic data path.
     // Both columns below are one-way password hashes (ADR-0100's third
     // channel), and BOTH serialized on `/api/v1/data/sys_account` before this
     // flag: to an admin for every user's row, and to a member for their own

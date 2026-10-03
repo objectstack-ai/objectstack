@@ -146,10 +146,12 @@ const SKILL_MAP: Record<string, string[]> = {
     // shape AS A RECORD-LIFECYCLE DECLARATION (the top-level `workflow` type
     // and `object.stateMachines` are both gone), and a record's legal
     // transitions are now a `state_machine` VALIDATION RULE — `data/validation`
-    // below, already the correct destination. The file's one surviving door is
-    // `ai/agent.zod.ts`'s `lifecycle`, an objectstack-ai door, and that index
-    // reaches it transitively. Advertising it here pointed automation authors
-    // at a shape the platform deliberately removed from their surface.
+    // below, already the correct destination. The file's one surviving door
+    // was `ai/agent.zod.ts`'s `lifecycle`, an objectstack-ai door that index
+    // reached transitively; advertising it here pointed automation authors at a
+    // shape the platform deliberately removed from their surface. That door
+    // was tombstoned at #21320 and the file deleted with it, so neither index
+    // names it now.
     'automation/execution.zod.ts',
     'automation/webhook.zod.ts',
     'automation/node-executor.zod.ts',

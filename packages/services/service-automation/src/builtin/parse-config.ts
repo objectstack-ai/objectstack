@@ -109,7 +109,7 @@ export function parseNodeConfig<T>(
             `${nodeType} '${nodeId}': config does not satisfy the ${nodeType} contract — ${issues || 'invalid config'}. ` +
             `The config is metadata, so re-running changes nothing; fix the node in the flow definition. ` +
             `The declared contract is the node type's configSchema (the Studio form) and the ` +
-            `${nodeType} config Zod in @objectstack/spec/automation (#4277).`,
+            `${nodeType} config Zod in @objectstack/spec/automation.`,
         ),
     };
 }

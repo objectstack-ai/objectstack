@@ -18,8 +18,11 @@
 // Posture: development / in-memory. `NODE_ENV` is forced to `development` so the
 // auth plugin's dev-admin bootstrap provisions a known, loginable admin (mirrors
 // `objectstack dev`). This is a verification harness — it never touches a real
-// database or production data.
+// database or production data, and it never touches the host's key custody
+// either: it seals under a data key held in this process's memory only (see
+// `harnessCryptoProvider`).
 
+import { randomBytes } from 'node:crypto';
 import { ObjectKernel, AppPlugin, DefaultDatasourcePlugin, createDispatcherPlugin } from '@objectstack/runtime';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
@@ -96,6 +99,47 @@ const DEFAULT_AUTH_SECRET = 'objectstack-verify-secret';
  * API.
  */
 export const ORGANIZATIONS_PKG = '@objectstack/organizations';
+
+/** This process's harness data key provider; created on the first boot, never persisted. */
+let processCryptoProvider: LocalCryptoProvider | undefined;
+
+/**
+ * [#21499] The one crypto provider every `bootStack` in this process hands to
+ * the settings service and to the engine.
+ *
+ * ## Why not the default provider
+ *
+ * `SettingsServicePlugin` handed no `cryptoProvider`, and a bare
+ * `new LocalCryptoProvider()`, both resolve a data key the way a SERVER does:
+ * `OS_SECRET_KEY`, then the dev env key, then the key file in the key home —
+ * and, in the development posture `bootStack` forces, with none of those they
+ * MINT the key file so the next restart reuses it. That is right for
+ * `os serve`. For this harness it was an undeclared side effect on key
+ * custody: `os verify` is a one-shot command that seals nothing it keeps, yet
+ * it left a key file behind that the next development-posture process on that
+ * host adopted and sealed real secrets under. And where the host already HAD
+ * a key, the harness sealed its throwaway fixtures under the host's real key —
+ * reading key material it never needed.
+ *
+ * ## Why not "read an existing key, or refuse" (the CLI's one-shot shape)
+ *
+ * The harness seals AND opens secrets in its own database — `secret` fields,
+ * encrypted settings — so a provider that refuses on a keyless host would
+ * break exactly what the harness exists to exercise.
+ *
+ * ## What it is
+ *
+ * A `LocalCryptoProvider` over an explicit random key: no env read, no key
+ * file read, no write anywhere. ⛔ The key never leaves this process's memory.
+ * It is the PROCESS's key, not the boot's, so two boots over one
+ * `BootOptions.databaseFile` — the harness's restart — open each other's
+ * secrets, as a real host's stable key would let them. Pinned by
+ * `harness.key-custody.test.ts`.
+ */
+function harnessCryptoProvider(): LocalCryptoProvider {
+  processCryptoProvider ??= new LocalCryptoProvider({ key: randomBytes(32) });
+  return processCryptoProvider;
+}
 
 /**
  * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
@@ -495,7 +539,10 @@ export async function bootStack(
   await kernel.use(new PlatformObjectsPlugin());
 
   // Service plugins `objectstack dev` auto-loads for an app of this shape.
-  await kernel.use(new SettingsServicePlugin());
+  // [#21499] The settings service seals under the harness's in-process key,
+  // never under a provider of its own (see `harnessCryptoProvider`).
+  const cryptoProvider = harnessCryptoProvider();
+  await kernel.use(new SettingsServicePlugin({ cryptoProvider }));
   await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
   // `autoDefaultOrganization: false` (cloud ADR-0081 D1): the harness proves the two
   // ENDS of the isolation spectrum — pure single-tenant (no org, no scoping)
@@ -686,12 +733,14 @@ export async function bootStack(
   await kernel.bootstrap();
 
   // Secret fields (Field.secret) refuse to persist without a crypto provider —
-  // mirror `objectstack dev`, which wires LocalCryptoProvider in development so
-  // an app with an encrypted field is exercisable end-to-end.
+  // mirror `objectstack dev`, which wires one in development so an app with an
+  // encrypted field is exercisable end-to-end. [#21499] The same instance the
+  // settings service holds, so every `sys_secret` row shares one key, as in
+  // `serve` — but the harness's in-process key, never the host's.
   try {
     const engine = await kernel.getServiceAsync<{ setCryptoProvider?: (p: unknown) => void }>('objectql');
     if (engine && typeof engine.setCryptoProvider === 'function') {
-      engine.setCryptoProvider(new LocalCryptoProvider());
+      engine.setCryptoProvider(cryptoProvider);
     }
   } catch {
     /* no engine / no crypto support — secret fields will fail closed, as in prod */

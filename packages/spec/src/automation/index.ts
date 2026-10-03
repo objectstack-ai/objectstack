@@ -66,7 +66,13 @@ export * from './schedule-organization.zod';
 // `ui/offline.zod.ts` under ADR-0049. The connector's
 // `ConnectorConflictResolution` left with `syncConfig`; no domain may re-adopt
 // the bare name (pinned in `sync-retirement.test.ts`).
-export * from './state-machine.zod';
+// `./state-machine.zod` REMOVED (#21320, ADR-0049): the XState-style
+// `StateMachineSchema` family (`StateNodeSchema`, `TransitionSchema`,
+// `ActionRefSchema`, `GuardRefSchema` and their types) left with its last
+// authorable door, the tombstoned `agent.lifecycle`. ADR-0020 had already
+// retired it as a record-lifecycle declaration — a record's legal transitions
+// are the `state_machine` validation rule (`data/validation.zod.ts`), and
+// orchestration is Flow (ADR-0019).
 export * from './node-executor.zod';
 export * from './flow-node-expression-paths';
 export * from './flow-node-config-refusals';

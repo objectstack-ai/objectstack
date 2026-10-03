@@ -12,8 +12,10 @@
  * notifications — is empty out of the box.
  *
  * This helper runs right after `bootstrapPlatformAdmin` promotes the first human
- * user to platform admin, and transfers ownership of those orphan rows to that
- * admin. It is the ownership twin of org-scoping's `claimOrphanOrgRows` (which
+ * user to platform admin, and again whenever a seed settles (`app:seeded`) on
+ * every boot — the first one and every later one — and transfers ownership of
+ * those orphan rows to the platform admin. It is the ownership twin of
+ * org-scoping's `claimOrphanOrgRows` (which
  * back-fills `organization_id`): walk every user-authored object that declares
  * the canonical `owner_id` column, and re-own the rows that no human owns yet.
  *
@@ -30,10 +32,13 @@
  * answering 403 on every write at `modifyAllRecords: false`.
  *
  * A claim on admin promotion that races a seeder the platform itself deferred
- * cannot be correct as a single pass. `security-plugin.ts` therefore re-runs
- * this helper on `app:seeded` — the published settle signal for exactly that
- * background continuation — and every pass reports whether its own reading was
- * final ({@link reportClaimPass}).
+ * cannot be correct as a single pass. `security-plugin.ts` therefore runs this
+ * helper on every `app:seeded` — the published settle signal for exactly that
+ * background continuation, and the only signal a LATER boot's seed replay gives
+ * (an in-budget replay settles before `kernel:ready`, and a bootstrap that finds
+ * an admin already in place promotes nobody, so it never reaches this helper) —
+ * and every pass reports whether its own reading was final
+ * ({@link reportClaimPass}).
  *
  * Mistake-proof by construction: authors write plain seed records (no
  * `owner_id`), and the platform — not the author — performs the handoff. There
@@ -317,7 +322,8 @@ async function claimPredicate(
   }
   logger?.warn?.(
     `[security] claimSeedOwnership stopped after ${MAX_CLAIM_PAGES} fallback page(s) on ${objectName}; ` +
-      'unowned rows may remain and the next run will claim them',
+      'unowned rows may remain until the claim next runs — the next seed settle (`app:seeded`, on this ' +
+      'boot or a later one) or the next platform-admin promotion',
     { object: objectName, where, pages: MAX_CLAIM_PAGES },
   );
   return total;
@@ -356,7 +362,7 @@ async function claimPredicate(
  *    pass is a reading and not a verdict. Rows that land after it are NOT
  *    covered by it. `warn`, because at the moment the line is printed those rows
  *    are unowned and nothing else about the boot looks wrong; the re-run on
- *    `app:seeded` is a promise, not yet a fact.
+ *    `app:seeded` is still ahead at that moment.
  *  - **final** (`inFlight === 0`) — every source this boot writes has settled,
  *    so "nothing matched" really does mean "nothing to claim". `info`.
  *  - **unattested** (no snapshot) — no seed pipeline registered on this kernel,
@@ -370,9 +376,11 @@ async function claimPredicate(
  * provisional forever — a permanent warning about behaviour that is correct by
  * design, which is how a log level gets trained away.
  *
- * The `handed N seeded record(s) to first admin X` prefix is unchanged and now
- * fires on every pass including `N = 0`: existing consumers match on it, and the
- * finality clause is appended rather than replacing it.
+ * The `handed N seeded record(s)` prefix is unchanged and fires on every pass
+ * including `N = 0`: existing consumers match on it, and the finality clause is
+ * appended rather than replacing it. The recipient reads `platform admin X`, not
+ * `first admin X`: on a later boot it is the admin who already holds the grant,
+ * not anyone this boot promoted.
  */
 function reportClaimPass(
   logger: ClaimOwnershipOptions['logger'],
@@ -383,7 +391,7 @@ function reportClaimPass(
 ): void {
   const total = results.reduce((s, r) => s + r.count, 0);
   const head =
-    `[security] handed ${total} seeded record(s) to first admin ${adminUserId} ` +
+    `[security] handed ${total} seeded record(s) to platform admin ${adminUserId} ` +
     `(${results.length} of ${eligibleObjects} eligible object(s) had unowned rows)`;
   const meta = {
     adminUserId,
@@ -397,8 +405,9 @@ function reportClaimPass(
   if (seedSettlement && seedSettlement.inFlight > 0) {
     logger?.warn?.(
       `${head} — PROVISIONAL: ${seedSettlement.inFlight} seed source(s) were still writing when this ` +
-        'pass ran, so rows seeded after it are NOT covered by it and stay unowned until the claim ' +
-        're-runs on `app:seeded`. A count of 0 here is "nothing had landed yet", never "nothing to claim".',
+        'pass ran, so rows seeded after it are NOT covered by it. The claim runs again as each of those ' +
+        'sources settles (`app:seeded`) and hands those rows to the same platform admin. A count of 0 ' +
+        'here is "nothing had landed yet", never "nothing to claim".',
       meta,
     );
     return;
@@ -490,12 +499,16 @@ export async function claimSeedOwnership(
       } catch (e) {
         // Best-effort per predicate, exactly as the per-id loop was: one
         // predicate that cannot land must not cost the object its other one,
-        // nor any later object. The rows stay unowned and the next run — boot,
-        // the bootstrap replay, or `meta resync` — claims them, because the
-        // predicate is still true of them.
+        // nor any later object. The rows stay unowned and the next run claims
+        // them, because the predicate is still true of them. That run is the
+        // next `app:seeded` (this boot or a later one) or the next promotion —
+        // ⚠️ NOT `os meta resync` and NOT a bootstrap replay: on an install that
+        // already has an admin both short-circuit on `already_have_admin` and
+        // never reach this function.
         logger?.warn?.(
-          `[security] claimSeedOwnership failed for ${schema.name}; those rows stay unowned ` +
-            'and the next run will claim them',
+          `[security] claimSeedOwnership failed for ${schema.name}; those rows stay unowned until the ` +
+            'claim next runs — the next seed settle (`app:seeded`, on this boot or a later one) or the ' +
+            'next platform-admin promotion',
           { object: schema.name, where, error: (e as Error).message },
         );
       }

@@ -89,7 +89,7 @@
  * not disagree.
  *
  * ⛔ The other half of that reason — "and Zod strips undeclared keys" — is GONE,
- * not merely reworded. `ManifestSchema` is `strictObject` since #14192 and
+ * not merely reworded. `ManifestSchema` is `strictObject` since commit 4d0d9445a and
  * `AssembledPackageBodySchema` inherits the closed posture through `.extend()`,
  * so an undeclared key on an entry is REFUSED by this very parse, by name, and
  * never reaches a clone to be dropped from. Defaults are what still move bytes;

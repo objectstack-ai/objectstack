@@ -5668,8 +5668,20 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
     .describe('Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
   mapStyle: z.string().optional()
     .describe('MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record'),
-  navigation: z.unknown().optional()
-    .describe('Marker-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
+  /**
+   * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
+   * `object-timeline` already take. `ObjectMap.tsx:1189` (at the pin
+   * `89cad75d55`) hands `schema.navigation` to `useNavigationOverlay`, which
+   * reads `navigation?.mode ?? 'page'`
+   * (`react/src/hooks/useNavigationOverlay.ts:364`) and types its mode union
+   * as that schema's.
+   * Until #21464 this member was `z.unknown()`, so `navigation: 42` and a bare
+   * mode string such as `'drawer'` passed every door and opened the record
+   * page, whatever they named.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe('Marker-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
   enableClustering: z.boolean().optional()
     .describe('Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers'),
 }));
@@ -5679,7 +5691,9 @@ export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state — `filter` carries
  * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
  * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
- * default-free family the way `object-grid` did.
+ * default-free family the way `object-grid` did. Since #21464 `navigation`
+ * carries {@link NavigationConfigSchema} too, whose defaulted members
+ * materialize on parse on a document that authored the key.
  */
 export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
 
@@ -5881,8 +5895,19 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
     .describe('Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   gantt: GanttConfigSchema.optional()
     .describe('Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
-  navigation: z.unknown().optional()
-    .describe('Task-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema; renderer default `drawer`'),
+  /**
+   * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
+   * `object-timeline` already take. `ObjectGantt.tsx:1960` (at the pin
+   * `89cad75d55`) reads `schema.navigation ?? { mode: 'drawer' }`, classifies
+   * its `.mode` there, and hands it to `useNavigationOverlay` (`:2025-2026`),
+   * which types its mode union as that schema's. Until #21464 this member was
+   * `z.unknown()`, so `navigation: 42` and a bare mode string such as
+   * `'drawer'` passed every door and opened the record page, whatever they
+   * named.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe("Task-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values. The renderer's own default is `{ mode: 'drawer' }` when the key is absent"),
   label: I18nLabelSchema.optional()
     .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
   skipWeekends: z.boolean().optional()
@@ -5910,7 +5935,9 @@ export type ObjectGanttProps = z.input<typeof ObjectGanttPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state — `filter` carries
  * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
  * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
- * default-free family the way `object-grid` did.
+ * default-free family the way `object-grid` did. Since #21464 `navigation`
+ * carries {@link NavigationConfigSchema} too, whose defaulted members
+ * materialize on parse on a document that authored the key.
  */
 export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 
@@ -6206,8 +6233,20 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   tree: TreeConfigSchema.optional()
     .describe('Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: { parentField?, labelField?, fields?, defaultExpandedDepth? }. `parentField` auto-detects from the object schema when omitted'),
-  navigation: z.unknown().optional()
-    .describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
+  /**
+   * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
+   * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
+   * `object-timeline` already take, and the type objectui's own
+   * `ObjectTreeSchema.navigation` mirrors (objectui#11168 slice 3).
+   * `ObjectTree.tsx:1054` (at the pin `89cad75d55`) hands `schema.navigation`
+   * to `useNavigationOverlay` (`:1046`), which reads `navigation?.mode ??
+   * 'page'` and types its mode union as that schema's. Until #21464 this
+   * member was `z.unknown()`, so `navigation: 42` and a bare mode string such
+   * as `'drawer'` passed every door and opened the record page, whatever they
+   * named.
+   */
+  navigation: NavigationConfigSchema.optional()
+    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
@@ -6215,7 +6254,9 @@ export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
  * ADR-0122: the parsed state differs from the authored state — `filter` carries
  * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
  * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
- * default-free family the way `object-grid` did.
+ * default-free family the way `object-grid` did. Since #21464 `navigation`
+ * carries {@link NavigationConfigSchema} too, whose defaulted members
+ * materialize on parse on a document that authored the key.
  */
 export type ObjectTreePropsParsed = z.infer<typeof ObjectTreePropsSchema>;
 

@@ -180,6 +180,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
 
   it('loads each dep lazily in-process and the gates still work', async () => {
     const req = createRequire(import.meta.url);
+    // Kept in-case on purpose: loading the barrel IS this case's subject, budgeted by COLD_LOAD_TIMEOUT_MS.
     const {
       validateReactPages,
       validateReactPageProps,

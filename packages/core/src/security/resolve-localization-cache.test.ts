@@ -58,7 +58,7 @@ function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean } 
           return r[k] === v;
         }),
       );
-      // [#10978] Hold the caller's bound, AFTER the filter and by PRESENCE — a
+      // [commit 4c9780c7a] Hold the caller's bound, AFTER the filter and by PRESENCE — a
       // double that hands back everything it matched cannot tell this read's
       // `limit: 10` from no bound at all, so folding or dropping that bound
       // would stay green here by construction.

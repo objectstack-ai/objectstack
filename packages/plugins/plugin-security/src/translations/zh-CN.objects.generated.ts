@@ -43,7 +43,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "管理来源",
-        help: "记录来源：platform（平台内置）/ package（应用包声明）/ admin（租户创建）。",
+        help: "记录来源（能力、权限集与岗位共用同一套 platform / package / admin 取值）：platform（平台内置）/ package（应用包声明）/ admin（租户创建）。",
         options: {
           platform: "平台",
           package: "应用包",
@@ -230,7 +230,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "管理来源",
-        help: "记录来源：platform（平台发布）/ package（应用包发布）/ admin（环境自建）。",
+        help: "记录来源（能力、权限集与岗位共用同一套 platform / package / admin 取值）：platform（平台发布）/ package（应用包发布）/ admin（环境自建）。",
         options: {
           platform: "平台",
           package: "应用包",

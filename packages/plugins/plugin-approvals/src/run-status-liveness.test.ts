@@ -220,9 +220,10 @@ describe('the dead-run sweep classifies every ExecutionStatus member (#16433)', 
   it('audits a refused-run release as a dead-run abandonment', async () => {
     await sweep('refused');
     const actions = engine._tables['sys_approval_action'] ?? [];
-    const action = actions.find(a => a['actor_id'] === 'system:dead-run');
+    const action = actions.find(a => a['action'] === 'recall');
     expect(action).toBeTruthy();
-    expect(action!['action']).toBe('recall');
+    // No person did it (ADR-0118 D1): null, never a sentinel.
+    expect(action!['actor_id']).toBeNull();
     expect(String(action!['comment'])).toContain('refused');
     expect(String(action!['comment'])).toContain('run_1');
   });

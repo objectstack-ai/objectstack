@@ -91,7 +91,7 @@ File destination configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **path** | `string` | ✅ | Log file path |
-| **rotation** | `{ maxSize: string; maxFiles: integer; compress: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
+| **rotation** | `{ maxSize?: string; maxFiles?: integer; compress?: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
 | **encoding** | `string` | optional (default: `"utf8"`) |  |
 | **append** | `boolean` | optional (default: `true`) |  |
 
@@ -110,8 +110,8 @@ HTTP destination configuration
 | **method** | `Enum<'POST' \| 'PUT'>` | optional (default: `"POST"`) |  |
 | **headers** | `Record<string, string>` | optional |  |
 | **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
-| **batch** | `{ maxSize: integer; flushIntervalMs: integer }` | optional |  |
-| **retry** | `{ maxAttempts: integer; initialDelayMs: integer; backoffMultiplier: number }` | optional |  |
+| **batch** | `{ maxSize?: integer; flushIntervalMs?: integer }` | optional |  |
+| **retry** | `{ maxAttempts?: integer; initialDelayMs?: integer; backoffMultiplier?: number }` | optional |  |
 | **timeoutMs** | `integer` | optional (default: `30000`) | Timeout in milliseconds |
 | **timeout** | `never` | optional | [REMOVED] `HttpDestinationConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 30000. Rename the key to `timeoutMs`; the value (milliseconds) and the 30000 default are unchanged. |
 
@@ -158,9 +158,9 @@ Log destination configuration
 | **type** | `Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'datadog' \| 'splunk' \| 'loki' \| 'http' \| 'kafka' \| 'redis' \| 'custom'>` | ✅ | Destination type |
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | optional (default: `"info"`) | Extended log severity level |
 | **enabled** | `boolean` | optional (default: `true`) |  |
-| **console** | `{ stream: Enum<'stdout' \| 'stderr'>; colors: boolean; prettyPrint: boolean }` | optional | Console destination configuration |
-| **file** | `{ path: string; rotation?: object; encoding: string; append: boolean }` | optional | File destination configuration |
-| **http** | `{ url: string; method: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
+| **console** | `{ stream?: Enum<'stdout' \| 'stderr'>; colors?: boolean; prettyPrint?: boolean }` | optional | Console destination configuration |
+| **file** | `{ path: string; rotation?: object; encoding?: string; append?: boolean }` | optional | File destination configuration |
+| **http** | `{ url: string; method?: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
 | **externalService** | `{ endpoint?: string; region?: string; credentials?: object; logGroup?: string; … }` | optional | External service destination configuration |
 | **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) |  |
 | **filterId** | `string` | optional | Filter function identifier |
@@ -170,7 +170,7 @@ Log destination configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **path** | `string` | ✅ | Log file path |
-| **rotation** | `{ maxSize: string; maxFiles: integer; compress: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
+| **rotation** | `{ maxSize?: string; maxFiles?: integer; compress?: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
 | **encoding** | `string` | optional (default: `"utf8"`) |  |
 | **append** | `boolean` | optional (default: `true`) |  |
 
@@ -182,8 +182,8 @@ Log destination configuration
 | **method** | `Enum<'POST' \| 'PUT'>` | optional (default: `"POST"`) |  |
 | **headers** | `Record<string, string>` | optional |  |
 | **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
-| **batch** | `{ maxSize: integer; flushIntervalMs: integer }` | optional |  |
-| **retry** | `{ maxAttempts: integer; initialDelayMs: integer; backoffMultiplier: number }` | optional |  |
+| **batch** | `{ maxSize?: integer; flushIntervalMs?: integer }` | optional |  |
+| **retry** | `{ maxAttempts?: integer; initialDelayMs?: integer; backoffMultiplier?: number }` | optional |  |
 | **timeoutMs** | `integer` | optional (default: `30000`) | Timeout in milliseconds |
 | **timeout** | `never` | optional | [REMOVED] `HttpDestinationConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 30000. Rename the key to `timeoutMs`; the value (milliseconds) and the 30000 default are unchanged. |
 
@@ -227,7 +227,7 @@ Log enrichment configuration
 | **addHostname** | `boolean` | optional (default: `true`) |  |
 | **addProcessId** | `boolean` | optional (default: `true`) |  |
 | **addEnvironment** | `boolean` | optional (default: `true`) |  |
-| **addTimestampFormats** | `{ unix: boolean; iso: boolean }` | optional |  |
+| **addTimestampFormats** | `{ unix?: boolean; iso?: boolean }` | optional |  |
 | **addCaller** | `boolean` | optional (default: `false`) |  |
 | **addCorrelationIds** | `boolean` | optional (default: `true`) |  |
 
@@ -294,7 +294,7 @@ Log severity level
 | **redact** | `string[]` | optional (default: `["password","token","secret","key"]`) | Keys to redact from log context |
 | **sourceLocation** | `boolean` | optional (default: `false`) | Include file and line number |
 | **file** | `string` | optional | Path to log file |
-| **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
+| **rotation** | `{ maxSize?: string; maxFiles?: number }` | optional |  |
 
 
 ---
@@ -311,14 +311,14 @@ Logging configuration
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | optional (default: `"info"`) | Extended log severity level |
-| **default** | `{ name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }` | optional | Default logger configuration |
-| **loggers** | `Record<string, { name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }>` | optional | Named logger configurations |
-| **destinations** | `{ name: string; type: Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| …>; level: Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>; enabled: boolean; … }[]` | ✅ | Log destinations |
-| **enrichment** | `{ staticFields?: Record<string, any>; dynamicEnrichers?: string[]; addHostname: boolean; addProcessId: boolean; … }` | optional | Log enrichment configuration |
+| **default** | `{ name?: string; level?: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format?: Enum<'json' \| 'text' \| 'pretty'>; redact?: string[]; … }` | optional | Default logger configuration |
+| **loggers** | `Record<string, { name?: string; level?: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format?: Enum<'json' \| 'text' \| 'pretty'>; redact?: string[]; … }>` | optional | Named logger configurations |
+| **destinations** | `{ name: string; type: Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| …>; level?: Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>; enabled?: boolean; … }[]` | ✅ | Log destinations |
+| **enrichment** | `{ staticFields?: Record<string, any>; dynamicEnrichers?: string[]; addHostname?: boolean; addProcessId?: boolean; … }` | optional | Log enrichment configuration |
 | **redact** | `string[]` | optional (has default) | Fields to redact |
-| **sampling** | `{ enabled: boolean; rate: number; rateByLevel?: Record<string, number> }` | optional |  |
-| **buffer** | `{ enabled: boolean; size: integer; flushIntervalMs: integer; flushOnShutdown: boolean }` | optional |  |
-| **performance** | `{ async: boolean; workers: integer }` | optional |  |
+| **sampling** | `{ enabled?: boolean; rate?: number; rateByLevel?: Record<string, number> }` | optional |  |
+| **buffer** | `{ enabled?: boolean; size?: integer; flushIntervalMs?: integer; flushOnShutdown?: boolean }` | optional |  |
+| **performance** | `{ async?: boolean; workers?: integer }` | optional |  |
 
 ### Nested Shape: `LoggingConfig.default`
 
@@ -330,7 +330,7 @@ Logging configuration
 | **redact** | `string[]` | optional (default: `["password","token","secret","key"]`) | Keys to redact from log context |
 | **sourceLocation** | `boolean` | optional (default: `false`) | Include file and line number |
 | **file** | `string` | optional | Path to log file |
-| **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
+| **rotation** | `{ maxSize?: string; maxFiles?: number }` | optional |  |
 
 ### Nested Shape: `LoggingConfig.loggers[string]`
 
@@ -342,7 +342,7 @@ Logging configuration
 | **redact** | `string[]` | optional (default: `["password","token","secret","key"]`) | Keys to redact from log context |
 | **sourceLocation** | `boolean` | optional (default: `false`) | Include file and line number |
 | **file** | `string` | optional | Path to log file |
-| **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
+| **rotation** | `{ maxSize?: string; maxFiles?: number }` | optional |  |
 
 ### Nested Shape: `LoggingConfig.destinations[number]`
 
@@ -354,9 +354,9 @@ Log destination configuration
 | **type** | `Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| …>` | ✅ | Destination type |
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | optional (default: `"info"`) | Extended log severity level |
 | **enabled** | `boolean` | optional (default: `true`) |  |
-| **console** | `{ stream: Enum<'stdout' \| 'stderr'>; colors: boolean; prettyPrint: boolean }` | optional | Console destination configuration |
-| **file** | `{ path: string; rotation?: object; encoding: string; append: boolean }` | optional | File destination configuration |
-| **http** | `{ url: string; method: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
+| **console** | `{ stream?: Enum<'stdout' \| 'stderr'>; colors?: boolean; prettyPrint?: boolean }` | optional | Console destination configuration |
+| **file** | `{ path: string; rotation?: object; encoding?: string; append?: boolean }` | optional | File destination configuration |
+| **http** | `{ url: string; method?: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
 | **externalService** | `{ endpoint?: string; region?: string; credentials?: object; logGroup?: string; … }` | optional | External service destination configuration |
 | **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) |  |
 | **filterId** | `string` | optional | Filter function identifier |
@@ -370,7 +370,7 @@ Log destination configuration
 | **addHostname** | `boolean` | optional (default: `true`) |  |
 | **addProcessId** | `boolean` | optional (default: `true`) |  |
 | **addEnvironment** | `boolean` | optional (default: `true`) |  |
-| **addTimestampFormats** | `{ unix: boolean; iso: boolean }` | optional |  |
+| **addTimestampFormats** | `{ unix?: boolean; iso?: boolean }` | optional |  |
 | **addCaller** | `boolean` | optional (default: `false`) |  |
 | **addCorrelationIds** | `boolean` | optional (default: `true`) |  |
 

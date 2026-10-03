@@ -118,7 +118,7 @@ describe('[#20445] normalizeAnalyticsFilterTree — `$empty` lowers to its own v
     });
   });
 
-  for (const flag of ['true', 0, null, [true], new Date(0)]) {
+  for (const flag of ['true', 0, null, new Date(0)]) {
     it(`a non-boolean flag (${String(flag)}) is refused INVALID_FILTER / 400, with the null flags`, async () => {
       const err = await refusalOf(() => normalizeAnalyticsFilterTree({ where: { name: { $empty: flag } } }, NO_DATETIME_COLUMNS));
       expect(err.code).toBe('INVALID_FILTER');
@@ -126,6 +126,13 @@ describe('[#20445] normalizeAnalyticsFilterTree — `$empty` lowers to its own v
       expect(err.message).toContain('Operator "$empty" on field "name" requires a boolean comparand');
     });
   }
+
+  it('[#21448] a LIST flag ([true]) is refused INVALID_FILTER / 400 by the shared comparand-shape face first, in its words', async () => {
+    const err = await refusalOf(() => normalizeAnalyticsFilterTree({ where: { name: { $empty: [true] } } }, NO_DATETIME_COLUMNS));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toMatch(/^Operator "\$empty" on field "name" requires a single comparable value/);
+  });
 });
 
 describe('[#20445] the `where` face on SQLite — native execute, and the ObjectQL echo run on the same rows', () => {

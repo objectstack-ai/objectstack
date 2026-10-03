@@ -18,6 +18,7 @@ import {
   CryptoContextScopeError,
   UnknownCiphertextVersionError,
   aadForVersion2,
+  ciphertextDerivationStatus,
 } from './local-crypto-provider.js';
 
 const ctx: CryptoContext = { scope: 'settings', namespace: 'mail', key: 'api_key' };
@@ -339,6 +340,48 @@ describe('LocalCryptoProvider — scoped, versioned AAD (ADR-0128)', () => {
     // Positive control: the same calls with a member succeed.
     expect(await p.decrypt(sealed, at('settings'))).toBe('x');
     expect((await p.rotateKey(sealed, at('settings'))).ciphertext.startsWith('v2:')).toBe(true);
+  });
+
+  /**
+   * ADR-0128 §4.2 — the reading the at-rest re-wrap classifies rows with. It
+   * must agree with what `decrypt` dispatches on, so each status is pinned
+   * against the provider's own behaviour on the same bytes, not against a
+   * spelling of the marker.
+   */
+  it('ciphertextDerivationStatus reads the marker decrypt dispatches on, without opening anything', async () => {
+    const p = new LocalCryptoProvider({ key: PINNED_KEY });
+    const legacyCtx = at('settings', 'legacy_ns', 'legacy_key');
+
+    // Version 1: opens today, and rotateKey moves it to the current derivation.
+    expect(ciphertextDerivationStatus(LEGACY_HANDLE.ciphertext)).toBe('superseded');
+    expect(await p.decrypt(LEGACY_HANDLE, legacyCtx)).toBe(LEGACY_PLAIN);
+    const rotated = await p.rotateKey(LEGACY_HANDLE, legacyCtx);
+    expect(ciphertextDerivationStatus(rotated.ciphertext)).toBe('current');
+
+    // Version 2: the pinned vector and every fresh seal are current.
+    expect(ciphertextDerivationStatus(V2_HANDLE.ciphertext)).toBe('current');
+    for (const scope of CRYPTO_CONTEXT_SCOPES) {
+      expect(ciphertextDerivationStatus((await p.encrypt('x', at(scope))).ciphertext)).toBe('current');
+    }
+
+    // Unknown: exactly the bytes decrypt refuses as an unknown derivation.
+    const unknown = { ...V2_HANDLE, ciphertext: 'v3:' + V2_HANDLE.ciphertext.slice(3) };
+    expect(ciphertextDerivationStatus(unknown.ciphertext)).toBe('unknown');
+    await expect(p.decrypt(unknown, V2_CTX)).rejects.toBeInstanceOf(UnknownCiphertextVersionError);
+    for (const notAString of [undefined, null, 42, { ciphertext: V2_HANDLE.ciphertext }]) {
+      expect(ciphertextDerivationStatus(notAString)).toBe('unknown');
+    }
+  });
+
+  it('ciphertextDerivationStatus is a statement about the marker, not a promise that the row opens', async () => {
+    // A version-1 body sealed under ANOTHER key still reads `superseded`: only
+    // opening it under its producer's context can say whether it is readable,
+    // which is why the re-wrap opens every row before it writes one.
+    const other = new LocalCryptoProvider({ key: randomBytes(32) });
+    expect(ciphertextDerivationStatus(LEGACY_HANDLE.ciphertext)).toBe('superseded');
+    await expect(
+      other.decrypt(LEGACY_HANDLE, at('settings', 'legacy_ns', 'legacy_key')),
+    ).rejects.toThrow();
   });
 });
 

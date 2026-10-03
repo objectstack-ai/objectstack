@@ -31,7 +31,7 @@ export const SysSession = ObjectSchema.create({
   // ordinary row that looks MAXIMALLY expired. A `ttl` keyed on `expires_at`
   // without this filter would therefore reap the ADR-0069 D4 audit records
   // FIRST AND HARDEST — the very rows it exists to preserve — and no existing
-  // test would go red. The canonical null predicate (`{$null: true}`, #10165)
+  // test would go red. The canonical null predicate (`{$null: true}`, commit 801296050)
   // is what lets that exclusion be declared HERE, in the object file, instead
   // of hiding in a plugin registration one package away.
   //
@@ -262,7 +262,7 @@ export const SysSession = ObjectSchema.create({
     token: Field.text({
       label: 'Session Token',
       required: true,
-      // [#11374] Bound from better-auth 1.7.1's own MySQL schema: a unique
+      // [commit 3954fb7df] Bound from better-auth 1.7.1's own MySQL schema: a unique
       // string column is emitted as varchar(255) (get-migration.mjs), and the
       // producer writes generateId(32) — 32 chars. 255 admits everything the
       // upstream schema admits, and lets the unique index exist on MySQL.

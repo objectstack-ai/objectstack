@@ -209,7 +209,7 @@ describe('#5660 — the degrade REGISTRATION is one record, cause in meta', () =
         // Self-sufficient without the reason: what the state costs and what
         // happens next, so the message alone is a usable record.
         expect(record.msg).toContain('no actions and no handlers');
-        expect(record.msg).toContain('#3017');
+        expect(record.msg).toContain('the materializer retries with backoff');
         // …and none of the foreign text is in it.
         expect(record.msg).not.toContain(CAUSE_LINE_FACT);
         expect(record.msg).not.toContain(HINT_LINE_FACT);
@@ -404,7 +404,7 @@ describe('#5660 — what the interpolated rendering cost, measured', () => {
             log.warn(
                 'Connector registered DEGRADED: gh_mcp (origin: declarative) — no actions and no handlers ' +
                     'until its upstream is reachable; a connector_action dispatching to it fails with the stored ' +
-                    'reason, and the materializer retries with backoff (#3017).',
+                    'reason, and the materializer retries with backoff.',
                 { degradedReason: MULTILINE_UPSTREAM, error: MULTILINE_UPSTREAM },
             );
         });

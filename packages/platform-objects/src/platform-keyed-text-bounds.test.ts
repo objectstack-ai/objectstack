@@ -6,10 +6,10 @@ import * as PlatformObjects from './index';
 /**
  * #11701 — a NON-UNIQUE declared index over a text column MySQL cannot key.
  *
- * ## What used to be here, and where it went (#12147)
+ * ## What used to be here, and where it went (commit 945e91a13)
  *
  * This file also carried route A's own rule — "every text-family column a
- * declared index keys on declares a `maxLength`" (#11374) — enumerated over
+ * declared index keys on declares a `maxLength`" (commit 3954fb7df) — enumerated over
  * this package's exports, with a vacuity control, an `UNBOUNDABLE` allowlist
  * and a synthetic control driving that allowlist's two branches. All of it is
  * now `scripts/check-keyed-text-bounds.mjs`, which walks EVERY `*.object.ts` in
@@ -79,7 +79,7 @@ const platformObjects: AnyObject[] = Object.values(PlatformObjects)
 /**
  * #11701 — a NON-UNIQUE index over a text column MySQL cannot key.
  *
- * See this file's header for why this is a different defect from #11374's:
+ * See this file's header for why this is a different defect from the one commit 3954fb7df fixed:
  * a UNIQUE index over an unkeyable column is EXPRESSIBLE after #11627 (it moves
  * onto a SHA-256 hash-shadow column), but a non-unique one is not — hashing
  * destroys the ordering and prefix structure an access path is for, so there is

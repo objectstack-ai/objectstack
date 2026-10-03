@@ -160,7 +160,7 @@ describe('[#12699] platformGlobalObjects — the deployment carve-out', () => {
     });
     // And nothing to refuse means nothing to warn about.
     const warned = logger.warn.mock.calls.map((c) => String(c[0]));
-    expect(warned.filter((m) => m.includes('#12699'))).toEqual([]);
+    expect(warned.filter((m) => m.includes('org-scoping entitlement key'))).toEqual([]);
   });
 
   it('composes with, never replaces, the object-level channel: `tenancy.enabled:false` stays exempt with no deployment declaration', async () => {

@@ -488,7 +488,7 @@ Sort field and direction pair
 | **staticData** | `any[]` | optional | Static inline records |
 | **locale** | `string` | optional | Locale override for the calendar chrome |
 | **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
-| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectCalendarProps.filter[number]`
 
@@ -584,7 +584,7 @@ Sort field and direction pair
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
-| **navigation** | `any` | optional | Task-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema; renderer default `drawer` |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Task-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the seven `NavigationModeSchema` values. The renderer's own default is `{ mode: 'drawer' }` when the key is absent |
 | **label** | `string \| Record<string, string>` | optional | Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label |
 | **skipWeekends** | `boolean` | optional | Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays |
 | **holidays** | `string[]` | optional | Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math |
@@ -608,8 +608,8 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectGanttProps.data[provider='value']`
 
@@ -678,6 +678,17 @@ Sort field and direction pair
 | **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
 | **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
 | **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
+
+### Nested Shape: `ObjectGanttProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -895,7 +906,7 @@ Sort field and direction pair
 | **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key; `object-kanban` offers no quick-add control. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
-| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectKanbanProps.filter[number]`
 
@@ -911,7 +922,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectKanbanProps.navigation`
 
@@ -940,7 +951,7 @@ View filter rule
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **mapStyle** | `string` | optional | MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record |
-| **navigation** | `any` | optional | Marker-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Marker-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the seven `NavigationModeSchema` values |
 | **enableClustering** | `boolean` | optional | Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers |
 
 ### Nested Shape: `ObjectMapProps.data[provider='object']`
@@ -955,8 +966,8 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectMapProps.data[provider='value']`
 
@@ -1004,6 +1015,17 @@ Sort field and direction pair
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
 | **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
+
+### Nested Shape: `ObjectMapProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -1107,7 +1129,7 @@ View filter rule
 | **maxDate** | `string` | optional | Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
 | **descriptionField** | `string` | optional | Field rendered as each entry's description (renderer default `description`). Declared FLAT because the `timeline` block has no member for it — it is the only spelling this binding has |
 | **mapping** | `any` | optional | Record-to-entry field mapping (`{ title, date, description, variant }`) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has |
-| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 
 ### Nested Shape: `ObjectTimelineProps.timeline`
 
@@ -1164,7 +1186,7 @@ Sort field and direction pair
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: `{ parentField?, labelField?, fields?, defaultExpandedDepth? }`. `parentField` auto-detects from the object schema when omitted |
-| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the seven `NavigationModeSchema` values |
 
 ### Nested Shape: `ObjectTreeProps.data[provider='object']`
 
@@ -1178,8 +1200,8 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectTreeProps.data[provider='value']`
 
@@ -1215,6 +1237,17 @@ View filter rule
 | **fields** | `string[]` | optional | Additional fields rendered as flat columns alongside the label |
 | **defaultExpandedDepth** | `integer` | optional | Initial expansion depth (0 = roots only; omit = expand all) |
 
+### Nested Shape: `ObjectTreeProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+
 
 ---
 
@@ -1224,7 +1257,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `{ label: string \| Record<string, string>; icon?: string; collapsed: boolean; children: any[] }[]` | ✅ |  |
+| **items** | `{ label: string \| Record<string, string>; icon?: string; collapsed?: boolean; children: any[] }[]` | ✅ |  |
 | **allowMultiple** | `boolean` | optional (default: `false`) | Allow multiple panels to be expanded simultaneously |
 | **variant** | `Enum<'flush' \| 'card'>` | optional (default: `"flush"`) | Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -1428,7 +1461,7 @@ View filter rule
 | **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") — side positions (`right`/`left`) only. |
 | **collapsible** | `boolean` | optional | Whether the panel can be collapsed (renderer default: off). |
 | **defaultCollapsed** | `boolean` | optional | Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`). |
-| **feed** | `{ types?: (Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
+| **feed** | `{ types?: (Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]; filterMode?: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle?: boolean; limit?: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordChatterProps.feed`
@@ -1755,7 +1788,7 @@ Sort field and direction pair
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
 | **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
-| **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
@@ -1773,7 +1806,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **picker** | `{ object: string; valueField: string; labelField?: string; filter?: object[] }` | ✅ | Where the Add affordance sources records from. |
+| **picker** | `{ object: string; valueField?: string; labelField?: string; filter?: object[] }` | ✅ | Where the Add affordance sources records from. |
 | **linkField** | `string` | optional | Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent. |
 | **label** | `string \| Record<string, string>` | optional | Label for the Add button (default "Add"). |
 

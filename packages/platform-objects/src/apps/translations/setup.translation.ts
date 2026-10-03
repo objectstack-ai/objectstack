@@ -46,7 +46,7 @@ import { withSourceFallback } from './source-hash.js';
  *
  * A leaf with NO recorded hash is legacy-trusted and served verbatim.
  *
- * ## The generated half joined this seam in #11671
+ * ## The generated half joined this seam in commit 09b4f4e4e
  *
  * The fourth argument is the GENERATED provenance table
  * (`<locale>.source-hashes.generated.ts`, written by `os i18n extract

@@ -2,14 +2,14 @@
 
 /**
  * `kernel.use()` enforces the DECLARED plugin contract (#16049) — on BOTH
- * published kernels (#16721).
+ * published kernels (commit 51ae73123).
  *
  * WHICH KERNEL. Groups A–F drive `ObjectKernel.use()`, the path #16049 wired
  * (`PluginLoader.validatePluginContract`). Group G drives `LiteKernel.use()`,
- * which #16721 converged onto the SAME check — `assertPluginContract` in
+ * which commit 51ae73123 converged onto the SAME check — `assertPluginContract` in
  * `plugin-contract.ts`, the one statement both kernels call. G is not a copy
  * of A–F: it pins the cases whose answer DIFFERED between the kernels before
- * #16721, the parity of the envelope for one input, and the two orderings
+ * commit 51ae73123, the parity of the envelope for one input, and the two orderings
  * `LiteKernel.use()` owes (state before contract, contract before registry).
  *
  * WHY THIS FILE EXISTS. `PluginSchema` (`@objectstack/spec`,
@@ -424,7 +424,7 @@ describe('E — `version` is the NINTH enforced key, and admitting it refused no
 
 describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
     /**
-     * Before #16721 every refusal above had an accepting twin on this kernel:
+     * Before commit 51ae73123 every refusal above had an accepting twin on this kernel:
      * `LiteKernel.use()` wrote the object straight into its registry, so the
      * object group A refuses mounted routes here. `AGENTS.md` names this
      * kernel for tests, so "green in vitest, refused at boot" was the shape
@@ -469,7 +469,7 @@ describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
         ['staticPath', { name: '@os-fixture/lite-ui-no-static-path', type: 'ui', slug: 'lite-ui-no-static-path' }],
         ['slug', { name: '@os-fixture/lite-ui-no-slug', type: 'ui', staticPath: UI_STATIC_PATH }],
     ] as const)('refuses a `ui` plugin with no `%s`, naming the key and the spec code (#16334 reaches this kernel now)', (key, overrides) => {
-        // The two inputs #16721 was filed on: refused by `ObjectKernel` (group F),
+        // The two inputs behind commit 51ae73123: refused by `ObjectKernel` (group F),
         // and until now stored verbatim here — the hono auto-discovery pin's
         // group F carried the accepting readings and was rewritten with this.
         const kernel = makeLiteKernel();
@@ -542,7 +542,7 @@ describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
         // was excluded from the schema check it was the ONE declared key this
         // kernel did not judge at all: `version: 'v1.0.0'` registered here and
         // was refused by `ObjectKernel` at boot — precisely the green-in-vitest,
-        // refused-in-production split #16721 converged the other eight keys to
+        // refused-in-production split commit 51ae73123 converged the other eight keys to
         // close. It now travels the ordinary envelope.
         const kernel = makeLiteKernel();
         const bad = fixture({ name: 'com.example.lite-bad-version', version: 'v1.0.0' });
@@ -567,7 +567,7 @@ describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
         // "An author gets ONE refusal, with the same code and message shape,
         // from either kernel." `ObjectKernel.use()` re-wraps a failed load as
         // `Failed to load plugin: <name> - <message>` for EVERY load failure —
-        // its existing wrapper, untouched by #16721 — so the parity to pin is
+        // its existing wrapper, untouched by commit 51ae73123 — so the parity to pin is
         // that the LiteKernel message is exactly what follows that prefix.
         const make = () => fixture({ name: '@os-fixture/parity', type: 'ui', staticPath: UI_STATIC_PATH, slug: 'Not A Slug' });
 
@@ -596,7 +596,7 @@ describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
     });
 
     it('ORDER — state is checked before the contract: after bootstrap the refusal is the idle one', async () => {
-        // `validateIdle()` first, then the contract — the wiring #16721 step 1
+        // `validateIdle()` first, then the contract — the wiring step 1 (before commit 51ae73123)
         // measured with. A kernel that can no longer register plugins says so,
         // and does not run the schema over an object it would not store anyway.
         const kernel = makeLiteKernel();

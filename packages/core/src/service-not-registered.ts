@@ -75,7 +75,7 @@
  * The code carried by the "never registered" rejection.
  *
  * Spelled the ADR-0112 way and REGISTERED in `ERROR_CODE_LEDGER` under
- * `@objectstack/core` (#16649, under the #16404 door-or-no-door rule: every
+ * `@objectstack/core` (commit 613bfbd3d, under the #16404 door-or-no-door rule: every
  * `code` that ships in `dist` carries a ledger row, whether or not a door
  * answers with it). `door: 'none'` on this tree — this value is read
  * in-process by the seam that catches the rejection and is never serialized

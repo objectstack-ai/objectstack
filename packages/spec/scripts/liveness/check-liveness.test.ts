@@ -437,18 +437,28 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   });
 
   it('FAILS when an `experimental` entry cites a repo-local file that is gone', () => {
-    // The other half of the widening. `agent.lifecycle` is `experimental` and
-    // its shipped evidence is a prose absence claim ("no runtime reader"), which
-    // extracts no path at all — so before this change nothing about it could
-    // ever fail, and after it, a pointer written there is held to the same
-    // standard as a `live` one.
+    // The other half of the widening: a pointer written on an `experimental`
+    // row is held to the same standard as a `live` one. The row is MADE
+    // `experimental` in the copy rather than found that way, the `planned`
+    // case's shape above: this case used to borrow `agent.lifecycle`, whose
+    // shipped evidence was a prose absence claim, and #21320 retired that key
+    // (`dead` now) — a borrowed `experimental` row is a claim with a timestamp.
+    // `tool.outputSchema`'s shipped pointers are all cloud-attributed, which
+    // this check never resolves, so the pointer written below is the run's
+    // only cause.
     const root = path.join(tmp, 'experimental-missing-file');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'agent', 'lifecycle', `${ROTTED} (rotted by the self-test)`);
+    const shipped = String(readRow(root, 'tool', 'outputSchema').status);
+    setStatus(root, 'tool', 'outputSchema', 'experimental');
+    if (shipped !== 'experimental') moveCount(root, 'tool', shipped, 'experimental');
+    setEvidence(root, 'tool', 'outputSchema', `${ROTTED} (rotted by the self-test)`);
+    // The control: the row this run judges IS `experimental` in the copy.
+    expect(readRow(root, 'tool', 'outputSchema').status).toBe('experimental');
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toContain(`agent/lifecycle → ${ROTTED}`);
+    expect(output).toContain(`${SCANNED_LABEL} entr(ies) cite a file that is missing from THIS repo`);
+    expect(output).toContain(`tool/outputSchema → ${ROTTED}`);
   });
 
   // THE BOUNDARY, and it is a real one rather than an oversight — which is the
