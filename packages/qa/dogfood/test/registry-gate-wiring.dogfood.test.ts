@@ -103,16 +103,23 @@ describe('dogfood: the object-existence gates are actually WIRED (#3770, #3867, 
   // Without this, every 404 below could be passing for the wrong reason.
   // ─────────────────────────────────────────────────────────────
 
-  it('premise: the unregistered name IS a real table the engine can read', async () => {
-    // Straight through the ENGINE, which is deliberately ungated — #3770 put
-    // the gate at the protocol ingress, the external API boundary, precisely so
-    // internal callers (hooks, flows, migrations, raw ObjectQL) keep working.
-    // So this both establishes ground truth and pins that boundary choice.
+  it('premise: the unregistered name IS a real table — readable at the driver, refused by the engine', async () => {
+    // Ground truth through the DRIVER, the declared internal path a body
+    // cannot reach (host code holding the engine). Without this, every 404
+    // below could be passing for the wrong reason.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
-    const rows = (await ql.find(UNREGISTERED_BUT_REAL, { context: { isSystem: true } })) as unknown[];
+    const driver = ql.getDriverForObject(UNREGISTERED_BUT_REAL);
+    expect(driver, 'the default driver answers the name').toBeDefined();
+    const rows = (await driver.find(UNREGISTERED_BUT_REAL, {})) as unknown[];
     expect(Array.isArray(rows)).toBe(true);
     expect(rows.length).toBeGreaterThan(0);
+    // [#21516] One name space with the door: the engine's in-process verbs no
+    // longer read a table by a name the registry does not hold — #3770's gate
+    // at the protocol ingress stays, and the engine now answers the same name
+    // with the same envelope.
+    await expect(ql.find(UNREGISTERED_BUT_REAL, { context: { isSystem: true } }))
+      .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
   });
 
   // ─────────────────────────────────────────────────────────────
