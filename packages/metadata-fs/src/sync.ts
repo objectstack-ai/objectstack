@@ -38,7 +38,7 @@ export class KeyedMutex {
  * of event sinks can only express shutdown as "send an event", and an event is
  * precisely what a filtered or numeric-`since` subscriber is entitled to drop
  * — and delivering one has never ended an iterator anyway. See invariant 8 in
- * `@objectstack/metadata-core`'s `repository.ts` (#11021, #11127).
+ * `@objectstack/metadata-core`'s `repository.ts` (commit 7d81c889f, #11127).
  */
 export interface BrokerSubscriber {
   filter: WatchFilter;

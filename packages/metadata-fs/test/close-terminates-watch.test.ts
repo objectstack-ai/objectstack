@@ -100,7 +100,7 @@ describe('FileSystemRepository — close() terminates every live watcher (#11127
     ['filtered + numeric `since`', { org: 'system' } as WatchFilter, true],
     // The row that proves the filter half bites on its own.
     ['filtered, no `since` at all', { org: 'system' } as WatchFilter, false],
-    // Not filter-dependent here, unlike the sibling defect in #11021: there is
+    // Not filter-dependent here, unlike the sibling defect commit 7d81c889f fixed: there is
     // no drain attempt at all, so the empty filter hangs identically.
     ['empty filter, no `since`', {} as WatchFilter, false],
     ['ref-exact filter, no `since`', { org: 'system', type: 'view', name: 'sample_view' } as WatchFilter, false],
