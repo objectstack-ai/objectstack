@@ -71,6 +71,15 @@ const RUN_WAIT_MS = 20_000;
 const EMAIL = 'admin@objectos.ai';
 const PASSWORD = 'admin123';
 
+/**
+ * The HOST's own object, where every installed package's job writes its rows.
+ * Not the package's own object: an uninstall withdraws the package from the
+ * running kernel (#21576), so its object stops answering — a job still running
+ * after the uninstall would fail its write there and leave no row to see. The
+ * host's object outlives every package, so a run that should have stopped shows.
+ */
+const HOST_TICK = 'host_tick';
+
 const BODY_APP_ID = 'com.example.jobsapp';
 const BODY_TICK = 'jobs_app_tick';
 const BODY_JOB = 'jobs_app_tick_body';
@@ -127,13 +136,13 @@ function tickObject(name: string) {
 const BODY_ARTIFACT = {
   manifest: { id: BODY_APP_ID, namespace: 'jobs_app', version: '0.1.0', type: 'app', name: 'Jobs App' },
   objects: [tickObject(BODY_TICK)],
-  jobs: [bodyJob(BODY_JOB, BODY_TICK)],
+  jobs: [bodyJob(BODY_JOB, HOST_TICK)],
 };
 
 const OTHER_ARTIFACT = {
   manifest: { id: OTHER_APP_ID, namespace: 'other_jobs', version: '0.1.0', type: 'app', name: 'Other Jobs' },
   objects: [tickObject(OTHER_TICK)],
-  jobs: [bodyJob(OTHER_JOB, OTHER_TICK)],
+  jobs: [bodyJob(OTHER_JOB, HOST_TICK)],
 };
 
 /** One version of the drop package, declaring `jobs` (all body jobs into one object). */
@@ -141,7 +150,7 @@ function dropArtifact(version: string, jobs: string[]) {
   return {
     manifest: { id: DROP_APP_ID, namespace: 'drop_jobs', version, type: 'app', name: 'Drop Jobs' },
     objects: [tickObject(DROP_TICK)],
-    jobs: jobs.map((name) => bodyJob(name, DROP_TICK)),
+    jobs: jobs.map((name) => bodyJob(name, HOST_TICK)),
   };
 }
 
@@ -178,6 +187,7 @@ const CONTROL_RUNTIME_MODULE =
 const HOST_ARTIFACT = {
   manifest: { id: 'com.example.host', namespace: 'host', version: '0.1.0', type: 'app', name: 'Host' },
   requires: ['job'],
+  objects: [tickObject(HOST_TICK)],
 };
 
 const groups: ChildProcess[] = [];
@@ -412,20 +422,20 @@ beforeAll(async () => {
   readings.dropInstall = await packageInstall(dropAppV1, first);
   readings.handlerInstall = await packageInstall(handlerApp, first);
   readings.installed = await http(first, 'GET', '/api/v1/marketplace/install-local', token);
-  readings.afterInstall = await awaitRuns(first, token, BODY_TICK, BODY_JOB, 0);
+  readings.afterInstall = await awaitRuns(first, token, HOST_TICK, BODY_JOB, 0);
 
   // Reinstall the drop package with a version that no longer declares DROP_GONE.
-  readings.dropBefore = await awaitRuns(first, token, DROP_TICK, DROP_GONE, 0);
+  readings.dropBefore = await awaitRuns(first, token, HOST_TICK, DROP_GONE, 0);
   readings.dropReinstall = await packageInstall(dropAppV2, first);
-  readings.dropGoneHot = await quietAfter(first, token, DROP_TICK, DROP_GONE);
-  readings.dropKeptHot = await awaitRuns(first, token, DROP_TICK, DROP_KEPT,
-    rowsOf(await jobRows(first, token, DROP_TICK, DROP_KEPT)).length);
+  readings.dropGoneHot = await quietAfter(first, token, HOST_TICK, DROP_GONE);
+  readings.dropKeptHot = await awaitRuns(first, token, HOST_TICK, DROP_KEPT,
+    rowsOf(await jobRows(first, token, HOST_TICK, DROP_KEPT)).length);
 
   // Uninstall the body package; the other package is the control.
   readings.uninstall = await http(first, 'DELETE', `/api/v1/marketplace/install-local/${BODY_APP_ID}`, token);
-  readings.bodyGoneHot = await quietAfter(first, token, BODY_TICK, BODY_JOB);
-  readings.otherHot = await awaitRuns(first, token, OTHER_TICK, OTHER_JOB,
-    rowsOf(await jobRows(first, token, OTHER_TICK, OTHER_JOB)).length);
+  readings.bodyGoneHot = await quietAfter(first, token, HOST_TICK, BODY_JOB);
+  readings.otherHot = await awaitRuns(first, token, HOST_TICK, OTHER_JOB,
+    rowsOf(await jobRows(first, token, HOST_TICK, OTHER_JOB)).length);
   readings.output.install = first.output();
   await stopGroup(first.child);
 
@@ -434,14 +444,14 @@ beforeAll(async () => {
   const token2 = await authenticate(second);
   // The rows boot 1 left behind are the floors: only a run in THIS boot lifts one.
   const floorOf = async (object: string, job: string) => rowsOf(await jobRows(second, token2, object, job)).length;
-  const bodyFloor = await floorOf(BODY_TICK, BODY_JOB);
-  const goneFloor = await floorOf(DROP_TICK, DROP_GONE);
+  const bodyFloor = await floorOf(HOST_TICK, BODY_JOB);
+  const goneFloor = await floorOf(HOST_TICK, DROP_GONE);
   const restartedAt = Date.now();
-  readings.afterRestart = await awaitRuns(second, token2, OTHER_TICK, OTHER_JOB, await floorOf(OTHER_TICK, OTHER_JOB));
-  readings.dropKeptRestart = await awaitRuns(second, token2, DROP_TICK, DROP_KEPT, await floorOf(DROP_TICK, DROP_KEPT));
+  readings.afterRestart = await awaitRuns(second, token2, HOST_TICK, OTHER_JOB, await floorOf(HOST_TICK, OTHER_JOB));
+  readings.dropKeptRestart = await awaitRuns(second, token2, HOST_TICK, DROP_KEPT, await floorOf(HOST_TICK, DROP_KEPT));
   await sleep(Math.max(0, QUIET_WAIT_MS - (Date.now() - restartedAt)));
-  readings.bodyGoneRestart = { floor: bodyFloor, after: await floorOf(BODY_TICK, BODY_JOB) };
-  readings.dropGoneRestart = { floor: goneFloor, after: await floorOf(DROP_TICK, DROP_GONE) };
+  readings.bodyGoneRestart = { floor: bodyFloor, after: await floorOf(HOST_TICK, BODY_JOB) };
+  readings.dropGoneRestart = { floor: goneFloor, after: await floorOf(HOST_TICK, DROP_GONE) };
   readings.output.restart = second.output();
   await stopGroup(second.child);
 
