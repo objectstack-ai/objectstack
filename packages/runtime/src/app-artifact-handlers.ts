@@ -300,6 +300,13 @@ export interface AppArtifactJobScheduling {
     notScheduled: string[];
     /** Jobs whose `IJobService.schedule` call threw. */
     failed: string[];
+    /**
+     * Jobs this app had scheduled on the job service before, which this call
+     * did not schedule again and therefore CANCELLED (#21489): a job the new
+     * version dropped, disabled or can no longer run. Re-scheduling replaces;
+     * it never leaves the old set running beside the new one.
+     */
+    cancelled: string[];
 }
 
 /**
@@ -326,10 +333,17 @@ export interface AppArtifactJobScheduling {
  * job the same `timeoutMs` also bounds the sandbox run — the one limit
  * `JobSchema.timeoutMs` states.
  *
- * Re-scheduling replaces: `IJobService.schedule` replaces a job of the same
- * name. Never throws: a job that fails to schedule is logged at `error` with its
- * own counter (a silent outage otherwise — the app looks healthy and the work
- * never runs), and the rest still schedule.
+ * Re-scheduling replaces, it never accumulates (#21489), as the hook and
+ * action halves do: `IJobService.schedule` replaces a job of the same name, and
+ * every job this app scheduled on the job service before and does not schedule
+ * now — dropped by the new version, disabled, or no longer runnable — is
+ * CANCELLED ({@link retireAppJobs}). A call with no jobs at all cancels
+ * everything the app scheduled. The package's uninstall cancels the rest, through
+ * the uninstall cleanup this function registers ({@link ensureJobUninstallCleanup}).
+ *
+ * Never throws: a job that fails to schedule is logged at `error` with its own
+ * counter (a silent outage otherwise — the app looks healthy and the work never
+ * runs), and the rest still schedule.
  */
 export async function scheduleAppArtifactJobs(
     ctx: PluginContext,
@@ -339,10 +353,19 @@ export async function scheduleAppArtifactJobs(
     const { appId, ql } = options;
     const logger: Logger = ctx.logger;
     const tag = `[${options.source ?? 'AppPlugin'}]`;
-    const out: AppArtifactJobScheduling = { bodies: [], handlers: [], notScheduled: [], failed: [] };
+    const out: AppArtifactJobScheduling = { bodies: [], handlers: [], notScheduled: [], failed: [], cancelled: [] };
 
     const jobs = collectBundleJobs(bundle);
-    if (jobs.length === 0) return out;
+    let svc: IJobService | undefined;
+    try { svc = ctx.getService<IJobService>('job'); } catch { /* not installed */ }
+    if (svc && typeof svc.schedule !== 'function') svc = undefined;
+
+    // Nothing to schedule: whatever this app scheduled before stops — a
+    // reinstall whose new version declares no jobs.
+    if (jobs.length === 0) {
+        if (svc) out.cancelled = await retireAppJobs(svc, appId, new Set(), logger, tag);
+        return out;
+    }
 
     // [#17396] The DEPLOYMENT gate, ahead of the job service probe. Every job
     // reaching this function is PACKAGE-AUTHORED — it arrived through
@@ -364,14 +387,15 @@ export async function scheduleAppArtifactJobs(
             appId,
             jobCount: jobs.length,
         });
+        if (svc) out.cancelled = await retireAppJobs(svc, appId, new Set(), logger, tag);
         return { ...out, withheld: 'scheduled-work-disabled' };
     }
-    let svc: IJobService | undefined;
-    try { svc = ctx.getService<IJobService>('job'); } catch { /* not installed */ }
-    if (!svc || typeof svc.schedule !== 'function') {
+    if (!svc) {
         logger.warn(`${tag} job service not registered — skipping declarative jobs`, { appId, jobCount: jobs.length });
         return { ...out, withheld: 'no-job-service' };
     }
+    const jobService: IJobService = svc;
+    ensureJobUninstallCleanup(ctx, jobService);
 
     const fnMap = collectBundleFunctions(bundle);
     // The RESOLVED view a `handler` job is handed as `ctx.bundle`, not the raw
@@ -447,7 +471,7 @@ export async function scheduleAppArtifactJobs(
         }
 
         try {
-            await svc.schedule(
+            await jobService.schedule(
                 jobName,
                 // #4567: authoring tier → boundary tier. `job.schedule` is the
                 // PARSED `Schedule`, whose cron `expression` is the ADR
@@ -461,6 +485,7 @@ export async function scheduleAppArtifactJobs(
                     : undefined,
             );
             (form === 'body' ? out.bodies : out.handlers).push(jobName);
+            claimJobName(jobService, appId, jobName);
         } catch (err: any) {
             out.failed.push(jobName);
             // #4567: a job that fails to schedule is a SILENT OUTAGE — the app
@@ -478,6 +503,8 @@ export async function scheduleAppArtifactJobs(
         }
     }
 
+    out.cancelled = await retireAppJobs(jobService, appId, new Set([...out.bodies, ...out.handlers]), logger, tag);
+
     const scheduled = out.bodies.length + out.handlers.length;
     logger.info(`${tag} Scheduled background jobs`, {
         appId,
@@ -485,6 +512,7 @@ export async function scheduleAppArtifactJobs(
         bodies: out.bodies.length,
         handlers: out.handlers.length,
         failed: out.failed.length,
+        cancelled: out.cancelled.length,
     });
     if (out.failed.length > 0) {
         logger.error(
@@ -494,4 +522,135 @@ export async function scheduleAppArtifactJobs(
         );
     }
     return out;
+}
+
+// ─── Cancelling a package's jobs: replace, and uninstall (#21489) ───────
+
+/**
+ * Which job names each app's scheduling put on a job service, keyed by the job
+ * service instance — one per kernel, so two kernels in one process never share
+ * a record, and a record goes with its kernel.
+ *
+ * A job's `name` is its identity on the job service, and it is not namespaced
+ * by package: the LAST app to schedule a name owns it ({@link claimJobName}),
+ * so cancelling one app's jobs never stops a job another app scheduled under
+ * the same name afterwards.
+ */
+const SCHEDULED_BY_APP = new WeakMap<object, Map<string, Set<string>>>();
+
+function scheduledByApp(svc: IJobService): Map<string, Set<string>> {
+    let record = SCHEDULED_BY_APP.get(svc);
+    if (!record) {
+        record = new Map();
+        SCHEDULED_BY_APP.set(svc, record);
+    }
+    return record;
+}
+
+/** `appId` now owns `jobName` on `svc`; no other app's record still claims it. */
+function claimJobName(svc: IJobService, appId: string, jobName: string): void {
+    const record = scheduledByApp(svc);
+    for (const [owner, names] of record) {
+        if (owner !== appId) names.delete(jobName);
+    }
+    const mine = record.get(appId) ?? new Set<string>();
+    mine.add(jobName);
+    record.set(appId, mine);
+}
+
+/**
+ * Cancel every job `appId` scheduled on `svc` that is not in `keep`, through
+ * `IJobService.cancel` — the verb every adapter implements (the cron adapter
+ * stops its timer, the DB adapter also marks the `sys_job` row inactive).
+ * Returns the names cancelled.
+ *
+ * A cancel that throws leaves its job RUNNING for a package that no longer
+ * declares it — code that should have stopped keeps executing while the
+ * install answered success — so it is logged at `error`, and the name stays on
+ * the record for the next replace or the uninstall to retry.
+ */
+async function retireAppJobs(
+    svc: IJobService,
+    appId: string,
+    keep: ReadonlySet<string>,
+    logger: Logger,
+    tag: string,
+): Promise<string[]> {
+    const record = scheduledByApp(svc);
+    const previous = record.get(appId);
+    const cancelled: string[] = [];
+    const remaining = new Set<string>(keep);
+    for (const name of previous ?? []) {
+        if (keep.has(name)) continue;
+        try {
+            await svc.cancel(name);
+            cancelled.push(name);
+        } catch (err: any) {
+            remaining.add(name);
+            logger.error(
+                `${tag} a job its package no longer schedules could NOT be cancelled — it keeps running until the runtime restarts`,
+                err as Error,
+                { appId, job: name },
+            );
+        }
+    }
+    if (remaining.size > 0) record.set(appId, remaining);
+    else record.delete(appId);
+    if (cancelled.length > 0) {
+        logger.info(`${tag} Cancelled background jobs the package no longer schedules`, { appId, jobs: cancelled });
+    }
+    return cancelled;
+}
+
+/** The uninstall cleanup's name on the protocol's registry (#21490). */
+export const PACKAGE_JOBS_UNINSTALL_CLEANUP = 'runtime.package-jobs';
+
+/** The protocols this process registered the job cleanup on — once each. */
+const JOB_CLEANUP_REGISTERED = new WeakSet<object>();
+
+/**
+ * Register, once per kernel, the uninstall cleanup that cancels a package's
+ * scheduled jobs (#21489): `runtime.package-jobs`, on the protocol's
+ * uninstall-cleanup registry (`registerUninstallCleanup`, #21490).
+ *
+ * Through the registry rather than a door's own uninstall step, because the
+ * registry is the ONE place an uninstall's data-plane revocation runs from:
+ * the protocol's `deletePackage` and install-local's `DELETE` both run every
+ * registered cleanup with the package id, so both now stop the package's jobs
+ * with no per-door copy. Before this, an install-local `DELETE` answered 200
+ * and the uninstalled package's job body kept executing, with a system-scoped
+ * `ctx.api`, until the runtime restarted.
+ *
+ * Registered from here, the moment a package's jobs are first scheduled on a
+ * kernel, because scheduling is what creates something to cancel; the record
+ * the cleanup reads is the one {@link claimJobName} keeps. The package id the
+ * cleanup receives is the app id the jobs were scheduled under: install-local
+ * passes the manifest id, which is what it schedules under. A protocol without
+ * the registry registers nothing, and says nothing here: the uninstall door
+ * that runs cleanups is the one that reports a missing runner.
+ *
+ * The cleanup never throws: a job it could not cancel is an outcome
+ * (`success: false`, the names in `error`), which both doors report on their
+ * uninstall response.
+ */
+function ensureJobUninstallCleanup(ctx: PluginContext, svc: IJobService): void {
+    let protocol: { registerUninstallCleanup?: (name: string, cleanup: (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>) => void } | undefined;
+    try { protocol = ctx.getService<any>('protocol'); } catch { return; }
+    if (!protocol || typeof protocol.registerUninstallCleanup !== 'function') return;
+    if (JOB_CLEANUP_REGISTERED.has(protocol)) return;
+    JOB_CLEANUP_REGISTERED.add(protocol);
+    const logger = ctx.logger;
+    protocol.registerUninstallCleanup(PACKAGE_JOBS_UNINSTALL_CLEANUP, async ({ packageId }) => {
+        const before = [...(scheduledByApp(svc).get(packageId) ?? [])];
+        if (before.length === 0) return { success: true, removed: 0 };
+        const cancelled = await retireAppJobs(svc, packageId, new Set(), logger, '[uninstall]');
+        const left = before.filter((name) => !cancelled.includes(name));
+        return left.length === 0
+            ? { success: true, removed: cancelled.length }
+            : {
+                success: false,
+                removed: cancelled.length,
+                error: `${left.length} job(s) of the uninstalled package could not be cancelled and keep running until the runtime restarts: ${left.join(', ')}`,
+            };
+    });
 }

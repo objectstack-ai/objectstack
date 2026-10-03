@@ -56,9 +56,9 @@ const BODY_JOB = {
 const HANDLER_JOB = { name: 'jobs_app_tick_handler', schedule: INTERVAL, handler: 'tick' };
 
 /** The compiled-artifact shape `os build` writes and `os package install` sends. */
-function artifact(jobs: unknown[] | undefined) {
+function artifact(jobs: unknown[] | undefined, id: string = APP_ID) {
     return {
-        manifest: { id: APP_ID, namespace: 'jobs_app', version: '0.1.0', type: 'app', name: 'Jobs App' },
+        manifest: { id, namespace: 'jobs_app', version: '0.1.0', type: 'app', name: 'Jobs App' },
         objects: [{ name: TICK, label: 'Tick', fields: { name: { type: 'text', label: 'Name' } } }],
         ...(jobs ? { jobs } : {}),
     };
@@ -86,15 +86,50 @@ function recordingEngine() {
 /** `IJobService` as state: what was handed to `schedule`, by job name. */
 function recordingJobService() {
     const scheduled = new Map<string, { run: (c: any) => Promise<unknown>; options: unknown }>();
+    const cancels: string[] = [];
     return {
         scheduled,
+        cancels,
         svc: {
             schedule: vi.fn(async (name: string, _schedule: unknown, run: (c: any) => Promise<unknown>, options?: unknown) => {
                 scheduled.set(name, { run, options });
             }),
-            cancel: async () => undefined,
+            // The adapters' own semantics: `cancel` stops the job and forgets it.
+            cancel: async (name: string) => { cancels.push(name); scheduled.delete(name); },
             trigger: async () => undefined,
         },
+    };
+}
+
+/**
+ * The protocol's uninstall-cleanup registry, as its two verbs behave
+ * (`packages/metadata-protocol`, #21490): one cleanup per name, and ONE runner
+ * that calls every registered cleanup with the package id and reports each
+ * outcome. The runner itself is pinned where it lives; this models it so the
+ * door's `DELETE` reaches what the binder registered.
+ */
+function registryProtocol() {
+    const cleanups = new Map<string, (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>>();
+    return {
+        registerUninstallCleanup: (name: string, cleanup: any) => { cleanups.set(name, cleanup); },
+        runUninstallCleanups: async (request: { packageId: string }) => {
+            const out: unknown[] = [];
+            for (const [name, cleanup] of cleanups) out.push({ name, ...(await cleanup({ packageId: request.packageId })) });
+            return out;
+        },
+    };
+}
+
+function makeDeleteC(manifestId: string) {
+    const json = vi.fn((payload: any, status?: number) => ({ payload, status: status ?? 200 }));
+    return {
+        req: {
+            url: `http://localhost:3000/api/v1/marketplace/install-local/${manifestId}`,
+            raw: new Request('http://localhost:3000/x'),
+            json: async () => ({}),
+            param: (name: string) => (name === 'manifestId' ? manifestId : undefined),
+        },
+        json,
     };
 }
 
@@ -158,6 +193,7 @@ async function bootPlugin() {
         auth: installerAuthService(),
         objectql: withInstallerGrants(rec.engine),
         job: jobs.svc,
+        protocol: registryProtocol(),
     };
     const ctx = {
         hook: (e: string, h: any) => hooks.set(e, h),
@@ -174,7 +210,9 @@ async function bootPlugin() {
     await hooks.get('kernel:ready')?.();
     const install = async (bundle: unknown) =>
         rawApp.routes.get('POST /api/v1/marketplace/install-local')!(makeC({ manifest: bundle }));
-    return { install, rec, jobs, register, logger };
+    const uninstall = async (manifestId: string) =>
+        rawApp.routes.get('DELETE /api/v1/marketplace/install-local/:manifestId')!(makeDeleteC(manifestId));
+    return { install, uninstall, rec, jobs, register, logger };
 }
 
 describe('#21489: install-local schedules an installed package’s job bodies', () => {
@@ -212,6 +250,36 @@ describe('#21489: install-local schedules an installed package’s job bodies', 
         expect([...jobs.scheduled.keys()], 'a restart leaves the installed job unscheduled').toEqual([BODY_JOB.name]);
         await jobs.scheduled.get(BODY_JOB.name)!.run({ jobId: BODY_JOB.name });
         expect(rec.writes).toHaveLength(1);
+    });
+});
+
+describe('#21489: an uninstalled or replaced package’s jobs STOP', () => {
+    const OTHER_ID = 'com.example.otherjobs';
+    const OTHER_JOB = { ...BODY_JOB, name: 'other_jobs_tick_body' };
+
+    it('DELETE cancels the uninstalled package’s jobs through the uninstall cleanup — and no other package’s', async () => {
+        const { install, uninstall, jobs } = await bootPlugin();
+        expect((await install(artifact([BODY_JOB]))).status).toBe(200);
+        expect((await install(artifact([OTHER_JOB], OTHER_ID))).status).toBe(200);
+
+        const res = await uninstall(APP_ID);
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(jobs.cancels).toEqual([BODY_JOB.name]);
+        expect([...jobs.scheduled.keys()], 'the control package’s job keeps running').toEqual([OTHER_JOB.name]);
+        expect(res.payload.data.cleanups).toContainEqual({ name: 'runtime.package-jobs', success: true, removed: 1 });
+    });
+
+    it('a reinstall whose new version DROPS a job cancels it, and keeps the job it still declares', async () => {
+        const { install, jobs } = await bootPlugin();
+        const KEPT = { ...BODY_JOB, name: 'jobs_app_kept' };
+        const GONE = { ...BODY_JOB, name: 'jobs_app_gone' };
+        expect((await install(artifact([KEPT, GONE]))).status).toBe(200);
+
+        expect((await install(artifact([KEPT]))).status).toBe(200);
+
+        expect(jobs.cancels).toEqual([GONE.name]);
+        expect([...jobs.scheduled.keys()]).toEqual([KEPT.name]);
     });
 });
 

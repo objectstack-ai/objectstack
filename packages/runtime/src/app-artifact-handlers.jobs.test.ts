@@ -25,7 +25,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
-import { scheduleAppArtifactJobs, collectJobsWithoutBody } from './app-artifact-handlers.js';
+import { scheduleAppArtifactJobs, collectJobsWithoutBody, PACKAGE_JOBS_UNINSTALL_CLEANUP } from './app-artifact-handlers.js';
 import { jobBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { AppPlugin } from './app-plugin.js';
@@ -64,36 +64,62 @@ function recordingEngine() {
     };
 }
 
-/** `IJobService` as state: what was handed to `schedule`, by job name. */
-function recordingJobService() {
+/**
+ * `IJobService` as state: what is scheduled right now, by job name — `schedule`
+ * replaces by name and `cancel` removes, the adapters' own semantics — plus
+ * every cancel in order. `failCancel` names a job whose cancel throws.
+ */
+function recordingJobService(opts: { failCancel?: string } = {}) {
     const scheduled = new Map<string, { schedule: unknown; run: (c: any) => Promise<unknown>; options: unknown }>();
+    const cancels: string[] = [];
     return {
         scheduled,
+        cancels,
         svc: {
             schedule: async (name: string, schedule: unknown, run: (c: any) => Promise<unknown>, options?: unknown) => {
                 scheduled.set(name, { schedule, run, options });
             },
-            cancel: async () => undefined,
+            cancel: async (name: string) => {
+                if (name === opts.failCancel) throw new Error(`cannot cancel ${name}`);
+                cancels.push(name);
+                scheduled.delete(name);
+            },
             trigger: async () => undefined,
         },
     };
 }
 
-function harness() {
+/** The protocol's uninstall-cleanup registry as state — the two verbs the binder and the doors use. */
+function recordingProtocol() {
+    const cleanups = new Map<string, (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>>();
+    const registrations: string[] = [];
+    return {
+        cleanups,
+        registrations,
+        protocol: {
+            registerUninstallCleanup: (name: string, cleanup: any) => { registrations.push(name); cleanups.set(name, cleanup); },
+        },
+    };
+}
+
+function harness(opts: { failCancel?: string; withProtocol?: boolean } = {}) {
     const engine = recordingEngine();
-    const jobs = recordingJobService();
+    const jobs = recordingJobService({ failCancel: opts.failCancel });
+    const reg = recordingProtocol();
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const ctx = {
         logger,
         getService: (name: string) => {
             if (name === 'job') return jobs.svc;
+            if (name === 'protocol' && opts.withProtocol) return reg.protocol;
             throw new Error(`no ${name}`);
         },
     } as unknown as PluginContext;
-    const schedule = (bundle: unknown) =>
-        scheduleAppArtifactJobs(ctx, bundle, { appId: APP_ID, ql: engine.ql as any, source: 'Test' });
+    const schedule = (bundle: unknown, appId: string = APP_ID) =>
+        scheduleAppArtifactJobs(ctx, bundle, { appId, ql: engine.ql as any, source: 'Test' });
     const warned = () => logger.warn.mock.calls.map((c) => String(c[0]));
-    return { engine, jobs, logger, ctx, schedule, warned };
+    const errored = () => logger.error.mock.calls.map((c) => String(c[0]));
+    return { engine, jobs, reg, logger, ctx, schedule, warned, errored };
 }
 
 /** A flattened JSON package, as install-local holds it: no `functions`. */
@@ -240,7 +266,7 @@ describe('#21489: scheduleAppArtifactJobs — handler jobs and the door-wide gat
             { name: 'off_handler', schedule: INTERVAL, handler: 'tick', enabled: false },
         ]));
 
-        expect(out).toEqual({ bodies: [], handlers: [], notScheduled: [], failed: [] });
+        expect(out).toEqual({ bodies: [], handlers: [], notScheduled: [], failed: [], cancelled: [] });
         expect(h.jobs.scheduled.size).toBe(0);
     });
 
@@ -255,6 +281,103 @@ describe('#21489: scheduleAppArtifactJobs — handler jobs and the door-wide gat
             process.env.OS_AUTOMATION_SCHEDULED_WORK_ENABLED = prior;
         }
         expect(h.jobs.scheduled.size).toBe(0);
+    });
+});
+
+describe('#21489: re-scheduling replaces — a job the new version does not schedule is CANCELLED', () => {
+    const job = (name: string) => ({ name, schedule: INTERVAL, body: WRITE_BODY });
+
+    it('a reinstall that DROPS a job cancels it, and keeps the one it still declares', async () => {
+        const h = harness();
+        await h.schedule(pkg([job('kept_job'), job('gone_job')]));
+
+        const out = await h.schedule(pkg([job('kept_job')]));
+
+        expect(out.cancelled).toEqual(['gone_job']);
+        expect(h.jobs.cancels).toEqual(['gone_job']);
+        expect([...h.jobs.scheduled.keys()]).toEqual(['kept_job']);
+    });
+
+    it('a version that disables a job, or declares no jobs at all, cancels what it no longer runs', async () => {
+        const h = harness();
+        await h.schedule(pkg([job('a_job'), job('b_job')]));
+
+        const disabled = await h.schedule(pkg([job('a_job'), { ...job('b_job'), enabled: false }]));
+        expect(disabled.cancelled).toEqual(['b_job']);
+
+        const none = await h.schedule(pkg([]));
+        expect(none.cancelled).toEqual(['a_job']);
+        expect(h.jobs.scheduled.size).toBe(0);
+    });
+
+    it("another app's jobs are never cancelled — not even one that took over a name this app once scheduled", async () => {
+        const h = harness();
+        await h.schedule(pkg([job('shared_name'), job('mine_only')]), APP_ID);
+        await h.schedule(pkg([job('shared_name'), job('theirs_only')]), 'com.example.other');
+
+        // This app's next version drops both: only its own remaining job stops.
+        const out = await h.schedule(pkg([]), APP_ID);
+
+        expect(out.cancelled).toEqual(['mine_only']);
+        expect([...h.jobs.scheduled.keys()].sort()).toEqual(['shared_name', 'theirs_only']);
+    });
+
+    it('a cancel that throws is said at error, and the job stays on the record for the next attempt', async () => {
+        const h = harness({ failCancel: 'stuck_job' });
+        await h.schedule(pkg([job('stuck_job')]));
+
+        const first = await h.schedule(pkg([]));
+        expect(first.cancelled).toEqual([]);
+        expect(h.errored().some((m) => m.includes('could NOT be cancelled'))).toBe(true);
+    });
+});
+
+describe('#21489: the uninstall cleanup cancels the uninstalled package\'s jobs', () => {
+    const job = (name: string) => ({ name, schedule: INTERVAL, body: WRITE_BODY });
+
+    it('is registered once per protocol, as runtime.package-jobs, when a package\'s jobs are scheduled', async () => {
+        const h = harness({ withProtocol: true });
+
+        await h.schedule(pkg([job('a_job')]), APP_ID);
+        await h.schedule(pkg([job('b_job')]), 'com.example.other');
+
+        expect(h.reg.registrations).toEqual([PACKAGE_JOBS_UNINSTALL_CLEANUP]);
+        expect(PACKAGE_JOBS_UNINSTALL_CLEANUP).toBe('runtime.package-jobs');
+    });
+
+    it("cancels every job of the uninstalled package and none of another package's", async () => {
+        const h = harness({ withProtocol: true });
+        await h.schedule(pkg([job('a_job'), job('a_other')]), APP_ID);
+        await h.schedule(pkg([job('b_job')]), 'com.example.other');
+        const cleanup = h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!;
+
+        const result = await cleanup({ packageId: APP_ID });
+
+        expect(result).toEqual({ success: true, removed: 2 });
+        expect(h.jobs.cancels.sort()).toEqual(['a_job', 'a_other']);
+        expect([...h.jobs.scheduled.keys()]).toEqual(['b_job']);
+        // A second uninstall of the same package has nothing left to cancel.
+        await expect(cleanup({ packageId: APP_ID })).resolves.toEqual({ success: true, removed: 0 });
+    });
+
+    it('a package that scheduled nothing is a no-op', async () => {
+        const h = harness({ withProtocol: true });
+        await h.schedule(pkg([job('a_job')]), APP_ID);
+
+        await expect(h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: 'com.example.never' }))
+            .resolves.toEqual({ success: true, removed: 0 });
+        expect(h.jobs.cancels).toEqual([]);
+    });
+
+    it('a job it could not cancel is an outcome, never a throw — success:false naming the job', async () => {
+        const h = harness({ withProtocol: true, failCancel: 'stuck_job' });
+        await h.schedule(pkg([job('stuck_job'), job('fine_job')]), APP_ID);
+
+        const result = await h.reg.cleanups.get(PACKAGE_JOBS_UNINSTALL_CLEANUP)!({ packageId: APP_ID });
+
+        expect(result.success).toBe(false);
+        expect(result.removed).toBe(1);
+        expect(result.error).toContain('stuck_job');
     });
 });
 
