@@ -811,7 +811,7 @@
       "title": "A node's SLA escalation fires once past its timeout — the declared action runs and an escalate timeline row lands",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["dev admin"],
@@ -832,7 +832,7 @@
         "in a writable package author + register a flow whose approval node config.escalation = {enabled:true, timeoutHours:1, action:'reassign', escalateTo:'<position machine name or user id>', notifySubmitter:true}",
         "trigger the flow; GET /api/v1/approvals/requests/:id — status=pending and the request carries sla_due_at = created_at + timeoutHours (the SLA is materialized on open)",
         "[needs clock control] advance the clock past sla_due_at (inject a clock / drive ApprovalService.runEscalations() with a clock whose now() is beyond the deadline) and run one escalation sweep",
-        "GET /:id/actions — assert exactly one action='escalate' row (the audit-first idempotency marker, actor SLA_ACTOR_ID) whose comment names the action",
+        "GET /:id/actions — assert exactly one action='escalate' row (the audit-first idempotency marker) whose comment names the action and which carries no actor: actor_id is absent on the read (stored null), because a machine action records no actor and the escalate row is the attribution (ADR-0118 D1)",
         "assert the declared action's effect: reassign → pending_approvers swapped to the escalatees + an approval.escalated notification to them; auto_approve/auto_reject → request finalized approved/rejected and the owning run resumes; notify → an approval.sla_breached notification to the pending approvers",
         "with notifySubmitter!==false, read the submitter's inbox — an approval.sla_breached notification addressed to them",
         "idempotency: run the sweep a SECOND time — GET /:id/actions shows NO second escalate row (single-shot, marker-guarded)",
@@ -848,7 +848,7 @@
         {
           "clause": "past the deadline the sweep escalates exactly ONCE: one action='escalate' timeline row, and a re-run adds none",
           "oracle": "api",
-          "verify": "after advancing past sla_due_at and sweeping, GET /:id/actions has exactly one action='escalate' row (actor SLA_ACTOR_ID); a second sweep adds no further escalate row (the audit row is the idempotency marker, written before any mutation)",
+          "verify": "after advancing past sla_due_at and sweeping, GET /:id/actions has exactly one action='escalate' row with no actor (actor_id absent on the read, stored null — ADR-0118 D1: a machine action records no actor, and the escalate row is the attribution); a second sweep adds no further escalate row (the audit row is the idempotency marker, written before any mutation)",
           "evidence": "actions reads after the first and second sweeps"
         },
         {
@@ -882,7 +882,8 @@
         "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (sla_due_at surfaced on the request)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the ADR-0042 SLA escalation (declared action fires once past timeout + escalate timeline row); blocked on a clock-control timing harness (hour granularity), with the sla_due_at materialization and the strict-schema build clause runnable today", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the ADR-0042 SLA escalation (declared action fires once past timeout + escalate timeline row); blocked on a clock-control timing harness (hour granularity), with the sla_due_at materialization and the strict-schema build clause runnable today", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-03", "change": "the escalate row's expected actor corrected: step 5 and the single-shot clause asserted actor SLA_ACTOR_ID, but under ADR-0118 D1 the sweep records no actor (actor_id null, absent on the GET /:id/actions read) and the escalate row is the attribution, so a run following the old text would report a false failure. Nothing else in the item changes", "ref": "#21517" }
       ]
     },
     {

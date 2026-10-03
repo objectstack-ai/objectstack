@@ -561,3 +561,114 @@ describe('#6190 — org-scoped writes of non-org-overridable types are refused',
         expect(affected).toHaveLength(17);
     });
 });
+
+/**
+ * An org-scoped change to which public forms accept anonymous intake is
+ * refused when the anonymous form doors would never read that organization:
+ * they resolve the form in `tenancy.defaultOrgId()`'s organization, which a
+ * walled posture (degraded or not) answers `null`. Same stub engine as above;
+ * the `tenancy` service is the only addition.
+ */
+describe('org-scoped anonymous form intake changes the anonymous doors cannot see', () => {
+    const sharing = (allowAnonymous: boolean) => ({ enabled: true, allowAnonymous, publicLink: '/forms/walled-intake' });
+    const FORM_VIEW = (allowAnonymous: boolean, label = 'Intake') => ({
+        name: 'task.intake_form',
+        label,
+        object: 'task',
+        viewKind: 'form',
+        config: { sharing: sharing(allowAnonymous) },
+    });
+
+    /** `defaultOrgId` answers what the anonymous doors resolve. */
+    function makeTenancyProtocol(defaultOrgId: string | null) {
+        const { engine, rows } = makeStubEngine();
+        const services = new Map<string, unknown>([['tenancy', { defaultOrgId: async () => defaultOrgId }]]);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_prod') as any;
+        return { protocol, rows };
+    }
+
+    async function publishEnvWide(protocol: any) {
+        const res = await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: FORM_VIEW(true) });
+        expect(res.success).toBe(true);
+    }
+
+    it('walled (no organization for an anonymous request): the org-scoped withdrawal is refused and nothing is saved', async () => {
+        const { protocol, rows } = makeTenancyProtocol(null);
+        await publishEnvWide(protocol);
+
+        const refusal = protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(false), organizationId: 'org_a',
+        });
+        await expect(refusal).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+        await expect(refusal).rejects.toThrow(/Save it env-wide instead/);
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+    });
+
+    it('walled: an org-scoped draft of the withdrawal is refused too', async () => {
+        const { protocol, rows } = makeTenancyProtocol(null);
+        await publishEnvWide(protocol);
+
+        await expect(protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(false), organizationId: 'org_a', mode: 'draft',
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+    });
+
+    it('walled: an org-scoped publish of a form the env-wide definition keeps private is refused', async () => {
+        const { protocol } = makeTenancyProtocol(null);
+        const res = await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: FORM_VIEW(false) });
+        expect(res.success).toBe(true);
+
+        await expect(protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    });
+
+    it('walled: a legacy org-scoped draft of the withdrawal cannot be promoted', async () => {
+        const { protocol, rows } = makeTenancyProtocol(null);
+        await publishEnvWide(protocol);
+        await seedLegacyOrgDraft(protocol, {
+            type: 'view', name: 'task.intake_form', body: FORM_VIEW(false), organizationId: 'org_a',
+        });
+
+        await expect(
+            protocol.publishMetaItem({ type: 'view', name: 'task.intake_form', organizationId: 'org_a' }),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(orgRows(rows).filter((r) => r.org === 'org_a' && r.state === 'active')).toEqual([]);
+    });
+
+    it('control (walled): an org-scoped edit that leaves the anonymous intake alone still saves', async () => {
+        const { protocol, rows } = makeTenancyProtocol(null);
+        await publishEnvWide(protocol);
+
+        const res = await protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(true, 'Intake (tenant)'), organizationId: 'org_a',
+        });
+        expect(res.success).toBe(true);
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([
+            { type: 'view', name: 'task.intake_form', org: 'org_a', state: 'active' },
+        ]);
+    });
+
+    it('control (walled): the env-wide withdrawal is accepted', async () => {
+        const { protocol } = makeTenancyProtocol(null);
+        await publishEnvWide(protocol);
+
+        const res = await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: FORM_VIEW(false) });
+        expect(res.success).toBe(true);
+        expect(res.message).toContain('env-wide');
+    });
+
+    it('control (single): the doors resolve this organization, so the org-scoped withdrawal is accepted', async () => {
+        const { protocol, rows } = makeTenancyProtocol('org_a');
+        await publishEnvWide(protocol);
+
+        const res = await protocol.saveMetaItem({
+            type: 'view', name: 'task.intake_form', item: FORM_VIEW(false), organizationId: 'org_a',
+        });
+        expect(res.success).toBe(true);
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([
+            { type: 'view', name: 'task.intake_form', org: 'org_a', state: 'active' },
+        ]);
+    });
+});

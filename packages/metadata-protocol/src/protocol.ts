@@ -38,6 +38,7 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
+import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -8352,12 +8353,23 @@ export class ObjectStackProtocolImplementation implements
                 // another package's object every name a container expands
                 // derives from the container's own name, never one of that
                 // package's `<object>.<key>` names.
+                //
+                // [#21510] …and it never replaces a STORED ROW of that name.
+                // A row stored under exactly the name is the sanctioned
+                // override for it (ADR-0005 keys an overlay by its own name);
+                // an expansion fills only a name with no row of its own. The
+                // test is {@link namesWithOwnStoredRow} over this caller's
+                // `records`, the one the by-name read asks, so the two doors
+                // answer the same row for the name. An item the registry or a
+                // package supplies under the name is still replaced, as before.
                 if (isView) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
                         if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
                     }
+                    const ownRowNames = this.namesWithOwnStoredRow(records);
                     for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
+                        if (ownRowNames.has(vi.name as string)) continue;
                         byName.set(vi.name as string, vi);
                     }
                     items = Array.from(byName.values());
@@ -8819,6 +8831,30 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21510] The names that have a stored row of their own among `records`,
+     * the active rows {@link readActiveOverlayRows} selected for one caller.
+     *
+     * ADR-0005 keys an overlay by its own name, so a row stored under exactly a
+     * name is the sanctioned override for that name. An expansion is derived
+     * from its container, so it fills only a name that is NOT in this set. This
+     * is the one predicate both doors ask: the list read
+     * ({@link readFlattenedMetaItems}) never lets an expansion displace a
+     * stored row of the same name, and the by-name read
+     * ({@link resolveRowlessExpandedView}) answers an expansion only for a name
+     * outside it. Both doors pass the rows they selected for the same caller,
+     * so a name that has a row in one organization only is row-less for every
+     * other caller. ⛔ Never a second test of "this name has its own row":
+     * two tests are two rules, and the doors would disagree again.
+     */
+    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+        const names = new Set<string>();
+        for (const record of records) {
+            if (typeof record?.name === 'string') names.add(record.name);
+        }
+        return names;
+    }
+
+    /**
      * [#21442] The item the list read serves under `request.name` when that
      * name is ROW-LESS — no stored row of its own — and a stored view
      * container in this caller's scope expands it; `undefined` otherwise.
@@ -8845,7 +8881,8 @@ export class ObjectStackProtocolImplementation implements
      * ⛔ No kernel-specific branch — every kernel answers through this path.
      *
      * A stored row of this very name is the name's own row and is answered
-     * as such by the caller's own read, never an expansion. The `container`
+     * as such by the caller's own read, never an expansion — the same
+     * predicate the list read applies ({@link namesWithOwnStoredRow}). The `container`
      * returned is the stored row the item derives from — its own name, body,
      * package and organization — which the layered read reports as the
      * name's provenance and the history and diff reads resolve to.
@@ -8867,7 +8904,7 @@ export class ObjectStackProtocolImplementation implements
             // this name".
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        if (records.some((record) => record?.name === request.name)) return undefined;
+        if (this.namesWithOwnStoredRow(records).has(request.name)) return undefined;
         let found: RowlessExpandedView | undefined;
         for (const expanded of this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, records))) {
             if (expanded.item.name === request.name) found = expanded;
@@ -14947,6 +14984,66 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * An organization-scoped `view` write that changes which public forms
+     * accept anonymous intake, on a deployment whose anonymous form doors do
+     * not read that organization. Returns the refusal, or `null` when the
+     * write is fine.
+     *
+     * An anonymous form request carries no session and so no organization.
+     * The doors resolve the form in `tenancy.defaultOrgId()`'s organization
+     * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
+     * write's organization (every walled posture, degraded or not, answers
+     * `null`), the doors read the env-wide definition, so the write is refused
+     * and the author is pointed at the env-wide save, which every door
+     * honours. A composition with no tenancy service has no posture to judge
+     * (and no session to carry an organization over HTTP), so it is left as is.
+     *
+     * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
+     * an organization-scoped edit that leaves it as the env-wide definition has
+     * it is unaffected. Same code and status as {@link orgScopedWriteRefusal}:
+     * this item's anonymous intake has no per-org channel on this deployment.
+     */
+    private async anonymousFormIntakeOrgScopeRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string | null | undefined;
+        body: unknown;
+    }): Promise<Error | null> {
+        if (!args.organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
+        if (singular !== 'view') return null;
+        const tenancy = this.getServicesRegistry?.().get('tenancy') as
+            | { defaultOrgId?: () => Promise<string | null> }
+            | undefined;
+        if (typeof tenancy?.defaultOrgId !== 'function') return null;
+        const doorOrganization = await tenancy.defaultOrgId();
+        if (doorOrganization === args.organizationId) return null;
+        const proposed = anonymousFormIntakeSlugs(args.body);
+        const served = anonymousFormIntakeSlugs(
+            ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
+        );
+        if (proposed.length === served.length && proposed.every((s, i) => s === served[i])) return null;
+        const list = (slugs: string[]) => (slugs.length ? slugs.map((s) => `'${s}'`).join(', ') : 'none');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot change which public forms accept anonymous intake `
+            + `in organization '${args.organizationId}' (env-wide: ${list(served)}; this write: ${list(proposed)}). `
+            + `An anonymous form request carries no organization, and this deployment resolves `
+            + (doorOrganization
+                ? `it in organization '${doorOrganization}'`
+                : `none for it (a walled tenancy posture never guesses one)`)
+            + `, so the anonymous form doors serve the env-wide definition and would never see this change. `
+            + `Save it env-wide instead (retry with no active organization): that withdraws or publishes the form `
+            + `on every anonymous door. An organization-scoped edit that leaves the form's sharing as the env-wide `
+            + `definition has it is still accepted. See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -17722,6 +17819,18 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
+        // An org-scoped change to a form's anonymous intake that the anonymous
+        // form doors cannot see. Drafts too, so no draft is minted that its
+        // own promotion would refuse. See {@link anonymousFormIntakeOrgScopeRefusal}.
+        {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: request.type,
+                name: request.name,
+                organizationId: request.organizationId,
+                body: request.item,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
 
         if (this.environmentId !== undefined) {
             // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
@@ -19674,6 +19783,17 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
+        }
+        // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
+        // draft saved before that refusal existed must not reach `active`.
+        if (draftForGate) {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: singularType,
+                name: request.name,
+                organizationId: orgId,
+                body: draftForGate.body,
+            });
+            if (intakeRefusal) throw intakeRefusal;
         }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this

@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { runMigrationJournal, readRunJournal } from '@objectstack/core';
+import { runMigrationJournal, readRunJournal, resumeMigrationJournal, type MigrationPlan } from '@objectstack/core';
 // [#5619] The producer's OWN write-verb dispatch decisions. Imported from
 // `@objectstack/metadata-core` rather than `@objectstack/objectql` because
 // objectql depends on THIS package — the import that would pin these doubles to
@@ -234,6 +234,48 @@ describe('#4556 migration — sentinel → NULL', () => {
     expect(byId(engine, 'h3').recorded_by).toBe(RECORDED_BY_SENTINEL);
     expect(byId(engine, 'h5').recorded_by).toBe(RECORDED_BY_SENTINEL);
     expect(byId(engine, 'h2').recorded_by).toBe('usr_alice');
+  });
+
+  it('[#21528] a run killed after a committed chunk, started at chunk size 2, resumes with the plan the owner registers', async () => {
+    const engine = new FakeEngine();
+    seedMixed(engine);
+    // Started the way `os migrate recorded-by --apply --chunk-size 2` starts
+    // it: chunk 0 converts h1+h3 and commits, and the process dies inside
+    // chunk 1 (h5) before writing anything. The forward stops there for good,
+    // so the tables at that moment are what the kill leaves; the resume gets
+    // a copy, since this engine is still inside the dead chunk's transaction.
+    const started = createRecordedBySentinelPlan({ chunkSize: 2 });
+    let runId = '';
+    let killed: () => void = () => {};
+    const atKill = new Promise<void>((resolve) => { killed = resolve; });
+    const crashing: MigrationPlan = {
+      ...started,
+      steps: [{
+        ...started.steps[0]!,
+        async forward(rows, ctx, e) {
+          if (ctx.chunkIndex === 0) return started.steps[0]!.forward(rows, ctx, e);
+          runId = ctx.runId;
+          killed();
+          return new Promise<void>(() => {});
+        },
+      }],
+    };
+    void runMigrationJournal(asEngine(engine), crashing);
+    await atKill;
+    const restarted = new FakeEngine();
+    restarted.tables = new Map([...engine.tables].map(([k, v]) => [k, v.map((r) => ({ ...r }))]));
+    expect(await findSentinelHistoryRows(asEngine(restarted))).toEqual([{ id: 'h5' }]);
+
+    // The registry holds the owner's plan at its default size, and load() now
+    // returns only h5: the resume still runs the journal's two chunks.
+    const result = await resumeMigrationJournal(asEngine(restarted), createRecordedBySentinelPlan(), runId);
+
+    expect(result).toMatchObject({ runId, status: 'completed', chunksTotal: 2, chunksCommitted: 2 });
+    expect(restarted.history().filter((r) => r.recorded_by === RECORDED_BY_SENTINEL)).toEqual([]);
+    expect(byId(restarted, 'h2').recorded_by).toBe('usr_alice');
+    const events = await readRunJournal(asEngine(restarted), runId);
+    expect(events.filter((e) => e.kind === 'chunk_done').map((e) => e.chunk_index)).toEqual([0, 1]);
+    expect(events[events.length - 1]!.kind).toBe('run_done');
   });
 
   it('findSentinelHistoryRows selects only sentinel rows, by id', async () => {

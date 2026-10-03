@@ -480,19 +480,31 @@ export interface ApprovalActionRow {
   /** Display name of the actor (`sys_user.name`), when resolvable. */
   actor_name?: string;
   /**
-   * Structured hand-off parties on a `reassign` action (#4365): the user whose
-   * pending-approver slot was moved, and the user who received it. Previously
-   * the pair existed only inside a default free-text `comment`
-   * (`"<from_id> → <to_id>"`), which clients could neither parse nor render
+   * Structured hand-off parties on a `reassign` action: the pending-approver
+   * slot that was handed over, and the address it was handed to. A
+   * reassignment moves a slot, not necessarily a person, so both hold a slot
+   * address in its stored spelling — a user id, an email, or a position
+   * address (`position:<name>`; any other `type:value` literal a slate kept
+   * is stored the same way). Like `acted_as`, neither is a `sys_user`
+   * reference, and neither makes a claim about who made the move: that
+   * person is `actor_id`.
+   *
+   * Previously the pair existed only inside a default free-text `comment`
+   * (`"<from> → <to>"`), which clients could neither parse nor render
    * readably. `comment` is now pure user input; consumers render the hand-off
-   * from these fields (via the resolved `*_name` companions below).
+   * from these fields — through the `*_name` companions below where one
+   * resolved, and as the address itself where none did.
    */
   reassign_from?: string;
   /** See {@link ApprovalActionRow.reassign_from}. */
   reassign_to?: string;
-  /** Display name of `reassign_from` (`sys_user.name`), when resolvable. */
+  /**
+   * Display name of `reassign_from` (`sys_user.name`). It resolves only when
+   * the address names an account: a user id, or an email an account carries.
+   * A position address never resolves, so absent means "render the address".
+   */
   reassign_from_name?: string;
-  /** Display name of `reassign_to` (`sys_user.name`), when resolvable. */
+  /** Display name of `reassign_to`; resolves as {@link ApprovalActionRow.reassign_from_name} does. */
   reassign_to_name?: string;
   /**
    * Whether the actor was admitted to this action ONLY by the privileged

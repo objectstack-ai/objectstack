@@ -118,6 +118,64 @@ const PIN_APP: any = {
         { name: 'handler_engine_reads_family', label: 'Handler engine read', type: 'script' },
         { name: 'handler_engine_reads_history', label: 'Handler engine history read', type: 'script' },
         { name: 'handler_api_reads_family', label: 'Handler api read', type: 'script' },
+        // [#21454] EVALUATE shapes — each body attempts to evaluate the stored
+        // body or hash, and each must be refused before the query runs. The
+        // VALUE in every predicate is an immaterial constant: the query is
+        // refused unrun, so nothing depends on what it is.
+        {
+          name: 'body_filters_body_column',
+          label: 'Body filters the body column',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata').find({ where: { metadata: { $contains: 'z' } } }) };`),
+        },
+        {
+          name: 'body_sorts_body_column',
+          label: 'Body sorts by the body column',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata').find({ orderBy: [{ field: 'metadata', order: 'asc' }] }) };`),
+        },
+        {
+          name: 'body_groups_body_column',
+          label: 'Body groups by the body column',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata_history').aggregate({ groupBy: ['metadata'] }) };`),
+        },
+        {
+          name: 'body_filters_hash_column',
+          label: 'Body filters the hash column',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata').find({ where: { checksum: 'z' } }) };`),
+        },
+        {
+          name: 'body_counts_body_column',
+          label: 'Body counts by the body column',
+          type: 'script',
+          body: actionBody(`return { n: await ctx.api.object('sys_metadata').count({ where: { metadata: { $contains: 'z' } } }) };`),
+        },
+        {
+          name: 'body_searches_body_column',
+          label: 'Body searches an explicit body column',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata').find({ search: 'z', searchFields: ['metadata'] }) };`),
+        },
+        // A DEFAULT search is narrowed, not refused: a body may still search a
+        // family table by its scalar columns, served like the door.
+        {
+          name: 'body_searches_default',
+          label: 'Body default search',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata').find({ search: '${DS_NAME}' }) };`),
+        },
+        // The engine action verb is not on a served body's surface at all.
+        {
+          name: 'body_calls_execute',
+          label: 'Body calls execute',
+          type: 'script',
+          body: actionBody(`return { typeofExecute: typeof ctx.api.object('sys_metadata').execute };`),
+        },
+        // ② the engine handle's evaluate shape — a handler whose ctx.engine.find
+        // filters the body column is refused the same way.
+        { name: 'handler_engine_filters_body', label: 'Handler engine filters body', type: 'script' },
       ],
     },
   ],
@@ -165,6 +223,13 @@ const PIN_HANDLER_PLUGIN: Plugin = {
       'pin_note',
       'handler_api_reads_family',
       async (actionCtx: any) => ({ rows: await actionCtx.api.object('sys_metadata').find({ where }) }),
+      'pin.reader21454.handler',
+    );
+    // [#21454] ② the engine handle's evaluate shape: a filter on the body column.
+    ql.registerAction(
+      'pin_note',
+      'handler_engine_filters_body',
+      async (actionCtx: any) => ({ rows: await actionCtx.engine.find('sys_metadata', { where: { metadata: { $contains: 'z' } } }) }),
       'pin.reader21454.handler',
     );
   },
@@ -460,4 +525,74 @@ describe('[#21454] ② / ③ an action handler\'s engine handle and scoped API',
       expectServedLikeTheDoor(`handler ctx.api (${role})`, await readJson(res));
     });
   }
+});
+
+describe('[#21454] the EVALUATE shapes are refused end to end, the door\'s own refusal', () => {
+  /**
+   * Each shape answers the data door's refusal (`INVALID_FIELD` / 400), names
+   * the offending column, and carries no family content. The envelope's precise
+   * `param` / `field` are pinned directly on the door's predicate in the unit
+   * test; across the sandbox boundary only `code`, `status` and the MESSAGE are
+   * guaranteed (`SANDBOX_ERROR_PASSTHROUGH`), so the column is read from the
+   * message, which both the sandboxed-body and the host-handler paths carry.
+   */
+  async function expectRefusedAction(action: string, token: string, column: string): Promise<void> {
+    const res = await as(token, 'POST', `/actions/pin_note/${action}`, { params: {} });
+    const payload = await readJson(res);
+    const err = payload?.error ?? payload;
+    const text = JSON.stringify(payload ?? null);
+    expect(res.status, `${action}: refused with 400`).toBe(400);
+    expect(err?.code, `${action}: the data door's INVALID_FIELD`).toBe('INVALID_FIELD');
+    const named = (Array.isArray(err?.fields) && err.fields.includes(column))
+      || String(err?.message ?? '').includes(`'${column}'`);
+    expect(named, `${action}: the refusal names '${column}'`).toBe(true);
+    expect(text.includes(SENTINEL), `${action}: the stored credential reached the answer`).toBe(false);
+    for (const h of storedHashes) expect(text.includes(h), `${action}: a stored hash reached the answer`).toBe(false);
+  }
+
+  for (const [role, token] of [['administrator', () => adminToken], ['member', () => memberToken]] as const) {
+    it(`a body's filter / sort / grouping on the body column, invoked by the ${role}`, async () => {
+      await expectRefusedAction('body_filters_body_column', token(), 'metadata');
+      await expectRefusedAction('body_sorts_body_column', token(), 'metadata');
+      await expectRefusedAction('body_groups_body_column', token(), 'metadata');
+    });
+
+    it(`a body's filter on a hash column, and count as an oracle, invoked by the ${role}`, async () => {
+      await expectRefusedAction('body_filters_hash_column', token(), 'checksum');
+      await expectRefusedAction('body_counts_body_column', token(), 'metadata');
+    });
+
+    it(`a body's explicit search of the body column, invoked by the ${role}`, async () => {
+      await expectRefusedAction('body_searches_body_column', token(), 'metadata');
+    });
+
+    it(`the engine handle's filter on the body column, invoked by the ${role}`, async () => {
+      await expectRefusedAction('handler_engine_filters_body', token(), 'metadata');
+    });
+  }
+});
+
+describe('[#21454] a DEFAULT search is narrowed to the door\'s served set, not refused', () => {
+  for (const [role, token] of [['administrator', () => adminToken], ['member', () => memberToken]] as const) {
+    it(`a body's default search runs and is served like the door, invoked by the ${role}`, async () => {
+      const res = await as(token(), 'POST', '/actions/pin_note/body_searches_default', { params: {} });
+      expect(res.status).toBe(200);
+      // It ran (not refused) and answered the family served, never the stored
+      // body or hash — the body and hash columns were removed from the scan.
+      expectServedLikeTheDoor(`default search (${role})`, await readJson(res));
+    });
+  }
+});
+
+describe('[#21454] the engine action verb is unreachable from a served body', () => {
+  it('a sandboxed body sees no `execute` on ctx.api.object(...)', async () => {
+    const res = await as(adminToken, 'POST', '/actions/pin_note/body_calls_execute', { params: {} });
+    expect(res.status).toBe(200);
+    const text = JSON.stringify(await readJson(res) ?? null);
+    // The VM bridge installs only find/findOne/count/aggregate and the writes;
+    // `execute` is not a function the body can call, so no raw scoped context
+    // is ever handed to a nested action through a served body. (Read from the
+    // response text, envelope-agnostic.)
+    expect(text).toContain('"typeofExecute":"undefined"');
+  });
 });

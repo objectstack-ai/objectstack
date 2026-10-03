@@ -1,6 +1,7 @@
 # ADR-0042: Approval SLA escalation — a jobs-backed scanner with audit-row idempotency
 
 **Status**: Accepted — implemented (proposed 2026-06-12 · calibrated 2026-06-12)
+· **Superseded in part (2026-08-02, [ADR-0118](./0118-non-user-actor-contract.md) D1)** — §2's reserved actor `system:sla`, wherever this record names it: machine actions record `actor_id` null, and the `escalate` row is the attribution.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0019](./0019-approval-as-flow-node.md) (approval as flow node), [ADR-0041](./0041-flow-trigger-family.md) (triggers vs jobs vs hooks — this is the canonical "jobs, not trigger" case), thread interactions (#1740)
 **Closes**: [#1742](https://github.com/objectstack-ai/objectstack/issues/1742)
