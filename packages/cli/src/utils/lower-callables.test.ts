@@ -371,3 +371,30 @@ describe('lowerCallables — unrecognised `functions` entries reach the parse (#
     expect(ObjectStackDefinitionSchema.safeParse(lowered).success).toBe(false);
   });
 });
+
+// The job body `lowerCallables` mints must be one the spec accepts — the build
+// parses exactly this output (`compile.ts` step 3), so a minted body the parse
+// refused would fail every build of a stack with an extractable job function.
+describe('lowerCallables → the spec parses the job body it mints', () => {
+  const base = {
+    manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
+  };
+
+  it('parses a stack whose job gained a minted body beside its handler', () => {
+    const sweep = async (ctx: any) => {
+      await ctx.api.object('task').update({ id: '1', status: 'closed' });
+      ctx.log.info('closed');
+    };
+    const stack = defineStack({
+      ...base,
+      functions: { sweep },
+      jobs: [{ name: 'nightly_sweep', schedule: { type: 'interval', intervalMs: 60000 }, handler: 'sweep' }],
+    } as never);
+    const { lowered } = lowerCallables(normalizeStackInput(stack as Record<string, unknown>));
+    const result = ObjectStackDefinitionSchema.safeParse(lowered);
+    expect(result.success, result.success ? '' : JSON.stringify(result.error.issues)).toBe(true);
+    const job = result.success ? (result.data.jobs ?? [])[0] : undefined;
+    expect(job?.handler).toBe('sweep');
+    expect(job?.body).toMatchObject({ language: 'js', capabilities: ['api.write', 'log'] });
+  });
+});
