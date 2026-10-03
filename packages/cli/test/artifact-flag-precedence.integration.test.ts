@@ -17,7 +17,9 @@
  *   | `os start --artifact ALPHA`, same directory                 | Widget BRAVO |
  *   | `os start --artifact ALPHA`, beside a config with no `dist/` | Widget CONFIG |
  *   | `os start --artifact ALPHA`, NO config (the control)         | Widget ALPHA |
+ *   | `os start --artifact ALPHA`, beside a HOST config            | Widget CONFIG |
  *   | `OS_ARTIFACT_URL=…BRAVO os dev -a ALPHA`                    | Widget BRAVO |
+ *   | `OS_ARTIFACT_PATH=ALPHA os start --artifact ./dist/…` (BRAVO) | Widget ALPHA |
  *
  * Every one of them printed `Artifact: …ALPHA.json`. The `serve` child read the
  * supervisor's answer only when the cwd held no config, and `dev` had no
@@ -30,10 +32,15 @@
  * - leg 2 — `start --artifact` beside a config (with and without a `dist/`),
  *   with its no-config control: all three serve the named artifact, so the
  *   config's presence changes nothing.
+ * - a HOST config (its `plugins` hold an instance) composes its own app, so
+ *   only the child declining to load the config at all serves the named
+ *   artifact there — the case that holds `cwdConfigJoinsBoot` itself.
  * - flag over env — `dev -a` under an `OS_ARTIFACT_URL` naming the other one.
  * - the documented first-project path — `start --artifact
- *   ./dist/objectstack.json` beside its config — still serves that file: the
- *   config's OWN compiled output is the one artifact a config boot shares.
+ *   ./dist/objectstack.json` beside its config — is the one boot a config
+ *   still joins (that file is the config's OWN compiled output), and it serves
+ *   that file even under an exported `OS_ARTIFACT_PATH` naming another: the
+ *   config boot is handed the supervisor's answer instead of re-deriving it.
  *
  * Each case also checks the supervisor's `Artifact:` row named the file that
  * was served: the card's rule is never to print one artifact and serve another.
@@ -63,13 +70,13 @@ import {
   randomPort,
   TSX,
 } from './helpers/serve-process.js';
-import { writeDefineStackConfig } from './helpers/define-stack-fixture.js';
+import { defineStackSourceFromLiteral, linkSpec, writeDefineStackConfig } from './helpers/define-stack-fixture.js';
 
 /** The banner's tail — every row above it has printed. */
 const READY = /Press Ctrl\+C to stop/;
 const BOOT_TIMEOUT_MS = 180_000;
-/** Six boots, one after another, each well under its own budget when healthy. */
-const ALL_BOOTS_TIMEOUT_MS = 6 * (BOOT_TIMEOUT_MS + 30_000);
+/** Seven boots, one after another, each well under its own budget when healthy. */
+const ALL_BOOTS_TIMEOUT_MS = 7 * (BOOT_TIMEOUT_MS + 30_000);
 
 /** The development dev-admin seed — the operator on every boot here. */
 const EMAIL = 'admin@objectos.ai';
@@ -250,11 +257,24 @@ beforeAll(async () => {
   writeFileSync(alpha, JSON.stringify(stack('ALPHA'), null, 2), 'utf8');
   writeFileSync(bravo, JSON.stringify(stack('BRAVO'), null, 2), 'utf8');
 
-  const project = (name: string, opts: { config: boolean; dist: boolean }) => {
+  const project = (name: string, opts: { config: boolean | 'host'; dist: boolean }) => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `fx-${name}`, private: true }), 'utf8');
-    if (opts.config) writeDefineStackConfig(dir, stack('CONFIG'));
+    if (opts.config === 'host') {
+      // A host config: a plugin INSTANCE in `plugins` (`isHostConfig`), so the
+      // config boot composes this module's own app instead of a standalone
+      // stack over `dist/` — no artifact path handed to it can reach it.
+      const literal = JSON.stringify(stack('CONFIG'), null, 2).replace(/\n}$/, `,
+  "plugins": [{ name: 'com.example.fx.host-marker', version: '1.0.0', init: async () => {}, start: async () => {} }]
+}`);
+      // The splice must have landed, or this fixture silently stops being a host.
+      if (!literal.includes('host-marker')) throw new Error(`host-config fixture lost its plugin:\n${literal}`);
+      writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSourceFromLiteral(literal));
+      linkSpec(dir);
+    } else if (opts.config) {
+      writeDefineStackConfig(dir, stack('CONFIG'));
+    }
     if (opts.dist) {
       mkdirSync(join(dir, 'dist'), { recursive: true });
       writeFileSync(join(dir, 'dist', 'objectstack.json'), JSON.stringify(stack('BRAVO'), null, 2), 'utf8');
@@ -265,6 +285,7 @@ beforeAll(async () => {
   // from the one named on the command line (ALPHA) — the card's reproduction.
   const withConfig = project('with-config', { config: true, dist: true });
   const configOnly = project('config-only', { config: true, dist: false });
+  const hostConfig = project('host-config', { config: 'host', dist: true });
   const noConfig = project('no-config', { config: false, dist: true });
   const bare = project('bare', { config: false, dist: false });
 
@@ -275,12 +296,14 @@ beforeAll(async () => {
   readings.leg2 = await measure([...startArgs(join(root, 'h-leg2')), '--artifact', alpha], withConfig);
   readings.leg2NoDist = await measure([...startArgs(join(root, 'h-leg2-nodist')), '--artifact', alpha], configOnly);
   readings.leg2Control = await measure([...startArgs(join(root, 'h-leg2-ctl')), '--artifact', alpha], noConfig);
+  readings.hostConfig = await measure([...startArgs(join(root, 'h-host')), '--artifact', alpha], hostConfig);
   readings.flagOverEnv = await measure([...devArgs, '-a', alpha], bare, {
     OS_ARTIFACT_URL: pathToFileURL(bravo).href,
   });
   readings.ownDist = await measure(
     [...startArgs(join(root, 'h-own-dist')), '--artifact', './dist/objectstack.json'],
     withConfig,
+    { OS_ARTIFACT_PATH: alpha },
   );
 }, ALL_BOOTS_TIMEOUT_MS);
 
@@ -321,6 +344,13 @@ describe('#21501 — the named artifact is the served stack, beside a config or 
     expect(r.served).toBe(reading('leg2NoDist').served);
   });
 
+  it('a HOST config: `os start --artifact ALPHA` beside one serves ALPHA, not the config\'s own app', () => {
+    const r = reading('hostConfig');
+    expect(r.status).toBe(200);
+    expect(r.served).toBe('Widget ALPHA');
+    expect(r.artifactRow).toContain('ALPHA.json');
+  });
+
   it('flag over env: `os dev -a ALPHA` under OS_ARTIFACT_URL naming BRAVO serves ALPHA', () => {
     const r = reading('flagOverEnv');
     expect(r.status).toBe(200);
@@ -328,7 +358,7 @@ describe('#21501 — the named artifact is the served stack, beside a config or 
     expect(r.artifactRow).toContain('ALPHA.json');
   });
 
-  it('the documented path: `os start --artifact ./dist/objectstack.json` beside its config serves that dist/', () => {
+  it('the documented path: `os start --artifact ./dist/objectstack.json` beside its config serves that dist/, even under OS_ARTIFACT_PATH naming ALPHA', () => {
     const r = reading('ownDist');
     expect(r.status).toBe(200);
     expect(r.served).toBe('Widget BRAVO');
