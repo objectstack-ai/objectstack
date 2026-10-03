@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8707 / #10101] The shared platform-row organization resolver — "which
+ * [commit 1408fe385 / #10101] The shared platform-row organization resolver — "which
  * column carries THIS object's own organization?", resolved from the object's
  * REGISTERED schema, never hard-coded to one spelling.
  *
@@ -16,7 +16,7 @@
  *
  * ## The ruling this promotion implements (maintainer, 2026-08-17, cloud#1395)
  *
- * > Ruled: Option A — extend the #8778 ruling: `resolveRecordOrganizationField`
+ * > Ruled: Option A — extend the [commit 7901b2dd2] ruling: `resolveRecordOrganizationField`
  * > is promoted to a shared resolver used by all three platform-row writers
  * > (approvals, automation runs, audit). A platform row's organization is the
  * > SUBJECT record's organization; actor context is the fallback, never the
@@ -174,7 +174,7 @@ export function createFieldPresenceProbe(
 }
 
 /**
- * [#8707] "Which column carries THIS object's own organization?" — resolved
+ * [commit 1408fe385] "Which column carries THIS object's own organization?" — resolved
  * from the object's REGISTERED schema, never hard-coded to one spelling.
  *
  * ## Precedence — deliberately the platform's own, not a second opinion

@@ -1,95 +1,10 @@
 {
- "packages/plugins/plugin-audit/src/audit-writers.ts": {
-  "#5226": 1
- },
- "packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts": {
-  "#5876": 1,
-  "#8552": 2
- },
- "packages/plugins/plugin-security/src/cleanup-package-permissions.ts": {
-  "#2747": 1
- },
- "packages/plugins/plugin-security/src/delegated-admin-gate.ts": {
-  "#830": 2
- },
- "packages/plugins/plugin-security/src/explain-engine.ts": {
-  "#4647": 3
- },
- "packages/plugins/plugin-security/src/normalize-managed-by.ts": {
-  "#2920": 1
- },
- "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts": {
-  "#2920": 1
- },
- "packages/plugins/plugin-security/src/objects/sys-position.object.ts": {
-  "#2920": 1
- },
- "packages/plugins/plugin-security/src/permission-evaluator.ts": {
-  "#2565": 2
- },
- "packages/plugins/plugin-security/src/security-plugin.ts": {
-  "#11082": 2,
-  "#12699": 3,
-  "#12974": 1,
-  "#2852": 1,
-  "#3022": 1,
-  "#3544": 1,
-  "#3547": 1,
-  "#4467": 1,
-  "#5386": 2,
-  "#5492": 1,
-  "#5493": 2,
-  "#7616": 1,
-  "#8552": 1,
-  "#8993": 1
- },
- "packages/plugins/plugin-security/src/translations/en.objects.generated.ts": {
-  "#2920": 2
- },
- "packages/plugins/plugin-security/src/unresolved-posture.ts": {
-  "#10401": 1,
-  "#10424": 1,
-  "#3545": 6
- },
- "packages/plugins/plugin-sharing/src/share-link-service.ts": {
-  "#5190": 1
- },
- "packages/plugins/plugin-sharing/src/sharing-rule-service.ts": {
-  "#7795": 1,
-  "#8158": 1
- },
- "packages/plugins/plugin-sharing/src/sharing-service.ts": {
-  "#5103": 1,
-  "#5493": 1,
-  "#5973": 1,
-  "#6428": 1
- },
- "packages/services/service-analytics/src/analytics-service.ts": {
-  "#3867": 1,
-  "#5222": 1,
-  "#5918": 1,
-  "#7598": 1
- },
- "packages/services/service-analytics/src/comparand-shape.ts": {
-  "#5222": 3,
-  "#7596": 1,
-  "#7598": 3
- },
  "packages/services/service-analytics/src/read-scope-sql.ts": {
   "#5347": 1,
   "#5369": 1,
   "#6050": 1,
   "#6125": 1,
   "#6387": 1
- },
- "packages/services/service-analytics/src/strategies/filter-normalizer.ts": {
-  "#3650": 2,
-  "#5158": 2,
-  "#5240": 1,
-  "#5334": 2,
-  "#6050": 1,
-  "#6386": 1,
-  "#6444": 1
  },
  "packages/services/service-analytics/src/strategies/native-sql-strategy.ts": {
   "#5222": 1,

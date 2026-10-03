@@ -50,9 +50,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
-import { SettingsServicePlugin } from '@objectstack/service-settings';
+// Paid at module load, as every dist-resolved dependency the boot reaches is.
+import '@objectstack/service-settings';
 import { bootSchemaStack, type SchemaStack } from '../../utils/schema-migrate.js';
 import type { SecretReferenceEngineLike } from '../../utils/secret-reference-union.js';
+import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
 import SecretOrphans from './orphans.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -137,7 +139,7 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
       databaseUrl: `file:${dbFile}`,
       // Byte-identical to `orphans.ts`'s own list — the boot has to be the
       // command's, or the driver this file names is not the one it holds.
-      extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
+      extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
     });
 
     const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;

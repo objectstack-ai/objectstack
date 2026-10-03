@@ -1041,9 +1041,14 @@ export default class Compile extends Command {
               await emitJson({ success: false, error: `runtime bundle failed: ${err.message}`, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
               this.exit(1);
             }
+            // The `✗` line below is this refusal's one rendering. It used to end
+            // in `this.error(err.message)`, which has oclif's entry point render
+            // the same message again as an `Error:` block on stderr; `this.exit(2)`
+            // raises the same signal with the status `this.error` raised, and
+            // renders nothing.
             console.log('');
             printError(`Runtime bundle failed: ${err.message}`);
-            this.error(err.message);
+            this.exit(2);
           }
         }
       }
@@ -1204,17 +1209,20 @@ export default class Compile extends Command {
       printAdvisoriesOnce();
       // [#15547] `resolveConfigPath()` already wrote its refusal and hint lines
       // to stderr before throwing, so this face has nothing left to render —
-      // and `this.error()` below is NOT a no-op for it: it re-renders the same
-      // sentence as an oclif `›   Error:` block AND raises this face's exit
+      // and an oclif `this.error()` here is NOT a no-op for it: it re-renders
+      // the same sentence as an `›   Error:` block AND raises this face's exit
       // status from 1 to 2. Measured on the published entry, `os compile
       // ./missing.ts` (and `os build`, which inherits this catch): exit 2 with
       // 483 stderr bytes, where the other eight faces answer exit 1 with 296.
       // `this.exit(1)` throws the ExitError the `--json` branch already relies
       // on, so the status and the bytes both stay where they were.
       if (isReportedError(error)) this.exit(1);
+      // Any other failure is rendered here, once, by `printError`, and ends in
+      // `this.exit(2)`: the status the `this.error()` that stood here raised
+      // (its entry-point `Error:` block was the same sentence a second time).
       console.log('');
       printError(error.message || String(error));
-      this.error(error.message || String(error));
+      this.exit(2);
     }
   }
 }

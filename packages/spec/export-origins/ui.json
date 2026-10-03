@@ -4,7 +4,6 @@
   "exports": {
     "ACTION_LOCATIONS": "src/ui/action.zod.ts#ACTION_LOCATIONS (const)",
     "ACTION_PARAM_BUILTIN_KEYS": "src/ui/action-params.zod.ts#ACTION_PARAM_BUILTIN_KEYS (const)",
-    "AIChatWindowProps": "src/ui/component.zod.ts#AIChatWindowProps (const)",
     "ASSEMBLED_VIEW_ITEMS_KEY": "src/ui/assembled-views.zod.ts#ASSEMBLED_VIEW_ITEMS_KEY (const)",
     "Action": "src/ui/action.zod.ts#Action (type)",
     "ActionAi": "src/ui/action.zod.ts#ActionAi (type)",
@@ -70,6 +69,7 @@
     "BulkActionParamSchema": "src/ui/bulk-action.zod.ts#BulkActionParamSchema (const)",
     "CHART_AGGREGATE_COMPARISON_SUFFIX": "src/ui/chart-aggregate.ts#CHART_AGGREGATE_COMPARISON_SUFFIX (const)",
     "COLUMN_SUMMARY_AGGREGATION": "src/ui/view-grouping-query.ts#COLUMN_SUMMARY_AGGREGATION (const)",
+    "COMPILED_PAGE_KINDS": "src/ui/page.zod.ts#COMPILED_PAGE_KINDS (const)",
     "CalendarConfig": "src/ui/view.zod.ts#CalendarConfig (type)",
     "CalendarConfigSchema": "src/ui/view.zod.ts#CalendarConfigSchema (const)",
     "ChartAggregate": "src/ui/chart.zod.ts#ChartAggregate (type)",
@@ -468,6 +468,7 @@
     "checkDashboardWidgetStageOrder": "src/ui/dashboard.zod.ts#checkDashboardWidgetStageOrder (function)",
     "checkGlobalFilterDateDefaultValue": "src/ui/dashboard.zod.ts#checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization": "src/ui/view.zod.ts#checkListViewCalendarVisualization (function)",
+    "checkPageRequiresKind": "src/ui/page.zod.ts#checkPageRequiresKind (function)",
     "checkPageSourceCompleteness": "src/ui/page.zod.ts#checkPageSourceCompleteness (function)",
     "columnSummaryAlias": "src/ui/view-grouping-query.ts#columnSummaryAlias (function)",
     "compileListViewGroupQuery": "src/ui/view-grouping-query.ts#compileListViewGroupQuery (function)",

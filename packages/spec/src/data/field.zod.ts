@@ -2052,7 +2052,7 @@ export const FieldSchema = lazySchema(() => {
    * on `autonumber`, so no other type's parse output moves.
    */
   autonumberFormat: z.string().optional().meta({
-    description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555).',
+    description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}`, which every driver and the engine fallback read, so one field numbers alike on every backend.',
     default: DEFAULT_AUTONUMBER_FORMAT,
   }),
   // `index` (field-level bool) removed in the 16.x line (#2377, ADR-0049): the

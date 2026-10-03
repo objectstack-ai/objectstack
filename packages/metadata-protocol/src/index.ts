@@ -190,6 +190,37 @@ export {
   redactMetadataItems,
 } from './metadata-redaction.js';
 
+// [#21454] The generic data door's serve of a stored-metadata ROW: the body
+// projected (`storedMetadataBodyProjection` plus this package's
+// `redactStoredMetadataRows`, the `dropType` wrinkle included) and the stored
+// content hash keyed (`serveStoredMetadataHashColumnRows`, under the crypto
+// provider's digest or, while none is registered, `ephemeralStoredHashDigest`,
+// this module's ONE process-scoped key). Exported so the in-process reader
+// contexts in `@objectstack/runtime` serve the family exactly as the door does
+// by consuming these functions, never a copy: a second ephemeral key would
+// serve a second keyed form of the same row.
+export {
+  ephemeralStoredHashDigest,
+  redactStoredMetadataRows,
+  serveStoredMetadataHashColumnRows,
+  storedMetadataBodyProjection,
+} from './metadata-redaction.js';
+export type { StoredHashDigest } from './metadata-redaction.js';
+
+// [#21454] The generic data door's EVALUATE refusals on the same family
+// (#21086 grouping, #21120 body filter / sort, #21207 content-hash evaluate and
+// search). Exported so the in-process reader contexts in `@objectstack/runtime`
+// refuse the evaluate shapes the way the door does — each through the door's
+// OWN predicate, never a copy: a second definition of which shapes leak a
+// stored body or hash is exactly the drift the family's one rule exists to
+// prevent.
+export {
+  storedMetadataBodyGroupingRefusal,
+  storedMetadataBodyPredicateRefusal,
+  storedMetadataHashEvaluateRefusal,
+  storedMetadataSearchRefusal,
+} from './metadata-redaction.js';
+
 export type { MetadataHostEngine } from './host-engine.js';
 
 // [#7560] ADR-0070's read-only-package rule. The authoring path (`saveMetaItem`

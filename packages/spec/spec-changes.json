@@ -10,217 +10,217 @@
     "converted": [
       {
         "surface": "action.execute",
-        "to": "action key 'execute' → 'target' (the deprecated handler alias, #3713)",
+        "to": "action key 'execute' → 'target' (the deprecated handler alias; the spec and the renderer had resolved the pair in opposite directions, so one key now names the handler)",
         "conversionId": "action-execute-to-target",
         "toMajor": 17
       },
       {
         "surface": "field.conditionalRequired",
-        "to": "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754)",
+        "to": "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, folded into the canonical key so no reader picks its own precedence)",
         "conversionId": "field-conditionalRequired-to-requiredWhen",
         "toMajor": 17
       },
       {
         "surface": "agent.tools",
-        "to": "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
+        "to": "agent key 'tools' removed — declare capability in a skill (ADR-0064: an agent's tools are exactly its skills' tools, and this inline slot resolved names against the whole registry with no surface check)",
         "conversionId": "agent-tools-to-skills",
         "toMajor": 17
       },
       {
         "surface": "sharingRule.accessLevel",
-        "to": "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
+        "to": "sharing-rule accessLevel 'full' → 'edit' (`full` never granted more than `edit`; a sharing rule grants read or edit, while delete and transfer come from object permissions and ownership)",
         "conversionId": "sharing-rule-access-level-full-to-edit",
         "toMajor": 17
       },
       {
         "surface": "flow.node.config.objectName",
-        "to": "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+        "to": "CRUD flow-node config key 'object' → 'objectName' (the last alias in the executors' `readAliasedConfig` shim graduates into this layer, and the shim is deleted)",
         "conversionId": "flow-node-crud-object-alias",
         "toMajor": 17
       },
       {
         "surface": "flow.node.notify.config",
-        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (executor `??` fallbacks graduated into this layer; `actionUrl` is canonical because the notification chain downstream already uses it), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (a shape the executor read that no config schema declared)",
         "conversionId": "flow-node-notify-config-aliases",
         "toMajor": 17
       },
       {
         "surface": "flow.node.wait.waitEventConfig",
-        "to": "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', 'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (#4045)",
+        "to": "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', 'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (the executor also read these keys from the loose config, a second contract beside the declared block)",
         "conversionId": "flow-node-wait-event-config-lift",
         "toMajor": 17
       },
       {
         "surface": "flow.node.connector_action.connectorConfig",
-        "to": "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → the declared `connectorConfig` block (#4045)",
+        "to": "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → the declared `connectorConfig` block (the executor reads only that block; the published designer form had been writing these keys where nothing read them)",
         "conversionId": "flow-node-connector-config-lift",
         "toMajor": 17
       },
       {
         "surface": "flow.node.map.config.flowName",
-        "to": "map flow-node config key 'flow' → 'flowName' (#4045 — undeclared executor fallback graduation)",
+        "to": "map flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback; it graduates into this layer)",
         "conversionId": "flow-node-map-flow-alias",
         "toMajor": 17
       },
       {
         "surface": "flow.node.subflow.config.flowName",
-        "to": "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+        "to": "subflow flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback, found when the schemaless nodes were reconciled with their executors; it graduates into this layer)",
         "conversionId": "flow-node-subflow-flow-alias",
         "toMajor": 17
       },
       {
         "surface": "flow.node.script.config",
-        "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+        "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (executor `??` fallbacks, graduated into this layer)",
         "conversionId": "flow-node-script-config-aliases",
         "toMajor": 17
       },
       {
         "surface": "permission.rowLevelSecurity.priority",
-        "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+        "to": "RLS-policy key 'priority' removed (a security audit found no reader: policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
         "conversionId": "permission-rls-priority-removed",
         "toMajor": 17
       },
       {
         "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
-        "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+        "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (authorable and inert, so removed under ADR-0049 enforce-or-remove; permissions gated nothing, active:false withdrew nothing)",
         "conversionId": "tool-inert-authoring-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / app.homePageId / app.areas.order",
-        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (premise corrected in #4709; the retirement stands), and no renderer ever sorted areas)",
+        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits found each one unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (the first retirement record said nothing read it, a premise since corrected; the retirement stands), and no renderer ever sorted areas)",
         "conversionId": "app-dead-authoring-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "app.areas.visible / app.areas.requiredPermissions",
-        "to": "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+        "to": "navigation-area keys 'visible'/'requiredPermissions' removed (ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
         "conversionId": "app-area-fail-open-gates-removed",
         "toMajor": 17
       },
       {
         "surface": "action.shortcut / action.bulkEnabled",
-        "to": "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+        "to": "action keys 'shortcut'/'bulkEnabled' removed (inert, removed under ADR-0049 enforce-or-remove: no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
         "conversionId": "action-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId",
-        "to": "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+        "to": "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (inert, removed under ADR-0049 enforce-or-remove: active:false never stopped a flow; status is the enforced lifecycle)",
         "conversionId": "flow-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria",
-        "to": "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+        "to": "view keys removed as inert (ADR-0049 enforce-or-remove): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
         "conversionId": "view-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "view.list.striped / view.list.bordered / view.list.virtualScroll",
-        "to": "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
+        "to": "view list keys removed: 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (a key that is only passed through is dead in effect; ADR-0049 enforce-or-remove)",
         "conversionId": "view-list-passthrough-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "view.list.exportOptions / view.listViews.*.exportOptions",
-        "to": "list-view export format 'pdf' removed (#8010 — PDF export was declined as #1301 NOT_PLANNED; ObjectGrid dropped the declared format from the menu with only a runtime console.warn)",
+        "to": "list-view export format 'pdf' removed (PDF export was declined as not planned, and ObjectGrid dropped the declared format from the menu with only a runtime console.warn; an honest enum replaces that warning)",
         "conversionId": "view-export-options-pdf-removed",
         "toMajor": 17
       },
       {
         "surface": "dashboard.aria / dashboard.performance / dashboard.widgets[].performance",
-        "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+        "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (inert, removed under ADR-0049 enforce-or-remove: no renderer applied any of them)",
         "conversionId": "dashboard-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "dashboard.widgets[].responsive",
-        "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
+        "to": "dashboard widget key 'responsive' removed (no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was measured equally unread and retired at protocol 18)",
         "conversionId": "dashboard-widget-responsive-removed",
         "toMajor": 17
       },
       {
         "surface": "dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / dashboard.widgets[].actionIcon / dashboard.widgets[].aria",
-        "to": "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed (#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never reached the DOM; use header.actions[] and the widget title/description)",
+        "to": "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed (no renderer ever drew a per-widget action button, and widget ARIA attributes never reached the DOM; use header.actions[] and the widget title/description)",
         "conversionId": "dashboard-widget-action-aria-removed",
         "toMajor": 17
       },
       {
         "surface": "dashboard.widgets[].compareTo",
-        "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
+        "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (the shape the dataset executor implements; the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
         "conversionId": "dashboard-widget-compareto-converged",
         "toMajor": 17
       },
       {
         "surface": "agent.knowledge",
-        "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+        "to": "agent key 'knowledge' removed (inert, removed under ADR-0049 enforce-or-remove: declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
         "conversionId": "agent-knowledge-removed",
         "toMajor": 17
       },
       {
         "surface": "skill.triggerPhrases",
-        "to": "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+        "to": "skill key 'triggerPhrases' removed (inert, removed under ADR-0049 enforce-or-remove: activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
         "conversionId": "skill-trigger-phrases-removed",
         "toMajor": 17
       },
       {
         "surface": "stack.api.requireAuth",
-        "to": "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+        "to": "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (a public form, a share link or `book.audience: 'public'`), which replaced the deployment-wide opt-out",
         "conversionId": "stack-api-require-auth-removed",
         "toMajor": 17
       },
       {
         "surface": "flow.node.waitEventConfig",
-        "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+        "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired): wait never had a timeout, so its timeout contract is withdrawn rather than built",
         "conversionId": "flow-node-wait-timeout-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "datasource.readReplicas",
-        "to": "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+        "to": "datasource key 'readReplicas' removed (no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
         "conversionId": "datasource-read-replicas-removed",
         "toMajor": 17
       },
       {
         "surface": "datasource.capabilities",
-        "to": "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
+        "to": "datasource key 'capabilities' removed (eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
         "conversionId": "datasource-capabilities-removed",
         "toMajor": 17
       },
       {
         "surface": "datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission",
-        "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
+        "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody; each of those jobs already has a live mechanism)",
         "conversionId": "datasource-inert-blocks-removed",
         "toMajor": 17
       },
       {
         "surface": "mapping.extractQuery / mapping.errorPolicy / mapping.batchSize",
-        "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+        "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
         "conversionId": "mapping-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "book.translations / book.groups.translations",
-        "to": "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+        "to": "book keys 'translations' (book-level and group-level) removed (no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
         "conversionId": "book-translations-removed",
         "toMajor": 17
       },
       {
         "surface": "job.id",
-        "to": "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+        "to": "job key 'id' removed (nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
         "conversionId": "job-id-removed",
         "toMajor": 17
       },
       {
         "surface": "translation.validationMessages",
-        "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
+        "to": "translation key 'validationMessages' removed (no resolver read it, so a translated rule message was stored and never shown; the legacy-key table of the translation-bundle migration had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, a translation key shipped together with its reader)",
         "conversionId": "translation-validation-messages-removed",
         "toMajor": 17
       },
       {
         "surface": "datasource.config",
-        "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+        "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (undeclared driver-factory `??` fallbacks, graduated into this layer and deleted from the reader)",
         "conversionId": "datasource-config-driver-key-aliases",
         "toMajor": 17
       },
@@ -232,121 +232,121 @@
       },
       {
         "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
-        "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+        "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed); script is now a pure function-call node, the only path that ran real logic",
         "conversionId": "flow-node-script-branch-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
-        "to": "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
+        "to": "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1: two declarations that differed only by accident became one, and retry is opt-in because a retry replays whatever the attempt already did",
         "conversionId": "retry-policy-converged",
         "toMajor": 17
       },
       {
         "surface": "object.managedBy",
-        "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
+        "to": "object managedBy 'system' → 'system-data' (ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
         "conversionId": "object-managed-by-system-to-system-data",
         "toMajor": 17
       },
       {
         "surface": "object.enable.trash / object.enable.mru",
-        "to": "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
+        "to": "object capability flags 'enable.trash'/'enable.mru' removed (the last slice of the dead author-facing property removals: no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
         "conversionId": "object-enable-trash-mru-removed",
         "toMajor": 17
       },
       {
         "surface": "hook.body.capabilities / action.body.capabilities",
-        "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
+        "to": "script-body capability token 'crypto.hash' removed (the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
         "conversionId": "hook-body-crypto-hash-removed",
         "toMajor": 17
       },
       {
         "surface": "dataset.measures[].aggregate",
-        "to": "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend compiled them and the v1 dataset runtime refused them by name, so a measure declaring one never produced a value; the measure is dropped, and with it any derived measure left referencing it)",
+        "to": "dataset measure aggregates 'array_agg' / 'string_agg' removed (no SQL backend compiled them and the v1 dataset runtime refused them by name, so a measure declaring one never produced a value; the measure is dropped, and with it any derived measure left referencing it)",
         "conversionId": "dataset-measure-array-string-agg-removed",
         "toMajor": 17
       },
       {
         "surface": "connector.rateLimitConfig",
-        "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
+        "to": "connector key 'rateLimitConfig' removed (no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
         "conversionId": "connector-rate-limit-config-removed",
         "toMajor": 17
       },
       {
         "surface": "connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform",
-        "to": "field-mapping key 'transform' removed (#5552 — the whole five-member FieldMappingTransform union went with it: no runtime ever executed constant/cast/lookup/javascript/map, and the javascript member advertised dialect=\"js\", retired in #3278. The enforced transform pipeline is the import mapping's string-enum `mapping.fieldMapping[].transform`, which is unaffected)",
+        "to": "field-mapping key 'transform' removed (the whole five-member FieldMappingTransform union went with it: no runtime ever executed constant/cast/lookup/javascript/map, and the javascript member advertised dialect=\"js\", a dialect already retired because JavaScript belongs in a script body. The enforced transform pipeline is the import mapping's string-enum `mapping.fieldMapping[].transform`, which is unaffected)",
         "conversionId": "field-mapping-transform-removed",
         "toMajor": 17
       },
       {
         "surface": "theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight / theme.typography.letterSpacing / theme.typography.fontFamily.heading / theme.typography.fontFamily.mono / theme.animation / theme.zIndex",
-        "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
+        "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
         "conversionId": "theme-inert-token-scales-removed",
         "toMajor": 17
       },
       {
         "surface": "page.component.page-header.description",
-        "to": "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+        "to": "page-header component prop 'description' → 'subtitle' (the off-spec spelling a renderer tolerated through a bare `subtitle ?? description` fallback; `subtitle` is the declared key, and the fallback retires)",
         "conversionId": "page-header-subtitle-alias",
         "toMajor": 17
       },
       {
         "surface": "object.indexes[].type / object.indexes[].partial",
-        "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
+        "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
         "conversionId": "object-index-type-partial-removed",
         "toMajor": 17
       },
       {
         "surface": "page.component.element:record_picker.displayField",
-        "to": "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+        "to": "record-picker component prop 'displayField' → 'labelField' (the required key no renderer read; `labelField ?? 'name'` is what renders the row, so the delivered spelling became the declared one)",
         "conversionId": "record-picker-display-field-to-label-field",
         "toMajor": 17
       },
       {
         "surface": "page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple",
-        "to": "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+        "to": "record-picker component props 'searchFields'/'multiple' removed (the control is a plain single-select with no search box; neither key had a reader)",
         "conversionId": "record-picker-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "page.component.page:card.body",
-        "to": "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+        "to": "page:card component prop 'body' → 'children' (one composition key across every container; the card renderer already reads both)",
         "conversionId": "page-card-body-to-children",
         "toMajor": 17
       },
       {
         "surface": "page.component.element:button.action.params",
-        "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+        "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (a static payload and a parameter definition are two things, so the payload gets its own key; `params` stays the ActionParam[] definition array)",
         "conversionId": "inline-action-api-params-to-body-extra",
         "toMajor": 17
       },
       {
         "surface": "page.component.page:tabs.type",
-        "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+        "to": "page:tabs component prop 'type' → 'tabStyle' (a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
         "conversionId": "page-tabs-type-to-tab-style",
         "toMajor": 17
       },
       {
         "surface": "page.component.page:header.icon / page.component.page:card.actions",
-        "to": "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer read point in objectui; the header resolves icons per action and the card renders title/children/footer only)",
+        "to": "page:header prop 'icon' and page:card prop 'actions' removed (neither has a renderer read point in objectui; the header resolves icons per action and the card renders title/children/footer only)",
         "conversionId": "page-structure-inert-keys-removed",
         "toMajor": 17
       },
       {
         "surface": "page.component.record:details.layout",
-        "to": "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were never implemented; the renderer branches only on inline|compact, values the schema never permitted, so both legal values selected nothing)",
+        "to": "record:details component prop 'layout' removed (the declared auto|custom modes were never implemented; the renderer branches only on inline|compact, values the schema never permitted, so both legal values selected nothing)",
         "conversionId": "record-details-layout-removed",
         "toMajor": 17
       },
       {
         "surface": "app.hidden",
-        "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+        "to": "stored app publish gate 'hidden' → '_unpublished' (ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
         "conversionId": "app-hidden-to-unpublished",
         "toMajor": 17
       },
       {
         "surface": "action.locations[]",
-        "to": "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K palette reads no action metadata, while the Studio designer previewed a command-palette frame for it. The value is stripped and the key kept, so an action left with no location becomes the documented headless shape `locations: []`)",
+        "to": "action location 'global_nav' removed (no running-app surface rendered it; the ⌘K palette reads no action metadata, while the Studio designer previewed a command-palette frame for it. The value is stripped and the key kept, so an action left with no location becomes the documented headless shape `locations: []`)",
         "conversionId": "action-global-nav-location-removed",
         "toMajor": 17
       }
@@ -902,217 +902,217 @@
       "converted": [
         {
           "surface": "action.execute",
-          "to": "action key 'execute' → 'target' (the deprecated handler alias, #3713)",
+          "to": "action key 'execute' → 'target' (the deprecated handler alias; the spec and the renderer had resolved the pair in opposite directions, so one key now names the handler)",
           "conversionId": "action-execute-to-target",
           "toMajor": 17
         },
         {
           "surface": "field.conditionalRequired",
-          "to": "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754)",
+          "to": "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, folded into the canonical key so no reader picks its own precedence)",
           "conversionId": "field-conditionalRequired-to-requiredWhen",
           "toMajor": 17
         },
         {
           "surface": "agent.tools",
-          "to": "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
+          "to": "agent key 'tools' removed — declare capability in a skill (ADR-0064: an agent's tools are exactly its skills' tools, and this inline slot resolved names against the whole registry with no surface check)",
           "conversionId": "agent-tools-to-skills",
           "toMajor": 17
         },
         {
           "surface": "sharingRule.accessLevel",
-          "to": "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
+          "to": "sharing-rule accessLevel 'full' → 'edit' (`full` never granted more than `edit`; a sharing rule grants read or edit, while delete and transfer come from object permissions and ownership)",
           "conversionId": "sharing-rule-access-level-full-to-edit",
           "toMajor": 17
         },
         {
           "surface": "flow.node.config.objectName",
-          "to": "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+          "to": "CRUD flow-node config key 'object' → 'objectName' (the last alias in the executors' `readAliasedConfig` shim graduates into this layer, and the shim is deleted)",
           "conversionId": "flow-node-crud-object-alias",
           "toMajor": 17
         },
         {
           "surface": "flow.node.notify.config",
-          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (executor `??` fallbacks graduated into this layer; `actionUrl` is canonical because the notification chain downstream already uses it), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (a shape the executor read that no config schema declared)",
           "conversionId": "flow-node-notify-config-aliases",
           "toMajor": 17
         },
         {
           "surface": "flow.node.wait.waitEventConfig",
-          "to": "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', 'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (#4045)",
+          "to": "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', 'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (the executor also read these keys from the loose config, a second contract beside the declared block)",
           "conversionId": "flow-node-wait-event-config-lift",
           "toMajor": 17
         },
         {
           "surface": "flow.node.connector_action.connectorConfig",
-          "to": "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → the declared `connectorConfig` block (#4045)",
+          "to": "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → the declared `connectorConfig` block (the executor reads only that block; the published designer form had been writing these keys where nothing read them)",
           "conversionId": "flow-node-connector-config-lift",
           "toMajor": 17
         },
         {
           "surface": "flow.node.map.config.flowName",
-          "to": "map flow-node config key 'flow' → 'flowName' (#4045 — undeclared executor fallback graduation)",
+          "to": "map flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback; it graduates into this layer)",
           "conversionId": "flow-node-map-flow-alias",
           "toMajor": 17
         },
         {
           "surface": "flow.node.subflow.config.flowName",
-          "to": "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+          "to": "subflow flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback, found when the schemaless nodes were reconciled with their executors; it graduates into this layer)",
           "conversionId": "flow-node-subflow-flow-alias",
           "toMajor": 17
         },
         {
           "surface": "flow.node.script.config",
-          "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+          "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (executor `??` fallbacks, graduated into this layer)",
           "conversionId": "flow-node-script-config-aliases",
           "toMajor": 17
         },
         {
           "surface": "permission.rowLevelSecurity.priority",
-          "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+          "to": "RLS-policy key 'priority' removed (a security audit found no reader: policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
           "conversionId": "permission-rls-priority-removed",
           "toMajor": 17
         },
         {
           "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
-          "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+          "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (authorable and inert, so removed under ADR-0049 enforce-or-remove; permissions gated nothing, active:false withdrew nothing)",
           "conversionId": "tool-inert-authoring-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / app.homePageId / app.areas.order",
-          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (premise corrected in #4709; the retirement stands), and no renderer ever sorted areas)",
+          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits found each one unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (the first retirement record said nothing read it, a premise since corrected; the retirement stands), and no renderer ever sorted areas)",
           "conversionId": "app-dead-authoring-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "app.areas.visible / app.areas.requiredPermissions",
-          "to": "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+          "to": "navigation-area keys 'visible'/'requiredPermissions' removed (ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
           "conversionId": "app-area-fail-open-gates-removed",
           "toMajor": 17
         },
         {
           "surface": "action.shortcut / action.bulkEnabled",
-          "to": "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+          "to": "action keys 'shortcut'/'bulkEnabled' removed (inert, removed under ADR-0049 enforce-or-remove: no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
           "conversionId": "action-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId",
-          "to": "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+          "to": "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (inert, removed under ADR-0049 enforce-or-remove: active:false never stopped a flow; status is the enforced lifecycle)",
           "conversionId": "flow-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria",
-          "to": "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+          "to": "view keys removed as inert (ADR-0049 enforce-or-remove): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
           "conversionId": "view-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "view.list.striped / view.list.bordered / view.list.virtualScroll",
-          "to": "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
+          "to": "view list keys removed: 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (a key that is only passed through is dead in effect; ADR-0049 enforce-or-remove)",
           "conversionId": "view-list-passthrough-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "view.list.exportOptions / view.listViews.*.exportOptions",
-          "to": "list-view export format 'pdf' removed (#8010 — PDF export was declined as #1301 NOT_PLANNED; ObjectGrid dropped the declared format from the menu with only a runtime console.warn)",
+          "to": "list-view export format 'pdf' removed (PDF export was declined as not planned, and ObjectGrid dropped the declared format from the menu with only a runtime console.warn; an honest enum replaces that warning)",
           "conversionId": "view-export-options-pdf-removed",
           "toMajor": 17
         },
         {
           "surface": "dashboard.aria / dashboard.performance / dashboard.widgets[].performance",
-          "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+          "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (inert, removed under ADR-0049 enforce-or-remove: no renderer applied any of them)",
           "conversionId": "dashboard-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "dashboard.widgets[].responsive",
-          "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
+          "to": "dashboard widget key 'responsive' removed (no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was measured equally unread and retired at protocol 18)",
           "conversionId": "dashboard-widget-responsive-removed",
           "toMajor": 17
         },
         {
           "surface": "dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / dashboard.widgets[].actionIcon / dashboard.widgets[].aria",
-          "to": "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed (#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never reached the DOM; use header.actions[] and the widget title/description)",
+          "to": "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed (no renderer ever drew a per-widget action button, and widget ARIA attributes never reached the DOM; use header.actions[] and the widget title/description)",
           "conversionId": "dashboard-widget-action-aria-removed",
           "toMajor": 17
         },
         {
           "surface": "dashboard.widgets[].compareTo",
-          "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
+          "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (the shape the dataset executor implements; the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
           "conversionId": "dashboard-widget-compareto-converged",
           "toMajor": 17
         },
         {
           "surface": "agent.knowledge",
-          "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+          "to": "agent key 'knowledge' removed (inert, removed under ADR-0049 enforce-or-remove: declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
           "conversionId": "agent-knowledge-removed",
           "toMajor": 17
         },
         {
           "surface": "skill.triggerPhrases",
-          "to": "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+          "to": "skill key 'triggerPhrases' removed (inert, removed under ADR-0049 enforce-or-remove: activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
           "conversionId": "skill-trigger-phrases-removed",
           "toMajor": 17
         },
         {
           "surface": "stack.api.requireAuth",
-          "to": "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+          "to": "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (a public form, a share link or `book.audience: 'public'`), which replaced the deployment-wide opt-out",
           "conversionId": "stack-api-require-auth-removed",
           "toMajor": 17
         },
         {
           "surface": "flow.node.waitEventConfig",
-          "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+          "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired): wait never had a timeout, so its timeout contract is withdrawn rather than built",
           "conversionId": "flow-node-wait-timeout-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "datasource.readReplicas",
-          "to": "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+          "to": "datasource key 'readReplicas' removed (no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
           "conversionId": "datasource-read-replicas-removed",
           "toMajor": 17
         },
         {
           "surface": "datasource.capabilities",
-          "to": "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
+          "to": "datasource key 'capabilities' removed (eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
           "conversionId": "datasource-capabilities-removed",
           "toMajor": 17
         },
         {
           "surface": "datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission",
-          "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
+          "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody; each of those jobs already has a live mechanism)",
           "conversionId": "datasource-inert-blocks-removed",
           "toMajor": 17
         },
         {
           "surface": "mapping.extractQuery / mapping.errorPolicy / mapping.batchSize",
-          "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+          "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
           "conversionId": "mapping-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "book.translations / book.groups.translations",
-          "to": "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+          "to": "book keys 'translations' (book-level and group-level) removed (no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
           "conversionId": "book-translations-removed",
           "toMajor": 17
         },
         {
           "surface": "job.id",
-          "to": "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+          "to": "job key 'id' removed (nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
           "conversionId": "job-id-removed",
           "toMajor": 17
         },
         {
           "surface": "translation.validationMessages",
-          "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
+          "to": "translation key 'validationMessages' removed (no resolver read it, so a translated rule message was stored and never shown; the legacy-key table of the translation-bundle migration had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, a translation key shipped together with its reader)",
           "conversionId": "translation-validation-messages-removed",
           "toMajor": 17
         },
         {
           "surface": "datasource.config",
-          "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+          "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (undeclared driver-factory `??` fallbacks, graduated into this layer and deleted from the reader)",
           "conversionId": "datasource-config-driver-key-aliases",
           "toMajor": 17
         },
@@ -1124,121 +1124,121 @@
         },
         {
           "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
-          "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+          "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed); script is now a pure function-call node, the only path that ran real logic",
           "conversionId": "flow-node-script-branch-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
-          "to": "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
+          "to": "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1: two declarations that differed only by accident became one, and retry is opt-in because a retry replays whatever the attempt already did",
           "conversionId": "retry-policy-converged",
           "toMajor": 17
         },
         {
           "surface": "object.managedBy",
-          "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
+          "to": "object managedBy 'system' → 'system-data' (ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
           "conversionId": "object-managed-by-system-to-system-data",
           "toMajor": 17
         },
         {
           "surface": "object.enable.trash / object.enable.mru",
-          "to": "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
+          "to": "object capability flags 'enable.trash'/'enable.mru' removed (the last slice of the dead author-facing property removals: no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
           "conversionId": "object-enable-trash-mru-removed",
           "toMajor": 17
         },
         {
           "surface": "hook.body.capabilities / action.body.capabilities",
-          "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
+          "to": "script-body capability token 'crypto.hash' removed (the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
           "conversionId": "hook-body-crypto-hash-removed",
           "toMajor": 17
         },
         {
           "surface": "dataset.measures[].aggregate",
-          "to": "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend compiled them and the v1 dataset runtime refused them by name, so a measure declaring one never produced a value; the measure is dropped, and with it any derived measure left referencing it)",
+          "to": "dataset measure aggregates 'array_agg' / 'string_agg' removed (no SQL backend compiled them and the v1 dataset runtime refused them by name, so a measure declaring one never produced a value; the measure is dropped, and with it any derived measure left referencing it)",
           "conversionId": "dataset-measure-array-string-agg-removed",
           "toMajor": 17
         },
         {
           "surface": "connector.rateLimitConfig",
-          "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
+          "to": "connector key 'rateLimitConfig' removed (no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
           "conversionId": "connector-rate-limit-config-removed",
           "toMajor": 17
         },
         {
           "surface": "connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform",
-          "to": "field-mapping key 'transform' removed (#5552 — the whole five-member FieldMappingTransform union went with it: no runtime ever executed constant/cast/lookup/javascript/map, and the javascript member advertised dialect=\"js\", retired in #3278. The enforced transform pipeline is the import mapping's string-enum `mapping.fieldMapping[].transform`, which is unaffected)",
+          "to": "field-mapping key 'transform' removed (the whole five-member FieldMappingTransform union went with it: no runtime ever executed constant/cast/lookup/javascript/map, and the javascript member advertised dialect=\"js\", a dialect already retired because JavaScript belongs in a script body. The enforced transform pipeline is the import mapping's string-enum `mapping.fieldMapping[].transform`, which is unaffected)",
           "conversionId": "field-mapping-transform-removed",
           "toMajor": 17
         },
         {
           "surface": "theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight / theme.typography.letterSpacing / theme.typography.fontFamily.heading / theme.typography.fontFamily.mono / theme.animation / theme.zIndex",
-          "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
+          "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
           "conversionId": "theme-inert-token-scales-removed",
           "toMajor": 17
         },
         {
           "surface": "page.component.page-header.description",
-          "to": "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+          "to": "page-header component prop 'description' → 'subtitle' (the off-spec spelling a renderer tolerated through a bare `subtitle ?? description` fallback; `subtitle` is the declared key, and the fallback retires)",
           "conversionId": "page-header-subtitle-alias",
           "toMajor": 17
         },
         {
           "surface": "object.indexes[].type / object.indexes[].partial",
-          "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
+          "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
           "conversionId": "object-index-type-partial-removed",
           "toMajor": 17
         },
         {
           "surface": "page.component.element:record_picker.displayField",
-          "to": "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+          "to": "record-picker component prop 'displayField' → 'labelField' (the required key no renderer read; `labelField ?? 'name'` is what renders the row, so the delivered spelling became the declared one)",
           "conversionId": "record-picker-display-field-to-label-field",
           "toMajor": 17
         },
         {
           "surface": "page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple",
-          "to": "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+          "to": "record-picker component props 'searchFields'/'multiple' removed (the control is a plain single-select with no search box; neither key had a reader)",
           "conversionId": "record-picker-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "page.component.page:card.body",
-          "to": "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+          "to": "page:card component prop 'body' → 'children' (one composition key across every container; the card renderer already reads both)",
           "conversionId": "page-card-body-to-children",
           "toMajor": 17
         },
         {
           "surface": "page.component.element:button.action.params",
-          "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+          "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (a static payload and a parameter definition are two things, so the payload gets its own key; `params` stays the ActionParam[] definition array)",
           "conversionId": "inline-action-api-params-to-body-extra",
           "toMajor": 17
         },
         {
           "surface": "page.component.page:tabs.type",
-          "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+          "to": "page:tabs component prop 'type' → 'tabStyle' (a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
           "conversionId": "page-tabs-type-to-tab-style",
           "toMajor": 17
         },
         {
           "surface": "page.component.page:header.icon / page.component.page:card.actions",
-          "to": "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer read point in objectui; the header resolves icons per action and the card renders title/children/footer only)",
+          "to": "page:header prop 'icon' and page:card prop 'actions' removed (neither has a renderer read point in objectui; the header resolves icons per action and the card renders title/children/footer only)",
           "conversionId": "page-structure-inert-keys-removed",
           "toMajor": 17
         },
         {
           "surface": "page.component.record:details.layout",
-          "to": "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were never implemented; the renderer branches only on inline|compact, values the schema never permitted, so both legal values selected nothing)",
+          "to": "record:details component prop 'layout' removed (the declared auto|custom modes were never implemented; the renderer branches only on inline|compact, values the schema never permitted, so both legal values selected nothing)",
           "conversionId": "record-details-layout-removed",
           "toMajor": 17
         },
         {
           "surface": "app.hidden",
-          "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+          "to": "stored app publish gate 'hidden' → '_unpublished' (ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
           "conversionId": "app-hidden-to-unpublished",
           "toMajor": 17
         },
         {
           "surface": "action.locations[]",
-          "to": "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K palette reads no action metadata, while the Studio designer previewed a command-palette frame for it. The value is stripped and the key kept, so an action left with no location becomes the documented headless shape `locations: []`)",
+          "to": "action location 'global_nav' removed (no running-app surface rendered it; the ⌘K palette reads no action metadata, while the Studio designer previewed a command-palette frame for it. The value is stripped and the key kept, so an action left with no location becomes the documented headless shape `locations: []`)",
           "conversionId": "action-global-nav-location-removed",
           "toMajor": 17
         }

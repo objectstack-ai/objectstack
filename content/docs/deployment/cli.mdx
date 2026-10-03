@@ -1053,10 +1053,14 @@ your app to read its metadata. Without `--apply`, that boot is read-only, the sa
 loaded, and a SQLite file that does not exist is not created. With `--apply`, the boot
 creates missing tables and columns so the migration has somewhere to write, but it
 still loads no seed data: the only rows that change are the migration's own.
-One edge follows from the read-only boot. A dry run pointed at a database that lacks a
-table it reads (a never-booted database, or the wrong `--database-url`) can fail and exit
-1, naming the table, where it used to create the table and report nothing to do. Point
-`--database-url` at the deployment's database, or boot the deployment once first.
+One edge follows from the read-only boot: it finds out which tables the database lacks
+(a never-booted database, or the wrong `--database-url`) instead of creating them.
+`os migrate value-shapes` does not read a table it found missing, since that table
+holds nothing: the scan is clean over zero records, exits 0, and names the objects it
+did not read. `os migrate recorded-by` and `os migrate resume` answer the same way
+(nothing to convert, no interrupted runs). Another dry run that reads a missing table
+can still fail and exit 1, naming the table. Point `--database-url` at the
+deployment's database, or boot the deployment once first.
 
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing

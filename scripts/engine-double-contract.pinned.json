@@ -737,6 +737,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.item-name-grammar.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3793,6 +3808,21 @@
     },
     {
       "file": "packages/runtime/src/seed-loader.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
       "verb": "update",
       "pinned": 1
     },

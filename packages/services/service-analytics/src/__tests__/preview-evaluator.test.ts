@@ -10,6 +10,7 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import { AnalyticsService } from '../analytics-service.js';
 import { evaluateAnalyticsQueryOverRows, bucketDate, matchesWhere } from '../preview-evaluator.js';
 import type { Cube } from '@objectstack/spec/data';
+import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 
 const SEED_ROWS = [
   { title: 'Flight', amount: 1200, category: 'travel', spent_on: '2026-05-03' },
@@ -151,19 +152,34 @@ describe('evaluateAnalyticsQueryOverRows', () => {
     expect(matchesWhere({ a: 'Hello World' }, { a: { $contains: 'world' } })).toBe(true);
   });
 
-  it('a bare-day $lte covers the whole day on a timestamp value (#3777)', () => {
-    // Same translation the SQL paths apply — the preview must agree, or a
-    // drafted chart shows different numbers than the published one.
-    expect(matchesWhere({ at: '2026-07-28T21:40:00.000Z' }, { at: { $lte: '2026-07-28' } })).toBe(true);
-    expect(matchesWhere({ at: '2026-07-29T00:00:00.000Z' }, { at: { $lte: '2026-07-28' } })).toBe(false);
-    // A plain date value is unchanged (string ordering makes the two forms
-    // equivalent there).
-    expect(matchesWhere({ on: '2026-07-28' }, { on: { $lte: '2026-07-28' } })).toBe(true);
-    expect(matchesWhere({ on: '2026-07-29' }, { on: { $lte: '2026-07-28' } })).toBe(false);
+  it('a bare-day $lte covers the whole day on a declared datetime — the shared lowering\'s rule, not the matcher\'s (#3777, #5930 step 4)', () => {
+    // [ADR-0053 D-D1, amended — #5930 step 4] `matchesWhere` compares the bound
+    // it is handed, like every other operator: a bare day is that day's
+    // midnight to it. The whole day is the shared lowering's, which
+    // `evaluateAnalyticsQueryOverRows` runs with the drafted object's declared
+    // types — the same answer the SQL paths give, so a drafted chart shows the
+    // numbers the published one will.
+    expect(matchesWhere({ at: '2026-07-28T21:40:00.000Z' }, { at: { $lte: '2026-07-28' } })).toBe(false);
+    const CUBE = { name: 'c', sql: 'c', dimensions: { id: { sql: 'id', type: 'string' } }, measures: { n: { sql: '*', type: 'count' } } } as unknown as Cube;
+    const rows = [
+      { id: 'late', at: '2026-07-28T21:40:00.000Z', on: '2026-07-28', note: '2026-07-28 late' },
+      { id: 'next', at: '2026-07-29T00:00:00.000Z', on: '2026-07-29', note: '2026-07-29' },
+    ];
+    const declared = (field: string) => ({ at: 'datetime', on: 'date', note: 'text' } as Record<string, string>)[field];
+    const ids = (where: Record<string, unknown>, declaredType?: (field: string) => string | undefined) =>
+      evaluateAnalyticsQueryOverRows({ measures: ['n'], dimensions: ['id'], where } as AnalyticsQuery, CUBE, rows.map((r) => ({ ...r })), declaredType)
+        .rows.map((r) => String(r.id)).sort();
+    // A declared datetime: the whole final day, and not the next midnight.
+    expect(ids({ at: { $lte: '2026-07-28' } }, declared)).toEqual(['late']);
+    // A declared date: the comparison as written, which orders exactly as the whole day.
+    expect(ids({ on: { $lte: '2026-07-28' } }, declared)).toEqual(['late']);
+    // A declared text column: as written, as the engine compares it — the
+    // `'2026-07-28 late'` text sorts after `'2026-07-28'`.
+    expect(ids({ note: { $lte: '2026-07-28' } }, declared)).toEqual([]);
+    // No declared type: type-blind (ADR-0053 D-D1 item 7).
+    expect(ids({ note: { $lte: '2026-07-28' } })).toEqual(['late']);
     // Full-ISO bounds keep instant semantics.
-    expect(
-      matchesWhere({ at: '2026-07-28T21:40:00.000Z' }, { at: { $lte: '2026-07-28T12:00:00.000Z' } }),
-    ).toBe(false);
+    expect(ids({ at: { $lte: '2026-07-28T12:00:00.000Z' } }, declared)).toEqual([]);
   });
 
   it('a timeDimension dateRange keeps the final day of the window on timestamps (#3777)', () => {

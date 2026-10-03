@@ -1613,7 +1613,7 @@ describe('[#6428] fail-closed: an unresolvable verdict is DENY, never abstain', 
 
     expect(logged.length).toBeGreaterThan(0);
     expect(String(logged[0][0])).toContain('fail-closed');
-    expect(String(logged[0][0])).toContain('#6428');
+    expect(String(logged[0][0])).toContain('an abstention would hand the row to the other write authorities');
   });
 
   it('a throwing SHARE lookup denies too — the whole evaluation is covered, not just the first query', async () => {

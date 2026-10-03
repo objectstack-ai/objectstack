@@ -328,7 +328,7 @@ describe('[#21113] REMOTE: what is deliberately left as it was', () => {
       case_number: 'CASE-00043',
     });
     const updated = await driver.update('crm_case', 'fixed2', { title: 'renamed' });
-    // [#14438] `update()` declares its not-found arm; a seeded id must answer the row.
+    // [commit 2200f8ec8] `update()` declares its not-found arm; a seeded id must answer the row.
     assert(updated !== null, 'update on a seeded id answered the not-found arm');
     expect(updated.case_number).toBe('CASE-00043');
     expect(updated.title).toBe('renamed');

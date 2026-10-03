@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #14438 — `TursoDriver.update()`'s declared return type is the contract's, not
+// Commit 2200f8ec8 — `TursoDriver.update()`'s declared return type is the contract's, not
 // `any`, and it carries the not-found arm.
 //
 // `TursoDriver` does not merely inherit `SqlDriver.update()` — it OVERRIDES it
@@ -8,8 +8,8 @@
 // `RemoteTransport.update()`'s result through the generic `formatRemoteRow`),
 // and the override was written out with its own explicit `Promise<any>`. Both
 // branches already carried the honest type: `SqlDriver.update()` is narrowed
-// by #14438 and `RemoteTransport.update()` declared
-// `Promise<Record<string, unknown> | null>` with #14428. The override's
+// by commit 2200f8ec8 and `RemoteTransport.update()` declared
+// `Promise<Record<string, unknown> | null>` with commit ca3fd4b1a. The override's
 // annotation was the one place the family's honest type was re-erased, so
 // this package's published `.d.ts` re-declared the door as `any` on its own —
 // which is why "TursoDriver inherits the fix" would have been wrong, and why
@@ -34,7 +34,7 @@
 // errors are the consumer sites the narrowing was written to surface.
 //
 // The runtime case below drives the LOCAL face (`:memory:`); the remote face's
-// `null` on a miss is pinned by the `RemoteTransport` suites (#14428).
+// `null` on a miss is pinned by the `RemoteTransport` suites (commit ca3fd4b1a).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
@@ -44,8 +44,8 @@ import { TursoDriver } from './turso-driver.js';
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
- * [#17879] MEASURED — `tursoUpdateIsAny` below is a PHANTOM half against a
- * NESTED regression, and `ContainsAny` (#17876) does NOT close it. On disk,
+ * [commit eb9334915] MEASURED — `tursoUpdateIsAny` below is a PHANTOM half against a
+ * NESTED regression, and `ContainsAny` (commit be5c60291) does NOT close it. On disk,
  * reverting only this override:
  *
  *   door resolves to  `Record<string, unknown> | null`
@@ -56,7 +56,7 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
  *
  * `ContainsAny` distributes over the not-found arm, so the regressed door
  * answers `boolean`, which `= false` accepts. No swap was made; the two
- * measured repairs are in the #17879 report.
+ * measured repairs are in commit eb9334915's message.
  */
 /** Exact (mutual, non-`any`) type equality. */
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;

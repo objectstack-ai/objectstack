@@ -260,7 +260,7 @@ describe('[#12340] stateStrategy refusal', () => {
       expect(m).toContain('were removed');
       expect(m).toContain("Use 'memory'");
       expect(m).toContain('p'); // locates the offending plugin
-      // The negative twin (#13179's strip): the prescription anchors on the
+      // The negative twin (commit fd289be45's strip): the prescription anchors on the
       // ADR and the version — never on a tracker id the refused author
       // cannot resolve. Mirrors the spec-side door's own pin.
       expect(m).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
@@ -385,7 +385,7 @@ describe('[#12428] startWatching refusal and the watch-handle removal', () => {
     expect(m).toContain('never watched');
     expect(m).toContain('scheduleReload');
     expect(m).toContain('p'); // locates the offending plugin
-    // The negative twin (#13179's strip, extended to this door's sibling id):
+    // The negative twin (commit fd289be45's strip, extended to this door's sibling id):
     // anchored on the ADR and the migration call, never on a tracker id.
     expect(m).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   });

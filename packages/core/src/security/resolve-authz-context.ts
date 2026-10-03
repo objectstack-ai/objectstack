@@ -24,7 +24,7 @@
  * `ql` yields a partial context (even `{ positions: [], permissions: [] }`) and
  * enforcement stays the SecurityPlugin's job, never this resolver's.
  *
- * ⚠️ [#13279] A FAILED read is not a missing service, and since the 2026-08-30
+ * ⚠️ [commit 6a180e42d] A FAILED read is not a missing service, and since the 2026-08-30
  * ruling the two no longer share an answer. When a permission-store read is
  * issued and THROWS, this resolver raises {@link AuthzStoreUnavailableError}
  * instead of reporting an empty grant set: an outage must not be answerable as
@@ -39,7 +39,7 @@
  */
 
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
-// [#13279, ruled 2026-08-30] `isMissingTableError` is the one "was this READ
+// [commit 6a180e42d, ruled 2026-08-30] `isMissingTableError` is the one "was this READ
 // failure just an unprovisioned table?" predicate. It was `@objectstack/metadata`'s
 // until this resolver needed it; metadata depends on core, so the ruling relocated
 // it to `@objectstack/types` — which core already depends on — rather than let a
@@ -269,7 +269,7 @@ async function tryFind(
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch (err) {
-    // [#13279] THE loud failure. This `catch` used to `return []`, which made a
+    // [commit 6a180e42d] THE loud failure. This `catch` used to `return []`, which made a
     // FAILED read and an EMPTY one the same answer — so an outage of the
     // permission store resolved as an authenticated principal holding zero
     // capabilities, and the door answered a `403` byte-identical to a genuine
@@ -326,7 +326,7 @@ async function tryFind(
     // Both directions are pinned by name in `authz-store-unavailable.test.ts`
     // ('THE OUTAGE DIRECTION' / 'THE UNPROVISIONED DIRECTION'); keep them.
     //
-    // `object` is passed as `readObject` so the #13324 narrowing applies: a
+    // `object` is passed as `readObject` so commit 4cda78c9b's narrowing applies: a
     // phrase that names some OTHER relation is not evidence about the table
     // this read asked for, and stays loud.
     if (isMissingTableError(err, object)) return [];
@@ -338,7 +338,7 @@ async function tryFind(
  * Resolve the authorization context for an inbound request. Anonymous requests
  * yield `{ positions: [], permissions: [], ... }`.
  *
- * ⚠️ [#13279] This function used to document itself as "Always resolves — never
+ * ⚠️ [commit 6a180e42d] This function used to document itself as "Always resolves — never
  * throws", and that total guarantee WAS the defect: the only way to always
  * resolve across a permission-store outage is to report a capability set the
  * resolver never actually read. It now throws exactly one error —
@@ -711,7 +711,7 @@ function grantAppliesInTenant(organizationId: unknown, tenantId: string | undefi
  * Fail-closed like its parent: a missing engine yields an empty-but-valid
  * envelope.
  *
- * ⚠️ [#13279] "and it never throws" was removed from this sentence deliberately.
+ * ⚠️ [commit 6a180e42d] "and it never throws" was removed from this sentence deliberately.
  * A permission-store read that is issued and FAILS now raises
  * {@link AuthzStoreUnavailableError} rather than contributing an empty grant
  * set, so a `runAs:'user'` automation cannot silently run with the authority of
@@ -922,7 +922,7 @@ export async function resolveUserAuthzGrants(
   // the flag exists rather than a plain deletion. Under `single` — the DEFAULT, what
   // a deployment that configured no tenancy at all resolves to — `bootstrapPlatformAdmin`
   // MINTS this very row for the first human user, and that promotion is ruled correct
-  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08 on #16682, verbatim: "The
+  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08, recorded in ADR-0131's 2026-09-17 amendment, verbatim: "The
   // rest of Choice 4A (#11974, 2026-08-25) stands: retiring the walled write must not
   // retire the `single` one"). A development environment started for a moment cannot be
   // asked to declare an administrator first, so deleting the row route for every posture

@@ -52,12 +52,14 @@
  * gate shows up there as a throw.
  *
  * `the #5146 rewrite cannot swallow the wrapper` is the gate-side question,
- * same as #6386's: the gate sits in `fieldLeaves`, downstream of
- * `nullSafeNegationOperand`. For a MIXED wrapper the carry-through is
- * structural: a non-`$` key never satisfies `operatorIsNullTotal`, so
- * `nullGuardForFieldSpec` never answers `none` for one — the disposition is
- * always `requireValue`/`allowNull`, both of which push the spec by
- * reference, so the gate always sees the author's wrapper.
+ * same as #6386's: the gate sits in `fieldLeaves`, downstream of the rewrite —
+ * the shared lowering's rule 3 (`lowerFilterCondition`, `filter-lowering.ts`),
+ * since #5930 step 4 deleted this module's own copy of it. For a MIXED wrapper
+ * the carry-through is structural: a non-`$` key is never total for a missing
+ * value (the lowering's `operatorIsNullTotal`), so its `nullGuardForFieldSpec`
+ * never answers `none` for one — the disposition is always
+ * `requireValue`/`allowNull`, both of which carry the spec by reference, so the
+ * gate always sees the author's wrapper.
  *
  * ## Reverse verification — direction predicted BEFORE running
  *
@@ -263,11 +265,12 @@ describe('[#6444] a mixed $/non-$ field wrapper is ONE refusal', () => {
 });
 
 describe('[#6444] the #5146 rewrite cannot swallow the wrapper', () => {
-  // The gate lives in `fieldLeaves`, DOWNSTREAM of `nullSafeNegationOperand`.
-  // A mixed wrapper reaches it because a non-$ key never satisfies
-  // `operatorIsNullTotal`, so `nullGuardForFieldSpec` never answers `none` for
-  // one — `requireValue` and `allowNull` both push the author's spec by
-  // REFERENCE. One case per rewrite path that can carry a mixed wrapper.
+  // The gate lives in `fieldLeaves`, DOWNSTREAM of the `$not` rewrite (the
+  // shared lowering's rule 3 since #5930 step 4). A mixed wrapper reaches it
+  // because a non-$ key never satisfies the lowering's `operatorIsNullTotal`,
+  // so its `nullGuardForFieldSpec` never answers `none` for one —
+  // `requireValue` and `allowNull` both carry the author's spec by REFERENCE.
+  // One case per rewrite path that can carry a mixed wrapper.
   const REWRITE_PATHS: Array<{ name: string; where: unknown; field: string }> = [
     {
       name: '`requireValue` — pushes {k: {$null: false}}, {k: spec}; spec kept by reference',

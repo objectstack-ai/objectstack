@@ -287,7 +287,21 @@ export const REMIND_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 export const ESCALATION_JOB_NAME = 'approvals-sla-escalation';
 /** Default interval between SLA escalation scans. */
 export const ESCALATION_SCAN_INTERVAL_MS = 5 * 60 * 1000;
-/** Reserved actor id for machine decisions made by the SLA scanner. */
+/**
+ * The SLA sweep's ACTING identity — what it names as `actorId` when it
+ * auto-decides through `decide()` under {@link SYSTEM_CTX}, because the
+ * system-context arm of `resolveActor` requires an explicit actor.
+ *
+ * ⛔ It is never RECORDED. Every actor column the sweep writes — the
+ * `escalate` row, the auto-decision it then takes, `sys_notification.actor_id`
+ * through `notify` — is a `sys_user` lookup, and under ADR-0118 D1 such a
+ * column holds a user id or `null`, never a sentinel: a machine has no
+ * `sys_user` id, so it records `null` ({@link recordedActor}). That the sweep
+ * acted is the row's own kind (`escalate`, with the configured action in its
+ * comment), and its auto-decision is the `approve` / `reject` the same
+ * request records right after it. Rows stored before this rule carried this
+ * string in `actor_id`; the boot-time `backfillActionSlots` nulls them.
+ */
 export const SLA_ACTOR_ID = 'system:sla';
 /**
  * Read-side legacy window for the #12278 `escalation.enabled` default flip
@@ -319,8 +333,6 @@ export const SLA_ACTOR_ID = 'system:sla';
  * "pick the cheaper transition" instruction.
  */
 export const ESCALATION_ENABLED_FLIP_CUTOFF_MS = Date.parse('2026-08-28T00:00:00Z');
-/** Reserved actor id for requests abandoned because their run died (#3456). */
-export const DEAD_RUN_ACTOR_ID = 'system:dead-run';
 /** How the dead-run sweep must treat one `ExecutionStatus` member. */
 type RunLiveness = 'terminal' | 'live';
 
@@ -838,9 +850,12 @@ function actingUserId(context: ExecutionContext | undefined): string | null {
 }
 
 /**
- * The PERSON a `sys_approval_action` row records in `actor_id` (ADR-0118 D1):
- * a `sys_user` id, or `null` — never the slot the action took (that is
- * `acted_as`), and never an address the caller named.
+ * The PERSON an action records (ADR-0118 D1): a `sys_user` id, or `null` —
+ * never the slot the action took (that is `acted_as`), never an address the
+ * caller named, and never a machine sentinel. It is the one value written to
+ * `sys_approval_action.actor_id` and the one actor `notify` forwards to
+ * `sys_notification.actor_id`; both are `sys_user` lookups, and a non-id in
+ * one drops the row from every join on it, silently.
  *
  * It is the user the CONTEXT vouches for: the session's user, or — on the
  * ADR-0043 action link, which authenticates by its single-use token — the
@@ -851,16 +866,11 @@ function actingUserId(context: ExecutionContext | undefined): string | null {
  * of the rows a position-slot decision writes named them (#21411).
  *
  * A system context that vouches for nobody records nobody, whatever actor it
- * names. One exception, by name: the SLA sweep's reserved {@link SLA_ACTOR_ID}
- * keeps its sentinel. It is ADR-0118 D1 debt this column still carries, with
- * the dead-run sentinel, owned by its own card (#21455) — kept here as one
- * spelled constant rather than widened into "a system context's explicit actor
- * is a person".
+ * names — the SLA sweep's {@link SLA_ACTOR_ID} and the dead-run sweep
+ * included. A machine has no `sys_user` id; what it did is the row's kind.
  */
-function recordedActor(actorId: string, context: ExecutionContext | undefined): string | null {
-  const person = actingUserId(context);
-  if (person) return person;
-  return actorId === SLA_ACTOR_ID ? SLA_ACTOR_ID : null;
+function recordedActor(context: ExecutionContext | undefined): string | null {
+  return actingUserId(context);
 }
 
 /**
@@ -1348,35 +1358,50 @@ export class ApprovalService implements IApprovalService {
     this.messaging = messaging;
   }
 
-  /** Best-effort notification fan-out — failures only log. */
+  /**
+   * Best-effort notification fan-out — failures only log.
+   *
+   * The event's actor is `sys_notification.actor_id` (and, downstream, each
+   * `sys_inbox_message.actor_id`), a `sys_user` lookup. So a caller hands in
+   * the CONTEXT of the action — `actorContext` — never an actor string, and
+   * the actor forwarded is the person that context vouches for
+   * ({@link recordedActor}), or nothing (ADR-0118 D1). There is no string
+   * input to pass a slot address or a machine sentinel through: an address the
+   * caller acted under (`position:<p>`, an email) is not a person, and a
+   * machine sweep vouches for nobody, so it passes no context at all.
+   */
   private async notify(input: {
     topic: string;
     audience: string[];
     payload?: Record<string, unknown>;
     dedupKey?: string;
     source?: { object: string; id: string };
-    actorId?: string;
+    actorContext?: ExecutionContext;
   }): Promise<number> {
-    const audience = input.audience.filter(a => a && !a.includes(':'));
+    const { actorContext, ...event } = input;
+    const audience = event.audience.filter(a => a && !a.includes(':'));
     if (!this.messaging || !audience.length) return 0;
+    const person = actorContext ? recordedActor(actorContext) : null;
     // Deep-link the inbox (#2678 P1.5): a notification about one request should
     // land on that request, not the bare inbox. Rewritten centrally so every
     // call site — and any future one — inherits it; the query param is read by
     // the console inbox to auto-open the drawer.
-    let payload = input.payload;
+    let payload = event.payload;
     if (
       payload?.actionUrl === '/system/approvals'
-      && input.source?.object === 'sys_approval_request'
-      && input.source.id
+      && event.source?.object === 'sys_approval_request'
+      && event.source.id
     ) {
-      payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(input.source.id)}` };
+      payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(event.source.id)}` };
     }
     try {
-      await this.messaging.emit({ severity: 'info', ...input, payload, audience });
+      await this.messaging.emit({
+        severity: 'info', ...event, payload, audience, ...(person ? { actorId: person } : {}),
+      });
       return audience.length;
     } catch (err: any) {
       this.logger?.warn?.('[approvals] notification failed', {
-        topic: input.topic, error: err?.message ?? String(err),
+        topic: event.topic, error: err?.message ?? String(err),
       });
       return 0;
     }
@@ -1542,13 +1567,13 @@ export class ApprovalService implements IApprovalService {
    * to the caller"**. Anything else is `FORBIDDEN`.
    *
    * A system context is exempt and keeps its explicit actor: the SLA sweep
-   * passes the reserved {@link SLA_ACTOR_ID} sentinel, and the ADR-0043 action
+   * passes its acting identity {@link SLA_ACTOR_ID}, and the ADR-0043 action
    * link passes the approver slot its single-use token is cryptographically
    * bound to (having put the person behind that slot on the context —
    * `personForTokenSlot`). Those are the only two callers that hold a
    * trustworthy actor with no session behind them. The actor is the ADDRESS
    * acted under; the person an action row records is the context's
-   * ({@link recordedActor}).
+   * ({@link recordedActor}) — `null` for the sweep, which vouches for nobody.
    *
    * A caller with NO identity at all cannot act. Belt-and-suspenders: the REST
    * anonymous-deny now denies every anonymous request (#3963), but this service
@@ -3248,7 +3273,7 @@ export class ApprovalService implements IApprovalService {
       // Two facts (#21411): the PERSON who decided, and the slot the decision
       // took (see `takenSlot`) — the tally below counts it against the slate
       // by this very value. An override holds no slot and records none.
-      actor_id: recordedActor(actorId, context), acted_as: slot ?? null,
+      actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment ?? null,
       // #4466: the override is recorded on the DECISION, not inferred later.
       // Written as an explicit `false` for an ordinary decision so a reader can
@@ -3805,7 +3830,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
-      actor_id: recordedActor(actorId, context), comment: input.comment ?? null, created_at: now,
+      actor_id: recordedActor(context), comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     await this.engine.update('sys_approval_request', {
@@ -4133,7 +4158,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'revise',
-      actor_id: recordedActor(actorId, context), acted_as: slot ?? null,
+      actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
@@ -4142,7 +4167,7 @@ export class ApprovalService implements IApprovalService {
       await this.engine.insert('sys_approval_action', {
         id: uid('aact'), request_id: requestId, organization_id: org,
         step_name: nodeId, step_index: 0, action: 'reject',
-        actor_id: recordedActor(actorId, context), acted_as: slot ?? null,
+        actor_id: recordedActor(context), acted_as: slot ?? null,
         comment: `Auto-rejected: revision limit (${maxRevisions}) exceeded`, created_at: now,
       }, { context: SYSTEM_CTX });
       await this.engine.update('sys_approval_request', {
@@ -4173,7 +4198,7 @@ export class ApprovalService implements IApprovalService {
         await this.notify({
           topic: 'approval.returned',
           audience: [String(raw.submitter_id)],
-          actorId: actorId,
+          actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
@@ -4216,7 +4241,7 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.returned',
         audience: [String(raw.submitter_id)],
-        actorId: actorId,
+        actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
@@ -4284,7 +4309,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'resubmit',
-      actor_id: recordedActor(actorId, context), comment: input.comment ?? null, created_at: now,
+      actor_id: recordedActor(context), comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     let resumed = false;
@@ -4443,7 +4468,13 @@ export class ApprovalService implements IApprovalService {
       // The hand-off parties are STRUCTURED fields (#4365) — the old default
       // comment (`"<from> → <to>"`) baked raw user ids into user-facing text.
       // `comment` is pure user input: absent unless the actor wrote one.
-      actor_id: recordedActor(actorId, context), acted_as: slot ?? null,
+      // They hold the two SLOT ADDRESSES in their stored spelling — a user id,
+      // an email or a `type:value` literal, exactly as on the slate — because
+      // a reassignment moves a slot, not necessarily a person. That is why
+      // they are slot-address columns like `acted_as`, not `sys_user` lookups
+      // (ADR-0118 D1: a lookup holds an id or null). The person who moved it
+      // is `actor_id`.
+      actor_id: recordedActor(context), acted_as: slot ?? null,
       reassign_from: from, reassign_to: to,
       via_override: viaOverride,
       comment: input.comment ?? null, created_at: now,
@@ -4469,7 +4500,7 @@ export class ApprovalService implements IApprovalService {
     await this.notify({
       topic: 'approval.reassigned',
       audience: [to],
-      actorId: actorId,
+      actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
@@ -4513,7 +4544,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'remind',
-      actor_id: recordedActor(actorId, context), comment: input.comment ?? null, created_at: nowIso,
+      actor_id: recordedActor(context), comment: input.comment ?? null, created_at: nowIso,
     }, { context: SYSTEM_CTX });
 
     // Per-approver fan-out: concrete identities (user ids / emails) each get
@@ -4528,7 +4559,7 @@ export class ApprovalService implements IApprovalService {
         notified += await this.notify({
           topic: 'approval.reminder',
           audience: [approver],
-          actorId: actorId,
+          actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
@@ -4551,7 +4582,7 @@ export class ApprovalService implements IApprovalService {
       notified += await this.notify({
         topic: 'approval.reminder',
         audience: literals,
-        actorId: actorId,
+        actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
@@ -4738,7 +4769,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'request_info',
-      actor_id: recordedActor(actorId, context), acted_as: slot ?? null,
+      actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment.trim(), created_at: now,
     }, { context: SYSTEM_CTX });
 
@@ -4746,7 +4777,7 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.request_info',
         audience: [String(raw.submitter_id)],
-        actorId: actorId,
+        actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'More information requested',
@@ -4782,7 +4813,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'comment',
-      actor_id: recordedActor(actorId, context), acted_as: slot ?? null,
+      actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment.trim(),
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
@@ -4793,7 +4824,7 @@ export class ApprovalService implements IApprovalService {
     await this.notify({
       topic: 'approval.comment',
       audience,
-      actorId: actorId,
+      actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
       payload: {
         title: 'New comment on an approval',
@@ -4893,8 +4924,9 @@ export class ApprovalService implements IApprovalService {
    *
    * `recalled` is the finalisation because it is the platform's existing terminal
    * state for *a live request that ended without a decision*; the audit row names
-   * the real cause and {@link DEAD_RUN_ACTOR_ID} the real actor, so a dead-run
-   * release is never mistaken for a submitter's withdrawal.
+   * the real cause (the dead run and its status) and records no person
+   * (`actor_id` null, ADR-0118 D1 — a sweep is no user), so a dead-run release
+   * is never mistaken for a submitter's withdrawal, which records the submitter.
    */
   /**
    * Read-only inspection for the OTHER dead-run shape: a request that is
@@ -5766,7 +5798,11 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: raw.id, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
-      actor_id: DEAD_RUN_ACTOR_ID,
+      // ADR-0118 D1: no person did this, so `actor_id` is null — never a
+      // sentinel in the `sys_user` lookup. The row still reads apart from a
+      // submitter's withdrawal, which records the submitter: this one records
+      // nobody and names the dead run and its status below.
+      actor_id: null,
       comment: `owning flow run ${runId} is ${runStatus} — request abandoned and record lock released`,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -5812,11 +5848,16 @@ export class ApprovalService implements IApprovalService {
       if (!escalatees.length) escalatees = [escalateTo];
     }
 
-    // Audit first — this row IS the idempotency marker (ADR-0042 §1).
+    // Audit first — this row IS the idempotency marker (ADR-0042 §1), and the
+    // marker is its KIND (`escalate`), not its actor. A machine has no
+    // `sys_user` id, so `actor_id` is null (ADR-0118 D1); the configured
+    // action is in the comment. The notifications below forward no actor for
+    // the same reason, and the auto-decision runs under SYSTEM_CTX, which
+    // vouches for nobody, so it records nobody either.
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: raw.id, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'escalate',
-      actor_id: SLA_ACTOR_ID,
+      actor_id: null,
       comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -5829,7 +5870,6 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.escalated',
         audience: escalatees,
-        actorId: SLA_ACTOR_ID,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval escalated to you',
@@ -5848,7 +5888,6 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.sla_breached',
         audience: [...pending, ...escalatees],
-        actorId: SLA_ACTOR_ID,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval SLA breached',
@@ -5862,7 +5901,6 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.sla_breached',
         audience: [String(raw.submitter_id)],
-        actorId: SLA_ACTOR_ID,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Your approval request breached its SLA',
@@ -6996,8 +7034,10 @@ export class ApprovalService implements IApprovalService {
     // Timeline display: resolve the PERSON in `actor_id` to a name so the
     // audit trail never shows a raw identifier. The slot the action was taken
     // as travels beside it in `acted_as`, as stored — the "acting as" half of
-    // the line (#21411). The reassign hand-off parties (#4365) resolve through
-    // the same batch; a `type:value` literal or a machine sentinel is skipped.
+    // the line (#21411). The reassign hand-off parties (#4365) are slot
+    // addresses, not people, and resolve through the same batch only where an
+    // address names an account: a user id, or an email an account carries. A
+    // `type:value` literal (a position) is skipped and shows as the address.
     const names = await this.resolveUserNames(
       actions
         .flatMap(a => [a.actor_id, a.reassign_from, a.reassign_to])

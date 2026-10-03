@@ -3,7 +3,7 @@
 /**
  * [#20987] `jsonMembershipCandidates` and `jsonMembershipPredicate` — the one
  * `$contains` membership construct `driver-sql` and the analytics read scope
- * and `where` ask, moved here from `driver-sql` (#17590).
+ * and `where` ask, moved here from `driver-sql`, where commit e04a0aff2 wrote it.
  *
  * What each face does with the SQL is pinned in its own package (the driver's
  * move proof `sql-driver-20987-json-membership-move.test.ts`, its executed

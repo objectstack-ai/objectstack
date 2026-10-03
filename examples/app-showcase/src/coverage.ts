@@ -261,7 +261,7 @@ export const COVERAGE = {
   },
   formViewTypes: {
     expected: FORM_VIEW_TYPES,
-    coveredBy: 'ui/views/task.view.ts formViews (simple/tabbed/wizard/split/drawer)',
+    coveredBy: 'ui/views/task.view.ts form (simple) + formViews (tabbed/wizard/split/drawer)',
   },
   chartTypes: {
     source: 'ChartTypeSchema',
@@ -366,9 +366,10 @@ export function collectListViewTypes(views: Array<{ list?: { type?: string }; li
 }
 
 /** Collect every form-view `type` from a set of `defineView` results. */
-export function collectFormViewTypes(views: Array<{ formViews?: Record<string, { type?: string }> }>): Set<string> {
+export function collectFormViewTypes(views: Array<{ form?: { type?: string }; formViews?: Record<string, { type?: string }> }>): Set<string> {
   const used = new Set<string>();
   for (const view of views) {
+    if (view.form?.type) used.add(view.form.type);
     for (const fv of Object.values(view.formViews ?? {})) {
       if (fv?.type) used.add(fv.type);
     }

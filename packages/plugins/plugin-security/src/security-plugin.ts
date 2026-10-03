@@ -139,7 +139,7 @@ import {
   PermissionSetReadUnansweredError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
-import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
+import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import { createPlatformAdminService } from './platform-admin-service.js';
 import {
@@ -935,6 +935,27 @@ function writeCheckPolicies(
   );
 }
 
+/**
+ * "Has this boot's own seed data finished landing?", asked through the
+ * published `seed-settlement` contract rather than by sniffing the runtime's
+ * internal `seed-datasets` service — that array's presence says a seed source
+ * EXISTS, never whether it has SETTLED, and the gap between those two facts is
+ * the whole defect. `undefined` means no seed pipeline registered on this
+ * kernel, which by `kernel:ready` is a fact and not a not-yet (every source is
+ * declared in Phase 2 `start()`). Read per use, never cached.
+ */
+function readSeedSettlementSnapshot(ctx: PluginContext): SeedSettlementSnapshot | undefined {
+  try {
+    const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
+      | ISeedSettlementService
+      | undefined;
+    if (!svc || typeof svc.snapshot !== 'function') return undefined;
+    return svc.snapshot();
+  } catch {
+    return undefined;
+  }
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1013,7 +1034,7 @@ export class SecurityPlugin implements Plugin {
       if (this.warnedEntitlementRefusals.has(refusal.problem)) continue;
       this.warnedEntitlementRefusals.add(refusal.problem);
       this.logger?.warn?.(
-        `[security/#12699] org-scoping entitlement key '${refusal.key}' REFUSED — ${refusal.problem}`,
+        `[security] org-scoping entitlement key '${refusal.key}' REFUSED — ${refusal.problem}`,
         { key: refusal.key, declared: refusal.value },
       );
     }
@@ -1068,6 +1089,20 @@ export class SecurityPlugin implements Plugin {
    */
   private metadata: any = null;
   private ql: any = null;
+  /**
+   * Who the seed-ownership claim hands rows to, as THIS boot's bootstrap
+   * answered it — the admin the last pass promoted, or the one it found
+   * already holding the unscoped grant. `undefined` until a bootstrap pass
+   * names one, and only ever overwritten with a real answer.
+   *
+   * Kept because the claim is not a single pass (see
+   * {@link claimSeedOwnershipOnSettle}). When a seed settles before any pass
+   * has named a target — an in-budget seed settles before `kernel:ready` —
+   * the claim asks `findExistingPlatformAdmin`, the same rule the bootstrap's
+   * `already_have_admin` guard runs, rather than growing a second copy of that
+   * scan here.
+   */
+  private claimTargetAdminUserId: string | undefined = undefined;
   /** [ADR-0090 D12] Delegated-admin write gate — wired in start() once `ql` exists. */
   private delegatedAdminGate: DelegatedAdminGate | null = null;
   /**
@@ -1309,9 +1344,102 @@ export class SecurityPlugin implements Plugin {
       });
     }
 
+    // The seed-ownership claim runs whenever a seed settles, on every boot —
+    // see {@link claimSeedOwnershipOnSettle}. Subscribed in `init()`, before ANY
+    // plugin's `start()`: an in-budget seed fires `app:seeded` from inside
+    // `AppPlugin.start()`, and the kernel orders starts by registration among
+    // plugins with no edge between them (ADR-0116), so a subscription made in
+    // this plugin's own `start()` misses that signal on every composition that
+    // registers the app first. Nothing here resolves a service: the handler
+    // reads the engine when it runs.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('app:seeded', (payload?: { appId?: string; overBudget?: boolean }) =>
+        this.claimSeedOwnershipOnSettle(ctx, payload),
+      );
+    }
+
     ctx.logger.info('Security Plugin initialized', {
       defaultPermissionSets: this.bootstrapPermissionSets.map((p) => p.name),
     });
+  }
+
+  /**
+   * The seed-ownership CLAIM, run on `app:seeded` — whenever a seed settles, on
+   * every boot, the first one and every later one.
+   *
+   * ## Why a settle signal, and not the promotion alone
+   *
+   * The claim used to run exactly once per database lifetime, inside the one
+   * pass that promotes the first admin — and that instant is not the moment the
+   * seed is done. `AppPlugin` races its inline seed against
+   * `OS_INLINE_SEED_BUDGET_MS` (default 8 s) and continues an over-budget bundle
+   * in the BACKGROUND rather than block kernel start, so for any non-trivial app
+   * the seeder is still writing while the claim walks the registry. Registry
+   * order and seed order are unrelated: every object whose rows land after its
+   * walk stayed `owner_id IS NULL` forever. Measured on a CRM bundle: 73 rows
+   * across six objects, the same loser set on two independent boots.
+   *
+   * ⛔ The fix is NOT to widen `shouldReplayBootstrapFor`. A replayed bootstrap
+   * short-circuits on `already_have_admin` and RETURNS before it ever reaches
+   * the claim, so a wider trigger re-runs a pass that cannot do the thing that
+   * was missed. What runs here is the claim itself.
+   *
+   * ## Why the target is resolved HERE when the bootstrap has not named it
+   *
+   * A later boot replays its seed into a database whose admin already exists,
+   * and an in-budget replay settles inside `AppPlugin.start()` — BEFORE
+   * `kernel:ready` runs the bootstrap that would name the target. Reading only
+   * {@link claimTargetAdminUserId} there returned with nobody to claim to, and
+   * the bootstrap that followed found the admin, promoted nobody and never
+   * reached the claim: every row that replay inserted stayed ownerless for good.
+   * So when no pass of this boot has named a target, this asks
+   * `findExistingPlatformAdmin` — the bootstrap's own `already_have_admin`
+   * rule, the same function, ⛔ never a second selection rule and never a
+   * second claim path. On a first boot nobody holds the grant yet, the answer is
+   * `undefined`, and the promotion that follows does its own claim.
+   *
+   * `app:seeded` fires once per app bundle, so the first fire is not
+   * necessarily the last; the runtime settles the source BEFORE it triggers, so
+   * this handler sees its own signal already reflected in the tally. The claim
+   * is idempotent (only NULL / `usr_system`-owned rows match) and every pass
+   * reports whether its own reading was final, so running on each fire costs a
+   * no-op walk and buys the guarantee.
+   *
+   * ⚠️ Scope: the predicates and the object filter are the promotion-time
+   * pass's own, unchanged. A row a human already owns is not matched by either
+   * predicate and cannot be touched here.
+   */
+  private async claimSeedOwnershipOnSettle(
+    ctx: PluginContext,
+    payload?: { appId?: string; overBudget?: boolean },
+  ): Promise<void> {
+    let ql: IObjectQLEngine | undefined;
+    try {
+      ql = ctx.getService<IObjectQLEngine>('objectql');
+    } catch {
+      return;
+    }
+    if (!ql) return;
+    try {
+      const adminUserId =
+        this.claimTargetAdminUserId ??
+        (await findExistingPlatformAdmin(ql, this.bootstrapPermissionSets));
+      if (!adminUserId) return;
+      await claimSeedOwnership(ql, adminUserId, {
+        logger: ctx.logger,
+        seedSettlement: readSeedSettlementSnapshot(ctx),
+      });
+    } catch (e) {
+      // Best-effort, exactly like the promotion-time call: a failed claim
+      // leaves the rows unowned and the next run claims them, because the
+      // predicate is still true of them. It must not break the boot — `trigger`
+      // dispatch PROPAGATES, and a seed that landed must not fail on this.
+      ctx.logger.warn('[security] seed-settle ownership claim failed', {
+        appId: payload?.appId,
+        overBudget: payload?.overBudget,
+        error: (e as Error).message,
+      });
+    }
   }
 
   async start(ctx: PluginContext): Promise<void> {
@@ -1510,14 +1638,14 @@ export class SecurityPlugin implements Plugin {
       const entitlement = this.deploymentOrgScopingEntitlement();
       if (entitlement.platformGlobalObjects.size > 0) {
         ctx.logger.info(
-          `[security/#12699] deployment declares ${entitlement.platformGlobalObjects.size} platform-global ` +
+          `[security] deployment declares ${entitlement.platformGlobalObjects.size} platform-global ` +
             `object(s) — Layer 0 does not wall them on THIS deployment`,
           { objects: [...entitlement.platformGlobalObjects].sort() },
         );
       }
       if (entitlement.suppressUnboundedOrgAdminGrant) {
         ctx.logger.info(
-          '[security/#12699] deployment suppresses the unbounded organization_admin auto-grant — ' +
+          '[security] deployment suppresses the unbounded organization_admin auto-grant — ' +
             'membership-driven grants hand out organization_admin_no_bypass under this walled posture',
         );
       }
@@ -1973,7 +2101,7 @@ export class SecurityPlugin implements Plugin {
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2085,7 +2213,8 @@ export class SecurityPlugin implements Plugin {
             if (stripped.size > 0) {
               ctx.logger.warn(
                 `[security] public-form insert on '${grantObject}' supplied server-managed ` +
-                  `field(s) [${[...stripped].join(', ')}] — stripped (#3022)`,
+                  `field(s) [${[...stripped].join(', ')}] — stripped: an anonymous form submission cannot set ` +
+                  `ownership, tenancy or audit columns`,
               );
             }
           }
@@ -3993,37 +4122,7 @@ export class SecurityPlugin implements Plugin {
     // insert seed rows. Falls back to immediate execution when the
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
-    /**
-     * Who the seed-ownership claim hands rows to — the admin the last bootstrap
-     * pass promoted, or the one it found already holding the unscoped grant.
-     *
-     * Kept because the claim is not a single pass (see the `app:seeded` hook
-     * below). `bootstrapPlatformAdmin` is the ONE place that answers "who is the
-     * platform admin" from the grant rows — through a two-leg, ordered, bounded
-     * scan that took its own card to get right — so the re-run reads its answer
-     * rather than growing a second copy of that scan here.
-     */
-    let claimTargetAdminUserId: string | undefined;
-    /**
-     * "Has this boot's own seed data finished landing?", asked through the
-     * published `seed-settlement` contract rather than by sniffing the runtime's
-     * internal `seed-datasets` service — that array's presence says a seed
-     * source EXISTS, never whether it has SETTLED, and the gap between those two
-     * facts is the whole defect. `undefined` means no seed pipeline registered
-     * on this kernel, which by `kernel:ready` is a fact and not a not-yet (every
-     * source is declared in Phase 2 `start()`).
-     */
-    const readSeedSettlement = (): SeedSettlementSnapshot | undefined => {
-      try {
-        const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
-          | ISeedSettlementService
-          | undefined;
-        if (!svc || typeof svc.snapshot !== 'function') return undefined;
-        return svc.snapshot();
-      } catch {
-        return undefined;
-      }
-    };
+    const readSeedSettlement = (): SeedSettlementSnapshot | undefined => readSeedSettlementSnapshot(ctx);
     // [ADR-0094] Guard so the env-projection wiring runs exactly once even
     // though runBootstrap re-runs (e.g. after the first user insert) —
     // registerMutationProjector replaces idempotently, but the legacy
@@ -4193,11 +4292,11 @@ export class SecurityPlugin implements Plugin {
           // difference that decides whether that pass's claim is the last word.
           seedSettlement: readSeedSettlement(),
         });
-        // Remember the claim's target for the `app:seeded` re-run below. Only
-        // ever overwritten with a real answer: a later pass that returns none
-        // (walled posture, an unreadable engine) must not erase the admin an
-        // earlier pass resolved and leave the re-run with nobody to claim to.
-        if (report?.adminUserId) claimTargetAdminUserId = report.adminUserId;
+        // Remember the claim's target for the `app:seeded` re-run
+        // ({@link claimSeedOwnershipOnSettle}). Only ever overwritten with a
+        // real answer: a later pass that returns none (walled posture, an
+        // unreadable engine) must not erase the admin an earlier pass resolved.
+        if (report?.adminUserId) this.claimTargetAdminUserId = report.adminUserId;
         // Which organizations this boot seeds. Resolved ONCE per bootstrap run
         // and reused by all four catalog steps, so a sweep costs one
         // organization enumeration rather than four.
@@ -4523,59 +4622,10 @@ export class SecurityPlugin implements Plugin {
 
     // ── Re-run the seed-ownership CLAIM when the seed actually settles ────────
     //
-    // The claim used to run exactly once per database lifetime, inside the one
-    // pass that promotes the first admin — and that instant is not the moment
-    // the seed is done. `AppPlugin` races its inline seed against
-    // `OS_INLINE_SEED_BUDGET_MS` (default 8 s) and continues an over-budget
-    // bundle in the BACKGROUND rather than block kernel start, so for any
-    // non-trivial app the seeder is still writing while the claim walks the
-    // registry. Registry order and seed order are unrelated: every object whose
-    // rows land after its walk stayed `owner_id IS NULL` forever, because
-    // nothing re-ran the claim. Measured on a CRM bundle: 73 rows across six
-    // objects, the same loser set on two independent boots.
-    //
-    // ⛔ The fix is NOT to widen `shouldReplayBootstrapFor`. A replayed
-    // bootstrap short-circuits on `already_have_admin` and RETURNS before it
-    // ever reaches the claim, so a wider trigger re-runs a pass that cannot do
-    // the thing that was missed. What re-runs here is the claim itself.
-    //
-    // `app:seeded` is the published settle signal for exactly that background
-    // continuation — the runtime settles the source BEFORE it triggers, so a
-    // consumer inside this hook sees its own signal already reflected in the
-    // tally. It fires once per app bundle, so the first fire is not necessarily
-    // the last; the claim is idempotent (only NULL / `usr_system`-owned rows
-    // match) and every pass reports whether its own reading was final, so
-    // running on each fire costs a no-op walk and buys the guarantee.
-    //
-    // ⚠️ Scope: this moves ownership for exactly the rows the promotion-time
-    // pass missed — the predicates, the target admin and the object filter are
-    // the one-shot pass's own, unchanged. A row a human already owns is not
-    // matched by either predicate and cannot be touched here.
-    //
-    // No admin yet ⇒ nothing to do: an in-budget seed settles before any user
-    // exists, and the promotion that follows does its own claim against a seed
-    // that has already settled.
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('app:seeded', async (payload?: { appId?: string; overBudget?: boolean }) => {
-        const adminUserId = claimTargetAdminUserId;
-        if (!adminUserId) return;
-        try {
-          await claimSeedOwnership(ql, adminUserId, {
-            logger: ctx.logger,
-            seedSettlement: readSeedSettlement(),
-          });
-        } catch (e) {
-          // Best-effort, exactly like the promotion-time call: a failed claim
-          // leaves the rows unowned and the next run claims them, because the
-          // predicate is still true of them. It must not break the boot.
-          ctx.logger.warn('[security] seed-settle ownership claim failed', {
-            appId: payload?.appId,
-            overBudget: payload?.overBudget,
-            error: (e as Error).message,
-          });
-        }
-      });
-    }
+    // Subscribed in `init()`, not here — see {@link claimSeedOwnershipOnSettle}.
+    // `runBootstrap` above only NAMES the claim's target for it
+    // (`this.claimTargetAdminUserId`); a seed that settles before this boot's
+    // bootstrap has run resolves the target itself, by the same rule.
 
     // Re-run bootstrap after a sys_user write that can change the promotion
     // answer, so the platform admin is promoted without a server restart:
@@ -5095,7 +5145,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] controlled_by_parent write gate could not resolve the sharing (OWD) edit ` +
           `check for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — ` +
-          `denying (fail-closed, #5386)`,
+          `denying (fail-closed: a child is writable only where its master is, so a master check that ` +
+          `cannot be resolved refuses)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return false;
@@ -5194,7 +5245,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] the row-level write gate could not resolve the sharing (${method}) verdict ` +
           `for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — keeping ` +
-          `the platform ownership floor (fail-closed, #5492)`,
+          `the platform ownership floor (fail-closed: only a resolved sharing allow, from Modify All Data ` +
+          `or an edit-level share, may replace that floor)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return 'deny';
@@ -5393,7 +5445,7 @@ export class SecurityPlugin implements Plugin {
       this.logger.warn?.(
         `[security] checkAuthoredRowWrite could not resolve an authored-policy verdict for ` +
           `'${object}' record '${recordId}' (${operation}, user ${context?.userId ?? 'unknown'}) — ` +
-          `abstaining (fail-closed, #5493)`,
+          `abstaining (fail-closed: a verdict that cannot be resolved never lifts the sharing refusal)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return 'abstain';
@@ -5451,7 +5503,8 @@ export class SecurityPlugin implements Plugin {
     } catch (e) {
       this.logger.error?.(
         `[security] getReadFilter could not resolve the sharing (OWD) read scope for object ` +
-          `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed, #4467)`,
+          `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed: a path that bypasses ` +
+          `the engine middleware never runs without the owner and share scope a direct read applies)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return { ...RLS_DENY_FILTER };
@@ -5488,7 +5541,8 @@ export class SecurityPlugin implements Plugin {
         `[security] getReadFilter received an on-behalf-of context for object ` +
           `'${object}' (agent ${context?.userId ?? 'unknown'} on behalf of ` +
           `${context.onBehalfOf.userId}) — the D10 delegator intersection is not ` +
-          `implemented on the read-scope path; denying (fail-closed, #2852)`,
+          `implemented on the read-scope path; denying (fail-closed: a delegated read is never scoped ` +
+          `wider than its delegator's own)`,
       );
       return { ...RLS_DENY_FILTER };
     }
@@ -6999,7 +7053,9 @@ export class SecurityPlugin implements Plugin {
         `[Security] Access denied: '${name}' is a platform-curated capability name — a sys_capability ` +
           `row cannot be created with it or renamed to it through the admin door. The platform defines ` +
           `this capability and seeds its own row for it; grants and requiredPermissions already resolve ` +
-          `the name. Choose a different capability name (ADR-0066 asset ownership, #8552).`,
+          `the name. A curated name is refused at authoring so that no admin-authored row can collide ` +
+          `with the row the platform seeds for it. Choose a different capability name (ADR-0066 asset ` +
+          `ownership).`,
         { operation: op, object: opCtx.object, name, curated: true },
       );
     };
@@ -7612,8 +7668,9 @@ export class SecurityPlugin implements Plugin {
       // `sys_audit_log` ledger is deliberately not the sink here. Named after
       // the cloud precedent (`cross_org_admin_read`).
       this.logger.warn?.(
-        `[security/#12974] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
-          'the Layer 0 organization wall — the org filter below was NOT appended',
+        `[security] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
+          'the Layer 0 organization wall on a read — the org filter below was NOT appended (only the ' +
+          "declared platform owner's reads cross it; writes stay walled for everyone)",
         {
           event: PLATFORM_OWNER_WALL_BYPASS_EVENT,
           object,
@@ -8192,7 +8249,8 @@ export class SecurityPlugin implements Plugin {
     if (ancestors.includes(object)) {
       this.logger.error?.(
         `[security] controlled_by_parent derivation found a CYCLE resolving '${object}' ` +
-          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed, #11082)`,
+          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `cannot resolve admits no child rather than leaving it unrestricted)`,
       );
       return { [rel.fk]: { $in: [] } };
     }
@@ -8200,7 +8258,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] controlled_by_parent derivation exceeded the chain depth bound ` +
           `(${CBP_MAX_CHAIN_DEPTH}) resolving '${object}' ` +
-          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed, #11082)`,
+          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `cannot resolve admits no child rather than leaving it unrestricted)`,
       );
       return { [rel.fk]: { $in: [] } };
     }
@@ -8217,7 +8276,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] controlled_by_parent derivation could not resolve the sharing (OWD) read ` +
           `scope of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
-          `— denying (fail-closed, #5386)`,
+          `— denying (fail-closed: a child is readable only where its master is, so a master scope that ` +
+          `cannot be resolved admits no child)`,
         e instanceof Error ? e : new Error(String(e)),
       );
       return { [rel.fk]: { $in: [] } };
@@ -8852,7 +8912,7 @@ export class SecurityPlugin implements Plugin {
         // FULL mask, never to the unmasked value. (The spec parse rejects such
         // declarations at authoring; this covers rows that arrived around it.)
         this.logger?.warn?.(
-          `[security/#8993] field '${object}.${fname}' declares an invalid maskingRule — ` +
+          `[security] field '${object}.${fname}' declares an invalid maskingRule — ` +
             `applying a full mask (fail-closed). Fix the declaration to a preset ` +
             `('phone' | 'id_card' | 'bank_account' | 'email' | 'name') or {keepHead, keepTail}.`,
           { object, field: fname },

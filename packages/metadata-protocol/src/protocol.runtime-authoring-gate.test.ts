@@ -1224,6 +1224,35 @@ describe('html page source compiled at the save door against the SDUI manifest (
             .resolves.toMatchObject({ success: true });
     });
 
+    // [#21459] `requires` exists only on the kinds this door compiles. On any
+    // other kind the spec parse refuses it before the compile runs, so the
+    // refusal is the spec's own issue at `requires` — not a compile finding.
+    it.each(['react', 'full', 'slotted', undefined])(
+        'refuses `requires` on a `%s` page with a 422 at `requires`, and persists nothing (#21459)',
+        async (kind) => {
+            const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+            const page = {
+                name: 'landing', label: 'Landing', requires: ['ui'],
+                ...(kind === undefined ? {} : { kind }),
+                ...(kind === 'react' ? { source: KNOWN } : {}),
+            };
+            const err = await savePage(protocol, page).catch((e: any) => e);
+            expect(refusal(err)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = err.issues.filter((i: any) => i.path === 'requires');
+            expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+            expect(issues[0].code).toBe('custom');
+            expect(issues[0].message).toContain(`\`kind: '${kind ?? 'full'}'\``);
+            expect(err.issues.some((i: any) => String(i.rule ?? '').startsWith('jsx-'))).toBe(false);
+            expect(pageRows(rows)).toEqual([]);
+        },
+    );
+
+    it('CONTROL: the same `requires` on an html page still saves, and the compile stamps it (#21459)', async () => {
+        const { protocol, rows } = hostWith(new Map([['sdui-manifest', manifest()]]));
+        await expect(savePage(protocol, htmlPage(KNOWN, { requires: ['ui'] }))).resolves.toMatchObject({ success: true });
+        expect(storedPage(rows)?.requires).toEqual(['ui']);
+    });
+
     it('a registered value that is not a manifest is warned about once and compiled against never', async () => {
         const { protocol, rows } = hostWith(new Map([['sdui-manifest', { oops: true }]]));
         await expect(savePage(protocol, htmlPage(UNKNOWN))).resolves.toMatchObject({ success: true });
@@ -1337,6 +1366,35 @@ describe('stored html page `requires` at load and at draft promotion (#20312)', 
         expect(result).toMatchObject({ loaded: 1, errors: 0 });
         expect(registered).toContainEqual({ type: 'page', name: 'landing' });
         expect(loadReports(warn)).toEqual([]);
+    });
+
+    // [#21459] A row stored before `requires` was narrowed to the compiled
+    // kinds: a react page carrying the key, which the save door now refuses, so
+    // it is seeded straight into the store. The stored-row seam replays the D2
+    // conversion `page-requires-non-compiled-kind-removed` before anything reads
+    // the body — so the row loads with the key gone and a notice saying so, the
+    // spec check finds nothing to report, and the load report never sees a list.
+    it('at load, a stored react page carrying `requires` is read without it — converted, not reported or badged (#21459)', async () => {
+        const services = new Map<string, unknown>([['sdui-manifest', manifest(false)]]);
+        const { protocol, rows, registered } = hostWith(services);
+        const body = { name: 'workbench', label: 'Workbench', kind: 'react', source: '<Workbench />', requires: ['plugin-kanban'] };
+        rows.set(keyOf({ type: 'page', name: 'workbench', organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'page', name: 'workbench', organization_id: null, state: 'active', metadata: JSON.stringify(body),
+        });
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'workbench' });
+        const lines = (warn.mock.calls as unknown[][]).map((c) => String(c[0]));
+        const converted = lines.filter((m) => m.includes('stored page/workbench carries a pre-protocol shape'));
+        expect(converted, JSON.stringify(lines)).toHaveLength(1);
+        expect(converted[0]).toContain("ADR-0087 conversion 'page-requires-non-compiled-kind-removed'");
+        expect(converted[0]).toContain('page.requires at pages[0].requires');
+        // The manifest carries no `plugin-kanban`, so an unconverted list WOULD
+        // have been reported — its absence is the conversion's doing.
+        expect(loadReports(warn)).toEqual([]);
+        expect(lines.filter((m) => m.includes('[metadata_spec_invalid]'))).toEqual([]);
     });
 
     // ── At draft → active promotion ──────────────────────────────────────

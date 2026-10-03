@@ -46,8 +46,9 @@
  *
  * Every predicate is TOTAL — TRUE or FALSE for every row, never UNKNOWN —
  * because both polarities spell their NULL case out. So a `$not` over `$empty`
- * needs no NULL guard (`operatorIsNullTotal` answers `true` for it on both
- * faces), and `NOT (…)` is the exact complement.
+ * needs no NULL guard (the shared lowering's `operatorIsNullTotal`, the NULL
+ * rule's one source on both faces since #5930 step 4, answers `true` for it),
+ * and `NOT (…)` is the exact complement.
  *
  * `L` has no construct on the `'unknown'` dialect: no JSON test parses on all
  * three dialects, and the text-match family's `unknown` arm (a construct that

@@ -69,7 +69,7 @@ describe('[#19912] TursoDriver local face: a deep json array survives the json b
       expect(driver.isRemote).toBe(false);
       await sync(driver); // creates the table
       await driver.create(T, { id: 'deep', label: 'deep', val: deepArray(1001) }, { bypassTenantAudit: true });
-      // The pre-#12380 form of the string 'bare': bound as-is, no encoding.
+      // The form of the string 'bare' from before commit 4045b954d: bound as-is, no encoding.
       await driver.execute(`insert into "${T}" ("id", "label", "val") values ('bare', 'bare', 'bare')`);
       expect(arrayDepth((await readAll(driver)).get('deep'))).toBe(1001);
 

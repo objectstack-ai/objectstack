@@ -32,7 +32,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { PackageSchema } from '@objectstack/spec/marketplace';
-import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, printStep, isExitSignal } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
@@ -665,6 +665,7 @@ export default class PackagePublish extends Command {
           const iconUrl = iconRes.body?.data?.icon_url ?? iconRes.body?.icon_url;
           if (iconUrl) printKV('  Icon URL', String(iconUrl));
         } catch (err: any) {
+          if (isExitSignal(err)) throw err;
           printError(`Cannot read --icon-file '${iconPath}': ${err.message}`);
           this.exit(1);
           return;
@@ -794,6 +795,7 @@ export default class PackagePublish extends Command {
         for (const v of violations) console.log(`    • ${v}`);
       }
     } catch (error) {
+      if (isExitSignal(error)) throw error;
       printError((error as Error).message);
       this.exit(1);
     }

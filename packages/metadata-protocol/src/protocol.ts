@@ -38,6 +38,7 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
+import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -94,10 +95,12 @@ import {
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
 import { isMissingTableError } from '@objectstack/metadata/errors';
-// [#21412] The divergent view-container `name` refusal — the one judge the
-// boot loop, `os validate` and the artifact/HMR loader call too; this door
-// passes the name it files the row under. See `saveMetaItem`.
-import { savedViewContainerNameRefusal } from '@objectstack/metadata/view-container-name';
+// [#21412, #21470] The divergent `name` refusal — the one judge the boot loop,
+// `os validate` and the artifact/HMR loader call too. Every door here that
+// writes a `sys_metadata` row passes the name it writes the row under: the save
+// door (`saveMetaItem`), the restore doors (`rollbackMetaItem`, `revertCommit`)
+// and the draft promotion (`promoteDraftForPublish`).
+import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -1222,10 +1225,10 @@ export { stripReadDecorations };
  * into a record risks producing an invalid record (e.g. a non-`<object>.<key>`
  * name). Structural validity is enforced separately by the view metadata schema
  * during the spec-validation step. No-op for non-view types and bodies that
- * already carry a `name`. [#21412] A CONTAINER's authored `name` reaches this
- * function only when it equals `saveName`: `saveMetaItem` refuses a
- * disagreeing one first, through `savedViewContainerNameRefusal`, so keeping
- * the authored `name` can no longer file a container under a second key.
+ * already carry a `name`. [#21412, #21470] A view's authored `name` reaches
+ * this function only when it equals `saveName`: `saveMetaItem` refuses a
+ * disagreeing one first, through `savedItemNameRefusal`, so keeping the
+ * authored `name` can no longer file a view under a second key.
  *
  * When `baseline` is provided (the registry entry this overlay will shadow),
  * missing identity fields — `viewKind`, `object`, `label` — are inherited onto
@@ -4898,6 +4901,29 @@ function isNonCanonicalStoredType(type: string): boolean {
 }
 
 /**
+ * [#21442] A stored `sys_metadata` row as the list read parses it: its own
+ * name, its body (stored-row conversions replayed), and the package and
+ * organization it is bound to (`organizationId: null` for an environment-wide
+ * row).
+ */
+interface StoredOverlayEntry {
+    name: string;
+    data: any;
+    packageId: string | undefined;
+    organizationId: string | null;
+}
+
+/**
+ * [#21442] A row-less view name a stored view container expands: the item the
+ * list read serves under the name, and the stored container row it derives
+ * from.
+ */
+interface RowlessExpandedView {
+    item: Record<string, unknown>;
+    container: StoredOverlayEntry;
+}
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -5267,6 +5293,32 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyDerivation(type: string): ((body: unknown) => unknown) | undefined {
         const channel = this.credentialChannelFor(type);
         return channel ? (body) => channel.strip(body) : undefined;
+    }
+
+    /**
+     * [#21470] What a restore passes to `repo.restoreVersion` as
+     * `deriveRestoredBody`: the divergent `name` refusal FIRST, then
+     * {@link restoredBodyDerivation}. A version stored before `saveMetaItem`
+     * judged every type can carry a `name` that is not its row's; written back,
+     * the write-through registers the row under that `name` and under none by
+     * its own. `restoreVersion` calls this on the very history body it read,
+     * before it reads the active row and before `put` — so a refused version
+     * writes nothing, the position the credential strip already has. The
+     * refusal is the save door's judge and envelope (`VALIDATION_ERROR` / 400):
+     * `rollbackMetaItem` rethrows it, `revertCommit` reports it per item in
+     * `failed[]`. A body that passes comes out of the strip, or byte for byte
+     * where the type has no credential channel.
+     *
+     * @param type The canonical (singular) type the row is restored under.
+     * @param name The name the row is restored under.
+     */
+    private restoredBodyWriter(type: string, name: string): (historyBody: unknown) => unknown {
+        const derive = this.restoredBodyDerivation(type);
+        return (historyBody) => {
+            const nameRefusal = savedItemNameRefusal(type, historyBody, name, 'restore');
+            if (nameRefusal) throw nameRefusal;
+            return derive ? derive(historyBody) : historyBody;
+        };
     }
 
     /**
@@ -8225,126 +8277,16 @@ export class ObjectStackProtocolImplementation implements
         // (when an active org is provided) and env-wide (organization_id IS NULL)
         // overlays; org-scoped rows win on name collision.
         try {
-            const queryByOrg = async (oid: string | null): Promise<any[]> => {
-                const whereClause: Record<string, unknown> = {
-                    type: request.type,
-                    state: 'active',
-                    organization_id: oid,
-                };
-                if (packageId) whereClause.package_id = packageId;
-                let rs = await this.engine.find('sys_metadata', { where: whereClause });
-                if ((!rs || rs.length === 0)) {
-                    const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                    if (alt) {
-                        const altWhere: Record<string, unknown> = { type: alt, state: 'active', organization_id: oid };
-                        if (packageId) altWhere.package_id = packageId;
-                        rs = await this.engine.find('sys_metadata', { where: altWhere });
-                    }
-                }
-                return rs ?? [];
-            };
-            // ── Leg D of #11633 (#11967): the cross-request overlay cache ──
-            //
-            // ⭐ The cache sits HERE, and its position IS the resolution of the
-            // SchemaRegistry-hydration trap #11633 §4 names. What is cached is
-            // the ROW SET — the value the two `queryByOrg` calls produce —
-            // never the merged answer below it. Everything downstream of this
-            // point still runs on every call, hit or miss: the overlay parse,
-            // the package-aware merge, `hydrateOverlayIntoRegistry`, the
-            // MetadataService merge, the disabled-package filter, the nav
-            // contributions, the decorations. A hit changes where the rows came
-            // from and nothing about what is done with them, so the read-side
-            // registry hydration cannot be skipped by one.
-            //
-            // ⛔ Do NOT move this below the merge. That is precisely the naive
-            // shape the trap describes, and it would additionally serve three
-            // mutable sources — the SchemaRegistry, the MetadataService and the
-            // artifact table — whose changes nothing in this key can observe.
-            // See `meta-overlay-cache.ts` for the measured four-source table.
-            //
-            // ⭐ The epoch reading is taken BEFORE the read, and it is this
-            // pre-read value that is stored with the rows. A write landing
-            // WHILE this read is in flight therefore moves the epoch past what
-            // the entry records, so the entry is already dead when it is
-            // written — the safe direction. Reading it afterwards would stamp
-            // pre-write rows with a post-write epoch and make that staleness
-            // permanent: the clear-then-repopulate-from-a-stale-read failure
-            // #11633 §7 pin 2 names.
-            const overlayCacheKey: MetaOverlayCacheKey = {
-                type: request.type,
-                packageId,
-                organizationId: orgId,
-            };
-            const overlayCacheEpoch = readWriteEpoch(this.engine);
-            const overlayCacheTtlMs = metaOverlayCacheTtlMs();
-            const overlayCacheNow = Date.now();
-            const cachedRecords = readMetaOverlayCache(
-                this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
-            );
-
-            let records: any[];
-            if (cachedRecords !== undefined) {
-                records = cachedRecords as any[];
-            } else {
-                const envWideRecords = await queryByOrg(null);
-                const orgRecords = orgId ? await queryByOrg(orgId) : [];
-                // org-specific rows override env-wide rows on name collision.
-                // ADR-0048 (#1828) — key by (package, name), not bare name, so a
-                // package A row and a package B row of the same name do not
-                // collapse; org-over-env precedence still holds within each slot.
-                //
-                // [#7774] …and for a bundled type the slot is `(package, name,
-                // locale)`. Within ONE org this changes nothing — the store's own
-                // unique index is `(type, name, organization_id, package_id)`, so
-                // an org cannot hold two rows that differ only by body locale.
-                // Across the two tiers it can: an env-wide row and this org's row
-                // may customize DIFFERENT members of one bundle, and keying them
-                // together made the org's zh-CN row silently displace the
-                // env-wide en-US one. Precedence is unchanged where it was ever
-                // meaningful — an org row still overrides the env-wide row of the
-                // same member — and an undiscriminated type keeps a
-                // byte-identical key.
-                const mergedMap = new Map<string, any>();
-                const rowKey = (r: any): string =>
-                    metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
-                for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
-                for (const r of orgRecords) mergedMap.set(rowKey(r), r);
-                records = Array.from(mergedMap.values());
-                // ⭐ An EMPTY row set is cached too, and that is the main point
-                // rather than an edge case: the empty result is what triggers the
-                // alt-type retry above, so "no overlay rows for this type" is the
-                // answer whose caching removes BOTH reads. #11633 §1 measured that
-                // an app whose objects are all code-authored pays the doubled read
-                // on every request; this is the line that stops it.
-                writeMetaOverlayCache(
-                    this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
-                );
-            }
+            // [#21442] The row set this read consults — the overlay cache
+            // included — is {@link readActiveOverlayRows}, and each row is
+            // parsed by {@link storedOverlayEntries}. The by-name read selects
+            // the view containers it expands through the same two calls, so
+            // the two doors cannot disagree about which containers are in
+            // scope for one caller.
+            const records = await this.readActiveOverlayRows(request, orgId);
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
-                // Parse each overlay body once — replaying the stored-row
-                // conversion chain (#3903) so every consumer of this list sees
-                // the canonical protocol shape — and surface its persisted
-                // software-package binding so the sidebar package filter and
-                // provenance classification see overlay rows the way they see
-                // registry items.
-                const overlays = records.map((record) => {
-                    const data = this.convertStoredItem(
-                        String(record.type ?? request.type),
-                        typeof record.metadata === 'string'
-                            ? JSON.parse(record.metadata)
-                            : record.metadata,
-                    ) as any;
-                    const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-                    if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
-                        (data as any)._packageId = recPkg;
-                    }
-                    // [#6602] The row's own scope travels with its body. The
-                    // merged set below is env-wide rows PLUS this org's rows,
-                    // and the two are only distinguishable here, at the row.
-                    const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
-                    return { data, packageId: recPkg, organizationId: recOrg };
-                });
+                const overlays = this.storedOverlayEntries(request, records);
 
                 // ADR-0048 (#1828) — package-aware merge: a package-scoped row
                 // overlays ONLY its own package's entry, so two installed
@@ -8411,15 +8353,24 @@ export class ObjectStackProtocolImplementation implements
                 // another package's object every name a container expands
                 // derives from the container's own name, never one of that
                 // package's `<object>.<key>` names.
+                //
+                // [#21510] …and it never replaces a STORED ROW of that name.
+                // A row stored under exactly the name is the sanctioned
+                // override for it (ADR-0005 keys an overlay by its own name);
+                // an expansion fills only a name with no row of its own. The
+                // test is {@link namesWithOwnStoredRow} over this caller's
+                // `records`, the one the by-name read asks, so the two doors
+                // answer the same row for the name. An item the registry or a
+                // package supplies under the name is still replaced, as before.
                 if (isView) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
                         if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
                     }
-                    for (const { data, packageId: recPkg } of overlays) {
-                        for (const vi of this.expandRuntimeViewContainer(request.type, data, { packageId: recPkg })) {
-                            byName.set(vi.name as string, vi);
-                        }
+                    const ownRowNames = this.namesWithOwnStoredRow(records);
+                    for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
+                        if (ownRowNames.has(vi.name as string)) continue;
+                        byName.set(vi.name as string, vi);
                     }
                     items = Array.from(byName.values());
                 }
@@ -8702,6 +8653,263 @@ export class ObjectStackProtocolImplementation implements
             // Execution: the stored bodies — see `getMetaItemsForExecution`.
             items: audience === 'served' ? decorateMetadataItems(request.type, governed) : governed,
         };
+    }
+
+    /**
+     * [#21442] The active `sys_metadata` rows a read of `request.type` consults
+     * for one caller: the environment-wide rows, plus that organization's rows
+     * when `orgId` names one (an organization's row wins its slot), restricted
+     * to `request.packageId` when one is given. Moved here unchanged from
+     * {@link readFlattenedMetaItems}, the list read, so the by-name read
+     * ({@link resolveRowlessExpandedView}) selects the view containers it
+     * expands by this same rule — ⛔ never a second selection rule, which would
+     * be a second expansion rule.
+     *
+     * `orgId` arrives already gated ({@link organizationIdForMetaRead}). A read
+     * failure is thrown as the engine threw it; each caller applies the #5532
+     * rule ({@link rethrowUnlessMetadataStoreUnprovisioned}).
+     */
+    private async readActiveOverlayRows(
+        request: { type: string; packageId?: string },
+        orgId: string | undefined,
+    ): Promise<any[]> {
+        const { packageId } = request;
+        const queryByOrg = async (oid: string | null): Promise<any[]> => {
+            const whereClause: Record<string, unknown> = {
+                type: request.type,
+                state: 'active',
+                organization_id: oid,
+            };
+            if (packageId) whereClause.package_id = packageId;
+            let rs = await this.engine.find('sys_metadata', { where: whereClause });
+            if ((!rs || rs.length === 0)) {
+                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
+                if (alt) {
+                    const altWhere: Record<string, unknown> = { type: alt, state: 'active', organization_id: oid };
+                    if (packageId) altWhere.package_id = packageId;
+                    rs = await this.engine.find('sys_metadata', { where: altWhere });
+                }
+            }
+            return rs ?? [];
+        };
+        // ── Leg D of #11633 (#11967): the cross-request overlay cache ──
+        //
+        // ⭐ The cache sits HERE, and its position IS the resolution of the
+        // SchemaRegistry-hydration trap #11633 §4 names. What is cached is
+        // the ROW SET — the value the two `queryByOrg` calls produce —
+        // never the merged answer below it. Everything downstream of this
+        // point still runs on every call, hit or miss: the overlay parse,
+        // the package-aware merge, `hydrateOverlayIntoRegistry`, the
+        // MetadataService merge, the disabled-package filter, the nav
+        // contributions, the decorations. A hit changes where the rows came
+        // from and nothing about what is done with them, so the read-side
+        // registry hydration cannot be skipped by one.
+        //
+        // ⛔ Do NOT move this below the merge. That is precisely the naive
+        // shape the trap describes, and it would additionally serve three
+        // mutable sources — the SchemaRegistry, the MetadataService and the
+        // artifact table — whose changes nothing in this key can observe.
+        // See `meta-overlay-cache.ts` for the measured four-source table.
+        //
+        // ⭐ The epoch reading is taken BEFORE the read, and it is this
+        // pre-read value that is stored with the rows. A write landing
+        // WHILE this read is in flight therefore moves the epoch past what
+        // the entry records, so the entry is already dead when it is
+        // written — the safe direction. Reading it afterwards would stamp
+        // pre-write rows with a post-write epoch and make that staleness
+        // permanent: the clear-then-repopulate-from-a-stale-read failure
+        // #11633 §7 pin 2 names.
+        const overlayCacheKey: MetaOverlayCacheKey = {
+            type: request.type,
+            packageId,
+            organizationId: orgId,
+        };
+        const overlayCacheEpoch = readWriteEpoch(this.engine);
+        const overlayCacheTtlMs = metaOverlayCacheTtlMs();
+        const overlayCacheNow = Date.now();
+        const cachedRecords = readMetaOverlayCache(
+            this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
+        );
+
+        let records: any[];
+        if (cachedRecords !== undefined) {
+            records = cachedRecords as any[];
+        } else {
+            const envWideRecords = await queryByOrg(null);
+            const orgRecords = orgId ? await queryByOrg(orgId) : [];
+            // org-specific rows override env-wide rows on name collision.
+            // ADR-0048 (#1828) — key by (package, name), not bare name, so a
+            // package A row and a package B row of the same name do not
+            // collapse; org-over-env precedence still holds within each slot.
+            //
+            // [#7774] …and for a bundled type the slot is `(package, name,
+            // locale)`. Within ONE org this changes nothing — the store's own
+            // unique index is `(type, name, organization_id, package_id)`, so
+            // an org cannot hold two rows that differ only by body locale.
+            // Across the two tiers it can: an env-wide row and this org's row
+            // may customize DIFFERENT members of one bundle, and keying them
+            // together made the org's zh-CN row silently displace the
+            // env-wide en-US one. Precedence is unchanged where it was ever
+            // meaningful — an org row still overrides the env-wide row of the
+            // same member — and an undiscriminated type keeps a
+            // byte-identical key.
+            const mergedMap = new Map<string, any>();
+            const rowKey = (r: any): string =>
+                metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
+            for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
+            for (const r of orgRecords) mergedMap.set(rowKey(r), r);
+            records = Array.from(mergedMap.values());
+            // ⭐ An EMPTY row set is cached too, and that is the main point
+            // rather than an edge case: the empty result is what triggers the
+            // alt-type retry above, so "no overlay rows for this type" is the
+            // answer whose caching removes BOTH reads. #11633 §1 measured that
+            // an app whose objects are all code-authored pays the doubled read
+            // on every request; this is the line that stops it.
+            writeMetaOverlayCache(
+                this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
+            );
+        }
+        return records;
+    }
+
+    /**
+     * [#21442] Each active row {@link readActiveOverlayRows} returned, parsed as
+     * the list read parses it: the body (stored-row conversions replayed), the
+     * package and the organization the row is bound to, and the row's own name.
+     * Moved here from {@link readFlattenedMetaItems} so the by-name read
+     * expands the very bodies the list read expands.
+     */
+    private storedOverlayEntries(
+        request: { type: string },
+        records: any[],
+    ): StoredOverlayEntry[] {
+        // Parse each overlay body once — replaying the stored-row
+        // conversion chain (#3903) so every consumer of this list sees
+        // the canonical protocol shape — and surface its persisted
+        // software-package binding so the sidebar package filter and
+        // provenance classification see overlay rows the way they see
+        // registry items.
+        return records.map((record) => {
+            const data = this.convertStoredItem(
+                String(record.type ?? request.type),
+                typeof record.metadata === 'string'
+                    ? JSON.parse(record.metadata)
+                    : record.metadata,
+            ) as any;
+            const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
+            if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
+                (data as any)._packageId = recPkg;
+            }
+            // [#6602] The row's own scope travels with its body. The
+            // merged row set is env-wide rows PLUS this org's rows, and
+            // the two are only distinguishable here, at the row.
+            const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
+            return { name: String(record.name), data, packageId: recPkg, organizationId: recOrg };
+        });
+    }
+
+    /**
+     * [#21442] Every item the stored view containers in `overlays` expand, in
+     * the order the list read upserts them by name (a later expansion of a
+     * name replaces an earlier one), each paired with the stored row it was
+     * expanded from. The one expansion pass both doors run: the list read
+     * serves the items, and {@link resolveRowlessExpandedView} also needs the
+     * row. Each container goes through {@link expandRuntimeViewContainer},
+     * unchanged.
+     */
+    private expandStoredViewContainers<E extends { data: unknown; packageId: string | undefined }>(
+        type: string,
+        overlays: readonly E[],
+    ): Array<{ item: Record<string, unknown>; container: E }> {
+        const out: Array<{ item: Record<string, unknown>; container: E }> = [];
+        for (const container of overlays) {
+            for (const item of this.expandRuntimeViewContainer(type, container.data, { packageId: container.packageId })) {
+                out.push({ item, container });
+            }
+        }
+        return out;
+    }
+
+    /**
+     * [#21510] The names that have a stored row of their own among `records`,
+     * the active rows {@link readActiveOverlayRows} selected for one caller.
+     *
+     * ADR-0005 keys an overlay by its own name, so a row stored under exactly a
+     * name is the sanctioned override for that name. An expansion is derived
+     * from its container, so it fills only a name that is NOT in this set. This
+     * is the one predicate both doors ask: the list read
+     * ({@link readFlattenedMetaItems}) never lets an expansion displace a
+     * stored row of the same name, and the by-name read
+     * ({@link resolveRowlessExpandedView}) answers an expansion only for a name
+     * outside it. Both doors pass the rows they selected for the same caller,
+     * so a name that has a row in one organization only is row-less for every
+     * other caller. ⛔ Never a second test of "this name has its own row":
+     * two tests are two rules, and the doors would disagree again.
+     */
+    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+        const names = new Set<string>();
+        for (const record of records) {
+            if (typeof record?.name === 'string') names.add(record.name);
+        }
+        return names;
+    }
+
+    /**
+     * [#21442] The item the list read serves under `request.name` when that
+     * name is ROW-LESS — no stored row of its own — and a stored view
+     * container in this caller's scope expands it; `undefined` otherwise.
+     *
+     * The list read ({@link readFlattenedMetaItems}) expands every stored
+     * container it reads into its own answer, so `GET /meta/view?object=`
+     * lists the container's views. Nothing else stores or registers those
+     * views on every kernel: the registry hydration that does
+     * ({@link hydrateExpandedViewItems}) runs only on an unscoped kernel and
+     * only for an environment-wide row. So the by-name read answered an
+     * expanded name only there, and answered nothing on an
+     * environment-scoped kernel or for an organization-scoped container — and,
+     * where the name is one a package also ships, answered the packaged row
+     * instead of the one the list serves.
+     *
+     * The answer is the list read's own, by construction: the same rows
+     * ({@link readActiveOverlayRows}, same `packageId`, same gated `orgId`),
+     * the same parse ({@link storedOverlayEntries}) and the same expansion
+     * ({@link expandStoredViewContainers} over
+     * {@link expandRuntimeViewContainer}), the last expansion of the name
+     * winning as it does in the list. Nothing is persisted or registered: an
+     * expansion is derived from its container on every read, so there is no
+     * second copy to drift from it (ADR-0005 keys an overlay by its own name).
+     * ⛔ No kernel-specific branch — every kernel answers through this path.
+     *
+     * A stored row of this very name is the name's own row and is answered
+     * as such by the caller's own read, never an expansion — the same
+     * predicate the list read applies ({@link namesWithOwnStoredRow}). The `container`
+     * returned is the stored row the item derives from — its own name, body,
+     * package and organization — which the layered read reports as the
+     * name's provenance and the history and diff reads resolve to.
+     */
+    private async resolveRowlessExpandedView(
+        request: { type: string; name: string; packageId?: string },
+        orgId: string | undefined,
+    ): Promise<RowlessExpandedView | undefined> {
+        if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'view') return undefined;
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows(
+                { type: request.type, ...(request.packageId ? { packageId: request.packageId } : {}) },
+                orgId,
+            );
+        } catch (error) {
+            // [#5532] The list read's rule: only an unprovisioned store means
+            // "no rows". Any other failure is not answered as "nothing expands
+            // this name".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        if (this.namesWithOwnStoredRow(records).has(request.name)) return undefined;
+        let found: RowlessExpandedView | undefined;
+        for (const expanded of this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, records))) {
+            if (expanded.item.name === request.name) found = expanded;
+        }
+        return found;
     }
 
     async getMetaItem(request: { type: string, name: string, packageId?: string, organizationId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
@@ -9031,6 +9239,23 @@ export class ObjectStackProtocolImplementation implements
         // step 2 / step 3 fold their own sources).
         if (item !== undefined) {
             item = this.foldObjectExtendersFromRegistry(request.type, request.name, item);
+        }
+
+        // 1b. [#21442] A view name with no stored row of its own that a stored
+        //     view container in this caller's scope EXPANDS — the item the
+        //     object door (`GET /meta/view?object=`) lists under this name,
+        //     resolved by {@link resolveRowlessExpandedView} through the list
+        //     read's own selection and expansion. Placed before steps 2 and 3
+        //     because the list read's expansion wins over the MetadataService
+        //     and registry items of the same name too; there, a name a package
+        //     ships (`<object>.default` under a tenant overlay of that package's
+        //     container) answered the packaged row while the list served the
+        //     expansion, and on an unscoped kernel a hydrated registry copy
+        //     answered only for an environment-wide container. ⛔ No
+        //     kernel-specific branch: every kernel answers here.
+        if (item === undefined) {
+            const expanded = await this.resolveRowlessExpandedView(request, orgId);
+            if (expanded !== undefined) item = expanded.item;
         }
 
         // 2. MetadataService (runtime-registered items: HMR-updated view/page/
@@ -9541,6 +9766,28 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
 
+        // ── [#21442] A row-less name a stored view container expands ──
+        //
+        // No row of this name was read above. When a stored view container in
+        // this caller's scope expands the name ({@link resolveRowlessExpandedView},
+        // the list read's own selection and expansion), `effective` is the
+        // expanded item — what {@link getMetaItem} answers for the name — and
+        // the layers say where it came from in the fields that already say it:
+        // `overlay` is the container's own stored row, the one stored layer
+        // behind this name (its `name` is the container's, its `_packageId` the
+        // package its row is bound to), and `overlayScope` the scope that row
+        // was read from. `code` keeps its own read: the item a package ships
+        // under this name (a tenant overlay of that package's container), else
+        // `null`.
+        let expandedFrom: RowlessExpandedView | undefined;
+        if (overlay === null) {
+            expandedFrom = await this.resolveRowlessExpandedView(request, orgId);
+            if (expandedFrom !== undefined) {
+                overlay = expandedFrom.container.data;
+                overlayScope = expandedFrom.container.organizationId === null ? 'env' : 'org';
+            }
+        }
+
         // [#4513] `effective` is documented above as "what `getMetaItem` would
         // return", and the response's `_diagnostics` is computed from it — so it
         // carries the same audit-family governance that read now applies, or the
@@ -9585,9 +9832,15 @@ export class ObjectStackProtocolImplementation implements
         // one that set holds. Every other type, and a flow name no managed
         // package ships, keeps overlay-wins. What becomes of the stored rows
         // themselves (keep, refuse, migrate) is not decided here.
-        const effectiveBase: unknown | null = overlay !== null && !this.isShippedFlowName(request.type, request.name)
-            ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
-            : code;
+        //
+        // [#21442] A name a stored container expands (above) takes the expanded
+        // item as its effective layer: the container row in `overlay` is the
+        // layer it derives from, not the value the by-name read serves.
+        const effectiveBase: unknown | null = expandedFrom !== undefined
+            ? expandedFrom.item
+            : overlay !== null && !this.isShippedFlowName(request.type, request.name)
+                ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
+                : code;
         const effective: unknown | null = this.governServedObject(request.type, effectiveBase);
 
         const _diagnostics =
@@ -14731,6 +14984,66 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * An organization-scoped `view` write that changes which public forms
+     * accept anonymous intake, on a deployment whose anonymous form doors do
+     * not read that organization. Returns the refusal, or `null` when the
+     * write is fine.
+     *
+     * An anonymous form request carries no session and so no organization.
+     * The doors resolve the form in `tenancy.defaultOrgId()`'s organization
+     * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
+     * write's organization (every walled posture, degraded or not, answers
+     * `null`), the doors read the env-wide definition, so the write is refused
+     * and the author is pointed at the env-wide save, which every door
+     * honours. A composition with no tenancy service has no posture to judge
+     * (and no session to carry an organization over HTTP), so it is left as is.
+     *
+     * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
+     * an organization-scoped edit that leaves it as the env-wide definition has
+     * it is unaffected. Same code and status as {@link orgScopedWriteRefusal}:
+     * this item's anonymous intake has no per-org channel on this deployment.
+     */
+    private async anonymousFormIntakeOrgScopeRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string | null | undefined;
+        body: unknown;
+    }): Promise<Error | null> {
+        if (!args.organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
+        if (singular !== 'view') return null;
+        const tenancy = this.getServicesRegistry?.().get('tenancy') as
+            | { defaultOrgId?: () => Promise<string | null> }
+            | undefined;
+        if (typeof tenancy?.defaultOrgId !== 'function') return null;
+        const doorOrganization = await tenancy.defaultOrgId();
+        if (doorOrganization === args.organizationId) return null;
+        const proposed = anonymousFormIntakeSlugs(args.body);
+        const served = anonymousFormIntakeSlugs(
+            ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
+        );
+        if (proposed.length === served.length && proposed.every((s, i) => s === served[i])) return null;
+        const list = (slugs: string[]) => (slugs.length ? slugs.map((s) => `'${s}'`).join(', ') : 'none');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot change which public forms accept anonymous intake `
+            + `in organization '${args.organizationId}' (env-wide: ${list(served)}; this write: ${list(proposed)}). `
+            + `An anonymous form request carries no organization, and this deployment resolves `
+            + (doorOrganization
+                ? `it in organization '${doorOrganization}'`
+                : `none for it (a walled tenancy posture never guesses one)`)
+            + `, so the anonymous form doors serve the env-wide definition and would never see this change. `
+            + `Save it env-wide instead (retry with no active organization): that withdraws or publishes the form `
+            + `on every anonymous door. An organization-scoped edit that leaves the form's sharing as the env-wide `
+            + `definition has it is still accepted. See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -17506,6 +17819,18 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
+        // An org-scoped change to a form's anonymous intake that the anonymous
+        // form doors cannot see. Drafts too, so no draft is minted that its
+        // own promotion would refuse. See {@link anonymousFormIntakeOrgScopeRefusal}.
+        {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: request.type,
+                name: request.name,
+                organizationId: request.organizationId,
+                body: request.item,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
 
         if (this.environmentId !== undefined) {
             // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
@@ -17720,20 +18045,21 @@ export class ObjectStackProtocolImplementation implements
         // (#2555 — a console personalization PUT sends only the raw config).
         // See {@link normalizeViewMetadata}.
         {
-            // [#21412] FIRST, before the stamp below can keep an authored
-            // `name`: a view CONTAINER whose own `name` disagrees with the name
-            // this door files the row under is refused, `VALIDATION_ERROR` /
-            // 400, through the one judge the source registrars call. Accepted,
-            // it was stored under the row name and registered under the
-            // body's (`hydrateOverlayIntoRegistry` keys by `body.name`), so one
-            // document answered under two names. The key here is the save
-            // name, not the derived binding: this door keeps a container saved
-            // under a name other than its object (#13407, #21334), and the
-            // body it stamps for one must pass when sent back. A body with no
-            // `name` passes and is stamped below. Containers only — the
-            // every-type half is #21470.
-            if (singularType === 'view') {
-                const nameRefusal = savedViewContainerNameRefusal(request.item, request.name);
+            // [#21412, #21470] FIRST, before the stamp below can keep an
+            // authored `name`: a body of ANY type whose own `name` disagrees
+            // with the name this door files the row under is refused,
+            // `VALIDATION_ERROR` / 400, through the one judge the source
+            // registrars call. Accepted, it was stored under the row name and
+            // registered under the body's (`hydrateOverlayIntoRegistry` keys by
+            // `body.name`), so one row answered under a name nobody saved it
+            // under and under none by its own. The key here is the save name,
+            // not a view container's derived binding: this door keeps a
+            // container saved under a name other than its object (#13407,
+            // #21334), and the body it stamps for one must pass when sent back.
+            // A body with no `name` passes; a view's is stamped below. What
+            // counts as a set `name` per type is the judge's header.
+            {
+                const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
             }
             let baseline: unknown;
@@ -18961,6 +19287,20 @@ export class ObjectStackProtocolImplementation implements
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             return { events: [] };
         }
+        // [#21442] A view name with no stored row of its own that a stored
+        // view container in this caller's scope expands — a name the by-name
+        // read answers with the container's expansion — was never stored, so
+        // it has no change log of its own and none is synthesized for it. Its
+        // history is the container's own row's, read exactly as this method
+        // reads it under the container's own name, and the answer says so:
+        // every event's `ref.name` names the container.
+        const expandedFrom = await this.resolveRowlessExpandedView(
+            { type: singularType, name: request.name },
+            organizationIdForMetaRead(singularType, request.organizationId),
+        );
+        if (expandedFrom !== undefined) {
+            return this.historyMetaItem({ ...request, name: expandedFrom.container.name });
+        }
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
         const ref = {
@@ -19433,6 +19773,28 @@ export class ObjectStackProtocolImplementation implements
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft' },
         );
+        // [#21470] …and the divergent `name` refusal, on the same body and for
+        // the same reason: a draft stored before `saveMetaItem` judged every
+        // type can carry a `name` that is not its row's, and promoting it
+        // registers the row under that `name`. Refused here, with the save
+        // door's judge and envelope, before `repo.promoteDraft` writes —
+        // exactly as the authoring gate below refuses, so a batch publish
+        // aborts on it as it aborts on that gate.
+        if (draftForGate) {
+            const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
+            if (nameRefusal) throw nameRefusal;
+        }
+        // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
+        // draft saved before that refusal existed must not reach `active`.
+        if (draftForGate) {
+            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
+                type: singularType,
+                name: request.name,
+                organizationId: orgId,
+                body: draftForGate.body,
+            });
+            if (intakeRefusal) throw intakeRefusal;
+        }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
         // promotion is about to earn, exactly as `saveMetaItem` attaches its
@@ -22686,14 +23048,17 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
-                    const restoreDerivation = this.restoredBodyDerivation(it.type);
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
-                        // [#20790] R2 — the type's credential-channel strip.
-                        ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
+                        // [#21470] The divergent `name` refusal, then [#20790]
+                        // R2's credential-channel strip. A refused version lands
+                        // in `failed[]` below, with nothing written. Judged under
+                        // the SINGULAR type, the spelling the write-through
+                        // registers under. See {@link restoredBodyWriter}.
+                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
@@ -23079,16 +23444,17 @@ export class ObjectStackProtocolImplementation implements
         // real outage (#4867).
         const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
         try {
-            const restoreDerivation = this.restoredBodyDerivation(singularType);
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
                 actor: request.actor ?? null,
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
-                // [#20790] R2 — a rollback past the credential move keeps the
-                // write-only channel's current credential and stores none.
-                ...(restoreDerivation ? { deriveRestoredBody: restoreDerivation } : {}),
+                // [#21470] The divergent `name` refusal, rethrown below with
+                // nothing written; then [#20790] R2 — a rollback past the
+                // credential move keeps the write-only channel's current
+                // credential and stores none. See {@link restoredBodyWriter}.
+                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
@@ -23276,6 +23642,21 @@ export class ObjectStackProtocolImplementation implements
         // the read below reads it as "the key the row is stored under" — the same
         // shape {@link rollbackMetaItem} keeps.
         const singularType = request.type;
+        // [#21442] A view name with no stored row of its own that a stored
+        // view container in this caller's scope expands — a name the by-name
+        // read answers with the container's expansion — has no versions of its
+        // own, and none are synthesized for it. The comparison is the
+        // container's own row's, made exactly as this method makes it under the
+        // container's own name, and the answer says so: its `name` is the
+        // container's — the item actually diffed, the same rule the echoed
+        // `type` follows above.
+        const expandedFrom = await this.resolveRowlessExpandedView(
+            { type: singularType, name: request.name },
+            organizationIdForMetaRead(singularType, request.organizationId),
+        );
+        if (expandedFrom !== undefined) {
+            return this.diffMetaItem({ ...request, name: expandedFrom.container.name });
+        }
         const orgId = request.organizationId ?? null;
         // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
         // cannot serve this function: its `MetadataEvent` shape doesn't carry

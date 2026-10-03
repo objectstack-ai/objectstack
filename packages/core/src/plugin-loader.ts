@@ -418,7 +418,7 @@ export class PluginLoader {
      *
      * The check itself — `PluginSchema.safeParse` for validation only, the
      * nine keys it reaches and the `PLUGIN_CONTRACT_VIOLATION` envelope —
-     * lives in `plugin-contract.ts`, because since #16721 it is ONE statement
+     * lives in `plugin-contract.ts`, because since commit 51ae73123 it is ONE statement
      * run by BOTH kernels:
      * `LiteKernel.use()` calls it directly, and `ObjectKernel.use()` reaches
      * it here, through `loadPlugin`. That module's comment is the authority on

@@ -40,7 +40,7 @@ const shared: Options = {
   // file and resolve the SAME `@objectstack/spec/package.json`.
   //
   // Same line, same reason, same measurement as
-  // `packages/metadata-protocol/tsup.config.ts` (#11235) and
+  // `packages/metadata-protocol/tsup.config.ts` (commit 376c70f98) and
   // `packages/runtime/tsup.config.ts` (#10993) — read either for the sibling
   // history. `pnpm check:dual-build-cjs-loads` holds the class: it
   // `require()`s every dual-built package's CJS entry point and reds on this
