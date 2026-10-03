@@ -1482,9 +1482,16 @@ describe('#21334 a container on another package\'s object never takes that packa
                     // The envelope, and the sibling named as the container that expands the name.
                     expectRefused(error, PIPELINE, LEAD);
                     // A save under the sibling's name would replace its row and drop `pipeline`,
-                    // the view this refusal keeps serving: no arm may name that save.
-                    expect(error.message, 'no save is prescribed under the sibling\'s (here the object\'s) name')
-                        .not.toContain(`under '${LEAD}'`);
+                    // the view this refusal keeps serving: no arm may name that save. So every
+                    // place the sibling's name appears names it as THE CONTAINER (or as the
+                    // object a view binds to), never as a name to save under.
+                    const leadIns = String(error.message).split(`'${LEAD}'`).slice(0, -1);
+                    expect(leadIns.filter((s) => /container $/.test(s)).length, 'the sibling is named as the container').toBeGreaterThan(0);
+                    expect(
+                        leadIns.filter((s) => !/(container|on) $/.test(s)),
+                        'the sibling\'s (here the object\'s) name is never prescribed as a name to save under',
+                    ).toEqual([]);
+                    expect(error.message).not.toContain(`under '${LEAD}'`);
                     expectNothingWritten(rows, registry, [LEAD], PIPELINE);
                     await expectServed(protocol, PIPELINE, undefined, 'Lead Pipeline');
                 });
