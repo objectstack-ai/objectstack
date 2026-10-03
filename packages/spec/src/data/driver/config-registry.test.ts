@@ -213,17 +213,65 @@ describe('DATABASE_DRIVER_SELECTION_IDS — what a boot flag may offer (#6969)',
   });
 
   it('is the selectable subset of the ids the platform ships a contract for', () => {
-    // Equal contents today, different questions (see the export's docstring):
-    // nothing shipped is currently withheld from the flag, and this states that
-    // out loud so the day one IS withheld, the change is deliberate and visible
-    // here rather than inferred from a diff.
-    expect([...DATABASE_DRIVER_SELECTION_IDS].sort()).toEqual([...BUILTIN_DRIVER_IDS].sort());
+    // Different questions (see the export's docstring), and now different
+    // contents: exactly ONE shipped id is withheld from the flag — `memory`,
+    // the in-memory (mingo) engine, retired as a boot store and withdrawn on its
+    // row. Stated out loud so a second withheld id is a deliberate, visible
+    // change here rather than something inferred from a diff.
+    const withheld = BUILTIN_DRIVER_IDS.filter((id) => !DATABASE_DRIVER_SELECTION_IDS.includes(id));
+    expect(withheld).toEqual(['memory']);
+    for (const id of DATABASE_DRIVER_SELECTION_IDS) expect(BUILTIN_DRIVER_IDS).toContain(id);
   });
 
   it('is frozen, so a consumer cannot mutate the vocabulary it was handed', () => {
     expect(Object.isFrozen(DATABASE_DRIVER_SELECTION_IDS)).toBe(true);
   });
 });
+/**
+ * The in-memory (mingo) engine's withdrawal from the SELECTION face.
+ *
+ * The engine refuses every tenant-scoped read, so a boot on it answered 503 to
+ * data requests; it was retired as a boot store at its declaration — this
+ * table's `memory` row — rather than narrowed at a consumer. The row keeps all
+ * four spellings on the CONTRACT face, so a stored `datasource.driver: memory`
+ * still parses (the boot hosts refuse it, naming the replacement); it offers
+ * none of them as a selection. These pin that row, and that it is the only row
+ * that moved.
+ */
+describe('the `memory` row: contract face kept, selection face withdrawn', () => {
+  const MEMORY_SPELLINGS = ['memory', 'mingo', 'in-memory', 'inmemory'] as const;
+
+  it('offers none of the engine\'s spellings as a boot selection', () => {
+    for (const spelling of MEMORY_SPELLINGS) {
+      expect(DATABASE_DRIVER_SELECTION_ALIASES, spelling).not.toContain(spelling);
+      expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
+    }
+    expect(DATABASE_DRIVER_SELECTION_IDS).not.toContain('memory');
+  });
+
+  it('keeps every spelling on the contract face, so a stored memory datasource still parses', () => {
+    for (const spelling of MEMORY_SPELLINGS) {
+      expect(resolveDriverId(spelling), spelling).toBe('memory');
+      expect(getDriverConfigSchema(spelling), spelling).toBe(DRIVER_CONFIG_SCHEMAS.memory);
+      const parsed = DatasourceSchema.safeParse({ name: 'scratch', driver: spelling, config: {} });
+      expect(parsed.success, spelling).toBe(true);
+    }
+  });
+
+  it('moved no other row: the selection face is exactly the six other drivers\' spellings', () => {
+    expect([...DATABASE_DRIVER_SELECTION_ALIASES]).toEqual([
+      'sqlite', 'sql',
+      'sqlite-wasm', 'wasm-sqlite', 'wasm',
+      'postgres', 'postgresql', 'pg',
+      'mysql', 'mysql2',
+      'mongodb', 'mongo',
+      'turso', 'libsql',
+    ]);
+    expect([...DATABASE_DRIVER_SELECTION_IDS]).toEqual(['sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso']);
+    expect([...BUILTIN_DRIVER_IDS]).toEqual(['memory', 'sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso']);
+  });
+});
+
 /**
  * The OFF-VOCABULARY population — the one the pins above cannot reach (#16903).
  *
@@ -360,11 +408,16 @@ describe('driver lookups — an OFF-vocabulary id is refused, never answered wit
   });
 
   it('still answers every canonical id from the vocabulary table, unmoved', () => {
-    // The other side of the same edge, for the resolvers.
+    // The other side of the same edge, for the resolvers: every contract id on
+    // the contract face, every selectable id on the selection face — and the one
+    // withdrawn id (`memory`) on the contract face only.
     for (const id of BUILTIN_DRIVER_IDS) {
       expect(resolveDriverId(id), id).toBe(id);
+    }
+    for (const id of DATABASE_DRIVER_SELECTION_IDS) {
       expect(resolveDatabaseDriverId(id), id).toBe(id);
     }
+    expect(resolveDatabaseDriverId('memory')).toBeUndefined();
     expect(resolveDriverId('  PostgreSQL ')).toBe('postgres');
     expect(resolveDriverId('sqlite3')).toBe('sqlite');
     expect(resolveDatabaseDriverId('sqlite3')).toBeUndefined();

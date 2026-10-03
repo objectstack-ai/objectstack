@@ -97,7 +97,7 @@ const ARTIFACT = {
 };
 
 // The first createStandaloneStack call cold-loads heavy deps (objectql,
-// metadata, driver-memory) via dynamic import — on a cold CI worker that can
+// metadata) via dynamic import — on a cold CI worker that can
 // exceed vitest's default 5s test timeout. Do the one-time boot in beforeAll
 // (with a generous timeout) and have the assertion cases read the result.
 const BOOT_TIMEOUT = 60_000;
@@ -111,7 +111,7 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
     dir = mkdtempSync(join(tmpdir(), 'os-standalone-rbac-'));
     artifactPath = join(dir, 'objectstack.json');
     writeFileSync(artifactPath, JSON.stringify(ARTIFACT), 'utf-8');
-    result = await createStandaloneStack({ artifactPath, databaseUrl: 'memory://standalone-rbac' });
+    result = await createStandaloneStack({ artifactPath, databaseUrl: ':memory:' });
   }, BOOT_TIMEOUT);
   afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ } });
 
@@ -229,7 +229,7 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
     const r = await createDefaultHostConfig({
       requireArtifact: true,
       artifactPath,
-      databaseUrl: 'memory://standalone-rbac',
+      databaseUrl: ':memory:',
     });
     expect(appSecurityPluginOptions(r)).toEqual({ fallbackPermissionSet: 'app_member_default' });
     expect(appDefaultPermissionSetName(r.permissions)).toBe('app_member_default');
@@ -268,7 +268,7 @@ describe('createStandaloneStack — stamps the locale-derived pinyin decision fr
     const i18n = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
     const result = await createStandaloneStack({
       artifactPath: writeArtifact('zh.objectstack.json', i18n),
-      databaseUrl: 'memory://standalone-pinyin-zh',
+      databaseUrl: ':memory:',
     });
     // The stamp is what each engine's SchemaRegistry (constructed later, at
     // kernel start, without config access) reads to decide whether to
@@ -283,7 +283,7 @@ describe('createStandaloneStack — stamps the locale-derived pinyin decision fr
     delete process.env.OS_SEARCH_PINYIN_ENABLED;
     await createStandaloneStack({
       artifactPath: writeArtifact('en.objectstack.json', { defaultLocale: 'en', supportedLocales: ['en'] }),
-      databaseUrl: 'memory://standalone-pinyin-en',
+      databaseUrl: ':memory:',
     });
     expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBeUndefined();
   }, BOOT_TIMEOUT);
@@ -292,7 +292,7 @@ describe('createStandaloneStack — stamps the locale-derived pinyin decision fr
     process.env.OS_SEARCH_PINYIN_ENABLED = 'false';
     await createStandaloneStack({
       artifactPath: writeArtifact('zh-override.objectstack.json', { supportedLocales: ['zh-CN'] }),
-      databaseUrl: 'memory://standalone-pinyin-override',
+      databaseUrl: ':memory:',
     });
     expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('false');
   }, BOOT_TIMEOUT);
@@ -348,10 +348,24 @@ describe('createStandaloneStack — default datasource declared, built via the s
     }
   }
 
-  it('memory:// → declares driver "memory"; factory builds InMemoryDriver that round-trips', async () => {
-    const r = await definitionRoundTrip({ databaseUrl: 'memory://default-driver' });
-    expect(r.driverId).toBe('memory');
-    expect(r.kind).toMatch(/InMemoryDriver$/);
+  // The in-memory (mingo) engine is no longer a boot store, so `memory://`
+  // declares NOTHING: the stack refuses before a definition exists, naming the
+  // SQLite replacements. The replacement itself is the next case.
+  it('memory:// → refused before any definition is declared, naming the replacements', async () => {
+    const err = await createStandaloneStack({ databaseUrl: 'memory://default-driver' }).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(err, 'createStandaloneStack accepted memory://').toBeInstanceOf(Error);
+    expect(err!.message).toContain('"memory://default-driver"');
+    expect(err!.message).toContain('--fresh');
+    expect(err!.message).toContain(':memory:');
+  }, BOOT_TIMEOUT);
+
+  it(':memory: → declares driver "sqlite" on SQLite\'s in-memory database; factory builds SqlDriver that round-trips', async () => {
+    const r = await definitionRoundTrip({ databaseUrl: ':memory:' });
+    expect(r.driverId).toBe('sqlite');
+    expect(r.kind).toMatch(/SqlDriver$/);
     expect(r.titles).toContain('hello-driver');
   }, BOOT_TIMEOUT);
 
@@ -378,7 +392,7 @@ describe('createStandaloneStack — default datasource declared, built via the s
   // Pinning an array index as if it were the guarantee is how #4085 happened —
   // a reader trusts the index, moves a plugin, and nothing fails.
   it('composes the default datasource alongside the engine', async () => {
-    const stack = await createStandaloneStack({ databaseUrl: 'memory://default-order' });
+    const stack = await createStandaloneStack({ databaseUrl: ':memory:' });
     const names = stack.plugins.map((p: any) => String(p?.name ?? p?.constructor?.name ?? ''));
     const dsIdx = names.indexOf('com.objectstack.runtime.default-datasource');
     const qlIdx = names.findIndex((n: string) => /objectql/i.test(n));
@@ -393,7 +407,7 @@ describe('createStandaloneStack — default datasource declared, built via the s
   // kernel stops ordering the two inits — which the array cannot notice, and
   // this does.
   it('declares the ObjectQL dependency that actually orders the two inits', async () => {
-    const stack = await createStandaloneStack({ databaseUrl: 'memory://default-order-deps' });
+    const stack = await createStandaloneStack({ databaseUrl: ':memory:' });
     const ds = stack.plugins.find(
       (p: any) => p?.name === 'com.objectstack.runtime.default-datasource',
     ) as any;
