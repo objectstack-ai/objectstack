@@ -1216,12 +1216,17 @@ describe('#21334 a container on another package\'s object never takes that packa
             protocol: Protocol, name: string, item: unknown, organizationId?: string, mode?: 'draft' | 'publish',
         ) => protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId), ...(mode ? { mode } : {}) } as any);
         const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
-        /** The minimum a rejection pin asserts — the ADR-0112 envelope — plus the subjects it names. */
+        /**
+         * The minimum a rejection pin asserts — the ADR-0112 envelope — plus the subjects it names.
+         * [#21639] Every name below is also a name the showcase SHIPS, and the family's one
+         * predicate names that other owner: the shipping package, and the object its view is on.
+         */
         const expectRefused = (error: any, saveName: string) => {
             expect(error).toBeInstanceOf(Error);
             expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
             expect(error.message, 'the refusal names the save name').toContain(`'${saveName}'`);
-            expect(error.message, 'the prescription names the object\'s own name').toContain(`'${TASK}'`);
+            expect(error.message, 'the refusal names the object its view is on').toContain(`'${TASK}'`);
+            expect(error.message, 'the refusal names the other owner, the shipping package').toContain(`the package '${SHOWCASE}' ships`);
         };
         /** The doors answer `name` with the one item `expectItem` names, and the same item on both. */
         const expectBothDoors = async (
@@ -1321,6 +1326,10 @@ describe('#21334 a container on another package\'s object never takes that packa
      * item under an expanded name still saves. One more control is the
      * census's: a container under a name of its own, not its object's and not
      * a sibling's expansion, still saves.
+     *
+     * [#21639] Since generalised: the family's one predicate drops "of the
+     * same object" and adds the shapes this check left open (that block,
+     * below). Every pin here keeps its envelope and its intent.
      */
     describe('#21620 the save door refuses a container saved under a name another stored container of the same object expands to', () => {
         const LEAD = 'crm_lead';
@@ -1882,9 +1891,15 @@ describe('#21334 a container on another package\'s object never takes that packa
                                 expect(error.message, 'the refusal names the save name').toContain(`'${row.save.name}'`);
                                 expect(error.message, 'the refusal names the colliding name').toContain(`'${refused.collides}'`);
                                 expect(error.message, 'the refusal names the other owner').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
-                                // … and never prescribes a save under a name another stored row holds.
+                                // … and never prescribes a save under a name another stored row
+                                // holds: wherever a stored row's name appears, it is named as THE
+                                // CONTAINER (or as the object a view binds to), never as a name.
                                 for (const given of row.given ?? []) {
-                                    expect(error.message, `no arm prescribes a save under '${given.name}'`).not.toContain(`under '${given.name}'`);
+                                    const leadIns = String(error.message).split(`'${given.name}'`).slice(0, -1);
+                                    expect(
+                                        leadIns.filter((leadIn) => !/(container|on) $/.test(leadIn)),
+                                        `'${given.name}', a stored row's name, is never prescribed as a name to save under`,
+                                    ).toEqual([]);
                                 }
                             }
                             expect(viewRowsOf(rows), 'no row and no draft is stored').toEqual(storedBefore);
