@@ -31,6 +31,7 @@ import { resolveThrownHttpError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
+import { SysUser, SysMember } from '@objectstack/platform-objects/identity';
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
@@ -120,6 +121,15 @@ async function boot(opts: { walled?: boolean } = {}) {
     objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, QA_INQUIRY],
   } as any);
   await engine.syncSchemas();
+  // [#21516] The authz resolver reads these on every grant resolution; in a
+  // deployment the auth and security plugins register them. This harness
+  // composes neither, so the ones its app does not declare are registered
+  // here, AFTER the DDL above, and stay unprovisioned: the resolver reads a
+  // missing table and answers "no grants", exactly as it did when the engine
+  // still handed an unregistered name to the driver (which it now refuses).
+  for (const o of [SysUser, SysMember, SysPosition, SysUserPosition, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
+  }
   engines.push(engine);
 
   const warn = vi.fn();
