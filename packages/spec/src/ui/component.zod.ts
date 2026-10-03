@@ -54,6 +54,9 @@ import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+// [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
+// `groupBy` union, by reference — the tile routes it exactly as the chart does.
+import { ChartGroupBySchema } from './chart.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
@@ -4430,6 +4433,101 @@ export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
 export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
 
 /**
+ * [#21464] The `object-metric` tile's `aggregate` — the query behind its one
+ * number, as the tile reads it at the `.objectui-sha` pin `89cad75d55`
+ * (`plugin-dashboard/src/ObjectMetricWidget.tsx`): `field` and `function`
+ * build the request and name the result column (`:403-443`, `computeOne`),
+ * `function` also decides whether the field's unit dresses the number (`:305`,
+ * `answersInFieldUnit`) and the `min` / `max` width (`:344-353`), and
+ * `groupBy` routes a structured date-bucket node to the spec-shape query
+ * (`:405-423`, `objectAggregateSpecQuery`) and is floored at the one `'_all'`
+ * bucket when absent (`:427`).
+ *
+ * The vocabulary is declared elsewhere, by reference; the SHAPE is the tile's
+ * own:
+ *
+ * - `function` is the query AST's {@link AggregationFunction} — the engine's
+ *   six, `count_distinct` among them. The tile forwards it to the data source
+ *   verbatim (`<field>_<function>` on the analytics wire, which answers
+ *   `_count_distinct`; the function itself on the spec-shape query), and
+ *   objectui's own pin of the unit rule classifies one row per member of that
+ *   enum and mounts each (`__tests__/ObjectMetricWidget.countNotCurrency-10356.test.tsx:102-124`),
+ *   so a `count_distinct` tile is drawn. The chart's five-function subset
+ *   (`ChartAggregateFunctionSchema`) is NOT this vocabulary: the chart leaves
+ *   `count_distinct` out because the client-side fallback cannot compute it,
+ *   and that fallback sums a `count_distinct` on the metric too — but the tile
+ *   reads and draws it wherever the analytics service answers it, so the
+ *   five would refuse a value the tile draws.
+ * - `groupBy` is the chart's {@link ChartGroupBySchema} — the tile types it as
+ *   `ChartAggregate['groupBy']` (`:150`) and routes its object arm the way the
+ *   chart does. Optional here: the chart requires it because an ungrouped chart
+ *   draws nothing, while a metric paints one number and floors an absent one —
+ *   every authored `object-metric` in the showcase writes `{ field, function }`
+ *   with no `groupBy`, and the chart's own header records that the ungrouped
+ *   need is this block's. That is also why the row does not take
+ *   `ChartAggregateSchema` whole: it would refuse every one of those tiles.
+ *
+ * The one rule the chart's aggregate carries is restated: a function other
+ * than `count` needs a `field` (the tile asks the server for
+ * `<field>_<function>`, and the client-side fallback sums `undefined`). The
+ * companion pin holds the two verdicts equal over the chart's vocabulary, so
+ * the copy cannot drift.
+ */
+const ObjectMetricAggregateSchema = lazySchema(() => strictObject({
+  surface: 'this `object-metric` aggregate',
+  history:
+    'Until this shape was declared, `aggregate` was `z.unknown()`: a string such as `\'count\'`, a function '
+    + 'the engine does not have, or `groupby` for `groupBy` passed, and the tile asked the server for a measure '
+    + 'it could not answer, or drew one ungrouped number.',
+  guidance: {
+    dateGranularity:
+      '`dateGranularity` goes INSIDE `groupBy`, not beside it — write `groupBy: { field: "<date field>", dateGranularity: "month" }`.',
+    filter:
+      '`filter` is the metric\'s own member, one level up, beside `aggregate` — the aggregate runs over it, and the drill-down list is scoped by the same filter.',
+    objectName:
+      '`objectName` is the metric\'s own member, one level up — the aggregate runs against it and does not name it again.',
+  },
+}, {
+  field: z.string().optional()
+    .describe('Field to aggregate — required for every function but `count`, which counts rows'),
+  function: AggregationFunction.describe('Aggregation function — `count`, `sum`, `avg`, `min`, `max` or `count_distinct`'),
+  groupBy: ChartGroupBySchema.optional()
+    .describe('Field the rows are grouped by, or a `{ field, dateGranularity }` date-bucket node. Omit it for the one number over every row (`_all`)'),
+}).superRefine((agg, ctx) => {
+  if (agg.function !== 'count' && !agg.field) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['field'],
+      message: `aggregate.function "${agg.function}" needs a "field" to aggregate (only "count" may omit it).`,
+    });
+  }
+}));
+
+/**
+ * [#21464] The `object-metric` tile's static `trend` badge, as `MetricWidget`
+ * draws it at the `.objectui-sha` pin `89cad75d55`
+ * (`plugin-dashboard/src/MetricWidget.tsx:437-450`): `value` painted as
+ * `{value}%`, `direction` choosing the arrow (`up` / `down` / `neutral`, no
+ * glyph when absent), and `label` the caption, resolved with `pickLocalized`
+ * (`:332-337`). The widget's own declared type is exactly these three
+ * (`MetricWidget.tsx:242-246`, mirrored at `ObjectMetricWidget.tsx:176-181`).
+ * No spec schema declares a trend badge, so the shape is the read's own. A
+ * `compareTo`-derived trend replaces this one outright (`ObjectMetricWidget.tsx:595`,
+ * `derivedTrend ?? trend`).
+ */
+const ObjectMetricTrendSchema = lazySchema(() => strictObject({
+  surface: 'this `object-metric` trend badge',
+  history:
+    'Until this shape was declared, `trend` was `z.unknown()`: a bare direction string, a misspelled member '
+    + 'or a direction outside up / down / neutral passed, and the badge drew a lone `%`, no caption, or no '
+    + 'arrow.',
+}, {
+  value: z.number().describe('The change shown on the badge, painted as a percentage (`12` reads `12%`)'),
+  label: I18nLabelSchema.optional().describe('Badge caption — a string or an inline locale map. The tile-level `description` outranks it in the one caption slot they share'),
+  direction: z.enum(['up', 'down', 'neutral']).optional().describe('Arrow beside the value; omit it for no arrow'),
+}));
+
+/**
  * `object-metric` (objectui `plugin-dashboard/src/ObjectMetricWidget.tsx` @
  * `eb7f586b`). The widget destructures every prop it reads
  * (`ObjectMetricWidgetProps`, :40-110 — the complete read set), and the
@@ -4530,8 +4628,9 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   ),
   colorVariant: z.enum(['default', 'blue', 'teal', 'orange', 'purple', 'success', 'warning', 'danger'])
     .optional().describe('Icon container color variant'),
-  aggregate: z.unknown().optional()
-    .describe('Aggregation config ({ field, function, groupBy? }) run against the object'),
+  /** [#21464] The query behind the number — see {@link ObjectMetricAggregateSchema}. */
+  aggregate: ObjectMetricAggregateSchema.optional()
+    .describe('Aggregation run against the object: `{ field?, function, groupBy? }` — `function` one of count / sum / avg / min / max / count_distinct (`field` needed for all but count), `groupBy` a field name or a `{ field, dateGranularity }` node, absent for one number over every row'),
   /**
    * Filter the aggregation is scoped by — the `ViewFilterRule` ARRAY form,
    * the one filter orthography every `filter` door in this map shares (#15449,
@@ -4564,8 +4663,34 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   variant: z.enum(['card', 'bare']).optional().describe('Layout variant'),
   fallbackValue: z.union([z.string(), z.number()]).optional()
     .describe('Static value shown when no data source is available'),
-  trend: z.unknown().optional().describe('Static trend info ({ value, label, direction })'),
+  /** [#21464] The static badge — see {@link ObjectMetricTrendSchema}. */
+  trend: ObjectMetricTrendSchema.optional()
+    .describe('Static trend badge `{ value, label?, direction? }` — `value` painted as a percentage, `direction` up / down / neutral. A `compareTo`-derived trend replaces it'),
+  /**
+   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The tile reads
+   * `enabled` (`isDrillEnabled`), `title` (`resolveDrillTitle`), `target`,
+   * `columns`, `maxRows` and `report` (`ObjectMetricWidget.tsx:602-651` at the
+   * `.objectui-sha` pin `89cad75d55`; `report` is drawn as a report body when
+   * it carries `columns` or `objectName`, `DrillDownDrawer.tsx:77-114`), and
+   * objectui's own type for this block refuses `filter` and `mode` by name
+   * (`ObjectMetricDrillDownConfig`). The by-reference candidate,
+   * `ChartDrillDownSchema`, disagrees with that read twice: it declares
+   * `filter`, which the tile never reads, and it refuses `report`, which the
+   * tile draws (objectui's `objectMetricDrillDownMembers-8071` test authors one).
+   * So neither the reference nor a copy is shipped; the member is typed once
+   * the fork is ruled.
+   */
   drillDown: z.unknown().optional().describe('Click-through drill config — opens the underlying records'),
+  /**
+   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The tile reads
+   * `kind` alone (`shiftFilterByCompareTo` and `compareToTrendLabelKey` in
+   * objectui's `core/src/utils/compare-to.ts`, from `ObjectMetricWidget.tsx:468-469`
+   * and `:581` at the `.objectui-sha` pin `89cad75d55`), and objectui records
+   * `dimension` as never read on this path. The by-reference candidate, the
+   * dashboard widget's `compareTo`, declares `dimension` beside `kind` — a key
+   * the tile would accept and ignore. So neither the reference nor a narrower
+   * copy is shipped; the member is typed once the fork is ruled.
+   */
   compareTo: z.unknown().optional().describe("Period-over-period comparison ({ kind: 'previousPeriod' | 'previousYear' })"),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */

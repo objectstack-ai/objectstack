@@ -18,22 +18,27 @@
  * | SQLite, quarter | `(strftime('%Y', …) \|\| '-Q' \|\| …)` | `no such function: date_trunc` |
  * | PostgreSQL 16.14, month | `to_char((…)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')` | `2026-01-01T00:00:00.000Z` where the face answers `2026-01` |
  *
+ * (The PostgreSQL row is the `datetime` expression. Since #21485 a `date`
+ * buckets as `to_char((…)::date::timestamp, …)`, its calendar day.)
+ *
  * The rows were right. The echo now reads the bucket from the `dateBucketSql`
  * hook, which the plugin fills from `SqlDriver.dateBucketSql`: the driver's
  * own `buildDateBucketExpr`, rendered. No second bucketing table.
  *
  * ## The cells
  *
- *   - **sqlite** (better-sqlite3), every run. Month and quarter are grouped by
- *     the driver; week is bucketed in memory (the driver declares no `week`).
+ *   - **sqlite** (better-sqlite3), every run. Month, quarter and week are
+ *     grouped by the driver (SQLite's `week` arm landed with #21595).
  *   - **postgres** where `OS_TEST_POSTGRES_URL` is set, a named skip otherwise.
  *     Month, quarter and week are grouped by the driver. No CI step provisions
  *     that variable for this package, so the live cell is red-capable and
  *     un-run in CI.
  *
- * Where the hook answers nothing, the bucket keeps `date_trunc`: a granularity
- * the driver buckets in memory, a non-UTC `timezone` (the engine buckets in
- * memory on that zone's calendar), and a host that wires no hook.
+ * Where the hook answers nothing, the bucket keeps `date_trunc`: a non-UTC
+ * `timezone` (the engine buckets in memory on that zone's calendar), and a host
+ * that wires no hook. [#21595] On SQLite, which has no `date_trunc`, the echo
+ * refuses there instead: `/analytics/sql` answers `NOT_IMPLEMENTED` / 501 as a
+ * declared refusal, and `/analytics/query` serves the rows with no `sql`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -45,6 +50,7 @@ import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import type { StrategyContext } from '../strategies/types.js';
+import { declaredRefusalMessage } from '@objectstack/types';
 
 const DEAL = 'os21441_bucket_deal';
 
@@ -114,7 +120,7 @@ const CELLS: readonly Cell[] = [
     label: 'sqlite',
     env: null,
     config: () => ({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
-    driverGrouped: ['month', 'quarter'],
+    driverGrouped: ['month', 'quarter', 'week'],
   },
   {
     id: 'pg',
@@ -225,21 +231,43 @@ for (const cell of CELLS) {
         expect(tuples(await run(dryRun.sql, dryRun.params), ['closed_on', 'big_sum'])).toEqual(tuples(res.rows, ['closed_on', 'big_sum']));
       });
 
-      it.each(['month', 'quarter', 'week'].filter((g) => !cell.driverGrouped.includes(g)))(
-        'FALLBACK: %s, which the driver buckets in memory, keeps `date_trunc`',
-        async (granularity) => {
-          const { res, ran } = await ask(bucketed('closed_on', granularity));
-          expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
-          expect(selectedBucket(res.sql!, 'closed_on')).toBe(`date_trunc('${granularity}', closed_on)`);
-        },
-      );
+      // [#21595] A FALLBACK case for "a granularity the driver buckets in
+      // memory" lived here. Its one input was SQLite `week`, and both cells now
+      // group all three, so it had none left: `week` runs in the case above.
 
-      it('FALLBACK: a non-UTC timezone buckets in memory on that zone\'s calendar, and the echo keeps `date_trunc`', async () => {
-        const { res, ran } = await ask(bucketed('closed_at', 'month', { timezone: 'Asia/Shanghai' }));
-        expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
-        expect(tuples(res.rows, ['closed_at', 'amount_sum'])).toEqual([['2026-01', 20], ['2026-02', 8], ['2026-03', 10], ['2026-04', 5]]);
-        expect(selectedBucket(res.sql!, 'closed_at')).toBe("date_trunc('month', closed_at)");
-      });
+      if (cell.id === 'sqlite') {
+        it('[#21595] REFUSAL: a non-UTC timezone on SQLite: the dry run refuses, and the query serves its rows with no `sql`', async () => {
+          const query = bucketed('closed_at', 'month', { timezone: 'Asia/Shanghai' });
+          const { res, ran } = await ask(query);
+          expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
+          expect(tuples(res.rows, ['closed_at', 'amount_sum'])).toEqual([['2026-01', 20], ['2026-02', 8], ['2026-03', 10], ['2026-04', 5]]);
+          // `/analytics/query`: the echo is a debugging aid, so its refusal
+          // leaves the answer without one rather than failing the query.
+          expect(res.sql).toBeUndefined();
+
+          // `/analytics/sql`: the dry run refuses in the declared envelope.
+          const err = await analytics.generateSql(query as any).then(
+            () => { throw new Error('expected the dry run to refuse'); },
+            (e) => e as Error & { code?: string; status?: number; refusal?: unknown },
+          );
+          expect([err.code, err.status, err.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
+          // The read every withhold arm makes: the prose reaches the caller.
+          expect(declaredRefusalMessage(err)).toBe(err.message);
+
+          // The control: the same query at UTC renders the driver's expression.
+          const utc = await analytics.generateSql({ ...query, timezone: 'UTC' } as any);
+          expect(selectedBucket(utc.sql, 'closed_at')).not.toContain('date_trunc');
+        });
+      } else {
+        // Not this card: whether these keys match the face's on PostgreSQL is
+        // the follow-up #21595's triage foresaw.
+        it('FALLBACK: a non-UTC timezone buckets in memory on that zone\'s calendar, and the echo keeps `date_trunc`', async () => {
+          const { res, ran } = await ask(bucketed('closed_at', 'month', { timezone: 'Asia/Shanghai' }));
+          expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
+          expect(tuples(res.rows, ['closed_at', 'amount_sum'])).toEqual([['2026-01', 20], ['2026-02', 8], ['2026-03', 10], ['2026-04', 5]]);
+          expect(selectedBucket(res.sql!, 'closed_at')).toBe("date_trunc('month', closed_at)");
+        });
+      }
     },
   );
 }
@@ -249,5 +277,18 @@ describe('[#21441] FALLBACK: a host that wires no dateBucketSql hook', () => {
     const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
     const { sql } = await new ObjectQLStrategy().generateSql(bucketed('closed_on', 'month') as any, ctx);
     expect(selectedBucket(sql, 'closed_on')).toBe("date_trunc('month', closed_on)");
+  });
+
+  it('[#21595] REFUSAL: on a SQLite datasource, it refuses rather than echo `date_trunc`', async () => {
+    const ctx = {
+      getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined),
+      sqlDialect: () => 'sqlite',
+    } as unknown as StrategyContext;
+    const err = await new ObjectQLStrategy().generateSql(bucketed('closed_on', 'month') as any, ctx).then(
+      () => { throw new Error('expected the echo to refuse'); },
+      (e) => e as Error & { code?: string; status?: number; refusal?: unknown },
+    );
+    expect([err.code, err.status, err.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
+    expect(declaredRefusalMessage(err)).toBe(err.message);
   });
 });

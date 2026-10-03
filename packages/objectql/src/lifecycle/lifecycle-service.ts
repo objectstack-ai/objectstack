@@ -85,7 +85,21 @@ export const DEFAULT_LIFECYCLE_INITIAL_DELAY_MS = 60_000;
 
 /** Minimal engine surface the service needs — duck-typed for tests. */
 export interface LifecycleEngineLike {
-  registry: { getAllObjects(): LifecycleObjectLike[] };
+  registry: {
+    getAllObjects(): LifecycleObjectLike[];
+    /**
+     * [#21597] Registry presence by name: the question the engine's in-process
+     * verbs ask before they read (`ObjectQL`'s `SchemaRegistry.getObject`). A
+     * name it does not resolve is refused with `OBJECT_NOT_FOUND` before any
+     * driver is asked, so the governance tenant scan asks this first and reads
+     * `sys_organization` only when it is registered.
+     *
+     * Optional so that a double modelling only `getAllObjects` stays a legal
+     * engine. Such a registry cannot be asked, and the tenant scan then reads
+     * exactly as it did before this member existed. Every real engine has it.
+     */
+    getObject?(name: string): unknown;
+  };
   delete(
     object: string,
     options: { where: Record<string, unknown>; multi: true; context: LifecycleSweepContext },
@@ -806,7 +820,10 @@ export class LifecycleService {
    * [#12853] The tenant scan is not. A `sys_organization` read that FAILED
    * throws out of here, because an empty `tenantOverrides` is the same value
    * as "this deployment has no tenant overrides" and the caller acts on the
-   * difference by DELETING rows. See the catch below. */
+   * difference by DELETING rows. See the catch below.
+   *
+   * [#21597] The scan asks the registry before it reads. An unregistered
+   * `sys_organization` is never read, and answers "no tenant overrides". */
   private async loadGovernance(
     engine: LifecycleEngineLike,
     declared: LifecycleObjectLike[],
@@ -835,7 +852,22 @@ export class LifecycleService {
     // Tenant-level windows (ADR-0057 §3.2): only overrides genuinely stored
     // at TENANT scope count — inherited global values would otherwise turn
     // every tenant into a "tenant override" and break the global pass.
-    if (typeof engine.find === 'function' && declared.length > 0) {
+    //
+    // [#21597] Registry first, the shape `ObjectQL.probeInstallOrganizations`
+    // takes on the same question. Since commit eb9ef791bd the engine's
+    // in-process verbs refuse a name the registry does not resolve with
+    // `OBJECT_NOT_FOUND`, before any driver is asked. So in a composition that
+    // registers no `sys_organization` (a lean embedding) the read below cannot
+    // reach a table at all, and its refusal is not the missing-table cause the
+    // catch accepts: every sweep used to abort on it. That composition has no
+    // organization object, so it has no tenant to hold an override, and "no
+    // tenant overrides" is the truth: the single-tenant answer, given here
+    // without reading. The question is the registry's own `getObject`, the
+    // same one the refusal asks, never a list of names. A registry that cannot
+    // be asked (a double without `getObject`) reads as before.
+    const organizationUnregistered =
+      typeof engine.registry.getObject === 'function' && !engine.registry.getObject('sys_organization');
+    if (typeof engine.find === 'function' && declared.length > 0 && !organizationUnregistered) {
       try {
         const orgs = await engine.find('sys_organization', {
           limit: TENANT_SCAN_LIMIT,
@@ -887,6 +919,12 @@ export class LifecycleService {
         // incomplete evidence" is the correct failure direction: a log cannot
         // bring back a reaped row, and the rows this defers are still there for
         // the next sweep to reap once the read succeeds.
+        //
+        // [#21597] That includes an `OBJECT_NOT_FOUND`. The unregistered case
+        // never reaches this catch (the registry was asked above), so a
+        // refusal here names some other object (a hook's nested read, say) or
+        // contradicts the registry's own answer. Neither is evidence that no
+        // tenant exists, and neither is read as absence.
         if (!isMissingTableError(error, 'sys_organization')) throw error;
       }
     }

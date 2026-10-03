@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 218,
-    "droppedRefinementSites": 659,
+    "droppedRefinementSites": 660,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -1416,6 +1416,7 @@
     },
     "ui/ObjectMetricProps": {
       "sites": [
+        "aggregate",
         "filter.element"
       ]
     },

@@ -150,7 +150,9 @@ describe('temporalFilterValue dialect gating', () => {
  * bucketing silently — the loud failure SQLite did not give us.
  */
 describe('buildDateBucketExpr dialect gating (#3773)', () => {
-  const GRANULARITIES = ['day', 'month', 'quarter', 'year'] as const;
+  // [#21595] `week` joined when SQLite gained a `week` arm: every dialect now
+  // renders all five, so each gate below holds for the new expression too.
+  const GRANULARITIES = ['day', 'week', 'month', 'quarter', 'year'] as const;
   const expr = (d: ProbeDriver, field: string, g: string, table?: string) =>
     (d as any).buildDateBucketExpr(field, g, table) as { sql: string; bindings: any[] } | null;
 
@@ -190,6 +192,11 @@ describe('buildDateBucketExpr dialect gating (#3773)', () => {
       expect(expr(d, 'anything', g, 't')!.sql).not.toContain('unixepoch');
       // No table key at all (a caller outside the aggregate path) → plain form.
       expect(expr(d, 'at', g)!.sql).not.toContain('unixepoch');
+      // [#21595] A `Field.date` is its calendar day on SQLite, as on the other
+      // dialects since #21485: no arm, `week` included, reads it through a zone.
+      for (const zoned of [`'localtime'`, `'utc'`]) {
+        expect(expr(d, 'on', g, 't')!.sql.toLowerCase(), `sqlite ${g}`).not.toContain(zoned);
+      }
     }
   });
 
@@ -231,7 +238,7 @@ describe('buildDateBucketExpr dialect gating (#3773)', () => {
     for (const client of ['pg', 'mysql2']) {
       const d = makeDriver(client);
       d.seedDate('t', 'on');
-      for (const g of [...GRANULARITIES, 'week']) {
+      for (const g of GRANULARITIES) {
         const sql = expr(d, 'on', g, 't')!.sql.toLowerCase();
         for (const zoned of ['timestamptz', 'time zone', 'convert_tz', 'time_zone']) {
           expect(sql, `${client} ${g}`).not.toContain(zoned);

@@ -5,6 +5,7 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark: `withReadScope` below is one of the
 // two merge boundaries that stamp it.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   declaredDatetimeLowering,
@@ -138,6 +139,50 @@ interface CrossObjectPlanDim {
 
 interface CrossObjectPlan {
   crossDims: CrossObjectPlanDim[];
+}
+
+/**
+ * [#21595] The echo has no bucket expression SQLite runs, so it refuses rather
+ * than print a statement SQLite refuses.
+ *
+ * `generateSql` prints a date-bucketed dimension in the expression the driver
+ * groups by (the `dateBucketSql` hook). Where nothing answers, it prints the
+ * representative `date_trunc('<granularity>', col)`, and SQLite has no
+ * `date_trunc`. On the shipped composition one case reaches that on SQLite: a
+ * non-UTC `timezone`. The engine then buckets in memory on that zone's
+ * calendar (ADR-0053 Phase 2, D2), and SQLite has no time-zone database, so no
+ * SQLite expression produces those keys. The other branch is a host whose hook
+ * answers nothing for a SQLite datasource.
+ *
+ * `NOT_IMPLEMENTED` / 501, for the reason `driver-sql`'s own bucket refusal
+ * gives: the query is spelled correctly and served, and the gap is the
+ * backend's. `refusal: true` declares the 501 a deliberate refusal addressed
+ * to the caller (`ApiErrorSchema.refusal`), so the boundaries keep its message
+ * instead of withholding it as a fault.
+ *
+ * The reach is the cross-field decline's: `execute()` calls `generateSql`
+ * inside a `try`, so `/analytics/query` still serves the rows and carries no
+ * `sql`, and the dry run (`/analytics/sql`) refuses. Both are within the
+ * declared response contracts: `sql` is optional on the query answer, and the
+ * dry run answers in the error envelope.
+ */
+function sqliteBucketEchoRefused(dimension: string, granularity: string, zone: string | undefined): Error {
+  const zoned = !!zone && zone !== 'UTC';
+  const err = new Error(
+    `[analytics] cannot render display SQL for the "${granularity}" bucket of "${dimension}" on SQLite` +
+      (zoned ? ` with timezone "${zone}". ` : '. ') +
+      (zoned
+        ? `The query itself is SERVED: the engine buckets it in memory on that zone's calendar, and SQLite has ` +
+          `no time-zone database, so no SQLite expression produces those bucket keys. `
+        : `The query itself is SERVED, but the driver behind this datasource renders no bucket expression for it. `) +
+      `Refusing rather than printing date_trunc(...), which is not a SQLite function. ` +
+      `Run the query itself (/analytics/query) to get its rows` +
+      (zoned ? `; with timezone "UTC" or none, this dry run renders the expression the driver groups by.` : '.'),
+  ) as Error & { code?: string; status?: number; refusal?: true };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  err.refusal = true;
+  return err;
 }
 
 /**
@@ -422,10 +467,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * for its dialect, through the `dateBucketSql` hook, so the echo runs there
    * and answers the face's bucket keys. The bucket stays REPRESENTATIVE where
    * the hook answers nothing: no hook, a driver with no bucket expression (a
-   * non-SQL driver), a granularity the driver buckets in memory (`week` on
-   * SQLite), or a non-UTC `timezone`, which the engine buckets in memory on
-   * that zone's calendar. There it prints `date_trunc('<granularity>', col)`,
-   * which SQLite refuses.
+   * non-SQL driver), or a non-UTC `timezone`, which the engine buckets in
+   * memory on that zone's calendar. There it prints
+   * `date_trunc('<granularity>', col)`. [#21595] Except on SQLite, which has no
+   * `date_trunc`: there the echo refuses ({@link sqliteBucketEchoRefused}), so
+   * it never prints a statement SQLite refuses.
    *
    * Filter VALUES are rendered as `$n` placeholders and returned in `params`,
    * never inlined: the echoed statement travels to the browser, and a filter
@@ -527,10 +573,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const joinClauses: string[] = [];
     // [#21441] The bucket expression the driver itself groups by for its
     // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on
-    // SQLite, `to_char(… AT TIME ZONE 'UTC', 'YYYY-MM')` on PostgreSQL. The
-    // echo then runs there and answers the face's bucket keys. It used to
-    // print `date_trunc('<granularity>', col)` on every dialect, calling that
-    // the driver's own bucketing: no driver buckets with it, SQLite refuses it
+    // SQLite, `to_char(…, 'YYYY-MM')` on PostgreSQL, whose argument is
+    // `(col)::timestamptz AT TIME ZONE 'UTC'` for a `datetime` and, since
+    // #21485, `(col)::date::timestamp` for a `date`. The echo then runs there
+    // and answers the face's bucket keys. It used to print
+    // `date_trunc('<granularity>', col)` on every dialect, calling that the
+    // driver's own bucketing: no driver buckets with it, SQLite refuses it
     // (`no such function`), and PostgreSQL answers a timestamp where the face
     // answers `2026-01`.
     //
@@ -538,7 +586,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // UTC bucket, and a non-UTC zone makes the engine bucket in memory on that
     // zone's calendar instead (ADR-0053 Phase 2, D2; `tzRequiresInMemory` in
     // objectql's `engine.ts`), which no driver expression describes. Where
-    // nothing answers, the bucket keeps the representative `date_trunc`.
+    // nothing answers, the bucket keeps the representative `date_trunc`, except
+    // on SQLite, which has no `date_trunc`: there the echo refuses
+    // ({@link sqliteBucketEchoRefused}, #21595).
     const zone = query.timezone;
     const driverBucketSql = (col: string, granularity: string): string | undefined => {
       if (zone && zone !== 'UTC') return undefined;
@@ -556,7 +606,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
       if (!gran) return col;
-      return driverBucketSql(col, gran) ?? `date_trunc('${gran}', ${col})`;
+      const bucket = driverBucketSql(col, gran);
+      if (bucket !== undefined) return bucket;
+      if (sqlDialectFor(ctx, tableName) === 'sqlite') throw sqliteBucketEchoRefused(dim, gran, zone);
+      return `date_trunc('${gran}', ${col})`;
     };
 
     if (query.dimensions) {

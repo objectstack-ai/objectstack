@@ -26,8 +26,14 @@
  *     author reads — so authoring time is where the refusal belongs (#20105).
  *     Each walk is scoped to its component type, because the same key means
  *     something else elsewhere: `element:button`'s `action` is an inline
- *     definition, not a reference, and `actions` is declared separately on
- *     `record:related_list`.
+ *     definition, not a reference.
+ *   - page components — `record:related_list` → `properties.actions[]` (the
+ *     list's action ids, #20936). objectui resolves each id against the
+ *     RELATED (child) object's own actions — not the page's object — and
+ *     places it by that action's own `locations`; an id that misses either
+ *     test draws no button, only a refusal notice above the list. This walk is
+ *     therefore the one that resolves against an OBJECT rather than the whole
+ *     stack, and the one that checks placement — see the scope note.
  *   - app navigation — `{ type: 'action', actionDef: { actionName } }`
  *   - app navigation deep-link auto-run — `{ type: 'object', runAction }`
  *     (#4848 — the declared form of the `?runAction=<name>` URL contract)
@@ -51,8 +57,20 @@
  * zero-false-positive posture (ADR-0072 D1) for coverage this issue did not ask
  * for. An action defined by another installed package is the one legitimate
  * miss; it is called out in the hint rather than guessed at.
+ *
+ * The `record:related_list` walk is the exception, and it keeps the posture
+ * rather than trading it. Its renderer asks both questions itself — is the id
+ * an action of the CHILD object, and does that action declare a location the
+ * list draws — and refuses the id when either answer is no. A finding that
+ * repeats that refusal is not a false positive; it is the runtime's own verdict
+ * moved to authoring time, which is what ADR-0072 D1 asks for ("resolve at
+ * runtime for the surface being authored"). So the walk answers from the child
+ * object's actions, and only for a child object this stack DEFINES: one it
+ * does not define has its actions in another package, and the walk says
+ * nothing about it rather than guess. Every other walk is unchanged.
  */
 
+import { ACTION_LOCATIONS, type ActionLocation } from '@objectstack/spec/ui';
 import { recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 
@@ -103,6 +121,82 @@ function collectActionNames(stack: AnyRec): Set<string> {
 }
 
 /**
+ * What a `record:related_list` draws for an authored action placed at each
+ * location of the spec's vocabulary (`ACTION_LOCATIONS`), or `null` where it
+ * draws nothing. Read at objectui's `relatedListActions.ts`
+ * (`placeAuthoredRelatedListActions`): `list_toolbar` is a header button;
+ * `list_item` and `record_related` are a row-menu item. The list renders only
+ * inside a parent record, which is the one scope `record_related` names.
+ *
+ * Keyed by `ActionLocation`, so the vocabulary is read from the spec and never
+ * copied: a location the spec adds fails this package's typecheck until it is
+ * classified here, instead of leaving a stale pair that silently refuses it.
+ */
+const RELATED_LIST_DRAWS: Readonly<Record<ActionLocation, string | null>> = {
+  list_toolbar: 'a header button',
+  list_item: 'a row-menu item',
+  record_header: null,
+  record_more: null,
+  record_related: 'a row-menu item',
+  record_section: null,
+};
+
+/** The locations a related list draws, in the spec's own order. */
+const RELATED_LIST_LOCATIONS: readonly ActionLocation[] = ACTION_LOCATIONS.filter(
+  (location) => RELATED_LIST_DRAWS[location] !== null,
+);
+
+/** `` `list_toolbar` (a header button), … `` — for a hint. */
+const RELATED_LIST_PLACEMENTS = RELATED_LIST_LOCATIONS.map(
+  (location) => `\`${location}\` (${RELATED_LIST_DRAWS[location]})`,
+).join(', ');
+
+/**
+ * The actions a related list resolves an id against, for each object this
+ * stack DEFINES: the actions written on the object (keyed by the object they
+ * are written on), then every `stack.actions` entry bound to it by
+ * `objectName` — the set `defineStack` merges into the object's `actions`, so
+ * the set the object's metadata serves to the renderer. An object this stack
+ * does not define is absent from the map: its actions live in another package.
+ */
+function indexObjectActions(stack: AnyRec): Map<string, Map<string, AnyRec>> {
+  const index = new Map<string, Map<string, AnyRec>>();
+  for (const obj of recordsOf(stack.objects)) {
+    const objectName = strName(obj.name);
+    if (!objectName) continue;
+    const byName = index.get(objectName) ?? new Map<string, AnyRec>();
+    for (const action of recordsOf(obj.actions)) {
+      const n = strName(action.name);
+      if (n && !byName.has(n)) byName.set(n, action);
+    }
+    index.set(objectName, byName);
+  }
+  for (const action of recordsOf(stack.actions)) {
+    const owner = strName(action.objectName);
+    const byName = owner ? index.get(owner) : undefined;
+    const n = strName(action.name);
+    if (byName && n && !byName.has(n)) byName.set(n, action);
+  }
+  return index;
+}
+
+/** Where an action name IS defined in the stack: `on object "x"` per owner, or `as a global action`. */
+function actionOwners(stack: AnyRec, name: string): string[] {
+  const owners = new Set<string>();
+  for (const obj of recordsOf(stack.objects)) {
+    if (recordsOf(obj.actions).some((a) => a.name === name)) {
+      owners.add(`on object "${strName(obj.name) ?? '?'}"`);
+    }
+  }
+  for (const action of recordsOf(stack.actions)) {
+    if (action.name !== name) continue;
+    const owner = strName(action.objectName);
+    owners.add(owner ? `on object "${owner}"` : 'as a global action');
+  }
+  return [...owners].sort();
+}
+
+/**
  * Validate every name-bound action reference in a stack. Returns findings
  * (empty = clean).
  */
@@ -111,6 +205,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
   if (!stack || typeof stack !== 'object') return findings;
 
   const known = collectActionNames(stack);
+  let objectActions: Map<string, Map<string, AnyRec>> | undefined;
 
   const check = (
     name: string,
@@ -248,9 +343,85 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
     }
   }
 
+  /**
+   * `record:related_list` → `properties.actions[]`. The renderer resolves each
+   * id against the RELATED object's own actions and places it by that
+   * action's own `locations` — naming it here is not a placement — and an id
+   * that misses either test draws no button, only a refusal notice above the
+   * list. Only the string elements are ids, each reported at its AUTHORED
+   * index, as for `page:header`. Silent when `child` is not an object this
+   * stack defines: its actions live in another package.
+   */
+  const checkRelatedListActions = (
+    child: string | undefined,
+    ids: readonly unknown[],
+    where: string,
+    path: string,
+  ) => {
+    if (!child) return;
+    objectActions ??= indexObjectActions(stack);
+    const childActions = objectActions.get(child);
+    if (!childActions) return;
+    const childNames = [...childActions.keys()].sort();
+    for (let ri = 0; ri < ids.length; ri++) {
+      const id = strName(ids[ri]);
+      if (!id) continue;
+      const idPath = `${path}.properties.actions[${ri}]`;
+      const action = childActions.get(id);
+      if (!action) {
+        const owners = known.has(id) ? actionOwners(stack, id) : [];
+        findings.push({
+          severity: 'error',
+          rule: ACTION_NAME_UNDEFINED,
+          where,
+          path: idPath,
+          message:
+            `Related-list actions names action "${id}", which is not an action of the related object ` +
+            `"${child}"` +
+            (owners.length > 0
+              ? ` (it is defined in this stack ${owners.join(' and ')}, which this list never reads)`
+              : ' (no action in this stack defines it)') +
+            ". The list resolves each id against its related object's own actions only — not the " +
+            "page's object, not a global action — so it draws no button for this one, only a refusal " +
+            'notice naming it above the list.' +
+            suggestName(id, childNames),
+          hint:
+            `Define "${id}" on "${child}" — in that object's \`actions\`, or in \`stack.actions\` with ` +
+            `\`objectName: '${child}'\` — with one of ${RELATED_LIST_PLACEMENTS} in its \`locations\`; ` +
+            `or name one of "${child}"'s own actions; or remove the reference. Ignore this only if ` +
+            `another installed package binds the action to "${child}".` +
+            ` Actions of "${child}": ${childNames.length > 0 ? childNames.join(', ') : '(none)'}.`,
+        });
+        continue;
+      }
+      const declared = Array.isArray(action.locations)
+        ? action.locations.filter((l): l is string => typeof l === 'string')
+        : undefined;
+      if (declared?.some((l) => (RELATED_LIST_LOCATIONS as readonly string[]).includes(l))) continue;
+      findings.push({
+        severity: 'error',
+        rule: ACTION_NAME_UNDEFINED,
+        where,
+        path: idPath,
+        message:
+          `Related-list actions names action "${id}", an action of the related object "${child}" ` +
+          (declared === undefined
+            ? 'that declares no `locations`, so it is placed at none'
+            : `whose \`locations\` (${declared.length > 0 ? declared.join(', ') : 'empty'}) include none`) +
+          ` of the locations a related list draws (${RELATED_LIST_LOCATIONS.join(', ')}). The list ` +
+          'places an authored action by its own `locations` — naming it here is not a placement — so ' +
+          'it draws no button for it, only a refusal notice naming it above the list.',
+        hint:
+          `Add one of ${RELATED_LIST_PLACEMENTS} to the \`locations\` of "${id}" on "${child}", ` +
+          'or remove the reference.',
+      });
+    }
+  };
+
   // ── Page components: record:quick_actions → properties.actionNames,
   //    record:alert → properties.action.actionName,
-  //    page:header → properties.actions[] ──
+  //    page:header → properties.actions[],
+  //    record:related_list → properties.actions[] (against the child object) ──
   const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
@@ -319,6 +490,19 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             'The header draws no button for it: the id resolves to nothing and is dropped, with only a browser-console warning no author reads.',
           );
         }
+      }
+
+      // `record:related_list`'s action ids, resolved against the RELATED
+      // object (see `checkRelatedListActions`). The related object is the
+      // per-element `dataSource.object` when one is bound (objectui's
+      // data-source gate writes it over `objectName`), else `objectName`.
+      if (type === 'record:related_list' && Array.isArray(props.actions)) {
+        const binding = component.dataSource;
+        const child =
+          (binding && typeof binding === 'object' && !Array.isArray(binding)
+            ? strName((binding as AnyRec).object)
+            : undefined) ?? strName(props.objectName);
+        checkRelatedListActions(child, props.actions as unknown[], where, path);
       }
     }
   }

@@ -39,7 +39,10 @@
  * `contentLayout` / `submitBehavior` / `navigateOnSuccess` / `mobile`) in
  * `component-form-family-typed-members.pin.test.ts`; its `fields` and
  * `sections`, and the master-detail form's two, are held below, and its
- * `customFields` waits with the objectui-held contracts.
+ * `customFields` waits with the objectui-held contracts. The metric tile
+ * (`object-metric` `aggregate` / `trend`) in
+ * `component-metric-family-typed-members.pin.test.ts`; its `drillDown` and
+ * `compareTo` wait below on a ruling between the reference and the read.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -127,7 +130,7 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  * would refuse a measured writer is reported, not shipped.
  */
 const STAGES = {
-  'object-metric': 'the metric tile\'s four config blocks; the dashboard widget\'s `compareTo` and the chart\'s `aggregate` / `drillDown` are the by-reference candidates, and `trend` has no spec declaration, so it is typed to the renderer\'s read',
+  'object-metric': 'the metric tile\'s `drillDown` and `compareTo`, each waiting on a fork: the by-reference candidate (the chart\'s `ChartDrillDownSchema`, the dashboard widget\'s `compareTo`) declares a key the tile never reads, and the chart\'s drill-down refuses one it draws, so the reference and the read are put to a ruling',
   'objectui-held': 'element contracts whose only declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`); the spec declares each first, contract-first, then the row takes it',
   'held-for-decision': 'a typed shape exists (by reference, or the renderer\'s own declared type), but measured writers author values it refuses that the renderer draws — the narrowing waits for a ruling',
 } as const;
@@ -226,10 +229,15 @@ on(['object-grid'], ['pagination.*'], {
 });
 
 // Read with a fixed shape at the pin — the later stages.
-on(['object-metric'], ['aggregate'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:250, `.field` / `.function` / `.groupBy` at :404-443'));
-on(['object-metric'], ['trend'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:254 (typed :176)'));
-on(['object-metric'], ['drillDown'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:265 (`ObjectMetricDrillDownConfig`, :218)'));
-on(['object-metric'], ['compareTo'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:267 (`CompareToConfig`, :241)'));
+// The metric tile's `aggregate` and `trend` are typed (stage 4). Its other two
+// wait on a fork between the by-reference candidate and the read: the chart's
+// drill-down declares `filter`, which the tile never reads, and refuses
+// `report`, which the tile draws as a report body (`DrillDownDrawer.tsx:77-114`;
+// objectui's `plugin-dashboard/src/__tests__/objectMetricDrillDownMembers-8071.test.tsx:277-294`
+// authors one); the dashboard widget's comparison declares `dimension`, which
+// this path never reads (`core/src/utils/compare-to.ts:28-33`).
+on(['object-metric'], ['drillDown'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:602-651 (`enabled` / `title` / `target` / `columns` / `maxRows` / `report`; `ObjectMetricDrillDownConfig`, :218, refuses `filter` and `mode`)'));
+on(['object-metric'], ['compareTo'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:468-469, :581 (`kind` alone; `CompareToConfig`, :241)'));
 // The form's inline members are objectui's runtime form field (`FormField`,
 // identity key `name`), merged over the generated set and drawn whole; the spec
 // declares no such field — its own form field is keyed by `field`, and the
