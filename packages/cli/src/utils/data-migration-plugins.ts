@@ -36,6 +36,8 @@ export async function buildDataMigrationPlugins(
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
   plugins.push(new PlatformObjectsPlugin());
+  const { MigrationRecoveryPlugin } = await import('@objectstack/runtime');
+  plugins.push(new MigrationRecoveryPlugin());
   if (opts.audit === true) {
     // [#21120] `os migrate audit-metadata-bodies` reads and rewrites
     // `sys_audit_log` / `sys_activity` rows, so their schema must be
