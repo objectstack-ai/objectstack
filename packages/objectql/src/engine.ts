@@ -1,6 +1,21 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+// CENSUS-INSTRUMENT-21516 (temporary; reverted before the fix lands)
+import { appendFileSync as census21516Append } from 'node:fs';
+function census21516(name: string): void {
+  const out = typeof process !== 'undefined' ? process.env.OS_TEST_UNRESOLVED_CENSUS : undefined;
+  if (!out) return;
+  const frames = String(new Error().stack ?? '')
+    .split('\n')
+    .slice(2)
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('at ') && !l.includes('node:internal') && !l.includes('/node_modules/'))
+    .slice(0, 12);
+  try {
+    census21516Append(out, JSON.stringify({ name, pid: process.pid, cwd: process.cwd(), frames }) + '\n');
+  } catch { /* instrument only */ }
+}
 import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/spec/data';
 // [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
@@ -9210,6 +9225,7 @@ export class ObjectQL implements IObjectQLEngine {
       return StorageNameMapping.resolveTableName(schema);
     }
     // Return name as-is (canonical name = table name; no FQN prefix to strip)
+    census21516(name);
     return StorageNameMapping.resolveTableName({ name });
   }
 
