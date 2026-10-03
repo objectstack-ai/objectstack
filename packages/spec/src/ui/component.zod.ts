@@ -6568,7 +6568,13 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `89cad75d5`, re-COUNTED there 2026-10-02 by
+   * builds against (`.objectui-sha` = `ab1879721`, re-COUNTED there 2026-10-03 by
+   * the same method — 0 for the tree, whose shell is byte-identical across the
+   * hop, 3 each for `plugin-gantt` and `plugin-calendar` (both byte-identical)
+   * and `plugin-grid` (changed on the hop: objectui#11068's
+   * `keyboardNavigation`, objectui#11533's rule dialect and objectui#11438's
+   * 17.6.0 inputs, its wiring unchanged), and 4 for `plugin-map`
+   * (byte-identical); re-COUNTED at `89cad75d5` 2026-10-02 by
    * the same method — 0 for the tree, whose shell changed on the hop
    * (objectui#11168 slice 3's published inputs, objectui#10859 batch 8's
    * retired bare `tree` registration) and still registers no gate, 3 each for
@@ -6694,8 +6700,12 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `89cad75d5`), re-measured there
- * 2026-10-02: `renderer.tsx` is byte-identical to `31971ff1e`, so its three
+ * repo builds against (`.objectui-sha` = `ab1879721`), re-measured there
+ * 2026-10-03: `ObjectTimeline.tsx`, `renderer.tsx` and `index.tsx` are
+ * byte-identical to `89cad75d5` (`git diff --quiet`), so every anchor held
+ * unmoved and was re-read in place, and the `schema.*` read set of all three
+ * is unchanged. At `89cad75d5` (2026-10-02) `renderer.tsx` was
+ * byte-identical to `31971ff1e`, so its three
  * anchors hold unmoved; `ObjectTimeline.tsx` changed (+16/-7, objectui#11168
  * slice 5) in two COMMENTS only — the `navigation` member's docblock on the
  * component's props and the comment above the navigation read — every anchor
@@ -6886,6 +6896,10 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
+   * `ab1879721`, re-READ there 2026-10-03 — the file, `SchemaRenderer.tsx`
+   * and `record-source.ts` are byte-identical across the hop from
+   * `89cad75d5` (`git diff --quiet`), so every anchor held unmoved and was
+   * re-read in place, and the prop channel above still carries the key. At
    * `89cad75d5`, re-READ there 2026-10-02 — the file changed across the hop
    * from `31971ff1e` (+16/-7, objectui#11168 slice 5) in two comments only,
    * both above or away from these reads, so every anchor MOVED by 6 with its
@@ -7143,7 +7157,11 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
-  // `89cad75d5`; re-measured there 2026-10-02: `data-list.tsx`,
+  // `ab1879721`; re-measured there 2026-10-03: `data-list.tsx`,
+  // `public-blocks.ts`, `block-types.ts` and `block-config.ts` all
+  // byte-identical to `89cad75d5` (`git diff --quiet`), so every anchor below
+  // holds unmoved and was re-read in place, both registrations still in the
+  // `element` namespace. At `89cad75d5`, 2026-10-02: `data-list.tsx`,
   // `public-blocks.ts`, `block-types.ts` and `block-config.ts` all
   // byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor below
   // holds unmoved and was re-read in place, both registrations still in the
@@ -7201,7 +7219,13 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `89cad75d5`), all three re-measured there 2026-10-02 (all three renderers
+  // `ab1879721`), all three re-measured there 2026-10-03 (`ObjectMap.tsx` and
+  // `ObjectTree.tsx` are byte-identical to `89cad75d5`; `ObjectGantt.tsx`
+  // (+8/-0) gained one import line and, in its tooltip's `percent` row,
+  // objectui#11475's scaling at the field definition's declared storage — a
+  // field-definition read, not a node key — and was re-READ. The `schema.*`
+  // read set of each is unchanged, so no declared key set moved and no read
+  // point died. At `89cad75d5`, 2026-10-02, all three renderers
   // changed on the hop off `31971ff1e` and were re-READ: `ObjectMap.tsx`
   // (+11/-4) types its shadowed-flat-key read, objectui#11355, and now reads
   // `mapStyle` ahead of `map.style` on the declared block's path too,
@@ -7247,8 +7271,11 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `89cad75d5`), re-measured there 2026-10-02 (`renderer.tsx` byte-identical
-  // to `31971ff1e`; `ObjectTimeline.tsx` changed in two comments only and
+  // `ab1879721`), re-measured there 2026-10-03 (`renderer.tsx`,
+  // `ObjectTimeline.tsx` and `index.tsx` byte-identical to `89cad75d5`, so
+  // every anchor held unmoved, the `schema.*` read set unchanged and no
+  // declared key set moved. At `89cad75d5`, 2026-10-02: `renderer.tsx`
+  // byte-identical to `31971ff1e`; `ObjectTimeline.tsx` changed in two comments only and
   // `index.tsx` for objectui#11168 slice 5 — one shared input list on both
   // registrations, publishing the ten further keys this row declares, with
   // `objectName` no longer required — both re-READ, the `schema.*` read set
