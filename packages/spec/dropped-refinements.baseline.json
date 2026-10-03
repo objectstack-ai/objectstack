@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 218,
-    "droppedRefinementSites": 654,
+    "droppedRefinementSites": 659,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -80,6 +80,7 @@
         "manifest.flows.element",
         "manifest.flows.element.errorHandling",
         "manifest.flows.element.nodes.element.in.waitEventConfig",
+        "manifest.hooks.element",
         "manifest.hooks.element.object",
         "manifest.jobs.element.schedule.options[0].timezone",
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
@@ -188,6 +189,7 @@
         "data.options[1].manifest.flows.element",
         "data.options[1].manifest.flows.element.errorHandling",
         "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.options[1].manifest.hooks.element",
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.options[1].manifest.objectExtensions.element",
@@ -281,6 +283,7 @@
         "options[1].manifest.flows.element",
         "options[1].manifest.flows.element.errorHandling",
         "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "options[1].manifest.hooks.element",
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.jobs.element.schedule.options[0].timezone",
         "options[1].manifest.objectExtensions.element",
@@ -334,6 +337,7 @@
         "data.packages.element.options[1].manifest.flows.element",
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
         "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.packages.element.options[1].manifest.hooks.element",
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.packages.element.options[1].manifest.objectExtensions.element",
@@ -721,6 +725,7 @@
     },
     "data/Hook": {
       "sites": [
+        "",
         "object"
       ]
     },

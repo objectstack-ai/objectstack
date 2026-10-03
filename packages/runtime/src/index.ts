@@ -39,6 +39,11 @@ export {
     normalizeDatabaseUrl,
     UNIFIED_DEFAULT_DB_FILENAME,
     LEGACY_DEFAULT_DB_FILENAMES,
+    // The in-memory engine's retirement as a boot store: one predicate and one
+    // sentence, so the CLI's legacy `os serve` resolver refuses it exactly as
+    // this package's own doors do.
+    namesRetiredMemoryEngine,
+    retiredMemoryEngineMessage,
 } from './resolve-project-database.js';
 export type {
     ResolveProjectDatabaseUrlOptions,

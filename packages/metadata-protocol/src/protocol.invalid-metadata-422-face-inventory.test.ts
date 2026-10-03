@@ -428,3 +428,67 @@ describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door'
         expect([...rows.values()].map((r) => r.type)).toEqual(['report']);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. #21565 — the `hook` door refuses a body bound to a stored-metadata table
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// An app-authored hook body may not be bound to `sys_metadata` or
+// `sys_metadata_history`: the runtime refuses such a hook where a body becomes
+// a handler (`hookBodyRunnerFactory`), so it never runs. The save door used to
+// answer 200 for it. `HookSchema` now refuses it at parse, so THIS gate — the
+// one `PUT /api/v1/meta/hook/:name` reaches, built here exactly as that route
+// builds it for the administrator (`writeFace: 'meta-envelope'`, the actor
+// named) — refuses it with the ADR-0112 envelope, the issue located at
+// `object`, and the runtime's prescription. Rides this file's pinned engine
+// double, as sections 4 and 5 do. ⛔ No check of its own lives in
+// `protocol.ts`: the refusal is the registered type schema's.
+
+async function saveHookAsAdministrator(protocol: any, item: Record<string, unknown>): Promise<any> {
+    try {
+        return await protocol.saveMetaItem({
+            type: 'hook',
+            name: item.name,
+            item,
+            writeFace: 'meta-envelope',
+            actor: 'usr_admin',
+        });
+    } catch (e: any) {
+        return e;
+    }
+}
+
+describe('[#21565] a hook body bound to a stored-metadata table is refused at the metadata door', () => {
+    const body = { language: 'js', source: "ctx.input.status = 'seen';" };
+    const hookOn = (object: string | string[]) => ({
+        name: 'stamp_status',
+        object,
+        events: ['beforeInsert'],
+        body,
+    });
+
+    it.each([
+        ['sys_metadata', 'object'],
+        ['sys_metadata_history', 'object'],
+        [['hks_note', 'sys_metadata'], 'object.1'],
+    ] as const)('`object: %j` — 422 INVALID_METADATA at `%s`, with the prescription, nothing stored', async (object, path) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveHookAsAdministrator(protocol, hookOn(object as string | string[]));
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues as Array<{ code?: string; path?: string; message: string }>;
+        expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', path]]);
+        expect(issues[0]!.message).toContain('a table of stored metadata');
+        expect(issues[0]!.message).toContain('Change metadata through the metadata API');
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same body hook on an ordinary object saves as before', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveHookAsAdministrator(protocol, hookOn('hks_note'));
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
+    });
+});

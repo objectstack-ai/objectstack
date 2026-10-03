@@ -69,7 +69,7 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 </Callout>
 
 <Callout type="tip">
-`os dev --ui` starts a dev server with the bundled Console UI, auto-loads ObjectQL, an in-memory driver when appropriate, and the Hono HTTP server.
+`os dev --ui` starts a dev server with the bundled Console UI, auto-loads ObjectQL, a SQLite database (a persistent project file by default, a throwaway one with `--fresh`), and the Hono HTTP server.
 </Callout>
 
 ## Commands
@@ -182,8 +182,8 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_URL` / `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
-| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` |
+| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `:memory:` / `libsql://` / `postgres://` / `mongodb://` |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` |
 | `--database-auth-token <t>` | `OS_DATABASE_AUTH_TOKEN` | libsql/Turso token |
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
@@ -472,8 +472,8 @@ os start
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | File path or `http(s)://` URL to the compiled artifact |
 | — | `OS_ARTIFACT_URL` | Boot a published artifact **by reference**, optionally content-hash pinned via a `#sha256=` fragment. See [Artifact-pinned boot](/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url) |
-| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` when the URL is ambiguous |
+| `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `:memory:` / `libsql://` / `postgres://` / `mongodb://` |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
 | `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` |
 | `--home <dir>` | `OS_HOME` | Home directory for persistent state (default `<cwd>/.objectstack` when an `objectstack.config.ts` is present, otherwise `~/.objectstack`) |
@@ -502,10 +502,24 @@ The fall-through applies to the **conventional** locations only. Remote
 (`http(s)://`) sources cannot be checked up front and are validated when fetched.
 </Callout>
 
+<Callout type="warn">
+**The in-memory (mingo) engine is not a boot store.** It refuses every
+tenant-scoped read, so a server booted on it signed you in and then answered
+`503` to every data request. Every boot command — `os dev`, `os start`,
+`os serve` and every `os migrate` subcommand — refuses it: the
+`--database-driver memory` flag value (rejected while the flags parse),
+`OS_DATABASE_DRIVER=memory` / `mingo` / `in-memory`, and a `memory://` or
+`mingo://` database URL, each with a message naming the replacement. Use SQLite
+instead: `os dev --fresh` for a throwaway database that is deleted on exit, or
+`--database :memory:` (`OS_DATABASE_URL=:memory:`) for SQLite's own in-memory
+database. A datasource you declare with `driver: 'memory'` still validates;
+as the project's **default** datasource it is refused at boot the same way.
+</Callout>
+
 **What it boots:**
 - Reads the artifact's `manifest`, `objects`, `views`, `flows`, …
 - Auto-registers the platform services declared in `requires: [...]` (e.g. `ai`, `automation`, `analytics`, `auth`, `ui`). Declaring a **service** capability (`automation`, `analytics`, `ai`, `audit`, …) is a *requirement*: if its provider package isn't installed, boot **fails fast** with a clear error instead of silently starting without a capability you asked for. (`auth` and `ui` are tier-gated with their own opt-in rules — `auth`'s secret-gated skip is described below.)
-- Auto-detects the driver from the database URL scheme (`memory://` → in-memory, `libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite)
+- Auto-detects the driver from the database URL scheme (`libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite; `:memory:` is SQLite's own in-memory database). `memory://` and `mingo://` are refused — see the callout below.
 - Runs standalone boot mode with one active environment.
 
 **Authentication:**
