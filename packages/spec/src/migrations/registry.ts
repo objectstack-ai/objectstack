@@ -19956,7 +19956,7 @@ const step18: MigrationStep = {
         + 'grid columns), including `scale` on a column that declares no `type` and whose `name` is a '
         + '`currency` field of the entry\'s `childObject`',
       replacement: 'each entry is `{ childObject, relationshipField?, columns?, formFields?, '
-        + 'inlineMode?, amountField?, sortField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
+        + 'inlineMode?, amountField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
         + '— the keys the renderer reads — with `inlineMode` one of `grid` / `form`. Each column is the '
         + 'strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes — '
         + '`{ name, label?, type?, … }`, where `{ name }` alone hydrates the rest from the child '
@@ -20096,9 +20096,10 @@ const step18: MigrationStep = {
         + '`{ name, label?, type?, options?, … }`. Write `name` where a column said `field` (or '
         + '`fieldName`, `key`); declare `label`, `type` and `options` on the column, because this block '
         + 'draws a column exactly as declared and hydrates nothing from the child object\'s field; '
-        + 'delete `scale` from a column declaring `type: \'currency\'`; delete `addLabel`, `sortField`, '
-        + '`formFields` and `inlineMode`, which belong to an `object-master-detail-form` detail entry and '
-        + 'are not read here, and any other key the shape does not declare.',
+        + 'delete `scale` from a column declaring `type: \'currency\'`; delete `addLabel`, `formFields` '
+        + 'and `inlineMode`, which belong to an `object-master-detail-form` detail entry and are not read '
+        + 'here, `sortField`, which no block takes (the detail entry derives the line-position field from '
+        + 'the child object), and any other key the shape does not declare.',
       reason: 'The block draws one inline grid of the record\'s child rows, through the same objectui '
         + 'grid as the other three carriers of the inline grid column, but it had no `ComponentPropsMap` '
         + 'row: it was the one entry on the string-arm registration ledger, so the component-props gate '

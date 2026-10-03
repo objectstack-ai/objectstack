@@ -21,7 +21,7 @@ export const entry: SemanticMigration = {
     + 'grid columns), including `scale` on a column that declares no `type` and whose `name` is a '
     + '`currency` field of the entry\'s `childObject`',
   replacement: 'each entry is `{ childObject, relationshipField?, columns?, formFields?, '
-    + 'inlineMode?, amountField?, sortField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
+    + 'inlineMode?, amountField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
     + '— the keys the renderer reads — with `inlineMode` one of `grid` / `form`. Each column is the '
     + 'strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes — '
     + '`{ name, label?, type?, … }`, where `{ name }` alone hydrates the rest from the child '
