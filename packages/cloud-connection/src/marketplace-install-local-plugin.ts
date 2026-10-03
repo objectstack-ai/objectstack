@@ -1835,7 +1835,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * install route refuses:
      *
      *   - the enabled jobs with no `body`, or with a `body` the declaration
-     *     refuses (`collectJobsWithoutRunnableBody`, which reads the jobs the
+     *     refuses (`collectJobsWithoutBody`, which reads the jobs the
      *     binder schedules and judges a body by the parse the binder binds by);
      *   - the hooks with no `body` (`collectHooksWithoutBody`, the judgement the
      *     binder withholds by on this door's rehydrate).
@@ -1850,16 +1850,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifest: unknown,
         manifestId: string,
     ): Promise<UnrunnableCode> => {
-        let collectJobs: typeof import('@objectstack/runtime')['collectJobsWithoutRunnableBody'] | undefined;
+        let collectJobs: typeof import('@objectstack/runtime')['collectJobsWithoutBody'] | undefined;
         let collectHooks: typeof import('@objectstack/runtime')['collectHooksWithoutBody'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
-            if (typeof mod?.collectJobsWithoutRunnableBody === 'function') collectJobs = mod.collectJobsWithoutRunnableBody;
+            if (typeof mod?.collectJobsWithoutBody === 'function') collectJobs = mod.collectJobsWithoutBody;
             if (typeof mod?.collectHooksWithoutBody === 'function') collectHooks = mod.collectHooksWithoutBody;
         } catch { /* reported below */ }
         if (!collectJobs) {
             ctx.logger?.warn?.(
-                `[MarketplaceInstallLocal] this runtime has no collectJobsWithoutRunnableBody — the jobs of ${manifestId} are not judged, `
+                `[MarketplaceInstallLocal] this runtime has no collectJobsWithoutBody — the jobs of ${manifestId} are not judged, `
                 + 'so a job with no runnable `body` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
         }

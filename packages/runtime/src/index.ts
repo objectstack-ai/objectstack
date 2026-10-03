@@ -68,7 +68,7 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // hooks, under the owner `app:<appId>` — called by `AppPlugin.start` and by the
 // install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate.
 // [#21489] …and its job half: `scheduleAppArtifactJobs` schedules a package's
-// jobs (a `body` runs sandboxed on every door), and `collectJobsWithoutRunnableBody`
+// jobs (a `body` runs sandboxed on every door), and `collectJobsWithoutBody`
 // names the enabled jobs no JSON door can run (no `body`, or one that does not
 // bind), which install-local refuses.
 // [#21585] `collectHooksWithoutBody` names the hooks whose code is only a
@@ -78,7 +78,7 @@ export {
     bindAppArtifactHandlers,
     appArtifactHandlerOwner,
     scheduleAppArtifactJobs,
-    collectJobsWithoutRunnableBody,
+    collectJobsWithoutBody,
     collectHooksWithoutBody,
 } from './app-artifact-handlers.js';
 export type {
@@ -86,7 +86,7 @@ export type {
     AppArtifactHandlerBindingOptions,
     AppArtifactJobScheduling,
     AppArtifactJobSchedulingOptions,
-    JobWithoutRunnableBody,
+    JobWithoutBody,
     HookWithoutBody,
 } from './app-artifact-handlers.js';
 // #14094 — what a DECLARATIVE job's handler is invoked with. A job has no graph,

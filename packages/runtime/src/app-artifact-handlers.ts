@@ -68,7 +68,7 @@
  * A job runs on a JSON door only through a `body` that binds. Its deprecated
  * `handler` names a `defineStack({ functions })` entry, which is code: it
  * travels in the artifact's runtime module, which only `os start --artifact`
- * loads, so no JSON door can ever resolve it. {@link collectJobsWithoutRunnableBody}
+ * loads, so no JSON door can ever resolve it. {@link collectJobsWithoutBody}
  * names those jobs — and the ones whose `body` the declaration refuses
  * (`judgeJobBody`) — and the install-local install route refuses a package that
  * declares one enabled.
@@ -285,12 +285,14 @@ export function bindAppArtifactHandlers(
 // ─── The job half (#21489) ─────────────────────────────────────────────
 
 /**
- * An enabled job a JSON door cannot run: it carries no `body`, or a `body` the
- * declaration refuses. Its `handler` (deprecated) names a
+ * An enabled job a JSON door cannot run: it carries no `body` — or, since
+ * #21585, a `body` that does not BIND (the declaration refuses it: an expression
+ * body, or one carrying `body.timeoutMs`), which no door can run either. "Without
+ * body" reads as "without a body that runs". Its `handler` (deprecated) names a
  * `defineStack({ functions })` entry — code, which a JSON artifact never
  * carries (ADR-0088) — or it names nothing at all.
  */
-export interface JobWithoutRunnableBody {
+export interface JobWithoutBody {
     /** The job's `name`. */
     name: string;
     /** The function name the job's `handler` declares, when it declares one. */
@@ -305,18 +307,20 @@ export interface JobWithoutRunnableBody {
 
 /**
  * The enabled jobs of an artifact that no JSON door can schedule (#21489):
- * those with no `body`, and (#21585) those whose `body` does not bind — the
- * judgement the binder's own {@link jobBodyRunnerFactory} makes
- * ({@link judgeJobBody}, a parse against `JobSchema.body`), so the door and the
- * binder cannot disagree. The install-local install route refuses a package
- * that declares one; see the module header.
+ * those with no `body`, and (#21585) those whose `body` does not BIND — an
+ * expression (L1) body, or one carrying `body.timeoutMs`, or any other shape
+ * the declaration refuses. That second half is the judgement the binder's own
+ * {@link jobBodyRunnerFactory} makes ({@link judgeJobBody}, a parse against
+ * `JobSchema.body`), so the door and the binder cannot disagree; such a job is
+ * named with its `bodyRefusal`. The install-local install route refuses a
+ * package that declares one; see the module header.
  *
  * Reads the jobs the binder reads ({@link collectBundleJobs}), and calls a job
  * enabled exactly when the binder does: `enabled: false` is the one value that
  * disables it (the schema's default is `true`).
  */
-export function collectJobsWithoutRunnableBody(bundle: unknown): JobWithoutRunnableBody[] {
-    const out: JobWithoutRunnableBody[] = [];
+export function collectJobsWithoutBody(bundle: unknown): JobWithoutBody[] {
+    const out: JobWithoutBody[] = [];
     for (const job of collectBundleJobs(bundle)) {
         if (!job || typeof job !== 'object') continue;
         if (job.enabled === false) continue;
@@ -440,7 +444,7 @@ export interface AppArtifactJobScheduling {
  *   - else a `handler` → the `functions` entry it names, invoked with the
  *     in-process `JobHandlerContext` (#14094). A JSON artifact carries no
  *     functions, so on install-local this resolves nothing — which is why that
- *     door refuses the shape up front ({@link collectJobsWithoutRunnableBody});
+ *     door refuses the shape up front ({@link collectJobsWithoutBody});
  *   - else → not scheduled (warn).
  *
  * The schedule is lowered to the boundary tier (`toBoundaryJobSchedule`), and

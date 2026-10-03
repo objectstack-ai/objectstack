@@ -491,7 +491,7 @@ export type JobBodyJudgement =
  *
  * Two readers, so they cannot disagree: {@link jobBodyRunnerFactory} binds
  * nothing for a body this refuses, and the install-local door refuses a
- * package whose enabled job carries one (`collectJobsWithoutRunnableBody` in
+ * package whose enabled job carries one (`collectJobsWithoutBody` in
  * `../app-artifact-handlers.ts`). Before the door asked, it judged only that a
  * `body` was PRESENT — an L1 expression body, or one carrying `timeoutMs`,
  * installed with a 200 and the job was never scheduled, with only a server
