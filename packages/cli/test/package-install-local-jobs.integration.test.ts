@@ -75,6 +75,21 @@ const BODY_APP_ID = 'com.example.jobsapp';
 const BODY_TICK = 'jobs_app_tick';
 const BODY_JOB = 'jobs_app_tick_body';
 
+/** Another installed package — the control a package's uninstall or reinstall must leave running. */
+const OTHER_APP_ID = 'com.example.otherjobs';
+const OTHER_TICK = 'other_jobs_tick';
+const OTHER_JOB = 'other_jobs_tick_body';
+
+/** A package reinstalled with a version that DROPS one of its two jobs. */
+const DROP_APP_ID = 'com.example.dropjobs';
+const DROP_TICK = 'drop_jobs_tick';
+const DROP_KEPT = 'drop_jobs_kept';
+const DROP_GONE = 'drop_jobs_gone';
+
+/** "Writes no further row": let an in-flight run land, take the floor, then read again this much later. */
+const SETTLE_MS = 1_500;
+const QUIET_WAIT_MS = 4_000;
+
 const HANDLER_APP_ID = 'com.example.handlerjobs';
 const HANDLER_TICK = 'handler_jobs_tick';
 const HANDLER_JOB = 'handler_jobs_tick_handler';
@@ -114,6 +129,21 @@ const BODY_ARTIFACT = {
   objects: [tickObject(BODY_TICK)],
   jobs: [bodyJob(BODY_JOB, BODY_TICK)],
 };
+
+const OTHER_ARTIFACT = {
+  manifest: { id: OTHER_APP_ID, namespace: 'other_jobs', version: '0.1.0', type: 'app', name: 'Other Jobs' },
+  objects: [tickObject(OTHER_TICK)],
+  jobs: [bodyJob(OTHER_JOB, OTHER_TICK)],
+};
+
+/** One version of the drop package, declaring `jobs` (all body jobs into one object). */
+function dropArtifact(version: string, jobs: string[]) {
+  return {
+    manifest: { id: DROP_APP_ID, namespace: 'drop_jobs', version, type: 'app', name: 'Drop Jobs' },
+    objects: [tickObject(DROP_TICK)],
+    jobs: jobs.map((name) => bodyJob(name, DROP_TICK)),
+  };
+}
 
 /** The handler-only package: its one enabled job names a function no JSON door carries. */
 const HANDLER_ARTIFACT = {
@@ -304,6 +334,22 @@ async function awaitRuns(live: LiveStart, token: string, object: string, job: st
   return { answer, floor };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The reading for an act that must STOP `job`: let a run already in flight
+ * land, take the row count as the floor, wait, and count again. A job that
+ * was stopped leaves `after === floor`; one still scheduled (every second)
+ * adds rows in between.
+ */
+async function quietAfter(live: LiveStart, token: string, object: string, job: string): Promise<{ floor: number; after: number }> {
+  await sleep(SETTLE_MS);
+  const floor = rowsOf(await jobRows(live, token, object, job)).length;
+  await sleep(QUIET_WAIT_MS);
+  const after = rowsOf(await jobRows(live, token, object, job)).length;
+  return { floor, after };
+}
+
 interface InstallRun { exit: number | null; output: string }
 const readings: {
   bodyInstall?: InstallRun;
@@ -311,6 +357,18 @@ const readings: {
   installed?: Answer;
   afterInstall?: { answer: Answer; floor: number };
   afterRestart?: { answer: Answer; floor: number };
+  otherInstall?: InstallRun;
+  dropInstall?: InstallRun;
+  dropReinstall?: InstallRun;
+  dropBefore?: { answer: Answer; floor: number };
+  dropGoneHot?: { floor: number; after: number };
+  dropKeptHot?: { answer: Answer; floor: number };
+  uninstall?: Answer;
+  bodyGoneHot?: { floor: number; after: number };
+  otherHot?: { answer: Answer; floor: number };
+  bodyGoneRestart?: { floor: number; after: number };
+  dropGoneRestart?: { floor: number; after: number };
+  dropKeptRestart?: { answer: Answer; floor: number };
   controlBody?: { answer: Answer; floor: number };
   controlHandler?: { answer: Answer; floor: number };
   output: Record<string, string>;
@@ -329,6 +387,12 @@ beforeAll(async () => {
   write(bodyApp, BODY_ARTIFACT);
   write(handlerApp, HANDLER_ARTIFACT);
   write(controlApp, CONTROL_ARTIFACT);
+  const otherApp = join(root, 'other-app');
+  const dropAppV1 = join(root, 'drop-app-v1');
+  const dropAppV2 = join(root, 'drop-app-v2');
+  write(otherApp, OTHER_ARTIFACT);
+  write(dropAppV1, dropArtifact('0.1.0', [DROP_KEPT, DROP_GONE]));
+  write(dropAppV2, dropArtifact('0.2.0', [DROP_KEPT]));
   writeFileSync(join(controlApp, 'dist', 'runtime.mjs'), CONTROL_RUNTIME_MODULE, 'utf8');
 
   // The runtime boots the HOST artifact — never a package — so the packages
@@ -344,18 +408,40 @@ beforeAll(async () => {
   const first = await bootStart(runtimeDir, home, port, ['--artifact', hostArtifact]);
   const token = await authenticate(first);
   readings.bodyInstall = await packageInstall(bodyApp, first);
+  readings.otherInstall = await packageInstall(otherApp, first);
+  readings.dropInstall = await packageInstall(dropAppV1, first);
   readings.handlerInstall = await packageInstall(handlerApp, first);
   readings.installed = await http(first, 'GET', '/api/v1/marketplace/install-local', token);
   readings.afterInstall = await awaitRuns(first, token, BODY_TICK, BODY_JOB, 0);
+
+  // Reinstall the drop package with a version that no longer declares DROP_GONE.
+  readings.dropBefore = await awaitRuns(first, token, DROP_TICK, DROP_GONE, 0);
+  readings.dropReinstall = await packageInstall(dropAppV2, first);
+  readings.dropGoneHot = await quietAfter(first, token, DROP_TICK, DROP_GONE);
+  readings.dropKeptHot = await awaitRuns(first, token, DROP_TICK, DROP_KEPT,
+    rowsOf(await jobRows(first, token, DROP_TICK, DROP_KEPT)).length);
+
+  // Uninstall the body package; the other package is the control.
+  readings.uninstall = await http(first, 'DELETE', `/api/v1/marketplace/install-local/${BODY_APP_ID}`, token);
+  readings.bodyGoneHot = await quietAfter(first, token, BODY_TICK, BODY_JOB);
+  readings.otherHot = await awaitRuns(first, token, OTHER_TICK, OTHER_JOB,
+    rowsOf(await jobRows(first, token, OTHER_TICK, OTHER_JOB)).length);
   readings.output.install = first.output();
   await stopGroup(first.child);
 
   // ── boot 2: same host, home and cwd — the ledger rehydrates on kernel:ready ──
   const second = await bootStart(runtimeDir, home, port, ['--artifact', hostArtifact]);
   const token2 = await authenticate(second);
-  // The rows boot 1 left behind are the floor: only a run in THIS boot lifts it.
-  const floor = rowsOf(await jobRows(second, token2, BODY_TICK, BODY_JOB)).length;
-  readings.afterRestart = await awaitRuns(second, token2, BODY_TICK, BODY_JOB, floor);
+  // The rows boot 1 left behind are the floors: only a run in THIS boot lifts one.
+  const floorOf = async (object: string, job: string) => rowsOf(await jobRows(second, token2, object, job)).length;
+  const bodyFloor = await floorOf(BODY_TICK, BODY_JOB);
+  const goneFloor = await floorOf(DROP_TICK, DROP_GONE);
+  const restartedAt = Date.now();
+  readings.afterRestart = await awaitRuns(second, token2, OTHER_TICK, OTHER_JOB, await floorOf(OTHER_TICK, OTHER_JOB));
+  readings.dropKeptRestart = await awaitRuns(second, token2, DROP_TICK, DROP_KEPT, await floorOf(DROP_TICK, DROP_KEPT));
+  await sleep(Math.max(0, QUIET_WAIT_MS - (Date.now() - restartedAt)));
+  readings.bodyGoneRestart = { floor: bodyFloor, after: await floorOf(BODY_TICK, BODY_JOB) };
+  readings.dropGoneRestart = { floor: goneFloor, after: await floorOf(DROP_TICK, DROP_GONE) };
   readings.output.restart = second.output();
   await stopGroup(second.child);
 
@@ -367,7 +453,7 @@ beforeAll(async () => {
   readings.controlBody = await awaitRuns(third, token3, BODY_TICK, BODY_JOB, 0);
   readings.output.control = third.output();
   await stopGroup(third.child);
-}, 3 * BOOT_TIMEOUT_MS + 6 * RUN_WAIT_MS);
+}, 3 * BOOT_TIMEOUT_MS + 12 * RUN_WAIT_MS);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
@@ -389,10 +475,45 @@ describe('#21489: install-local runs job bodies and refuses handler-only jobs', 
     expect(rowsOf(answer).length, `the installed body job never ran${transcript('install')}`).toBeGreaterThan(0);
   });
 
-  it('after restart, the rehydrated body job runs again', () => {
+  it("after restart, a rehydrated package's body job runs again", () => {
+    expect(readings.otherInstall!.exit, readings.otherInstall!.output).toBe(0);
     const { answer, floor } = readings.afterRestart!;
     expect(answer.status, JSON.stringify(answer.body)).toBe(200);
     expect(rowsOf(answer).length, `no run after the restart${transcript('restart')}`).toBeGreaterThan(floor);
+  });
+
+  it("uninstall: the DELETE answers 200, and the uninstalled package's body job writes no further row — hot", () => {
+    expect(readings.uninstall!.status, JSON.stringify(readings.uninstall!.body)).toBe(200);
+    const { floor, after } = readings.bodyGoneHot!;
+    expect(floor, 'precondition: the job had run before the uninstall').toBeGreaterThan(0);
+    expect(after, `the uninstalled package's job kept running${transcript('install')}`).toBe(floor);
+  });
+
+  it('… and none after a restart', () => {
+    const { floor, after } = readings.bodyGoneRestart!;
+    expect(after, `the uninstalled package's job ran after the restart${transcript('restart')}`).toBe(floor);
+  });
+
+  it("control: another package's job keeps running across that uninstall", () => {
+    const { answer, floor } = readings.otherHot!;
+    expect(rowsOf(answer).length, `the control package's job stopped${transcript('install')}`).toBeGreaterThan(floor);
+  });
+
+  it('reinstall: a job the new version DROPPED writes no further row — hot, and none after a restart', () => {
+    expect(readings.dropInstall!.exit, readings.dropInstall!.output).toBe(0);
+    expect(readings.dropReinstall!.exit, readings.dropReinstall!.output).toBe(0);
+    expect(rowsOf(readings.dropBefore!.answer).length, 'precondition: the dropped job had run').toBeGreaterThan(0);
+    const hot = readings.dropGoneHot!;
+    expect(hot.after, `the dropped job kept running after the reinstall${transcript('install')}`).toBe(hot.floor);
+    const restart = readings.dropGoneRestart!;
+    expect(restart.after, `the dropped job ran after the restart${transcript('restart')}`).toBe(restart.floor);
+  });
+
+  it('… while the job the new version KEPT keeps running, hot and after a restart', () => {
+    const hot = readings.dropKeptHot!;
+    expect(rowsOf(hot.answer).length, `the kept job stopped${transcript('install')}`).toBeGreaterThan(hot.floor);
+    const restart = readings.dropKeptRestart!;
+    expect(rowsOf(restart.answer).length, `the kept job did not run after the restart${transcript('restart')}`).toBeGreaterThan(restart.floor);
   });
 
   it('the handler-only package is REFUSED, with its code and remedy, and nothing of it is installed', () => {
