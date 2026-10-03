@@ -22,9 +22,12 @@
  *      and MUST NOT carry their own fallback filename.
  *   2. Priority: explicit URL (flag / config) → environment
  *      (`OS_DATABASE_URL` / legacy `DATABASE_URL` / vendor
- *      `TURSO_DATABASE_URL`) → explicit `memory` driver selection → the
- *      datasource the project config declares as its default home
- *      ({@link readConfigDeclaredDefault}) → the unified default file.
+ *      `TURSO_DATABASE_URL`) → the datasource the project config declares
+ *      as its default home ({@link readConfigDeclaredDefault}) → the
+ *      unified default file. The ruling's third rung, "explicit `memory`
+ *      driver selection", is gone: the in-memory (mingo) engine was
+ *      withdrawn as a boot store, and its spellings are REFUSED here, ahead
+ *      of every rung ({@link retiredMemoryEngineMessage}).
  *   3. Unified default filename: `objectstack.db` — what `os start` (the
  *      serving process) already used; the serving database is the ground
  *      truth the other two commands must align to.
@@ -45,7 +48,7 @@ import { resolve as resolvePath, isAbsolute } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolveArtifactCollections } from './artifact-collections.js';
-import { resolveDatabaseDriverId, resolveDriverId } from '@objectstack/spec/data';
+import { resolveDriverId } from '@objectstack/spec/data';
 
 /** The unified default database filename (`<state dir>/data/objectstack.db`). */
 export const UNIFIED_DEFAULT_DB_FILENAME = 'objectstack.db';
@@ -73,14 +76,50 @@ export function normalizeDatabaseUrl(url: string): string {
     return trimmed;
 }
 
+/**
+ * Does this spelling name the in-memory (mingo) engine?
+ *
+ * Read on the spec's CONTRACT face ({@link resolveDriverId}), which is the face
+ * that still knows the engine: the selection face no longer offers any of its
+ * spellings (`memory`, `mingo`, `in-memory`, and the contract-only
+ * `inmemory`), so a selection lookup answers "unknown" for all four and could
+ * not tell this retirement apart from a typo. Every boot door that refuses the
+ * engine — this module's driver check, the standalone stack's URL detection,
+ * and the CLI's legacy `os serve` resolver — asks this one question.
+ */
+export function namesRetiredMemoryEngine(spelling: unknown): boolean {
+    return resolveDriverId(spelling) === 'memory';
+}
+
+/**
+ * The refusal every boot door gives the in-memory (mingo) engine — ONE sentence,
+ * so the hosts cannot drift into describing the retirement differently.
+ *
+ * `selection` names what the operator wrote, in the door's own vocabulary
+ * (`OS_DATABASE_DRIVER "memory"`, `The database URL "memory://"`, a declared
+ * datasource). The rest is the same everywhere: the engine is not a boot
+ * store, the measured consequence of booting on it anyway, and the two SQLite
+ * replacements — `os dev --fresh` for a throwaway database, and the URL
+ * `:memory:` for SQLite's own in-memory mode. The caller chooses the error
+ * TYPE (a plain `Error` here and in the standalone stack, the CLI's
+ * `UnsupportedDriverError` on its legacy path), never the wording.
+ */
+export function retiredMemoryEngineMessage(selection: string): string {
+    return (
+        `${selection} selects the in-memory (mingo) engine, which is no longer a boot store: ` +
+        `it refuses every tenant-scoped read, so a server booted on it answers data requests with 503. ` +
+        `Use SQLite instead: \`os dev --fresh\` for a throwaway database that is deleted on exit, ` +
+        `or the URL \`:memory:\` (OS_DATABASE_URL=:memory:, --database :memory:, or databaseUrl: ':memory:') ` +
+        `for SQLite's own in-memory database.`
+    );
+}
+
 /** Where a resolved database URL came from — one tier per priority rung. */
 export type ProjectDatabaseUrlSource =
     /** `--database` / `--database-url` flag, or programmatic `databaseUrl`. */
     | 'explicit'
     /** `OS_DATABASE_URL` / `DATABASE_URL` / `TURSO_DATABASE_URL`. */
     | 'env'
-    /** `--database-driver memory` / `OS_DATABASE_DRIVER=memory` — no file default is imposed. */
-    | 'memory-driver'
     /** The datasource the project config declares as its default home. */
     | 'config-datasource'
     /** A legacy `dev.db` / `standalone.db` read for compatibility (see {@link notice}). */
@@ -107,10 +146,12 @@ export interface ResolveProjectDatabaseUrlOptions {
     /** Explicit database URL (CLI flag / programmatic config). Wins over everything. */
     explicitUrl?: string;
     /**
-     * Explicit driver selection (`--database-driver` / config). Only `memory`
-     * changes URL resolution (no file default is imposed for an explicitly
-     * in-memory boot); other values select engines, not URLs, and their
-     * vocabulary is the shared table's seam (commit e2798fab7) — deliberately not judged here.
+     * Explicit driver selection (`--database-driver` / config). It selects an
+     * engine, not a URL, so no value changes which URL resolves; the
+     * selection vocabulary is the shared table's seam (commit e2798fab7) and
+     * is judged downstream. The ONE thing judged here is a spelling of the
+     * retired in-memory engine, which is refused before any rung resolves
+     * (see {@link resolveProjectDatabaseUrl}).
      */
     explicitDriver?: string;
     /** Environment to read (`process.env` by default; tests inject their own). */
@@ -173,7 +214,11 @@ function resolveDatabaseStateDir(opts: {
  *     `config.url` when present. Discrete `host`/`port`/`database` fields are
  *     NOT reassembled into a DSN here — inventing a URL (with credentials)
  *     that the author never wrote is worse than falling through;
- *   - memory → `memory://`.
+ *   - memory → `memory://`. The declaration is contract-valid (the spec keeps
+ *     `memory` on its config-contract face), but the engine is no longer a
+ *     boot store: the standalone stack's URL detection refuses this URL with
+ *     the same replacement-naming refusal as every other memory door, and
+ *     names the declared datasource as the cause.
  *
  * A rule naming the host-reserved `default`, a missing declaration, or an
  * underivable connection all yield `undefined` — resolution then falls
@@ -253,6 +298,9 @@ function datasourceUrlOf(ds: { driver?: unknown; config?: unknown }, projectRoot
             return canonical === 'sqlite-wasm' ? `wasm-sqlite://${abs}` : `file:${abs}`;
         }
         case 'memory':
+            // Expressed, not refused, here: this function only translates a
+            // declaration into a URL. The boot that would open it refuses the
+            // scheme (`standalone-stack.ts`), naming this datasource.
             return 'memory://';
         case 'postgres':
         case 'mysql':
@@ -278,6 +326,24 @@ export function resolveProjectDatabaseUrl(
 ): ResolvedProjectDatabaseUrl {
     const env = opts.env ?? process.env;
 
+    // The retired in-memory engine is refused BEFORE any rung, whatever URL is
+    // named alongside it. This used to be the `memory-driver` rung, which
+    // returned `memory://` for an explicitly in-memory boot; the engine is no
+    // longer a boot store, so the rung became this refusal. It stands ahead of
+    // the URL rungs on purpose: a driver selection outranks the URL scheme
+    // downstream (`resolveExplicitDriver`), so `OS_DATABASE_DRIVER=memory` with
+    // a `file:` URL is refused there anyway — refusing it here gives the same
+    // answer before `os dev` / `os start` print a `Database:` row for a store
+    // the boot would never open. Other selection values are not judged here:
+    // they select engines, not URLs, and the shared table refuses an unknown
+    // one downstream with the full legal-values list.
+    const selection = opts.explicitDriver ?? env.OS_DATABASE_DRIVER;
+    if (namesRetiredMemoryEngine(selection)) {
+        const spelling = String(selection).trim();
+        const door = opts.explicitDriver !== undefined ? 'The driver selection' : 'OS_DATABASE_DRIVER';
+        throw new Error(retiredMemoryEngineMessage(`${door} "${spelling}"`));
+    }
+
     const explicit = opts.explicitUrl?.trim();
     if (explicit) return { url: normalizeDatabaseUrl(explicit), source: 'explicit' };
 
@@ -285,16 +351,6 @@ export function resolveProjectDatabaseUrl(
     if (envUrl) return { url: normalizeDatabaseUrl(envUrl), source: 'env' };
     const tursoUrl = env.TURSO_DATABASE_URL?.trim();
     if (tursoUrl) return { url: tursoUrl, source: 'env' };
-
-    // An explicitly in-memory boot gets no file default imposed on it. Only
-    // `memory` is judged here; unknown driver values are refused downstream
-    // (`resolveExplicitDriver`) with the full legal-values list.
-    // Resolved through the shared table (commit e2798fab7): `OS_DATABASE_DRIVER=mingo` is an
-    // accepted spelling of `memory` on both hosts, so it must reach this rung
-    // too — a raw string compare would have imposed the unified default FILE on
-    // a boot that explicitly asked for the in-memory engine.
-    const driver = resolveDatabaseDriverId(opts.explicitDriver ?? env.OS_DATABASE_DRIVER);
-    if (driver === 'memory') return { url: 'memory://', source: 'memory-driver' };
 
     const fromConfig = readConfigDeclaredDefault(opts);
     if (fromConfig) {
