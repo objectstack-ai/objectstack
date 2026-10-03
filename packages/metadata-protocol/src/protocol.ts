@@ -1744,7 +1744,7 @@ function stateTenantAuthorship(data: unknown): unknown {
  * package attribution of a container row both ask exactly this, positively:
  * a body that is neither a container nor a view item is not a view item.
  */
-function isShippedViewItem(artifact: unknown): artifact is Record<string, unknown> {
+function isShippedViewItem(artifact: unknown): boolean {
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return false;
     const viewKind = (artifact as { viewKind?: unknown }).viewKind;
     return typeof viewKind === 'string' && viewKind !== '';
@@ -18015,7 +18015,7 @@ export class ObjectStackProtocolImplementation implements
         const shippedServing = (name: string): Record<string, unknown> | undefined => {
             if (overlaid.has(name)) return undefined;
             const artifact = this.lookupArtifactItem(type, name) as Record<string, unknown> | undefined;
-            if (!isShippedViewItem(artifact)) return undefined;
+            if (!artifact || !isShippedViewItem(artifact)) return undefined;
             return typeof artifact._packageId === 'string' && artifact._packageId !== '' ? artifact : undefined;
         };
         const refusal = (text: string) => {
