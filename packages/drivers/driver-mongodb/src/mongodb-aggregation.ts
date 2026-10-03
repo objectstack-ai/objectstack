@@ -646,7 +646,7 @@ export function buildAggregationPipeline(opts: {
  * `$sum`'s identity `0` and averaged to `null` here, while `SUM(col)` /
  * `AVG(col)` answer `3` / `0.5` over the same 3-true/3-false rows on every SQL
  * dialect (#11635), `driver-memory` answers those numbers on both of its faces
- * (#11065), and objectql's in-memory fallback answers them too because its
+ * (commit 20950404c), and objectql's in-memory fallback answers them too because its
  * `toNumber` is `Number(v)` and `Number(true) === 1`. A rate measure over a
  * flag column — an SLA-violation rate, a win rate — is the ordinary shape of
  * that query, and the two answers are not two spellings of one: a dashboard
@@ -654,7 +654,7 @@ export function buildAggregationPipeline(opts: {
  * indistinguishable from "no matching rows". `sum`'s `0` is the worse half,
  * being a plausible number rather than a visible hole.
  *
- * The expression is the one #11065 landed on `driver-memory`'s analytics face
+ * The expression is the one commit 20950404c landed on `driver-memory`'s analytics face
  * (`memory-analytics.ts`, `numericAggregandExpr`), reproduced rather than
  * imported: this driver shares no line of code with that one, and the shared
  * contract between them is the VALUES in `@objectstack/spec/data`, not a

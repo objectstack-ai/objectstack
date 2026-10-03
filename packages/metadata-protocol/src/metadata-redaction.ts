@@ -742,8 +742,9 @@ export function storedMetadataBodyGroupingRefusal(object: string, groupBy: unkno
  * the grouping refusal above take. Same family, shape and code: `INVALID_FIELD`
  * / 400, naming the field, the object and the offending `param`.
  *
- * `filterFields` is the set of head field names the caller's `where` names
- * (`collectFilterFieldKeys`), and `sortFields` the fields its `orderBy` names.
+ * `filterFields` is the set of columns the caller's filters read
+ * (`collectStoredMetadataFilterFields`, `protocol.ts`: each key's head and each
+ * cross-field comparand's), and `sortFields` the fields its `orderBy` names.
  * Filter is judged before sort — a query that does both reads "the filter was
  * not run" first. `undefined` when neither names the body column.
  */

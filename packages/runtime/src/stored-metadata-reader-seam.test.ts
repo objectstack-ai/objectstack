@@ -14,8 +14,10 @@ import {
   assertEngineFindOnePredicate,
   assertEngineUpdateDispatch,
   assertEngineDeleteDispatch,
+  SysMetadataHistoryObject,
+  SysMetadataObject,
 } from '@objectstack/metadata-core';
-import { ephemeralStoredHashDigest } from '@objectstack/metadata-protocol';
+import { ephemeralStoredHashDigest, ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 
 const SENTINEL = 'seam-unit-sentinel-41d7';
@@ -263,5 +265,172 @@ describe('[#21454] the engine action verb is never on a served body\'s surface',
     const repo = { find: async () => [], count: async () => 0 } as any;
     const api = serveStoredMetadataReadsThrough({ object: (_name: string) => repo } as any, engineWithProvider);
     expect((api.object('sys_metadata') as any).execute).toBeUndefined();
+  });
+});
+
+/**
+ * [#21544] The door and the seam answer every family filter and search the
+ * SAME way, because both call the door's two exported functions — its one
+ * filter-field collector (`collectStoredMetadataFilterFields`) and its one
+ * default-search narrowing (`narrowStoredMetadataSearch`). One table, run
+ * through both: the generic data door (`findData`, over an engine double whose
+ * registry answers the real family definitions) and the seam (a scoped API
+ * served through `serveStoredMetadataReadsThrough`, whose engine face answers
+ * the same definitions). A future divergence fails one shared case.
+ *
+ * An outcome is the refusal's `code`, `status` and the column it names (the
+ * door's earlier ingress gate answers a DOTTED key first, naming the whole
+ * key under `where`, so the column is compared by its head and `param` is
+ * compared on the search rows only), or — for a query that ran — the
+ * `searchFields` the read was handed.
+ */
+describe('[#21544] door / seam parity — one collector, one narrowing', () => {
+  type Outcome =
+    | { refused: { code: unknown; status: unknown; column: string; param?: unknown } }
+    | { ran: { searchFields: unknown } };
+  const deep = (n: number, leaf: Record<string, unknown>): Record<string, unknown> =>
+    (n === 0 ? leaf : { $and: [deep(n - 1, leaf)] });
+  const familySchemas = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    sys_metadata: SysMetadataObject,
+    sys_metadata_history: SysMetadataHistoryObject,
+    ...overrides,
+  });
+  const refusedAs = (e: any, withParam: boolean): Outcome => ({
+    refused: {
+      code: e?.code,
+      status: e?.status,
+      column: String(e?.field).split('.')[0] as string,
+      ...(withParam ? { param: e?.param } : {}),
+    },
+  });
+  const isAggregate = (query: Record<string, unknown>) => 'groupBy' in query || 'aggregations' in query;
+
+  async function viaDoor(object: string, query: Record<string, unknown>, schemas: Record<string, unknown>, withParam: boolean): Promise<Outcome> {
+    const handed: Array<Record<string, unknown>> = [];
+    const record = async (_object: string, options: Record<string, unknown>) => {
+      handed.push(options);
+      return [];
+    };
+    const engine: any = {
+      registry: { getObject: (name: string) => schemas[name] },
+      find: record,
+      aggregate: record,
+      // `findData` reads through find / count / aggregate only — no `findOne` here.
+      count: async () => 0,
+      getKeyedDigest: () => provider,
+    };
+    try {
+      await new ObjectStackProtocolImplementation(engine).findData({ object, query: structuredClone(query) });
+    } catch (e) {
+      return refusedAs(e, withParam);
+    }
+    return { ran: { searchFields: handed[0]?.searchFields } };
+  }
+
+  async function viaSeam(object: string, query: Record<string, unknown>, schemas: Record<string, unknown>, withParam: boolean): Promise<Outcome> {
+    const handed: Array<Record<string, unknown>> = [];
+    const repo = {
+      async find(q: Record<string, unknown>) { handed.push(q); return []; },
+      async aggregate(q: Record<string, unknown>) { handed.push(q); return []; },
+    };
+    const api = serveStoredMetadataReadsThrough(
+      { object: (_name: string) => repo } as any,
+      { getKeyedDigest: () => provider, getObject: (name: string) => schemas[name] },
+    );
+    const served = api.object(object) as typeof repo;
+    try {
+      await (isAggregate(query) ? served.aggregate(structuredClone(query)) : served.find(structuredClone(query)));
+    } catch (e) {
+      return refusedAs(e, withParam);
+    }
+    return { ran: { searchFields: handed[0]?.searchFields } };
+  }
+
+  // [label, object, query, expected column (refused) or null (ran), compare param?, schema overrides]
+  const cases: Array<[string, string, Record<string, unknown>, string | null, boolean?, Record<string, unknown>?]> = [
+    // The search half: an explicit list, the default search, an emptied set.
+    ['an explicit search list (array) naming the body', 'sys_metadata', { search: 'z', searchFields: ['name', 'metadata'] }, 'metadata', true],
+    ['an explicit search list (comma string) naming a hash', 'sys_metadata_history', { search: 'z', searchFields: 'name,checksum' }, 'checksum', true],
+    ['an explicit object-form search list naming the parent hash', 'sys_metadata_history', { search: { query: 'z', fields: ['previous_checksum'] } }, 'previous_checksum', true],
+    ['an explicit search list naming neither', 'sys_metadata', { search: 'z', searchFields: ['name'] }, null, true],
+    ['the default search (narrowed, then run)', 'sys_metadata', { search: 'datasource' }, null, true],
+    ['the default search on the history table', 'sys_metadata_history', { search: 'datasource' }, null, true],
+    [
+      'a default search whose set narrows to nothing',
+      'sys_metadata',
+      { search: 'z' },
+      'metadata',
+      true,
+      { sys_metadata: { ...SysMetadataObject, searchableFields: ['metadata', 'checksum'] } },
+    ],
+    // The collector half: what the measurement found the door's old collector missed, and its neighbours.
+    ['a direct body filter', 'sys_metadata', { where: { metadata: { $contains: 'z' } } }, 'metadata'],
+    ['a dotted body key', 'sys_metadata', { where: { 'metadata.config': 'z' } }, 'metadata'],
+    ['a dotted hash key', 'sys_metadata_history', { where: { 'checksum.x': 'z' } }, 'checksum'],
+    ['a cross-field comparand on the body', 'sys_metadata', { where: { name: { $eq: { $field: 'metadata' } } } }, 'metadata'],
+    ['a cross-field comparand on a hash', 'sys_metadata', { where: { type: { $lt: { $field: 'checksum' } } } }, 'checksum'],
+    ['a cross-field comparand on the change note', 'sys_metadata_history', { where: { name: { $ne: { $field: 'change_note' } } } }, 'change_note'],
+    ['a dotted cross-field reference', 'sys_metadata', { where: { name: { $ne: { $field: 'metadata.x' } } } }, 'metadata'],
+    ['a reference in a list', 'sys_metadata', { where: { name: { $in: [{ $field: 'checksum' }] } } }, 'checksum'],
+    ['a reference under $not', 'sys_metadata_history', { where: { $not: { name: { $eq: { $field: 'previous_checksum' } } } } }, 'previous_checksum'],
+    ['an unrecognised $ key wrapping a body filter', 'sys_metadata', { where: { $nor: [{ metadata: { $contains: 'z' } }] } }, 'metadata'],
+    ['a direct body filter 33 levels deep', 'sys_metadata', { where: deep(33, { metadata: { $contains: 'z' } }) }, 'metadata'],
+    ['a cross-field comparand 33 levels deep', 'sys_metadata_history', { where: deep(33, { name: { $ne: { $field: 'checksum' } } }) }, 'checksum'],
+    [
+      'a cross-field comparand in an aggregation filter',
+      'sys_metadata',
+      { groupBy: ['type'], aggregations: [{ function: 'count', alias: 'n', filter: { name: { $ne: { $field: 'metadata' } } } }] },
+      'metadata',
+    ],
+    [
+      'a body filter 33 levels deep in an aggregation filter',
+      'sys_metadata_history',
+      { groupBy: ['type'], aggregations: [{ function: 'count', alias: 'n', filter: deep(33, { metadata: { $contains: 'z' } }) }] },
+      'metadata',
+    ],
+    // Controls: scalar columns, and a `having` alias spelled like a family column, run on both.
+    ['control: a cross-field comparand between scalar columns', 'sys_metadata', { where: { name: { $ne: { $field: 'type' } } } }, null],
+    ['control: a scalar filter 33 levels deep', 'sys_metadata', { where: deep(33, { type: 'view' }) }, null],
+    [
+      'control: a `having` on an aggregation alias spelled like the body column',
+      'sys_metadata',
+      { groupBy: ['type'], aggregations: [{ function: 'count', alias: 'metadata' }], having: { metadata: { $gt: 0 } } },
+      null,
+    ],
+  ];
+
+  for (const [label, object, query, column, withParam = false, overrides] of cases) {
+    it(`${label}: the door and the seam answer identically`, async () => {
+      const schemas = familySchemas(overrides);
+      const door = await viaDoor(object, query, schemas, withParam);
+      const seam = await viaSeam(object, query, schemas, withParam);
+      expect(seam).toEqual(door);
+      if (column === null) {
+        expect('ran' in door, `${label}: the door refused a query that should run`).toBe(true);
+      } else {
+        expect(door).toMatchObject({ refused: { code: 'INVALID_FIELD', status: 400, column } });
+      }
+    });
+  }
+
+  it('the default search is handed on narrowed — the body and hash columns never scanned', async () => {
+    const door = await viaDoor('sys_metadata_history', { search: 'datasource' }, familySchemas(), false);
+    const searchFields = (door as { ran: { searchFields: string[] } }).ran.searchFields;
+    expect(searchFields).toContain('name');
+    for (const column of ['metadata', 'checksum', 'previous_checksum', 'change_note']) expect(searchFields).not.toContain(column);
+  });
+
+  it('`count` runs the query the guard returns: a default search arrives narrowed', async () => {
+    const counted: Array<Record<string, unknown>> = [];
+    const repo = { async count(q: Record<string, unknown>) { counted.push(q); return 0; } };
+    const api = serveStoredMetadataReadsThrough(
+      { object: (_name: string) => repo } as any,
+      { getKeyedDigest: () => provider, getObject: (name: string) => familySchemas()[name] },
+    );
+    await (api.object('sys_metadata') as typeof repo).count({ search: 'datasource' });
+    const searchFields = counted[0]?.searchFields as string[];
+    expect(searchFields).toContain('name');
+    expect(searchFields).not.toContain('metadata');
+    expect(searchFields).not.toContain('checksum');
   });
 });

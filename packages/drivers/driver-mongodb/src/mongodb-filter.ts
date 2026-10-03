@@ -1037,7 +1037,7 @@ function translateCondition(
             // sibling operator on the same field. Merging one would drop a
             // constraint silently, so each becomes its own `$and` branch — see
             // `assembleLoweredWrites()`. This consumed a single `_presenceAnd`
-            // when the guard covered `$exists` alone (#13195); it is a LIST now
+            // when the guard covered `$exists` alone (commit 9dac1ae01); it is a LIST now
             // because the class has several members and one field constraint
             // can contest more than one key.
             const extraAnd = translated._extraAnd as Record<string, unknown>[] | undefined;
@@ -1077,7 +1077,7 @@ function translateCondition(
  * Read straight off the spec's `FILTER_OPERATORS` declaration order rather than
  * hand-copied, so a seventeenth operator is ranked the day it is declared. The
  * rank of `$exists` (last in that list) is what makes this generalisation emit,
- * byte for byte, the documents #13195's guard already emits for the one
+ * byte for byte, the documents commit 9dac1ae01's guard already emits for the one
  * operator it moved. `$like` / `$ilike` are declared but NOT translated by this
  * driver — the `default:` arm refuses them before the assembly runs — so the
  * fallback below is a totality floor, never a live path.
@@ -1146,7 +1146,7 @@ interface LoweredWrite {
  *
  * Free key → merge inline (the overwhelmingly common case). Taken key → the
  * write becomes its own `$and` branch on the same field, where both constraints
- * survive. That is exactly the guard #13195 landed for `$exists` alone,
+ * survive. That is exactly the guard commit 9dac1ae01 landed for `$exists` alone,
  * generalised to every writer rather than restated once per operator.
  * `driver-memory`'s reference matcher looped the operators and therefore could
  * not express this defect at all; it was the oracle both drivers agreed with
@@ -1239,7 +1239,7 @@ function translateFieldOperators(
    * {@link assembleLoweredWrites} after the loop. Collected rather than
    * assigned because an arm cannot know whether the key it wants is already
    * spoken for by a sibling operator the author wrote LATER — which is the
-   * whole of the defect this replaces. It subsumes #13195's single-operator
+   * whole of the defect this replaces. It subsumes commit 9dac1ae01's single-operator
    * `presence` collection: `$exists` is one writer among the rest now.
    */
   const writes: LoweredWrite[] = [];
@@ -1262,7 +1262,7 @@ function translateFieldOperators(
         put(op, store(value));
         break;
 
-      // [#13195] Value-independent — a presence predicate takes a boolean, not
+      // [commit 9dac1ae01] Value-independent — a presence predicate takes a boolean, not
       // a comparand, so it is never coerced. And "present" means the field HAS
       // A VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in
       // PR #5962, ruled onto this driver by the maintainer on 2026-08-30.
@@ -1473,7 +1473,7 @@ function translateFieldOperators(
 
   // [#13524] Assemble every lowered write, and do NOT let one clobber another.
   //
-  // #13195 landed this rule for `$exists` alone and said in this spot that the
+  // Commit 9dac1ae01 landed this rule for `$exists` alone and said in this spot that the
   // identical clobber was reachable through `$null` and `$between`. Enumerating
   // the declared vocabulary instead of the noticed operators found the whole
   // `$regex` string family too, which `driver-memory` had promoted for years
