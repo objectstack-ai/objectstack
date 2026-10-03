@@ -36,12 +36,13 @@
  *            outright (#8976).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
- *          → removes the cached manifest, then runs the uninstall cleanups
- *            domain plugins registered with the protocol (#21490) — the
- *            package's permission sets and their grants go with it — and
- *            reports each outcome as `cleanups`. Kernel must be restarted to
- *            fully unload — `engine.registerApp` is additive only. We
- *            document this in the response message.
+ *          → removes the cached manifest, withdraws the package from the
+ *            running kernel through the registry's `uninstallPackage` — the
+ *            verb the protocol's own uninstall uses — so its objects answer
+ *            404 at once (#21576), then runs the uninstall cleanups domain
+ *            plugins registered with the protocol (#21490) — the package's
+ *            permission sets and their grants go with it — and reports each
+ *            outcome as `cleanups`, a refused withdrawal included.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -119,6 +120,13 @@ type UninstallCleanupRunner = {
 
 /** The outcome name this door reports when the runner itself could not run. */
 const UNINSTALL_CLEANUP_RUNNER = 'protocol.runUninstallCleanups';
+
+/**
+ * [#21576] The outcome name this door reports when the running kernel did not
+ * withdraw the uninstalled package — named for the registry verb, as the one
+ * above is named for the protocol's.
+ */
+const REGISTRY_WITHDRAWAL = 'registry.uninstallPackage';
 
 /**
  * [#8976] The capability every MUTATING install-local route demands.
@@ -1122,20 +1130,110 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         } catch (err: any) {
             return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: err?.message ?? String(err) } }, 500);
         }
-        // [#21490] Only now — the ledger entry is gone, so the package will not
-        // come back at the next restart — revoke what its metadata granted.
-        // Never before: an uninstall whose ledger write failed above leaves the
-        // package installed, and it must keep its grants.
-        const cleanups = await this.runUninstallCleanups(ctx, manifestId, admission.userId);
-        ctx.logger?.info?.(`[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; ${cleanups.length} uninstall cleanup(s) ran; restart runtime to unload from running kernel)`);
+        // [#21576] Only now — the ledger entry is gone, so the package will not
+        // come back at the next restart — withdraw it from the running kernel,
+        // and then [#21490] revoke what its metadata granted. Never before: an
+        // uninstall whose ledger write failed above leaves the package
+        // installed, and it must stay registered and keep its grants.
+        //
+        // The withdrawal goes FIRST, with no `await` between it and the ledger
+        // removal, for the same reason `deletePackage` withdraws before it runs
+        // the cleanups: from the moment the uninstall is durable, nothing that
+        // reads "registered packages" can see this one again. The cleanups
+        // await the store row by row; were the package still registered while
+        // they ran, another request's hot install announcing
+        // `metadata:reloaded` in that window would re-project the very sets
+        // they had just selected and removed. The cleanups lose nothing by
+        // going second: `deletePackage` already runs every registered cleanup
+        // after its withdrawal, and the one registered today
+        // (`security.package-permissions`) selects by package id in the store,
+        // never through the registry.
+        const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
+        const cleanups = [
+            ...(withdrawal ? [withdrawal] : []),
+            ...await this.runUninstallCleanups(ctx, manifestId, admission.userId),
+        ];
+        ctx.logger?.info?.(
+            `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
+            + (withdrawal
+                ? 'the running kernel did NOT withdraw it, so it stays loaded until the next restart; '
+                : 'withdrawn from the running kernel; ')
+            + `${cleanups.length - (withdrawal ? 1 : 0)} uninstall cleanup(s) ran)`,
+        );
         return c.json({
             success: true,
             data: {
                 manifestId,
                 cleanups,
-                note: 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The app remains loaded in the running kernel until the next restart (the kernel API does not support unregistering apps in-place).',
+                note: withdrawal
+                    ? 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The running kernel did not withdraw the package, so it stays loaded until the next restart; that is the `registry.uninstallPackage` entry in `cleanups`.'
+                    : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
             },
         }, 200);
+    };
+
+    /**
+     * [#21576] Withdraw a package this door just removed from its ledger from
+     * the running kernel — through `SchemaRegistry.uninstallPackage`, the ONE
+     * verb the protocol's own uninstall (`deletePackage`) withdraws a package
+     * with, on the same registry: the `objectql` engine's, which is the engine
+     * the protocol is assembled over and the registry this door's install
+     * registers into (the `manifest` service's `registerApp`).
+     *
+     * Before this, the door left the package registered until the next
+     * restart, and every reader of "registered packages" kept answering as if
+     * it were installed. One of them re-created a ghost grant: another
+     * package's hot install announces `metadata:reloaded`, `plugin-security`
+     * re-runs its declared-permission seeding over every registered package,
+     * and the uninstalled package's permission set came back as a fresh
+     * `managed_by: package` row that outlived the restart as an orphan
+     * (ADR-0090: "No ghost grants"). Withdrawing the registration — not
+     * teaching that one reader to skip it — makes every such reader right.
+     *
+     * What the verb withdraws, all of it re-added by a later install of the
+     * same id (`registerApp`): the package's object contributions (so its
+     * objects answer 404 at once instead of after a restart), its namespace,
+     * every metadata item it shipped, its boot disable seed, and its package
+     * record. Its tables and rows are untouched.
+     *
+     * Never throws: the uninstall has already happened. Two answers:
+     *   - `undefined` — withdrawn, or nothing to withdraw: no `objectql`
+     *     engine, or a registry that does not hold the package (a cloud
+     *     install whose hot-register failed, a rehydrate that failed);
+     *   - one failed outcome named {@link REGISTRY_WITHDRAWAL}, when the
+     *     registry refused (ADR-0029: another package extends an object this
+     *     one owns) or could not be asked. It rides on `cleanups`, the way a
+     *     failed cleanup does, and the operator log says what it costs and
+     *     the remedy; the cause is logged, never put on the wire.
+     */
+    private withdrawFromRunningKernel = (
+        ctx: PluginContext,
+        manifestId: string,
+    ): UninstallCleanupOutcome | undefined => {
+        let ql: IObjectQLEngine | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine — nothing registered */ }
+        const registry = ql?.registry;
+        if (!registry) return undefined;
+        try {
+            if (registry.getPackage(manifestId) === undefined) return undefined;
+            registry.uninstallPackage(manifestId);
+            return undefined;
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but the running kernel did not withdraw it `
+                + `(${err?.message ?? err}) — it stays registered until the next restart: its objects keep answering, `
+                + 'and every reader of the registered packages still counts it, so a later hot install can re-project '
+                + 'its permission sets. The outcome is on the response (`cleanups`). Remedy: remove what blocks the '
+                + 'withdrawal (the cause in parentheses names it) and restart the runtime — the ledger entry is '
+                + 'already gone, so the restart does not bring the package back.',
+            );
+            return {
+                name: REGISTRY_WITHDRAWAL,
+                success: false,
+                removed: 0,
+                error: 'the running kernel did not withdraw the package — it stays loaded until the next restart',
+            };
+        }
     };
 
     /**
