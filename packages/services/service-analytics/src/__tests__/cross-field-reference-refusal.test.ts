@@ -215,21 +215,14 @@ describe("[#7598] the #5222 corpus's SUPPORTED arm is ROUTED by the `where` door
       kind: 'leaf', member: 'amount', operator: 'notEquals', values: [{ $field: 'budget' }],
     });
     // …and the literal keeps its guard. This pair is the whole claim.
-    // [ADR-0053 D-D1, amended — #5930 step 3] The guard now arrives twice: the
-    // shared lowering's NULL escape (outer), around this face's own interim
-    // copy of it (inner) — the same rows, until the copy's deletion card. The
-    // reference above gets neither, from either.
+    // [ADR-0053 D-D1, amended — #5930 step 4] The guard arrives once: the
+    // shared lowering's NULL escape, its one source since this face's own copy
+    // was deleted. The reference above gets none.
     expect(tree({ amount: { $ne: 5 } })).toEqual({
       kind: 'or',
       children: [
         { kind: 'leaf', member: 'amount', operator: 'notSet', values: [] },
-        {
-          kind: 'or',
-          children: [
-            { kind: 'leaf', member: 'amount', operator: 'notSet', values: [] },
-            { kind: 'leaf', member: 'amount', operator: 'notEquals', values: [5] },
-          ],
-        },
+        { kind: 'leaf', member: 'amount', operator: 'notEquals', values: [5] },
       ],
     });
   });

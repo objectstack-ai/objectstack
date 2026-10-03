@@ -724,7 +724,7 @@ const actionExecuteToTarget: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'action.execute',
-  summary: "action key 'execute' → 'target' (the deprecated handler alias, #3713)",
+  summary: "action key 'execute' → 'target' (the deprecated handler alias; the spec and the renderer had resolved the pair in opposite directions, so one key now names the handler)",
   apply(stack, emit) {
     const renameOn = (action: Dict, path: string): Dict => {
       const renamed = renameKey(action, 'execute', 'target');
@@ -764,7 +764,7 @@ const fieldConditionalRequiredToRequiredWhen: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'field.conditionalRequired',
-  summary: "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754)",
+  summary: "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, folded into the canonical key so no reader picks its own precedence)",
   apply(stack, emit) {
     const withObjects = mapObjectFieldsKey(stack, 'objects', 'conditionalRequired', 'requiredWhen', emit);
     return mapObjectFieldsKey(withObjects, 'objectExtensions', 'conditionalRequired', 'requiredWhen', emit);
@@ -819,7 +819,7 @@ const agentToolsToSkills: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'agent.tools',
-  summary: "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
+  summary: "agent key 'tools' removed — declare capability in a skill (ADR-0064: an agent's tools are exactly its skills' tools, and this inline slot resolved names against the whole registry with no surface check)",
   apply(stack, emit) {
     return mapCollection(stack, 'agents', (agent, path) => {
       if (!('tools' in agent) || agent.tools == null) return agent;
@@ -878,7 +878,7 @@ const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
   id: 'sharing-rule-access-level-full-to-edit',
   toMajor: 17,
   surface: 'sharingRule.accessLevel',
-  summary: "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
+  summary: "sharing-rule accessLevel 'full' → 'edit' (`full` never granted more than `edit`; a sharing rule grants read or edit, while delete and transfer come from object permissions and ownership)",
   apply(stack, emit) {
     return mapCollection(stack, 'sharingRules', (rule, path) => {
       if (rule.accessLevel !== 'full') return rule;
@@ -951,7 +951,7 @@ const flowNodeCrudObjectAlias: MetadataConversion = {
   id: 'flow-node-crud-object-alias',
   toMajor: 17,
   surface: 'flow.node.config.objectName',
-  summary: "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+  summary: "CRUD flow-node config key 'object' → 'objectName' (the last alias in the executors' `readAliasedConfig` shim graduates into this layer, and the shim is deleted)",
   apply(stack, emit) {
     const crudTypes = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
     return renameFlowConfigAliases(stack, crudTypes, [['object', 'objectName']], emit);
@@ -1074,8 +1074,8 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
   toMajor: 17,
   surface: 'flow.node.notify.config',
   summary:
-    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), " +
-    "and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (executor `??` fallbacks graduated into this layer; `actionUrl` is canonical because the notification chain downstream already uses it), " +
+    "and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (a shape the executor read that no config schema declared)",
   apply(stack, emit) {
     const renamed = renameFlowConfigAliases(
       stack,
@@ -1286,7 +1286,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
   surface: 'flow.node.wait.waitEventConfig',
   summary:
     "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', " +
-    "'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (#4045)",
+    "'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (the executor also read these keys from the loose config, a second contract beside the declared block)",
   apply(stack, emit) {
     return liftWaitEventConfig(stack, emit);
   },
@@ -1361,7 +1361,7 @@ const flowNodeMapFlowAlias: MetadataConversion = {
   id: 'flow-node-map-flow-alias',
   toMajor: 17,
   surface: 'flow.node.map.config.flowName',
-  summary: "map flow-node config key 'flow' → 'flowName' (#4045 — undeclared executor fallback graduation)",
+  summary: "map flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback; it graduates into this layer)",
   apply(stack, emit) {
     return renameFlowConfigAliases(stack, new Set(['map']), [['flow', 'flowName']], emit);
   },
@@ -1418,7 +1418,7 @@ const flowNodeSubflowFlowAlias: MetadataConversion = {
   id: 'flow-node-subflow-flow-alias',
   toMajor: 17,
   surface: 'flow.node.subflow.config.flowName',
-  summary: "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+  summary: "subflow flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback, found when the schemaless nodes were reconciled with their executors; it graduates into this layer)",
   apply(stack, emit) {
     return renameFlowConfigAliases(stack, new Set(['subflow']), [['flow', 'flowName']], emit);
   },
@@ -1527,7 +1527,7 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
   surface: 'flow.node.connector_action.connectorConfig',
   summary:
     "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → " +
-    'the declared `connectorConfig` block (#4045)',
+    'the declared `connectorConfig` block (the executor reads only that block; the published designer form had been writing these keys where nothing read them)',
   apply(stack, emit) {
     return liftConnectorConfigShape(stack, emit);
   },
@@ -1638,7 +1638,7 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
   id: 'flow-node-script-config-aliases',
   toMajor: 17,
   surface: 'flow.node.script.config',
-  summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+  summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (executor `??` fallbacks, graduated into this layer)",
   apply(stack, emit) {
     return renameFlowConfigAliases(
       stack,
@@ -1739,7 +1739,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
     'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
     + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / '
     + 'app.homePageId / app.areas.order',
-  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (premise corrected in #4709; the retirement stands), and no renderer ever sorted areas)",
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits found each one unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (the first retirement record said nothing read it, a premise since corrected; the retirement stands), and no renderer ever sorted areas)",
   apply(stack, emit) {
     const RETIRED = [
       'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
@@ -1850,7 +1850,7 @@ const appAreaFailOpenGatesRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'app.areas.visible / app.areas.requiredPermissions',
-  summary: "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+  summary: "navigation-area keys 'visible'/'requiredPermissions' removed (ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
   apply(stack, emit) {
     const RETIRED_AREA_GATES = ['visible', 'requiredPermissions'];
     return mapCollection(stack, 'apps', (app, path) => {
@@ -1952,7 +1952,7 @@ const permissionRlsPriorityRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'permission.rowLevelSecurity.priority',
-  summary: "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+  summary: "RLS-policy key 'priority' removed (a security audit found no reader: policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
   apply(stack, emit) {
     return mapCollection(stack, 'permissions', (ps, path) => {
       const rls = (ps as { rowLevelSecurity?: unknown }).rowLevelSecurity;
@@ -2021,7 +2021,7 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'tool.category / tool.permissions / tool.active / tool.builtIn',
-  summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+  summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (authorable and inert, so removed under ADR-0049 enforce-or-remove; permissions gated nothing, active:false withdrew nothing)",
   apply(stack, emit) {
     const RETIRED = ['category', 'permissions', 'active', 'builtIn'] as const;
     return mapCollection(stack, 'tools', (tool, path) => {
@@ -2134,7 +2134,7 @@ const actionInertKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'action.shortcut / action.bulkEnabled',
-  summary: "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+  summary: "action keys 'shortcut'/'bulkEnabled' removed (inert, removed under ADR-0049 enforce-or-remove: no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
   apply(stack, emit) {
     return mapCollection(stack, 'actions', (a, path) => stripKeys(a, ['shortcut', 'bulkEnabled'], emit, path));
   },
@@ -2159,7 +2159,7 @@ const flowInertKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId',
-  summary: "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+  summary: "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (inert, removed under ADR-0049 enforce-or-remove: active:false never stopped a flow; status is the enforced lifecycle)",
   apply(stack, emit) {
     let out = mapCollection(stack, 'flows', (f, path) => {
       let next = stripKeys(f, ['active', 'template'], emit, path);
@@ -2218,7 +2218,7 @@ const viewInertKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria',
-  summary: "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+  summary: "view keys removed as inert (ADR-0049 enforce-or-remove): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
   apply(stack, emit) {
     const LIST_KEYS = ['responsive', 'performance'] as const;
     // NOT 'data': the sweep's removal attempt was refuted by the build —
@@ -2264,7 +2264,7 @@ const viewListPassthroughKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'view.list.striped / view.list.bordered / view.list.virtualScroll',
-  summary: "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
+  summary: "view list keys removed: 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (a key that is only passed through is dead in effect; ADR-0049 enforce-or-remove)",
   apply(stack, emit) {
     const LIST_KEYS = ['striped', 'bordered', 'virtualScroll'] as const;
     return mapViewPayloads(stack, (payload, kind, path) =>
@@ -2332,8 +2332,8 @@ const viewExportOptionsPdfRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'view.list.exportOptions / view.listViews.*.exportOptions',
   summary:
-    "list-view export format 'pdf' removed (#8010 — PDF export was declined as #1301 NOT_PLANNED; "
-    + 'ObjectGrid dropped the declared format from the menu with only a runtime console.warn)',
+    "list-view export format 'pdf' removed (PDF export was declined as not planned, and ObjectGrid "
+    + 'dropped the declared format from the menu with only a runtime console.warn; an honest enum replaces that warning)',
   apply(stack, emit) {
     const stripPdf = (slot: unknown, path: string): unknown => {
       if (!slot || typeof slot !== 'object' || Array.isArray(slot)) return slot;
@@ -2401,7 +2401,7 @@ const dashboardInertKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'dashboard.aria / dashboard.performance / dashboard.widgets[].performance',
-  summary: "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+  summary: "dashboard keys 'aria'/'performance' and widget 'performance' removed (inert, removed under ADR-0049 enforce-or-remove: no renderer applied any of them)",
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
       let next = stripKeys(d, ['aria', 'performance'], emit, path);
@@ -2471,7 +2471,7 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'dashboard.widgets[].responsive',
-  summary: "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
+  summary: "dashboard widget key 'responsive' removed (no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was measured equally unread and retired at protocol 18)",
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
       const widgets = d.widgets;
@@ -2553,7 +2553,7 @@ const dashboardWidgetActionAriaRemoved: MetadataConversion = {
     + 'dashboard.widgets[].actionIcon / dashboard.widgets[].aria',
   summary:
     "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed "
-    + '(#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never '
+    + '(no renderer ever drew a per-widget action button, and widget ARIA attributes never '
     + 'reached the DOM; use header.actions[] and the widget title/description)',
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
@@ -2650,7 +2650,7 @@ const dashboardWidgetCompareToConverged: MetadataConversion = {
   surface: 'dashboard.widgets[].compareTo',
   summary:
     "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract "
-    + "(#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } "
+    + "(the shape the dataset executor implements; the bare strings and { offset: '1y' } rewrite mechanically; other { offset } "
     + 'durations have no faithful target and are reported, not guessed)',
   apply(stack, emit) {
     return mapCollection(stack, 'dashboards', (d, path) => {
@@ -2723,7 +2723,7 @@ const agentKnowledgeRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'agent.knowledge',
-  summary: "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+  summary: "agent key 'knowledge' removed (inert, removed under ADR-0049 enforce-or-remove: declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
   apply(stack, emit) {
     return mapCollection(stack, 'agents', (a, path) => stripKeys(a, ['knowledge'], emit, path));
   },
@@ -2741,7 +2741,7 @@ const skillTriggerPhrasesRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'skill.triggerPhrases',
-  summary: "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+  summary: "skill key 'triggerPhrases' removed (inert, removed under ADR-0049 enforce-or-remove: activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
   apply(stack, emit) {
     return mapCollection(stack, 'skills', (sk, path) => stripKeys(sk, ['triggerPhrases'], emit, path));
   },
@@ -2779,7 +2779,7 @@ const stackApiRequireAuthRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'stack.api.requireAuth',
-  summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+  summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (a public form, a share link or `book.audience: 'public'`), which replaced the deployment-wide opt-out",
   apply(stack, emit) {
     const api = stack.api;
     if (!isDict(api) || !('requireAuth' in api)) return stack;
@@ -2862,7 +2862,7 @@ const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
   surface: 'flow.node.waitEventConfig',
   summary:
     "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) " +
-    "and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+    "and 'onTimeout' (removed — zero readers, so no timeout ever fired): wait never had a timeout, so its timeout contract is withdrawn rather than built",
   apply(stack, emit) {
     return removeWaitTimeoutKeys(stack, emit);
   },
@@ -2941,7 +2941,7 @@ const datasourceInertBlocksRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission',
-  summary: "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
+  summary: "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody; each of those jobs already has a live mechanism)",
   apply(stack, emit) {
     return mapCollection(stack, 'datasources', (ds, path) => {
       const next = stripKeys(ds, ['retryPolicy', 'healthCheck'], emit, path);
@@ -3029,7 +3029,7 @@ const mappingInertKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'mapping.extractQuery / mapping.errorPolicy / mapping.batchSize',
-  summary: "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+  summary: "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
   apply(stack, emit) {
     const RETIRED = ['extractQuery', 'errorPolicy', 'batchSize'];
     // Scoped to the `mappings` collection deliberately: `batchSize` is live on
@@ -3084,7 +3084,7 @@ const bookTranslationsRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'book.translations / book.groups.translations',
-  summary: "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+  summary: "book keys 'translations' (book-level and group-level) removed (no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
   apply(stack, emit) {
     return mapCollection(stack, 'books', (book, path) => {
       const next = stripKeys(book, ['translations'], emit, path);
@@ -3146,7 +3146,7 @@ const jobIdRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'job.id',
-  summary: "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+  summary: "job key 'id' removed (nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
   apply(stack, emit) {
     return mapCollection(stack, 'jobs', (job, path) => stripKeys(job, ['id'], emit, path));
   },
@@ -3203,7 +3203,7 @@ const translationValidationMessagesRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'translation.validationMessages',
-  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
+  summary: "translation key 'validationMessages' removed (no resolver read it, so a translated rule message was stored and never shown; the legacy-key table of the translation-bundle migration had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, a translation key shipped together with its reader)",
   apply(stack, emit) {
     return mapCollection(stack, 'translations', (t, path) =>
       stripKeys(t, ['validationMessages'], emit, path));
@@ -3261,7 +3261,7 @@ const datasourceCapabilitiesRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'datasource.capabilities',
-  summary: "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
+  summary: "datasource key 'capabilities' removed (eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
   apply(stack, emit) {
     return mapCollection(stack, 'datasources', (ds, path) => stripKeys(ds, ['capabilities'], emit, path));
   },
@@ -3316,7 +3316,7 @@ const datasourceReadReplicasRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '16.1.0',
   surface: 'datasource.readReplicas',
-  summary: "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+  summary: "datasource key 'readReplicas' removed (no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
   apply(stack, emit) {
     return mapCollection(stack, 'datasources', (ds, path) => stripKeys(ds, ['readReplicas'], emit, path));
   },
@@ -3418,7 +3418,7 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
   summary:
     "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', "
     + "postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' "
-    + "and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+    + "and 'user' → 'username' (undeclared driver-factory `??` fallbacks, graduated into this layer and deleted from the reader)",
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       const kind = resolveDriverId(ds.driver);
@@ -3664,7 +3664,7 @@ const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
   summary:
     "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — "
     + "'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / "
-    + "'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+    + "'variables' (fed those stubs) and 'script' (inline JS the runtime never executed); script is now a pure function-call node, the only path that ran real logic",
   apply(stack, emit) {
     return removeScriptBranchKeys(stack, emit);
   },
@@ -3759,7 +3759,7 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'object.managedBy',
   summary:
-    "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the "
+    "object managedBy 'system' → 'system-data' (ADR-0103's residual bucket named the "
     + 'engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the '
     + 'name describing what the bucket actually holds: admin/user-writable platform data)',
   apply(stack, emit) {
@@ -3826,7 +3826,7 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'object.enable.trash / object.enable.mru',
   summary:
-    "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no "
+    "object capability flags 'enable.trash'/'enable.mru' removed (the last slice of the dead author-facing property removals: no "
     + 'recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)',
   apply(stack, emit) {
     return mapCollection(stack, 'objects', (obj, path) => {
@@ -3909,7 +3909,7 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'object.indexes[].type / object.indexes[].partial',
   summary:
-    "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver "
+    "object index keys 'indexes[].type'/'indexes[].partial' removed (no driver "
     + 'ever read either: the index method is the dialect\'s choice and a partial index is built '
     + 'by a database-layer migration, not declared)',
   apply(stack, emit) {
@@ -4068,7 +4068,7 @@ const retryPolicyConverged: MetadataConversion = {
   surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
     "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
-    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1: two declarations that differed only by accident became one, and retry is opt-in because a retry replays whatever the attempt already did",
   apply(stack, emit) {
     // ── 0. flows: errorHandling.retryDelayMs → errorHandling.backoffMs ─
     //
@@ -4246,7 +4246,7 @@ const hookBodyCryptoHashRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'hook.body.capabilities / action.body.capabilities',
   summary:
-    "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed "
+    "script-body capability token 'crypto.hash' removed (the sandbox never installed "
     + 'ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)',
   apply(stack, emit) {
     const stripToken = (item: Dict, path: string): Dict => {
@@ -4416,7 +4416,7 @@ const datasetMeasureAggRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'dataset.measures[].aggregate',
   summary:
-    "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend "
+    "dataset measure aggregates 'array_agg' / 'string_agg' removed (no SQL backend "
     + 'compiled them and the v1 dataset runtime refused them by name, so a measure declaring '
     + 'one never produced a value; the measure is dropped, and with it any derived measure '
     + 'left referencing it)',
@@ -4541,7 +4541,7 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'connector.rateLimitConfig',
   summary:
-    "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; "
+    "connector key 'rateLimitConfig' removed (no outbound rate-limiting engine exists; "
     + "the runtime's only token bucket limits INBOUND requests, so every knob here was inert "
     + 'while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)',
   apply(stack, emit) {
@@ -4666,10 +4666,10 @@ const fieldMappingTransformRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform',
   summary:
-    "field-mapping key 'transform' removed (#5552 — the whole five-member "
+    "field-mapping key 'transform' removed (the whole five-member "
     + 'FieldMappingTransform union went with it: no runtime ever executed constant/cast/'
-    + 'lookup/javascript/map, and the javascript member advertised dialect="js", retired '
-    + "in #3278. The enforced transform pipeline is the import mapping's string-enum "
+    + 'lookup/javascript/map, and the javascript member advertised dialect="js", a dialect '
+    + "already retired because JavaScript belongs in a script body. The enforced transform pipeline is the import mapping's string-enum "
     + '`mapping.fieldMapping[].transform`, which is unaffected)',
   apply(stack, emit) {
     return mapCollection(stack, 'connectors', (c, path) => {
@@ -4785,7 +4785,7 @@ const themeInertTokenScalesRemoved: MetadataConversion = {
   summary:
     "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', "
     + "'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed "
-    + '(#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, '
+    + '(ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, '
     + '--letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono '
     + 'faithfully, and no first-party component or stylesheet has ever read one. '
     + 'Re-declare any variable you actually consume under customVars, which emits it verbatim)',
@@ -4937,7 +4937,7 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
   toMajor: 17,
   surface: 'page.component.page-header.description',
   summary:
-    "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+    "page-header component prop 'description' → 'subtitle' (the off-spec spelling a renderer tolerated through a bare `subtitle ?? description` fallback; `subtitle` is the declared key, and the fallback retires)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       const type = component.type;
@@ -5162,7 +5162,7 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'page.component.element:record_picker.displayField',
   summary:
-    "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+    "record-picker component prop 'displayField' → 'labelField' (the required key no renderer read; `labelField ?? 'name'` is what renders the row, so the delivered spelling became the declared one)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
@@ -5284,7 +5284,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple',
   summary:
-    "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+    "record-picker component props 'searchFields'/'multiple' removed (the control is a plain single-select with no search box; neither key had a reader)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
@@ -5411,7 +5411,7 @@ const pageCardBodyToChildren: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'page.component.page:card.body',
   summary:
-    "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+    "page:card component prop 'body' → 'children' (one composition key across every container; the card renderer already reads both)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'page:card') return component;
@@ -5579,7 +5579,7 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
   toMajor: 17,
   surface: 'page.component.element:button.action.params',
   summary:
-    "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+    "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (a static payload and a parameter definition are two things, so the payload gets its own key; `params` stays the ActionParam[] definition array)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:button') return component;
@@ -5844,7 +5844,7 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'page.component.page:tabs.type',
   summary:
-    "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+    "page:tabs component prop 'type' → 'tabStyle' (a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'page:tabs') return component;
@@ -6032,7 +6032,7 @@ const pageStructureInertKeysRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'page.component.page:header.icon / page.component.page:card.actions',
   summary:
-    "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer "
+    "page:header prop 'icon' and page:card prop 'actions' removed (neither has a renderer "
     + 'read point in objectui; the header resolves icons per action and the card renders '
     + 'title/children/footer only)',
   apply(stack, emit) {
@@ -6198,7 +6198,7 @@ const recordDetailsLayoutRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'page.component.record:details.layout',
   summary:
-    "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were "
+    "record:details component prop 'layout' removed (the declared auto|custom modes were "
     + 'never implemented; the renderer branches only on inline|compact, values the schema never '
     + 'permitted, so both legal values selected nothing)',
   apply(stack, emit) {
@@ -6340,7 +6340,7 @@ const appHiddenToUnpublished: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'app.hidden',
   summary:
-    "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+    "stored app publish gate 'hidden' → '_unpublished' (ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
   apply(stack, emit) {
     return mapCollection(stack, 'apps', (app, path) => {
       if (app.hidden !== true) return app;
@@ -6453,7 +6453,7 @@ const actionGlobalNavLocationRemoved: MetadataConversion = {
   retiredAfter: '16.1.0',
   surface: 'action.locations[]',
   summary:
-    "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K "
+    "action location 'global_nav' removed (no running-app surface rendered it; the ⌘K "
     + 'palette reads no action metadata, while the Studio designer previewed a command-palette '
     + 'frame for it. The value is stripped and the key kept, so an action left with no location '
     + 'becomes the documented headless shape `locations: []`)',

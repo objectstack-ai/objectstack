@@ -31,9 +31,9 @@
  *     `$contains` `$notContains` `$startsWith` `$endsWith`;
  *   - value-DEPENDENT, so resolved explicitly rather than through the map —
  *     `$null` and `$exists`, whose meaning flips with their boolean;
- *   - lowered — `$between`, which becomes its two bounds so each strategy's
- *     existing upper-bound handling applies the calendar-day whole-day rule
- *     (see the note at the lowering);
+ *   - lowered — `$between`, which becomes its two bounds; the calendar-day
+ *     whole-day rule on its maximum is the shared lowering's (see the note at
+ *     the `$between` arm of {@link fieldLeaves});
  *   - structural — `$and` / `$or` / `$not`, carried as tree nodes;
  *   - anything else THROWS. An operator outside the vocabulary is a caller
  *     error, and a loud one beats a silently widened read — the call
@@ -74,59 +74,25 @@
  * see the note inside {@link buildNode}'s combinator branch for the history
  * and the reasoning the ruling adopted.
  *
- * # `$not` is NULL-safe (#5146)
+ * # `$not` and the negative-polarity operators are NULL-safe (#5146, #5298)
  *
  * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
- * drops every row whose `col` is NULL — while `driver-memory`, `formula` and
- * (since #5296) `driver-sql` return those rows. One widget filter, two row sets,
- * chosen by whichever backend answered. #5146 ruled the JS answer canonical, and
- * {@link nullSafeNegationOperand} applies the same leaf-wise totalisation
- * `sql-driver.ts` and `read-scope-sql.ts` apply.
+ * or `col <> ?` drops every row whose `col` is NULL, while `driver-memory`,
+ * `formula` and `driver-sql` return those rows. #5146 ruled the JS answer
+ * canonical for `$not`; #5298 ruled it for `$ne` / `$nin` / `$notContains`.
  *
- * The rewrite lives HERE rather than in `native-sql-strategy` on purpose: at
- * this layer the guard is STRUCTURE (one more `{col: {$null: false}}` conjunct),
- * not a SQL trick, so it survives `filterNodeToCondition` handing the tree to
- * the ObjectQL engine and holds on any driver behind it — including one that is
- * not NULL-safe by itself. Guarding only in the SQL strategy would make "what
- * does this widget's `$not` mean" depend on which backend caught it, which is
- * what #5146 spent a round eliminating. The cost is that the engine path can
- * guard twice (this rewrite, then `driver-sql`'s own); that is idempotent —
- * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
- * so it buys portability for one redundant conjunct.
- *
- * # `$ne` / `$nin` / `$notContains` are NULL-safe too (#5298)
- *
- * Same rule, same reason, one ruling later. The operators that carry their OWN
- * negation had the defect #5146 fixed for `$not`: a bare `col <> ?` is UNKNOWN
- * for a NULL column and the `WHERE` drops the row, while the JS backends return
- * it. Measured on this package's own fixture before the fix (#5977), for
- * `{stage: {$ne: 'won'}}` over rows whose `stage` is NULL:
- *
- *   | path                                   | was       | now (= JS family) |
- *   |----------------------------------------|-----------|-------------------|
- *   | `NativeSQLStrategy` (raw SQL)          | `2`       | `2,3,4`           |
- *   | `ObjectQLStrategy` display SQL echo    | `2`       | `2,3,4`           |
- *   | `ObjectQLStrategy` → engine condition  | `2,3,4`   | `2,3,4`           |
- *
- * The engine column was already right, and that is the whole argument for
- * fixing it HERE: it was right because `driver-sql` guards for itself (#5962),
- * so the Cube face's answer depended on which compiler downstream caught the
- * leaf — three emitters, two answers. `fieldLeaves` now emits the guard as
- * STRUCTURE, an `or` of `notSet` with the comparison, so all three compile the
- * same predicate and none of them needs to know the rule. That is the same
- * trade the `$not` rewrite above took, including its cost: the engine path
- * guards twice, which is idempotent (`c IS NULL OR (c IS NULL OR c <> v)`).
- *
- * Which operators get the guard is NOT a new list — it is
- * {@link nullValueSatisfiesOperator} and {@link operatorIsNullTotal}, the same
- * pair `nullGuardForFieldSpec` consults for the `$not` rewrite, asked about one
- * operator instead of a whole field spec. A leaf is guarded exactly when a NULL
- * value SATISFIES the operator and the compiled leaf is not already total, which
- * is that pair's `allowNull` verdict. Hard-coding the three names would have put
- * a second polarity table in this file, free to drift from the first — and the
- * `$eq`/`$ne` arms of the existing one already turn on the COMPARAND (`$ne:
- * null` compiles to `set`, which is total and must never be widened), so a name
- * list would have been wrong as well as duplicated.
+ * [ADR-0053 D-D1, amended — #5930 step 4] The ONE source of both rules is the
+ * shared lowering, `lowerFilterCondition` (`@objectstack/spec/data`, its rule
+ * 3), which {@link normalizeAnalyticsFilterTree} runs before {@link buildNode}
+ * reads the condition. It lays each guard on as STRUCTURE: a `{ col: { $null:
+ * false } }` conjunct beside a leaf of a `$not` operand that no missing value
+ * satisfies, and the escape `{ $or: [{ col: { $null: true } }, { col: spec }] }`
+ * around a leaf that a missing value does satisfy. As structure, the guard
+ * survives `filterNodeToCondition` handing the tree to the ObjectQL engine, and
+ * every compiler of the tree reads one predicate. This module kept its own copy
+ * of both rules (a `$not`-operand rewrite and a per-leaf wrap, with their
+ * polarity tables) until this face's deletion card. It restates neither now, so
+ * a ruling on what a missing value satisfies is made in one place.
  *
  * # A `null` COMPARAND is a null predicate, not a value (#5332)
  *
@@ -142,10 +108,11 @@
  *
  * The pair is not merely similar to `{$null: true|false}` — `driver-mongodb`
  * TRANSLATES `$null` into it — so {@link fieldLeaves} now emits the same
- * `notSet` / `set` leaves for all three spellings, and the #5146 guard table
- * moved in the same commit (see {@link nullValueSatisfiesOperator}); a guard that
- * still described the old emitter would have negated an always-false conjunction
- * and answered `{$not: {stage: {$eq: null}}}` with every row.
+ * `notSet` / `set` leaves for all three spellings. The #5146 guard table moved
+ * in the same commit (it is the shared lowering's now, which reads a `null`
+ * comparand of `$eq` / `$ne` as already total); a guard that still described the
+ * old emitter would have negated an always-false conjunction and answered
+ * `{$not: {stage: {$eq: null}}}` with every row.
  *
  * # A comparand keeps its own TYPE — there is no round trip any more (#5526)
  *
@@ -487,7 +454,6 @@ import type { StrategyContext } from '@objectstack/spec/contracts';
 import type { DatasetScopedStrategyContext } from './types.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
-  CROSS_FIELD_COMPARISON_OPERATORS,
   fieldReferenceBetweenBoundMessage,
   isBindableComparand,
   isFieldReference,
@@ -976,26 +942,24 @@ function undefinedComparandError(field: string, path: string): Error {
  * gate covers all three consumers of the tree at once — the same argument
  * {@link assertCompilableComparand} makes one function below.
  *
- * That places it DOWNSTREAM of {@link nullSafeNegationOperand}, and for row three
- * of the header's table that choice is the whole question: a gate on the far side
- * of the #5146 rewrite refuses, while a rewrite that could swallow the leaf first
- * would leave a CHANGED SHAPE for the gate to bless. Measured rather than
- * assumed, because the same trap cost PR #6390 a lap on the sibling door — and
- * the reasoning there does NOT transfer, since the two modules' polarity tables
- * are spelled differently (that one is uniformly `=== null`; this one mixes
- * `=== null` for `$eq`/`$ne` with IDENTITY reads for `$null`/`$exists`). What the
- * measurement shows here is that the rewrite never drops a leaf: every guard
- * disposition — `requireValue` pushes `{k: {$null: false}}, {k: spec}`,
- * `allowNull` pushes `{$or: [{k: {$null: true}}, {k: spec}]}`, `none` writes
- * `out[k] = spec` — carries `spec` through by reference, so the author's
- * `undefined` always reaches this gate and always throws. Pinned in
+ * That places it DOWNSTREAM of the #5146 rewrite, and for row three of the
+ * header's table that choice is the whole question: a gate on the far side of
+ * the rewrite refuses, while a rewrite that could swallow the leaf first would
+ * leave a CHANGED SHAPE for the gate to bless. [#5930 step 4] The rewrite is the
+ * shared lowering's rule 3 now (`lowerFilterCondition`, run by
+ * {@link normalizeAnalyticsFilterTree} before {@link buildNode}), and it never
+ * drops a leaf either: every guard disposition — `requireValue` adds
+ * `{k: {$null: false}}` beside `{k: spec}`, `allowNull` writes
+ * `{$or: [{k: {$null: true}}, {k: spec}]}`, a total spec is left in place —
+ * carries `spec` through by reference, so the author's `undefined` always
+ * reaches this gate and always throws. Pinned in
  * `filter-normalizer-undefined-comparand.test.ts` as its own block: one case per
- * rewrite path that can carry a SWEPT comparand (`requireValue`, `allowNull`, and
- * the nested-relation recursion), plus the measured reason there is no third —
- * `none` needs every operator to satisfy {@link operatorIsNullTotal}, which is
- * false for an `undefined` comparand on every operator this gate sweeps, so the
- * only field specs that reach it holding one are the `$null` / `$exists` flags it
- * deliberately does not sweep.
+ * rewrite path that can carry a SWEPT comparand (`requireValue`, `allowNull`,
+ * and the nested-relation recursion). A spec is left unguarded only when every
+ * operator in it is already total for a missing value, which no operator this
+ * gate sweeps is when its comparand is `undefined`; the `$null` / `$exists`
+ * flags it deliberately does not sweep are the only specs that reach it that
+ * way.
  */
 function assertDefinedComparands(field: string, spec: unknown): void {
   const root = `"${field}"`;
@@ -1069,16 +1033,15 @@ function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: stri
  * `opKeys` only and returns, and the nested-relation flatten sits after that
  * early return — so with even one `$` key present, every non-`$` sibling was
  * simply never visited. Dropping a conjunct WIDENS (#3650), and inside a `$not`
- * it did worse than widen by one conjunct: {@link nullGuardForFieldSpec} judged
- * the wrapper while the sibling still existed (a non-`$` key never satisfies
- * {@link operatorIsNullTotal}, so the disposition was `requireValue` or
- * `allowNull`, never `none`), the sibling then vanished here, and for a
- * null-predicate operator the surviving guard was CONTRADICTORY —
+ * it did worse than widen by one conjunct: the #5146 rewrite judged the wrapper
+ * while the sibling still existed (a non-`$` key is never total for a missing
+ * value, so the wrapper was always guarded), the sibling then vanished here,
+ * and for a null-predicate operator the surviving guard was CONTRADICTORY —
  * `{$not: {d: {$null: true, nested: 'x'}}}` compiled to `NOT(d set AND d
- * notSet)`, which is TRUE for every row. That same never-`none` fact is what
- * guarantees the #5146 rewrite carries a mixed wrapper to this gate by
- * reference instead of swallowing it — pinned in
- * `filter-normalizer-mixed-wrapper.test.ts`'s rewrite block.
+ * notSet)`, which is TRUE for every row. That same always-guarded fact is what
+ * guarantees the rewrite (the shared lowering's rule 3 since #5930 step 4)
+ * carries a mixed wrapper to this gate by reference instead of swallowing it —
+ * pinned in `filter-normalizer-mixed-wrapper.test.ts`'s rewrite block.
  *
  * ## Ordering against the neighbouring gates
  *
@@ -1162,13 +1125,18 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     if (opKeys.length > 0) {
       for (const opKey of opKeys) {
         // `$between [min, max]` LOWERS to its two bounds rather than getting a
-        // `between` operator of its own. Both strategies already carry the
-        // calendar-day whole-day rule on their upper bound — NativeSQLStrategy
-        // compiles a bare-day `lte` half-open (#3777), ObjectQLStrategy hands
-        // `$lte` to the driver, which does the same — so a range's max
-        // inherits that rule by construction instead of needing a second
-        // implementation to keep in step. (The preview evaluator's `$between`
-        // gap was closed the same way, sharing its `$lte` helper.)
+        // `between` operator of its own: `gte` its minimum and `lte` its
+        // maximum, inclusive at both ends, as written.
+        //
+        // [ADR-0053 D-D1, amended — #5930 step 4] The whole-day rule is not
+        // applied here, and no compiler downstream applies it to the `lte`
+        // this produces: it is the shared lowering's (rule 1 splits a
+        // `$between` on a `datetime` column, or on one whose type the reader
+        // cannot name, and rule 2 widens its bare-day maximum), which
+        // {@link normalizeAnalyticsFilterTree} runs before this function. A
+        // `$between` that reaches this arm is on a column the reader declares
+        // something else (`date`, `time`, text, a number), so the split here is
+        // structural only — the comparison the typed drivers run for it.
         //
         // Before this, `$between` was simply absent from the operator map and
         // fell to the `continue` below: the predicate VANISHED from the WHERE
@@ -1311,18 +1279,9 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // it every field entry before any leaf exists — so no scalar leaf is
         // built from a list, and no compiler's `values[0]` read ever drops one.
         const values = Array.isArray(v) ? v.map(comparand) : [comparand(v)];
-        // [#5298] The operators that carry their own negation are NULL-safe,
-        // here as everywhere else — see the module header's section on it.
-        if (nullValueSatisfiesOperator(opKey, v) && !operatorIsNullTotal(opKey, v)) {
-          out.push({
-            kind: 'or',
-            children: [
-              { kind: 'leaf', member: key, operator: 'notSet', values: [] },
-              { kind: 'leaf', member: key, operator: cubeOp, values },
-            ],
-          });
-          continue;
-        }
+        // [#5298] A negative-polarity operator reaches this line already inside
+        // the NULL escape the shared lowering wrote around it (see the module
+        // header's section on it), so it compiles as written here.
         leaf(cubeOp, values);
       }
       return out;
@@ -1443,12 +1402,12 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
           `Dropping it would silently widen the query to rows the filter excludes.`,
         );
       }
-      // NULL-safe negation (#5146): totalise the operand's leaves FIRST, so the
-      // negation can never be UNKNOWN and this path admits the same rows
-      // `driver-memory` / `formula` / `driver-sql` admit. The guard is added as
-      // STRUCTURE here, which is what makes it survive into the ObjectQL engine
-      // path too (see the module header).
-      const inner = buildNode(nullSafeNegationOperand(raw));
+      // NULL-safe negation (#5146): the operand's leaves arrive TOTAL — the
+      // shared lowering guarded each one as structure before this function ran
+      // (see the module header) — so the negation can never be UNKNOWN and
+      // this path admits the rows `driver-memory` / `formula` / `driver-sql`
+      // admit, on the ObjectQL engine path too.
+      const inner = buildNode(raw);
       // `notOf` turns a TRUE operand into FALSE instead of nothing: `{$not: {}}`
       // is the zero-row filter, and emitting nothing for it charted every row.
       children.push(notOf(inner));
@@ -1466,269 +1425,6 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   }
 
   return andOf(children);
-}
-
-// ── [#5146 / #5325] NULL-safe `$not` ─────────────────────────────────────────
-
-/**
- * What one field constraint needs so the leaves it produces are TOTAL — TRUE or
- * FALSE for every row, never UNKNOWN.
- *
- * - `'none'`         — already total (`set` / `notSet`, a boolean constant), or
- *                      a shape this normalizer refuses, which must keep refusing.
- * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
- * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
- */
-type NullGuard = 'none' | 'requireValue' | 'allowNull';
-
-/**
- * Does a NULL column satisfy this one operator, under the semantics the JS
- * backends (`driver-memory`'s `match`, `formula`'s `matchesFilterCondition`)
- * give it? They evaluate a missing value in ordinary two-valued JS — `undefined
- * !== 'won'` is simply `true` — and #5146 ruled that answer canonical.
- *
- * This is `sql-driver.ts`'s and `read-scope-sql.ts`'s table, with the
- * differences that come from THIS module's emitter rather than from a different
- * reading of #5146 — each guard matches its own emitter, which is the invariant,
- * not the literal table:
- *
- *   - `$null` / `$exists` are read by IDENTITY (`=== true` / `=== false`)
- *     because {@link fieldLeaves} reads them that way, where `read-scope-sql`
- *     uses truthiness because its emitter does. Immaterial in practice: both
- *     compile to a null predicate, so they are total either way and never
- *     reach the polarity question. [#20040] And from the `where` door the
- *     flag is always a boolean here: {@link assertBooleanNullFlags} refuses
- *     any other value before the `$not` rewrite that consults this table runs.
- *   - `$between` exists in this vocabulary; it lowers to `gte` + `lte`, two
- *     positive comparisons, so it takes the same default they do.
- *
- * `$eq` / `$ne` DO carry `read-scope-sql`'s `value === null` arms — since #5332,
- * and only since then. While {@link fieldLeaves} stringified a `null` comparand
- * to `''`, these two arms had to describe THAT emitter: `{$eq: null}` was an
- * ordinary value comparison here, the guard said so, and the TSDoc recorded the
- * `''` comparand as a separate defect deliberately left undecided. #5332 decided
- * it — the emitter now compiles the pair to `notSet` / `set` — so the arms moved
- * with it, in the same commit. The invariant is not "copy the sibling table", it
- * is "each guard matches its OWN emitter"; the two tables agreeing again is the
- * consequence of the emitters agreeing, not the reason for the edit.
- *
- * The default is the large positive-comparison family (`$gt` / `$in` /
- * `$contains` / …), every member of which answers `false` for a value that is
- * not there. An operator this module does not support also lands here; it is
- * guarded and then still THROWS from {@link fieldLeaves}, so fail-closed is
- * preserved.
- */
-function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
-  switch (op) {
-    // [#5332] `$eq: null` IS the null predicate — a NULL column satisfies it,
-    // and no other comparand does.
-    case '$eq': return value === null;
-    // Mirror image: `$ne: null` compiles to `set` (`IS NOT NULL`), which a NULL
-    // column FAILS. Any other comparand is the two-valued JS `!==`, which an
-    // absent value passes — the arm this used to be for every comparand.
-    case '$ne': return value !== null;
-    case '$null': return value === true;
-    case '$exists': return value === false;
-    // [#20445] Null is empty on every row of the ruled table, so a NULL column
-    // satisfies `$empty: true` and fails its complement.
-    case '$empty': return value === true;
-    // Negative-polarity set / substring tests hold vacuously for an absent value.
-    case '$nin': return true;
-    // `$notContains` is the one operator where the two JS backends disagree for
-    // a null-valued field (`driver-memory` answers false, `formula` true).
-    // `formula` is followed because `driver-sql` and `read-scope-sql` follow it,
-    // so this module casts no vote on a disagreement that is filed elsewhere.
-    case '$notContains': return true;
-    default: return false;
-  }
-}
-
-/** Is this operator's compiled leaf already total for a NULL column? */
-function operatorIsNullTotal(op: string, value: unknown): boolean {
-  // [#7598, maintainer ruling 2026-08-12] A `{ $field }` comparand on any of the
-  // six scalar comparison operators is TOTAL AT THE BACKEND, so this module must
-  // add no guard of its own — and MEASURED, adding one changes the answer.
-  //
-  // Every other entry in this switch is total because THIS module compiles the
-  // operator into a null predicate. This one is total because of where the leaf
-  // ends up: since the ruling, a `where` carrying a reference is declined by
-  // `NativeSQLStrategy.canHandle` and served on the engine path, where
-  // `driver-sql`'s `applyCrossFieldComparison` emits a predicate written total
-  // across NULLs by construction (it repeats both column expressions for exactly
-  // that reason — see `cross-field-conformance-cases.ts`, whose rows 4-6 carry
-  // every NULL arrangement a pair of columns can be in). `@objectstack/formula`
-  // resolves the reference and then compares in two-valued JS. The two agree,
-  // and the corpus's declared id lists are the third statement of it.
-  //
-  // ## What the guard did before this arm existed — measured on the wasm driver
-  //
-  // The `$ne` arm of {@link nullValueSatisfiesOperator} answers `true` for any
-  // non-null comparand, so a reference took the negative-polarity totalisation
-  // in {@link fieldLeaves} and `{ amount: { $ne: { $field: 'budget' } } }`
-  // lowered to `{$or: [{amount: null}, {amount: {$ne: ref}}]}`. That admitted
-  // fixture row 6 — BOTH columns NULL — where the corpus, both SQL drivers and
-  // the memory evaluator all EXCLUDE it, because row 6 satisfies the inner
-  // `$eq` and `$ne` is its exact complement. Six corpus cases moved: the three
-  // `$ne` class-pair cases, `a column differs from itself on no row`, and the
-  // two `$not`-of-`$eq` cases (which reach the same guard through
-  // {@link nullGuardForFieldSpec}). Widening a `$ne`, on a shape whose producer
-  // is an RLS rule, is the direction that matters.
-  //
-  // The guard is right for a LITERAL comparand and is untouched there: `{amount:
-  // {$ne: 5}}` must still admit a NULL `amount`, which is #5298's ruling and the
-  // JS backends' answer. What differs is only that a reference's NULL semantics
-  // are already decided by the referent, not by the target column alone — so
-  // there is nothing left for a guard to decide.
-  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && isFieldReference(value)) return true;
-  switch (op) {
-    // Compile to `set` / `notSet` — `IS NULL` / `IS NOT NULL`, two-valued by
-    // construction, on every strategy that compiles this tree.
-    case '$null':
-    case '$exists':
-      return true;
-    // [#20445] `empty` / `notEmpty` spell their NULL case out on both SQL
-    // compilers (`col IS NULL OR …` / `col IS NOT NULL AND …`), and the engine
-    // answers the operator by its own arm, so the leaf is TOTAL: a guard would
-    // only restate what the predicate already says.
-    case '$empty':
-      return true;
-    // [#5332] A `null` comparand makes these null PREDICATES too — `notSet` /
-    // `set`, not comparisons — so they are total by construction and take NO
-    // guard. Left out, `{$not: {stage: {$eq: null}}}` wrapped `stage IS NOT NULL
-    // AND stage IS NULL` (an always-false conjunction) and negated it to EVERY
-    // row, for a filter meaning "stage is not empty".
-    case '$eq':
-    case '$ne':
-      return value === null;
-    // An EMPTY set compiles to a boolean CONSTANT (see `fieldLeaves`), and a
-    // constant is total. Wrapping a guard around it would only add a redundant
-    // conjunct to a predicate whose value is already decided.
-    case '$in':
-    case '$nin':
-      return Array.isArray(value) && value.length === 0;
-    default:
-      return false;
-  }
-}
-
-/**
- * The guard one field constraint needs. A constraint is the AND of its
- * operators, so it is total when every operator is, and a NULL column satisfies
- * it only when it satisfies all of them.
- */
-function nullGuardForFieldSpec(spec: unknown): NullGuard {
-  // `{field: null}` compiles to `notSet` (`IS NULL`) — already total.
-  if (spec === null) return 'none';
-  // [#19888] No bare-array arm: a list in the equality slot is refused by
-  // `assertNoListInEqualitySlot` before this rewrite runs.
-  // A scalar / Date is an implicit `=`; a NULL column fails it.
-  if (typeof spec !== 'object' || spec instanceof Date) return 'requireValue';
-  const entries = Object.entries(spec as Record<string, unknown>);
-  // `{field: {}}` is REFUSED by `fieldLeaves` (#5240). Passing it through
-  // unrewritten is what keeps that refusal reachable — a guard wrapped around it
-  // would only change which message the caller sees.
-  if (entries.length === 0) return 'none';
-  let total = true;
-  let nullSatisfies = true;
-  for (const [op, value] of entries) {
-    if (!operatorIsNullTotal(op, value)) total = false;
-    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
-  }
-  if (total) return 'none';
-  return nullSatisfies ? 'allowNull' : 'requireValue';
-}
-
-/**
- * Guard one `field: spec` entry, writing either the untouched entry into `out`
- * or its guarded form into `guarded`.
- *
- * [#20887] A nested-relation condition (`{account: {region: 'NA'}}`) is written
- * through untouched: it reaches the engine as written, and the engine guards
- * what it lowers it to — the `$in` / `$contains` over the related ids — with
- * the same NULL-safe rule, after reading the related object. A guard here would
- * test the relation column before the engine knows which ids match.
- */
-function guardFieldEntry(
-  key: string,
-  spec: unknown,
-  out: Record<string, unknown>,
-  guarded: unknown[],
-): void {
-  if (isNestedRelationCondition(spec)) {
-    out[key] = spec;
-    return;
-  }
-
-  const guard = nullGuardForFieldSpec(spec);
-  if (guard === 'none') {
-    out[key] = spec;
-  } else if (guard === 'requireValue') {
-    // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
-    guarded.push({ [key]: { $null: false } }, { [key]: spec });
-  } else {
-    // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the AND
-    // this node's keys form.
-    guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: spec }] });
-  }
-}
-
-/**
- * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
- * predicate — which is what makes `NOT (…)` mean here what it means in
- * `driver-memory`, `formula` and (since #5296) `driver-sql`.
- *
- * # Why the guard rides the LEAF, not the `NOT`
- *
- * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
- * NULL` are the same predicate. They stop being the same as soon as the operand
- * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
- * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
- * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
- * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
- * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
- *
- * # Why polarity is per operator
- *
- * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
- * `{$not: {a: {$ne: 5}}}` means "a is 5", and both JS backends exclude a NULL
- * row from it. Adding an unconditional null escape there would hand back exactly
- * the rows the filter excludes. So each leaf is guarded in the direction its own
- * operator answers, per {@link nullValueSatisfiesOperator}.
- *
- * # Why it is a REWRITE of the condition, not of the tree
- *
- * The output is still a `FilterCondition`, so `buildNode` compiles it with no
- * new cases and — the point of doing it here rather than in the SQL strategy —
- * the guard reaches the ObjectQL engine as structure too. Running only inside a
- * `$not` keeps every other comparison's shape untouched, and a NESTED `$not` is
- * left alone on purpose: its own branch totalises its operand, and
- * `NOT <total>` is itself total, so recursing would stack a redundant guard on
- * the same column.
- */
-function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const guarded: unknown[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
-      // A non-object element is passed through so `buildNode` still refuses it
-      // with its own message.
-      out[key] = value.map((element) => (isFilterObject(element) ? nullSafeNegationOperand(element) : element));
-      continue;
-    }
-    if (key.startsWith('$')) {
-      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
-      // whatever this module does with them today — the rewrite rules on NULL,
-      // not on the operator vocabulary, and an unknown one must still throw.
-      out[key] = value;
-      continue;
-    }
-    guardFieldEntry(key, value, out, guarded);
-  }
-  if (guarded.length > 0) {
-    const existing = Array.isArray(out.$and) ? out.$and : [];
-    out.$and = [...existing, ...guarded];
-  }
-  return out;
 }
 
 // ── [#5334] The FilterArray door ─────────────────────────────────────────────
@@ -2192,10 +1888,10 @@ function nonBooleanFlagError(op: BooleanFlagOperator, field: string, path: strin
  *
  * ## Why before any lowering, and not at the identity read in `fieldLeaves`
  *
- * Two readers see the flag before that read does. {@link nullSafeNegationOperand}
- * classifies every field spec under a `$not` through
- * {@link nullValueSatisfiesOperator} and {@link operatorIsNullTotal}, both of
- * which read the flag, and the draft preview evaluates the condition
+ * Two readers see the flag before that read does. The shared lowering
+ * (`lowerFilterCondition`, run by {@link normalizeAnalyticsFilterTree} before
+ * {@link buildNode}) classifies every field spec under a `$not` by its NULL
+ * polarity, which reads the flag, and the draft preview evaluates the condition
  * {@link normalizeWhereComparands} returns without ever reaching `fieldLeaves`.
  * A gate here answers all of them, and the preview then refuses this cell in
  * the published door's words. `read-scope-sql.ts` placed its twin at its one
@@ -2469,8 +2165,9 @@ export function conjunctFieldKeys(condition: Record<string, unknown>): string[] 
  * `lowering` is the caller's column-type reader (item 7), and it is REQUIRED,
  * so no compile site can reach the tree without deciding it: a strategy passes
  * the member's declared type through its context's `declaredFieldType` hook
- * ({@link declaredDatetimeLowering}), and a position that cannot or need not
- * read types passes {@link NO_DATETIME_COLUMNS}. {@link lowerAnalyticsWhere}
+ * ({@link declaredDatetimeLowering}, which also states how that strategy reads
+ * a column the hook cannot name), and a position that only collects members
+ * passes {@link NO_DATETIME_COLUMNS}. {@link lowerAnalyticsWhere}
  * itself stays un-lowered: its other readers ask about the AUTHORED condition
  * (the keys an ad-hoc cube is minted from, the routing detectors), not about
  * the predicate that runs.
@@ -2550,27 +2247,50 @@ function shieldNestedRelations(node: Record<string, unknown>): Record<string, un
 
 /**
  * [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's reader for a
- * position that cannot, or need not, read declared types: no member is a
+ * position that need not, or must not, rewrite a bound: no member is a
  * `datetime` column, so the whole-day rule and the `$between` split rewrite
  * nothing and every bound reaches its face as written; the NULL-polarity guards
  * apply all the same (they do not depend on the type).
  *
- * Three kinds of position use it. The draft preview, which evaluates drafted
- * rows with no schema (its own bound copy keeps the whole-day rule until its
- * deletion card). A strategy context the host wired no `declaredFieldType` hook
- * into — the step-2 RLS seam's reading of a guard without types, for the same
- * reason: the rule stays with each face's own copy and no answer moves. And a
- * reader that collects MEMBERS rather than compiling (`assertWhereFields`, the
- * cross-object envelope check): the two type-scoped rules never change which
- * member a leaf names.
+ * Two kinds of position use it. A reader that collects MEMBERS rather than
+ * compiling (`assertWhereFields`, the cross-object envelope check): the two
+ * type-scoped rules never change which member a leaf names. And the draft
+ * preview, which evaluates drafted rows and is handed no declared type; its own
+ * bound copy (`lteBound`) keeps the whole-day rule until its deletion lands.
+ *
+ * [#5930 step 4] ⛔ Not a strategy whose host cannot name a column's type: see
+ * {@link declaredDatetimeLowering}'s `undeclared` argument.
  */
 export const NO_DATETIME_COLUMNS: FilterLoweringOptions = Object.freeze({
   isDatetimeColumn: () => false,
 });
 
 /**
- * [ADR-0053 D-D1, amended — #5930 step 3] A strategy's column-type reader for
- * the shared lowering (item 7): a `where` member is a `datetime` column when
+ * Item 7's type-blind reading: the lowering is handed no reader, so its two
+ * type-scoped rules apply to every column.
+ */
+const TYPE_BLIND: FilterLoweringOptions = Object.freeze({});
+
+/**
+ * How a strategy's lowering reads a column whose declared type its host cannot
+ * name (no `declaredFieldType` hook, or a hook answering no type for it).
+ *
+ * - `'type-blind'` — ADR-0053 D-D1 item 7's reading for a seam that cannot read
+ *   the declaration: the whole-day rule and the `$between` split apply to that
+ *   column (sound on `Field.date` text, where `< next-day` orders exactly as
+ *   `<= day`). For a face that is the LAST seam before its statement runs,
+ *   where nothing downstream reads the declaration.
+ * - `'as-written'` — leave that column's bounds as written, for a face whose
+ *   filter is handed to a seam that does read the declaration: the ObjectQL
+ *   engine's `where` seam, which lowers it again with the object's own field
+ *   map (and itself applies item 7's type-blind reading to an object with no
+ *   field map).
+ */
+export type UndeclaredColumnReading = 'type-blind' | 'as-written';
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 steps 3 and 4] A strategy's column-type reader
+ * for the shared lowering (item 7): a `where` member is a `datetime` column when
  * the host's declared-type hook says the column it binds against is one —
  * `type === 'datetime'`, the test `SqlDriver` indexes `datetimeFields` by and
  * the engine seam reads. `target` resolves a member to its (object, column)
@@ -2578,21 +2298,56 @@ export const NO_DATETIME_COLUMNS: FilterLoweringOptions = Object.freeze({
  * asked of the column the predicate will read.
  *
  * The hook is the context's optional `declaredFieldType` — the one
- * `nonTextColumnResolver` asks — and a context without one gets
- * {@link NO_DATETIME_COLUMNS}.
+ * `nonTextColumnResolver` asks; the production composition answers it from the
+ * engine's registry (`AnalyticsServiceConfig.sourceFieldMeta`). A column the
+ * hook declares is read by its declaration. A column it cannot name (no hook,
+ * or no type for that column) is read as `undeclared` says
+ * ({@link UndeclaredColumnReading}), so each strategy states which seam owns the
+ * column's type rather than inheriting one silent default.
+ *
+ * This reader is the whole of the whole-day rule on the strategies' `where`,
+ * measure-filter, dataset-scope and `dateRange` positions: no strategy keeps a
+ * whole-day copy of its own since #5930 step 4.
  */
 export function declaredDatetimeLowering(
   ctx: StrategyContext,
   target: (member: string) => { object: string; field: string },
+  undeclared: UndeclaredColumnReading,
 ): FilterLoweringOptions {
   const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
-  if (typeof declared !== 'function') return NO_DATETIME_COLUMNS;
+  if (typeof declared !== 'function') return undeclared === 'type-blind' ? TYPE_BLIND : NO_DATETIME_COLUMNS;
   return {
     isDatetimeColumn: (member) => {
       const { object, field } = target(member);
-      return declared.call(ctx, object, field) === 'datetime';
+      const type = declared.call(ctx, object, field);
+      if (typeof type !== 'string' || type === '') return undeclared === 'type-blind';
+      return type === 'datetime';
     },
   };
+}
+
+/**
+ * [ADR-0053 D-D1 item 8, amended — #5930 step 4] A `timeDimensions[].dateRange`
+ * window as the tree the strategies compile: the `{ $gte, $lte }` pair (or the
+ * `{ $gte, $lt }` pair of a resolved preset that stops before its end) on the
+ * window's member, through the same shared lowering, with the same reader, as
+ * the strategy's `where`.
+ *
+ * So an explicit window's bare-day end takes the whole-day rule exactly where
+ * a `where` bound on the same member would — on a `datetime` column, or one
+ * whose type the reader cannot name — and nowhere else, and on the last
+ * supported day the end is dropped. A resolved preset's ends are instants,
+ * which the lowering never widens. The window's own door (the preset
+ * vocabulary, `explicitDateRangeWindow`) has already judged the bounds, so the
+ * `where` door's comparand faces do not run here: this changes what a window
+ * means on no input it accepts.
+ */
+export function normalizeDateRangeWindow(
+  member: string,
+  bounds: Record<string, unknown>,
+  lowering: FilterLoweringOptions,
+): NormalizedFilterNode | null {
+  return buildNode(lowerFilterCondition({ [member]: bounds }, lowering));
 }
 
 /**

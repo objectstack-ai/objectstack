@@ -241,7 +241,7 @@ const SELECT = 'SELECT id AS "id", COUNT(*) AS "n" FROM "deal" WHERE ';
 const TAIL = ' GROUP BY id';
 const notSet = { kind: 'leaf', member: 'stage', operator: 'notSet', values: [] };
 const set = { kind: 'leaf', member: 'stage', operator: 'set', values: [] };
-const neLost = { kind: 'or', children: [notSet, { kind: 'leaf', member: 'stage', operator: 'notEquals', values: ['lost'] }] };
+const neLost = { kind: 'leaf', member: 'stage', operator: 'notEquals', values: ['lost'] };
 
 interface ControlFamily {
   tree: unknown;
@@ -259,14 +259,15 @@ const IS_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
     engine: { $and: [{ $not: { stage: { $null: true } } }] },
     rows: ['r1', 'r3'],
   },
-  // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's `allowNull`
-  // escape on the `$not` operand now wraps this face's own copy of it: one more
-  // `stage IS NULL OR …` outermost. The rows are the family's, unchanged.
+  // [ADR-0053 D-D1, amended — #5930 step 4] The shared lowering's `allowNull`
+  // escape on the `$not` operand, and nothing else: this face's own copies of
+  // the escape (around the operand, and around the `$ne` leaf) are deleted.
+  // The rows are the family's, unchanged.
   notNe: {
-    tree: { kind: 'not', child: { kind: 'or', children: [notSet, { kind: 'or', children: [notSet, { kind: 'and', children: [notSet, neLost] }] }] } },
-    sql: `${SELECT}NOT ((stage IS NULL OR (stage IS NULL OR (stage IS NULL AND (stage IS NULL OR stage != $1)))))${TAIL}`,
+    tree: { kind: 'not', child: { kind: 'or', children: [notSet, { kind: 'and', children: [notSet, neLost] }] } },
+    sql: `${SELECT}NOT ((stage IS NULL OR (stage IS NULL AND stage != $1)))${TAIL}`,
     params: ['lost'],
-    engine: { $and: [{ $not: { $or: [{ stage: { $null: true } }, { $or: [{ stage: { $null: true } }, { stage: { $null: true }, $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] }] }] } }] },
+    engine: { $and: [{ $not: { $or: [{ stage: { $null: true } }, { stage: { $null: true, $ne: 'lost' } }] } }] },
     rows: ['r1', 'r3'],
   },
 };
@@ -279,13 +280,14 @@ const IS_NOT_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
     engine: { $and: [{ $not: { stage: { $null: false } } }] },
     rows: ['r2'],
   },
-  // [ADR-0053 D-D1, amended — #5930 step 3] …and the `requireValue` guard the
-  // same way: one more `stage IS NOT NULL AND …`. Rows unchanged.
+  // [ADR-0053 D-D1, amended — #5930 step 4] …and the `requireValue` guard the
+  // same way, once. The second `stage IS NOT NULL` is the `$null: false`
+  // operator itself. Rows unchanged.
   notNe: {
-    tree: { kind: 'not', child: { kind: 'and', children: [set, { kind: 'and', children: [set, { kind: 'and', children: [set, neLost] }] }] } },
-    sql: `${SELECT}NOT ((stage IS NOT NULL AND (stage IS NOT NULL AND (stage IS NOT NULL AND (stage IS NULL OR stage != $1)))))${TAIL}`,
+    tree: { kind: 'not', child: { kind: 'and', children: [set, { kind: 'and', children: [set, neLost] }] } },
+    sql: `${SELECT}NOT ((stage IS NOT NULL AND (stage IS NOT NULL AND stage != $1)))${TAIL}`,
     params: ['lost'],
-    engine: { $and: [{ $not: { stage: { $null: false }, $and: [{ stage: { $null: false } }, { stage: { $null: false } }, { $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] } }] },
+    engine: { $and: [{ $not: { stage: { $null: false, $ne: 'lost' }, $and: [{ stage: { $null: false } }] } }] },
     rows: ['r2', 'r3'],
   },
 };
