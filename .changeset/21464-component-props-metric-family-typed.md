@@ -4,7 +4,7 @@
 
 feat(spec)!: an `object-metric` page block's `aggregate` and `trend` take the shape the tile reads instead of any value (#21464)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered ui-object-metric-aggregate-trend-typed -->
 
