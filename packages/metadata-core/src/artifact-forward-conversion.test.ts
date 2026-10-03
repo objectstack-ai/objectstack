@@ -357,7 +357,7 @@ describe('the artifact door never stamps a column constraint (ADR-0113, #16693)'
  * the defect is WHO writes `_unpublished`).
  *
  * The entry is `retiredFromLoadPath: true`, which does NOT hold it back here —
- * that flag's jurisdiction is the authoring funnel and nothing else (#16864's
+ * that flag's jurisdiction is the authoring funnel and nothing else (ADR-0087's recorded
  * determination, landed). So before this fix an artifact declaring
  * `engines.protocol: ^17.0.0` — the range `create-objectstack` stamps — had
  * every `defineApp({ hidden: true })` in it registered as an unpublished app,

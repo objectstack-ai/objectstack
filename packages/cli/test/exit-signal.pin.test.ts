@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * PIN — every command that takes `--json` lets oclif's exit signal through its
- * `catch`, so a completed run prints exactly ONE document and exits 0 (#21434).
+ * PIN — every command lets oclif's exit signal through its `catch`: a completed
+ * `--json` run prints exactly ONE document and exits 0, and a refusal on the
+ * text face prints exactly ONE error line (#21434, #21496).
  *
  * ## The defect
  *
@@ -10,7 +11,8 @@
  * (`code: 'EEXIT'`, `oclif.exit: n`), and the entry point turns that into the
  * exit status. A `this.exit(0)` written inside a `try` therefore lands in that
  * `try`'s own `catch` first, and a `catch` that reports what it caught reports
- * the signal as an error. Measured at the public door on `aa4632235`:
+ * the signal as an error. The JSON face, measured at the public door on
+ * `aa4632235`:
  *
  *     os migrate recorded-by --apply --yes --json     (one sentinel row)
  *     → the row converted, the result document printed, then a SECOND
@@ -19,6 +21,19 @@
  * A completed apply reported failure, and `--json` stdout no longer parsed.
  * `os migrate resume --run` did the same for an already-concluded run, and
  * printed `{"error":"EEXIT: 1"}` under every refusal it makes inside its `try`.
+ *
+ * The text face has the same shape. Measured at the public door on
+ * `f9a8eb889e`:
+ *
+ *     os package install ./does-not-exist.json
+ *     → `✗ Cannot read artifact: ENOENT …`, then `✗ EEXIT: 1`, exit status 1.
+ *
+ * `os package publish` printed the same pair for an unreadable artifact. For an
+ * icon whose type it cannot infer, it printed THREE error lines: the refusal,
+ * then `✗ Cannot read --icon-file '…': EEXIT: 1` from the icon step's own
+ * `catch`, then `✗ EEXIT: 1` from the outer one. The exit status was right
+ * every time; the extra lines were the defect.
+ *
  * The repair is the existing idiom, `if (isExitSignal(error)) throw error;` as
  * the catch's first statement (`src/utils/format.ts` — one predicate, no second
  * helper).
@@ -27,28 +42,33 @@
  *
  * The idiom already sat in 17 command files; four more (`migrate recorded-by`,
  * `resume`, `account-issuer`, `apply`) lacked it. A pin naming those four goes
- * green while the next command repeats the shape. So the population is
- * DISCOVERED, not listed:
+ * green while the next command repeats the shape. This pin's first population
+ * did exactly that: it held only the JSON-capable commands, and three text-face
+ * commands (`package install`, `package publish`, `plugin sign`) carried the
+ * shape outside it. So the population is DISCOVERED, not listed, and it asks
+ * nothing of a command's flags:
  *
  *   1. the files oclif's command table is built from — `package.json`
  *      `oclif.commands` (strategy `pattern`, `./dist/commands`, `**\/*.js`),
  *      whose `src/` twin is every non-test `.ts` under `src/commands`
  *      (`tsconfig.build.json` maps `src` → `dist` and excludes the tests);
- *   2. each module IMPORTED and its default export's `static flags` read — the
- *      declaration oclif itself parses, inherited flags included (`os build`
- *      extends `os compile`), never a text match over the source;
- *   3. a member is any command declaring a boolean `json` flag OR a flag whose
- *      `options` include `'json'` (`--format json`): the same audience, a
- *      program reading stdout and the exit status.
+ *   2. each module IMPORTED and its default export taken as the command class,
+ *      with the superclasses that live under `src/commands` followed (`os build`
+ *      extends `os compile`). It is never a text match over the source;
+ *   3. every such command is a member. The signal leaks the same way through
+ *      either face: a second document on `--json`, a second `✗` line on the
+ *      text face. So membership has no predicate. The face (`--json`,
+ *      `--<flag> json`, or `text`) is read off `static flags` only to label each
+ *      case.
  *
  * There is no roster to update. A command added later is in the population the
- * moment its module declares either flag, and this file goes red if any of its
- * `this.exit(…)` calls sits in a `try` whose `catch` does not let the signal
- * through. `os secret rewrap` is the first to have entered that way: it landed
- * beside this pin with its `--json` flag and its rethrow already in place, and
- * no line here names it.
+ * moment its module exists under `src/commands`, whatever faces it has. This
+ * file goes red if any of its `this.exit(…)` calls sits in a `try` whose
+ * `catch` does not let the signal through. `os secret rewrap` is the first to
+ * have entered that way: it landed beside this pin with its `--json` flag and
+ * its rethrow already in place, and no line here names it.
  *
- * ## The two halves
+ * ## The three parts
  *
  * - **Structural, over the WHOLE population** (the second `describe`): every
  *   `this.exit(…)` — direct, or through a same-class method that reaches one —
@@ -56,12 +76,13 @@
  *   `isExitSignal` rethrow (imported from `utils/format.js`) as its first
  *   statement. Decided over the command's own source and its superclasses'.
  *   That property is exactly what makes "a completed run prints one document
- *   and exits 0" hold against this mechanism, for members whose completed run
- *   needs a server, a cloud account or a database this tier does not boot.
- *   The analyzer is pinned against fixtures first (the first `describe`), so a
- *   detector that stops detecting goes red on the fixture it stopped seeing.
- * - **Driven, for the members the census found in-family** (the third
- *   `describe`): `migrate recorded-by`, `migrate resume` and
+ *   and exits 0" and "a refusal prints one error line" hold against this
+ *   mechanism, for members whose runs need a server, a cloud account or a
+ *   database this tier does not boot. The analyzer is pinned against fixtures
+ *   first (the first `describe`), so a detector that stops detecting goes red
+ *   on the fixture it stopped seeing.
+ * - **Driven, JSON face, for the members the census found in-family** (the
+ *   third `describe`): `migrate recorded-by`, `migrate resume` and
  *   `migrate account-issuer` run in-process through oclif with the seams that
  *   would boot a database replaced (`bootSchemaStack`, the journal runner, the
  *   sentinel scan, the collision probe). The commands' own parse, `try`/
@@ -70,29 +91,42 @@
  *   `JSON.parse`), and the exit status. `migrate apply`'s two sites are on its
  *   TEXT face only (its JSON face returns before them), so the structural half
  *   is its pin.
+ * - **Driven, text face, for the members the widening found** (the fourth
+ *   `describe`): `package install`, `package publish` and `plugin sign` run
+ *   in-process through oclif. The network is replaced by a stubbed `fetch`, and
+ *   `plugin sign`'s self-verification by a seam (no real key fails it). Each
+ *   case asserts the two things an operator reads: the refusal is ONE `✗` line
+ *   with no `EEXIT` anywhere in the output, and the exit status, which is 1 as
+ *   it was before the repair.
  *
  * ## Tier
  *
  * `unit` (`vitest-tiers.ts`): nothing is spawned and no kernel boots — the
- * boot seam is replaced through `vi.mock`, never value-imported here. The
- * public-door form of the driven half (a real sqlite file, the CLI spawned) was
- * measured by hand before and after the fix and is recorded on the pull
- * request rather than re-run per CI shard.
+ * boot seam is replaced through `vi.mock`, never value-imported here, and
+ * `fetch` is stubbed, never reached. The public-door form of the driven halves
+ * (a real sqlite file, the CLI spawned; for the text face, the CLI spawned
+ * against a missing file and a stub control plane) was measured by hand before
+ * and after each fix and is recorded on the pull request rather than re-run
+ * per CI shard.
  *
  * ## What this does NOT cover
  *
- * - Commands with no JSON face. `os package install`, `os package publish` and
- *   `os plugin sign` carry the same shape on their text face (an extra
- *   `EEXIT: 1` error line, exit status unchanged); they are reported on the
- *   pull request, not widened into here.
- * - `this.error(…)`, which also throws a signal `isExitSignal` recognises. On
- *   this tree no JSON-capable command calls it inside a `try`.
+ * - `this.error(…)`, which also throws a signal `isExitSignal` recognises. The
+ *   analyzer is seeded with `exit` only. Measured over the whole population on
+ *   `f9a8eb889e`, three such calls sit inside a `try`. One is in `compile.ts`,
+ *   in the same `catch` block as a `this.exit(1)` this file already judges.
+ *   The other two are in `init.ts`, whose outer `catch` re-reports them: `os
+ *   init` with a failed dependency install prints `✗ Dependency installation
+ *   failed` from that `catch`. They are reported on the pull request, not
+ *   widened into here.
  * - A second document a command writes by calling `emitJson` twice on one
  *   path — a different mechanism, which only the driven half would see.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -101,9 +135,12 @@ import { isExitSignal } from '../src/utils/format.js';
 import MigrateRecordedBy from '../src/commands/migrate/recorded-by.js';
 import MigrateResume from '../src/commands/migrate/resume.js';
 import MigrateAccountIssuer from '../src/commands/migrate/account-issuer.js';
+import PackageInstall from '../src/commands/package/install.js';
+import PackagePublish from '../src/commands/package/publish.js';
+import PluginSign from '../src/commands/plugin/sign.js';
 
 // ---------------------------------------------------------------------------
-// Seams for the driven half. Replaced, never value-imported: the commands'
+// Seams for the driven halves. Replaced, never value-imported: the commands'
 // own control flow is what runs.
 // ---------------------------------------------------------------------------
 
@@ -115,6 +152,7 @@ const seams = vi.hoisted(() => ({
   readRunJournal: vi.fn(),
   findSentinelHistoryRows: vi.fn(),
   probeAccountIdentityCollisions: vi.fn(),
+  verifyPayload: vi.fn(),
 }));
 
 vi.mock('../src/utils/schema-migrate.js', async (importOriginal) => ({
@@ -131,6 +169,10 @@ vi.mock('@objectstack/core', async (importOriginal) => ({
   resumeMigrationJournal: seams.resumeMigrationJournal,
   findInterruptedRuns: seams.findInterruptedRuns,
   readRunJournal: seams.readRunJournal,
+  // `os plugin sign`'s self-check. No real key makes it fail (measured: Ed25519,
+  // Ed448, RSA, RSA-PSS, EC and DSA keys all verify), so the refusal behind it
+  // is reachable only through this seam. `signPayload` stays real.
+  verifyPayload: seams.verifyPayload,
 }));
 vi.mock('@objectstack/metadata-protocol', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -336,22 +378,25 @@ function commandId(abs: string): string {
 type FlagDecl = { type?: unknown; options?: unknown };
 type CommandClass = (abstract new (...args: never[]) => unknown) & { flags?: Record<string, FlagDecl> };
 
-interface JsonCommand {
+interface Member {
   id: string;
-  /** How it takes a JSON face: `--json`, or `--<flag> json`. */
+  /**
+   * A LABEL, never a filter: how it takes a JSON face (`--json`, or
+   * `--<flag> json`), or `text` when it has none.
+   */
   faces: string[];
   /** Its own source file, then each superclass's that lives under src/commands. */
   chain: string[];
 }
 
-function jsonFaces(cls: CommandClass): string[] {
+function faceLabels(cls: CommandClass): string[] {
   const flags = cls.flags ?? {};
   const faces: string[] = [];
   if (flags.json?.type === 'boolean') faces.push('--json');
   for (const [name, decl] of Object.entries(flags)) {
     if (Array.isArray(decl?.options) && decl.options.includes('json')) faces.push(`--${name} json`);
   }
-  return faces;
+  return faces.length > 0 ? faces : ['text'];
 }
 
 const PKG = JSON.parse(readFileSync(resolve(HERE, '../package.json'), 'utf8')) as {
@@ -366,10 +411,10 @@ for (const file of COMMAND_FILES) {
   if (typeof mod.default === 'function') classFile.set(mod.default, file);
 }
 
-const POPULATION: JsonCommand[] = [];
+// Every command is a member — there is deliberately no `continue` here.
+const POPULATION: Member[] = [];
 for (const [cls, file] of classFile) {
-  const faces = jsonFaces(cls as CommandClass);
-  if (faces.length === 0) continue;
+  const faces = faceLabels(cls as CommandClass);
   const chain: string[] = [];
   for (let k: unknown = cls; k && classFile.has(k); k = Object.getPrototypeOf(k)) chain.push(classFile.get(k)!);
   POPULATION.push({ id: commandId(file), faces, chain });
@@ -382,15 +427,19 @@ const FLOW = new Map(
 
 /**
  * Floors, not counts of today: the population and the `this.exit`-in-`try`
- * sites this landed over (46 JSON-capable commands: 32 `--json`, 14
- * `--format json`; 105 sites, 21 of them `os build`'s through `compile.ts`). A
- * discovery or analyzer that silently stops finding anything returns zero, and
- * zero passes every per-member assertion — these are what notice. A drop below
- * them is a broken detector or a deliberate removal; say which when you lower
- * one.
+ * sites this was widened over, on `f9a8eb889e`. That is 65 commands: 46
+ * JSON-capable (32 `--json`, 14 `--format json`, the first population) and 19
+ * text-face only. It is 127 sites: 105 in the first population, 21 of them
+ * `os build`'s through `compile.ts`, and 22 in the three text-face commands
+ * the widening was filed on. A discovery or analyzer that silently stops
+ * finding anything returns zero, and zero passes every per-member assertion —
+ * these are what notice. A drop below them is a broken detector or a
+ * deliberate removal; say which when you lower one.
  */
-const POPULATION_FLOOR = 46;
-const SITE_FLOOR = 105;
+const POPULATION_FLOOR = 65;
+const SITE_FLOOR = 127;
+/** The first population's floor, kept so a face-label regression is seen too. */
+const JSON_FACE_FLOOR = 46;
 
 // ---------------------------------------------------------------------------
 // 1. The analyzer, against fixtures — it must be able to fail
@@ -485,10 +534,10 @@ describe('the analyzer decides the fixtures it was written against', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. The population — every JSON-capable command, structurally
+// 2. The population — every command, structurally
 // ---------------------------------------------------------------------------
 
-describe('every command that takes a JSON face lets the exit signal through', () => {
+describe('every command lets the exit signal through', () => {
   it("discovers from the table oclif builds — package.json's command strategy is the one the walk mirrors", () => {
     expect(PKG.oclif?.commands).toEqual(OCLIF_COMMANDS);
     // Every module under the walk is a command: a file the walk lists but
@@ -497,21 +546,34 @@ describe('every command that takes a JSON face lets the exit signal through', ()
   });
 
   it('the population is not vacuous — the floor holds and the commands this was filed on are in it', () => {
-    expect(POPULATION.length, 'fewer JSON-capable commands discovered than this pin landed over').toBeGreaterThanOrEqual(POPULATION_FLOOR);
+    expect(POPULATION.length, 'fewer commands discovered than this pin was widened over').toBeGreaterThanOrEqual(POPULATION_FLOOR);
+    // The population IS the walk: every module the walk lists is a member.
+    expect(POPULATION).toHaveLength(COMMAND_FILES.length);
+    expect(
+      POPULATION.filter((c) => !c.faces.includes('text')).length,
+      'fewer JSON-capable commands labelled than the first population held',
+    ).toBeGreaterThanOrEqual(JSON_FACE_FLOOR);
     const ids = POPULATION.map((c) => c.id);
     for (const anchor of ['migrate recorded-by', 'migrate resume', 'migrate account-issuer', 'migrate apply', 'build']) {
       expect(ids).toContain(anchor);
+    }
+    // The text-face commands this was widened on: members with no JSON face.
+    for (const anchor of ['package install', 'package publish', 'plugin sign']) {
+      expect(POPULATION.find((c) => c.id === anchor)?.faces).toEqual(['text']);
     }
     // Inheritance is followed: `os build` declares nothing itself.
     expect(POPULATION.find((c) => c.id === 'build')?.chain.map((f) => relative(COMMANDS_DIR, f))).toEqual(['build.ts', 'compile.ts']);
   });
 
-  it('the scan reaches the sites — including the completed-apply exit this was filed on', () => {
+  it('the scan reaches the sites — including the completed-apply exit and the text-face refusals this was filed on', () => {
     const total = [...FLOW.values()].reduce((n, f) => n + f.sites.length, 0);
-    expect(total, 'fewer this.exit-in-try sites found than this pin landed over').toBeGreaterThanOrEqual(SITE_FLOOR);
+    expect(total, 'fewer this.exit-in-try sites found than this pin was widened over').toBeGreaterThanOrEqual(SITE_FLOOR);
     expect(FLOW.get('migrate recorded-by')?.sites.map((s) => s.call)).toContain(
       "this.exit(result.status === 'completed' ? 0 : 1)",
     );
+    for (const id of ['package install', 'package publish', 'plugin sign']) {
+      expect(FLOW.get(id)?.sites.map((s) => s.call), `os ${id}`).toContain('this.exit(1)');
+    }
   });
 
   it.each(POPULATION.map((c) => [c.id, c.faces.join(' | ')]))('os %s (%s)', (id) => {
@@ -737,5 +799,139 @@ describe('os migrate account-issuer --json, driven', () => {
     const run = await drive(MigrateAccountIssuer, ['--json']);
     expect(expectOneDocument(run)).toMatchObject({ ok, database: 'file:exit-signal-pin.db' });
     expect(run.exit).toBe(code);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. The text-face members, driven — ONE error line, the exit status unchanged
+// ---------------------------------------------------------------------------
+
+// Paid at module scope, like the imports above — never inside a clocked case.
+const SCRATCH = mkdtempSync(join(tmpdir(), 'exit-signal-pin-'));
+const MISSING_ARTIFACT = join(SCRATCH, 'does-not-exist.json');
+const ARTIFACT = join(SCRATCH, 'objectstack.json');
+writeFileSync(ARTIFACT, JSON.stringify({ manifest: { id: 'com.acme.pin', name: 'pin', version: '1.0.0' } }));
+/** An icon whose type `os package publish` cannot infer: its refusal sits inside the icon step's own `try`. */
+const UNTYPED_ICON = join(SCRATCH, 'icon.bmp');
+writeFileSync(UNTYPED_ICON, 'not an image');
+const OSPLUGIN = join(SCRATCH, 'pin.osplugin');
+writeFileSync(OSPLUGIN, 'artifact bytes');
+const KEY = join(SCRATCH, 'publisher.key.pem');
+writeFileSync(KEY, generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString());
+const SIDECAR = join(SCRATCH, 'pin.osplugin.sig');
+
+afterAll(() => {
+  rmSync(SCRATCH, { recursive: true, force: true });
+});
+
+const RUNTIME = 'http://runtime.exit-signal-pin.test';
+const CLOUD = 'http://cloud.exit-signal-pin.test';
+
+/** The colour codes chalk adds, stripped so a line reads as the operator sees it. */
+const SGR = /\u001b\[[0-9;]*m/g;
+
+interface DrivenText {
+  /** Everything the command printed, on either stream, one entry per line. */
+  lines: string[];
+  /** The lines that report an error: `printError`'s `✗` glyph. */
+  errors: string[];
+  /** The status the shell would see, read as `drive` reads it. */
+  exit: number;
+}
+
+async function driveText(cmd: Runnable, argv: string[]): Promise<DrivenText> {
+  const lines: string[] = [];
+  const capture = (...args: unknown[]): void => {
+    lines.push(...args.map(String).join(' ').replace(SGR, '').split('\n'));
+  };
+  const captureWrite = ((chunk: unknown, enc?: unknown, cb?: unknown) => {
+    capture(String(chunk).replace(/\n$/, ''));
+    const done = typeof enc === 'function' ? enc : cb;
+    if (typeof done === 'function') done();
+    return true;
+  }) as typeof process.stdout.write;
+  const spies = [
+    vi.spyOn(console, 'log').mockImplementation(capture),
+    vi.spyOn(console, 'error').mockImplementation(capture),
+    vi.spyOn(process.stdout, 'write').mockImplementation(captureWrite),
+    vi.spyOn(process.stderr, 'write').mockImplementation(captureWrite),
+  ];
+  process.exitCode = undefined;
+  let exit: number;
+  try {
+    await cmd.run(argv, config);
+    exit = typeof process.exitCode === 'number' ? process.exitCode : 0;
+  } catch (error) {
+    if (!isExitSignal(error)) throw error;
+    exit = (error as { oclif: { exit: number } }).oclif.exit;
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+    process.exitCode = OUTER_EXIT_CODE;
+  }
+  return { lines, errors: lines.filter((line) => /^\s*✗ /.test(line)), exit };
+}
+
+/**
+ * The refusal is reported ONCE, the signal is never named, and the status is
+ * the 1 it always was. `subject` is what the one line must be about — a path
+ * or a URL the case chose, never the refusal's wording.
+ */
+function expectOneRefusal(run: DrivenText, subject?: string): void {
+  const output = run.lines.join('\n');
+  expect(run.errors, `expected ONE error line; the command printed:\n${output}`).toHaveLength(1);
+  if (subject !== undefined) expect(run.errors[0]).toContain(subject);
+  expect(output).not.toContain('EEXIT');
+  expect(run.exit).toBe(1);
+}
+
+const fetchStub = vi.fn<typeof fetch>();
+
+function answer(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+describe('the text-face members, driven — ONE error line, the exit status unchanged', () => {
+  beforeEach(() => {
+    fetchStub.mockReset();
+    vi.stubGlobal('fetch', fetchStub);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('os package install, an unreadable artifact (refused inside a nested catch): ONE error line, exit 1', async () => {
+    const run = await driveText(PackageInstall, [MISSING_ARTIFACT]);
+    expectOneRefusal(run, MISSING_ARTIFACT);
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+
+  it('os package install, a runtime with no install-local endpoint (refused in the try itself): ONE error line, exit 1', async () => {
+    fetchStub.mockImplementation(async () => answer(404, { error: { message: 'not found' } }));
+    const run = await driveText(PackageInstall, [ARTIFACT, '--runtime', RUNTIME]);
+    expectOneRefusal(run, RUNTIME);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  it('os package publish, an unreadable artifact: ONE error line, exit 1', async () => {
+    const run = await driveText(PackagePublish, [MISSING_ARTIFACT, '--token', 'pin-token', '--server', CLOUD]);
+    expectOneRefusal(run, MISSING_ARTIFACT);
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+
+  it("os package publish, an icon whose type it cannot infer (refused inside the icon step's own try): ONE error line, exit 1", async () => {
+    fetchStub.mockImplementation(async () => answer(200, { data: { id: 'pkg_pin', created: true } }));
+    const run = await driveText(PackagePublish, [ARTIFACT, '--token', 'pin-token', '--server', CLOUD, '--icon-file', UNTYPED_ICON]);
+    expectOneRefusal(run, UNTYPED_ICON);
+    // The package was registered, and the refusal came before any icon upload.
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  it('os plugin sign, a signature that fails its self-verification: ONE error line, exit 1, no sidecar', async () => {
+    seams.verifyPayload.mockReturnValue(false);
+    const run = await driveText(PluginSign, [OSPLUGIN, '--key', KEY, '--out', SIDECAR]);
+    expectOneRefusal(run);
+    expect(seams.verifyPayload).toHaveBeenCalledTimes(1);
+    expect(existsSync(SIDECAR)).toBe(false);
   });
 });
