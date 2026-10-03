@@ -150,14 +150,14 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
     expected: ['2'],
   },
   {
-    name: 'number compiles and matches — the #7956 control cell',
+    name: 'number compiles and matches — the control cell of the cross-driver comparand-type measurement',
     filter: () => ({ qty: { $eq: 100 } }),
     verdict: 'matches',
     expected: ['1'],
     note: 'The matrix\'s control: this row returning on every driver is what made its zeros real answers.',
   },
   {
-    name: 'bigint compiles and matches — the crash cell, dead (#7872)',
+    name: 'bigint compiles and matches — the crash cell, dead at the shared comparand door',
     filter: () => ({ qty: { $eq: BigInt(100) } }),
     verdict: 'matches',
     expected: ['1'],
@@ -175,7 +175,7 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
     filter: () => ({ qty: { $in: [BigInt(100), 999] } }),
     verdict: 'matches',
     expected: ['1'],
-    note: '$in/$nin members are comparands in their own right (#5234) — the door narrows each.',
+    note: '$in/$nin members are comparands in their own right, each judged like a scalar comparand — the door narrows each.',
   },
   {
     name: 'boolean compiles and matches — implicit-equality form',
@@ -188,7 +188,7 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
     filter: () => ({ note: null }),
     verdict: 'matches',
     expected: ['1'],
-    note: 'null IS a comparand and IS the null predicate (#6050\'s untouched half) — the door must not confuse it with undefined.',
+    note: 'null IS a comparand and IS the null predicate — the half left untouched when an undefined comparand was ruled a loud refusal — so the door must not confuse it with undefined.',
   },
   {
     name: 'Date compiles — row agreement is temporal-conformance\'s subject',
@@ -269,7 +269,7 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
       + 'instead of deep-equality-on-two-drivers, refusal-on-three.',
   },
   {
-    name: 'an ARRAY in the implicit-equality slot is refused (#19757)',
+    name: 'an ARRAY in the implicit-equality slot is refused at the shared face',
     filter: () => ({ label: ['alpha'] as unknown as string }),
     verdict: 'door-refusal',
     code: 'INVALID_FILTER',
@@ -279,14 +279,14 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
       + 'it with MongoDB\'s array equality (a stored array equal to the list, or holding it as an element).',
   },
   {
-    name: 'an ARRAY under $eq is refused (#19757)',
+    name: 'an ARRAY under $eq is refused at the shared face',
     filter: () => ({ label: { $eq: ['alpha'] as unknown as string } }),
     verdict: 'door-refusal',
     code: 'INVALID_FILTER',
     mustMention: ['Operator "$eq"', 'at where.label.$eq.', '{"$in": […]}'],
   },
   {
-    name: 'an ARRAY in the equality slot is refused nested in $or too (#19757)',
+    name: 'an ARRAY in the equality slot is refused nested in $or too, at the shared face',
     filter: () => ({ $or: [{ qty: 100 }, { label: ['alpha'] as unknown as string }] }),
     verdict: 'door-refusal',
     code: 'INVALID_FILTER',

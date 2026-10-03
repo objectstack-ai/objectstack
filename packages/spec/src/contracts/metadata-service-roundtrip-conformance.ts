@@ -191,7 +191,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'object', name: 'pin_account', data: PIN_ACCOUNT }],
         read: { type: 'object', name: 'pin_account' },
         expected: { kind: 'readable', document: PIN_ACCOUNT },
-        why: 'The contract\'s first two CRUD members, on the type whose reads are special-cased. This is the row #6725 would have failed.',
+        why: 'The contract\'s first two CRUD members, on the type whose reads are special-cased. This is the row that catches an object write landing in a store none of the object reads consult — the hole a shipped implementation once fell through.',
     },
     {
         id: 'nonobject-roundtrip',
@@ -199,7 +199,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'view', name: 'pin_grid', data: PIN_GRID }],
         read: { type: 'view', name: 'pin_grid' },
         expected: { kind: 'readable', document: PIN_GRID },
-        why: 'The generic type store — NOT special-cased on the read side of SchemaRegistry, which is the asymmetry that produced #6725. An implementation can pass one of these two rows and fail the other.',
+        why: 'The generic type store — NOT special-cased on the read side of SchemaRegistry, which is the asymmetry that let an object write land in the generic store while every object read looked elsewhere. An implementation can pass one of these two rows and fail the other.',
     },
     {
         id: 'get-before-register-object',
@@ -277,7 +277,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'object', name: 'pin_key', data: PIN_KEYED_OBJECT }],
         read: { type: 'object', name: 'pin_key' },
         expected: { kind: 'refused' },
-        why: 'Whether `name` or `data.name` is the key is the whole round-trip. **Ruled** (#7378, maintainer 2026-08-12, row 1, superseding the 2026-08-11 option (a) this row used to state): a disagreement is refused loudly — it is almost always an authoring bug, and silent resolution in EITHER direction can file the item under a key the author never wrote. A document with no `name` of its own still registers under the argument; the objectql driver pins that boundary.',
+        why: 'Whether `name` or `data.name` is the key is the whole round-trip. **Ruled** (maintainer 2026-08-12, row 1 of the round-trip ruling, superseding the 2026-08-11 option (a) this row used to state): a disagreement is refused loudly — it is almost always an authoring bug, and silent resolution in EITHER direction can file the item under a key the author never wrote. A document with no `name` of its own still registers under the argument; the objectql driver pins that boundary.',
     },
     {
         id: 'data-name-mismatch-refused-nonobject',
@@ -293,7 +293,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'objects', name: 'pin_plural', data: PIN_PLURAL }],
         read: { type: 'object', name: 'pin_plural' },
         expected: { kind: 'readable', document: PIN_PLURAL },
-        why: "The two spellings of the object type address ONE store. **Ruled** (#7378, maintainer 2026-08-12, row 2): every implementation gives one answer, converged with `check:meta-type-normalized`'s enforced direction — the type folds plural→singular (`PLURAL_TO_SINGULAR`, `../shared`) before any store decision. This row was `plural-objects-type-is-its-own-store` (expected `absent`) while the answer was still a measured divergence; the reverse read direction is pinned driver-locally in objectql.",
+        why: "The two spellings of the object type address ONE store. **Ruled** (maintainer 2026-08-12, row 2 of the round-trip ruling): every implementation gives one answer, converged with `check:meta-type-normalized`'s enforced direction — the type folds plural→singular (`PLURAL_TO_SINGULAR`, `../shared`) before any store decision. This row was `plural-objects-type-is-its-own-store` (expected `absent`) while the answer was still a measured divergence; the reverse read direction is pinned driver-locally in objectql.",
     },
     {
         id: 'primitive-data-refused',
@@ -301,7 +301,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'setting', name: 'pin_flag', data: 'enabled' }],
         read: { type: 'setting', name: 'pin_flag' },
         expected: { kind: 'refused' },
-        why: '`data` is declared `unknown`, not `object`, so this is a runtime refusal (#7378, maintainer 2026-08-12, row 3): a value the service cannot key was measured as accept-then-drop — written, then readable back through NO member — which is indefensible; and coercing it into storability is equally forbidden. The ruling fixes 「接受再丢」, it does not demand 「必须存下」.',
+        why: '`data` is declared `unknown`, not `object`, so this is a runtime refusal (maintainer 2026-08-12, row 3 of the round-trip ruling): a value the service cannot key was measured as accept-then-drop — written, then readable back through NO member — which is indefensible; and coercing it into storability is equally forbidden. The ruling fixes 「接受再丢」, it does not demand 「必须存下」.',
     },
     {
         id: 'array-data-refused',
