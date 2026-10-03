@@ -1,7 +1,7 @@
 ---
 "@objectstack/service-analytics": minor
 "@objectstack/driver-sql": minor
-"@objectstack/driver-turso": minor
+"@objectstack/driver-turso": patch
 ---
 
 fix(service-analytics): the ObjectQL face echoes a date-bucketed dimension in the bucket expression the driver itself groups by, so SQLite runs the statement it prints
@@ -14,6 +14,6 @@ Clause-②: no
 
 - **`@objectstack/driver-sql`**: `SqlDriver.dateBucketSql(objectName, field, granularity)` returns the expression `aggregate` groups by, rendered as SQL text: the existing `buildDateBucketExpr`, unchanged, with each identifier quoted by the dialect. It returns `null` for a granularity the dialect buckets in memory (`week` on SQLite). The MySQL arm (`date_format(convert_tz(…))`) is checked by code read only, because no MySQL server was available.
 - **`@objectstack/service-analytics`**: the new optional `AnalyticsServiceConfig.dateBucketSql` hook carries the expression to the ObjectQL strategy. `AnalyticsServicePlugin` wires it from the driver that serves the object, as it wires `sqlDialect`.
-- **`@objectstack/driver-turso`**: `REMOTE_FACE_ANSWERS` lists `dateBucketSql` as inherited. The remote face renders the same SQLite expression with no connection.
+- **`@objectstack/driver-turso`**: a comment that said `SqlDriver` buckets with `date_trunc` now names the SQLite `strftime` expression it emits. The inherited `dateBucketSql` answers on the remote face too: it renders the same SQLite expression with no connection, and libSQL runs it.
 
 **Unchanged.** The rows every face answers. The echo keeps `date_trunc(…)` where nothing answers: a host that wires no hook, a driver with no bucket expression (memory, MongoDB), a granularity the driver buckets in memory, and a query with a non-UTC `timezone`, which the engine buckets in memory on that zone's calendar.
