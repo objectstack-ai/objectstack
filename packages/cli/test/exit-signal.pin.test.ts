@@ -3,7 +3,7 @@
 /**
  * PIN — every command lets oclif's exit signal through its `catch`: a completed
  * `--json` run prints exactly ONE document and exits 0, and a refusal on the
- * text face prints exactly ONE error line (#21434, #21496).
+ * text face prints exactly ONE error line (#21434, #21496, #21523).
  *
  * ## The defect
  *
@@ -34,6 +34,18 @@
  * `catch`, then `✗ EEXIT: 1` from the outer one. The exit status was right
  * every time; the extra lines were the defect.
  *
+ * `this.error(msg)` raises the same signal in another spelling: it throws
+ * oclif's `CLIError`, which carries `oclif.exit` (2 unless told otherwise), and
+ * leaks the same way. Measured at the public door on `bee8d1c62c`:
+ *
+ *     os init demo -p npm                 (the registry unreachable)
+ *     → `✗ Project scaffolded, but dependency installation failed.`, then
+ *       `✗ Dependency installation failed` from the outer `catch`, then
+ *       oclif's own `›   Error: Dependency installation failed`, exit status 2.
+ *
+ * The outer `catch` printed the refusal again and raised a second `this.error`
+ * with the same message. A scaffold its own self-test rejects did the same.
+ *
  * The repair is the existing idiom, `if (isExitSignal(error)) throw error;` as
  * the catch's first statement (`src/utils/format.ts` — one predicate, no second
  * helper).
@@ -63,16 +75,17 @@
  *
  * There is no roster to update. A command added later is in the population the
  * moment its module exists under `src/commands`, whatever faces it has. This
- * file goes red if any of its `this.exit(…)` calls sits in a `try` whose
- * `catch` does not let the signal through. `os secret rewrap` is the first to
- * have entered that way: it landed beside this pin with its `--json` flag and
- * its rethrow already in place, and no line here names it.
+ * file goes red if any of its `this.exit(…)` or `this.error(…)` calls sits in
+ * a `try` whose `catch` does not let the signal through. `os secret rewrap` is
+ * the first to have entered that way: it landed beside this pin with its
+ * `--json` flag and its rethrow already in place, and no line here names it.
  *
  * ## The three parts
  *
  * - **Structural, over the WHOLE population** (the second `describe`): every
- *   `this.exit(…)` — direct, or through a same-class method that reaches one —
- *   lexically inside a `try` has, in EVERY enclosing `catch`, the
+ *   signal-raising call — `this.exit(…)` or `this.error(…)`, the analyzer's two
+ *   seeds (`SIGNAL_SEEDS`), direct or through a same-class method that reaches
+ *   one — lexically inside a `try` has, in EVERY enclosing `catch`, the
  *   `isExitSignal` rethrow (imported from `utils/format.js`) as its first
  *   statement. Decided over the command's own source and its superclasses'.
  *   That property is exactly what makes "a completed run prints one document
@@ -92,39 +105,40 @@
  *   TEXT face only (its JSON face returns before them), so the structural half
  *   is its pin.
  * - **Driven, text face, for the members the widening found** (the fourth
- *   `describe`): `package install`, `package publish` and `plugin sign` run
- *   in-process through oclif. The network is replaced by a stubbed `fetch`, and
- *   `plugin sign`'s self-verification by a seam (no real key fails it). Each
- *   case asserts the two things an operator reads: the refusal is ONE `✗` line
- *   with no `EEXIT` anywhere in the output, and the exit status, which is 1 as
- *   it was before the repair.
+ *   `describe`): `package install`, `package publish`, `plugin sign` and `init`
+ *   run in-process through oclif. The network is replaced by a stubbed `fetch`,
+ *   `plugin sign`'s self-verification by a seam (no real key fails it), and
+ *   `os init`'s `<pm> install` and scaffold self-test by seams, with its working
+ *   directory a scratch directory. Each case asserts the two things an operator
+ *   reads: the refusal is ONE `✗` line with no `EEXIT` anywhere in the output,
+ *   and the exit status, unchanged by the repair — 1 for the `this.exit(1)`
+ *   refusals, 2 for `os init`'s `this.error` ones.
  *
  * ## Tier
  *
  * `unit` (`vitest-tiers.ts`): nothing is spawned and no kernel boots — the
- * boot seam is replaced through `vi.mock`, never value-imported here, and
- * `fetch` is stubbed, never reached. The public-door form of the driven halves
- * (a real sqlite file, the CLI spawned; for the text face, the CLI spawned
- * against a missing file and a stub control plane) was measured by hand before
- * and after each fix and is recorded on the pull request rather than re-run
- * per CI shard.
+ * boot seam and `os init`'s `execSync` are replaced through `vi.mock`, never
+ * value-imported here, and `fetch` is stubbed, never reached. The public-door
+ * form of the driven halves (a real sqlite file, the CLI spawned; for the text
+ * face, the CLI spawned against a missing file, a stub control plane, or an
+ * unreachable package registry) was measured by hand before and after each fix
+ * and is recorded on the pull request rather than re-run per CI shard.
  *
  * ## What this does NOT cover
  *
- * - `this.error(…)`, which also throws a signal `isExitSignal` recognises. The
- *   analyzer is seeded with `exit` only. Measured over the whole population on
- *   `f9a8eb889e`, three such calls sit inside a `try`. One is in `compile.ts`,
- *   in the same `catch` block as a `this.exit(1)` this file already judges.
- *   The other two are in `init.ts`, whose outer `catch` re-reports them: `os
- *   init` with a failed dependency install prints `✗ Dependency installation
- *   failed` from that `catch`. They are reported on the pull request, not
- *   widened into here.
+ * - oclif's own rendering of a `this.error` signal: the entry point prints the
+ *   `›   Error: …` block after `run()` has thrown, outside an in-process run.
+ *   It is one block per refusal before the repair and after it; what the
+ *   repair removed is the catch's second `✗` line.
+ * - Members of oclif's `Command` other than the two seeds. The one other
+ *   member that throws the signal, `this.parse`, is called inside a `try` by
+ *   no command, measured on `bee8d1c62c`; a command that does adds a seed.
  * - A second document a command writes by calling `emitJson` twice on one
  *   path — a different mechanism, which only the driven half would see.
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -138,6 +152,7 @@ import MigrateAccountIssuer from '../src/commands/migrate/account-issuer.js';
 import PackageInstall from '../src/commands/package/install.js';
 import PackagePublish from '../src/commands/package/publish.js';
 import PluginSign from '../src/commands/plugin/sign.js';
+import Init from '../src/commands/init.js';
 
 // ---------------------------------------------------------------------------
 // Seams for the driven halves. Replaced, never value-imported: the commands'
@@ -153,6 +168,8 @@ const seams = vi.hoisted(() => ({
   findSentinelHistoryRows: vi.fn(),
   probeAccountIdentityCollisions: vi.fn(),
   verifyPayload: vi.fn(),
+  execSync: vi.fn(),
+  validateScaffold: vi.fn(),
 }));
 
 vi.mock('../src/utils/schema-migrate.js', async (importOriginal) => ({
@@ -184,6 +201,17 @@ vi.mock('@objectstack/plugin-auth', () => ({
   probeAccountIdentityCollisions: seams.probeAccountIdentityCollisions,
   formatAccountIdentityPreflightReport: () => '',
 }));
+// `os init`'s dependency install (`<pm> install`) and the scaffold self-test
+// that follows a successful one. Nothing is spawned and nothing is bundled:
+// the command's own `try`/`catch` around them is what runs.
+vi.mock('child_process', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  execSync: seams.execSync,
+}));
+vi.mock('../src/utils/scaffold-validate.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  validateScaffold: seams.validateScaffold,
+}));
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(HERE, '..');
@@ -214,6 +242,18 @@ interface ExitSignalFlow {
 }
 
 const FORMAT_MODULE = /(?:^|\/)utils\/format\.js$/;
+
+/**
+ * The oclif `Command` members that THROW the signal instead of ending the
+ * process — the analyzer's seeds. `this.exit(n)` throws oclif's exit error
+ * (`code: 'EEXIT'`, `oclif.exit: n`); `this.error(msg)` throws a `CLIError`
+ * carrying `oclif.exit` (2 unless `{ exit }` says otherwise). `isExitSignal`
+ * recognises both, so both leak the same way through a `catch` that reports
+ * what it caught. `this.error(msg, { exit: false })` throws nothing; no command
+ * writes it, and the analyzer judges it like any other `this.error` call — a
+ * guard on its catch is harmless, a missing one a false red, never a false green.
+ */
+const SIGNAL_SEEDS = ['exit', 'error'] as const;
 
 function isThisCall(node: ts.Node, names: ReadonlySet<string>): node is ts.CallExpression {
   return ts.isCallExpression(node)
@@ -307,9 +347,9 @@ function analyzeExitSignalFlow(sources: ReadonlyArray<{ file: string; text: stri
     visit(sf);
   }
 
-  // Fixpoint: a member raises the signal if its body calls `this.exit` or a
-  // member that does.
-  const raising = new Set<string>(['exit']);
+  // Fixpoint: a member raises the signal if its body calls a seed — `this.exit`
+  // or `this.error` — or a member that does.
+  const raising = new Set<string>(SIGNAL_SEEDS);
   for (let changed = true; changed;) {
     changed = false;
     for (const [name, bodies] of members) {
@@ -435,9 +475,15 @@ const FLOW = new Map(
  * finding anything returns zero, and zero passes every per-member assertion —
  * these are what notice. A drop below them is a broken detector or a
  * deliberate removal; say which when you lower one.
+ *
+ * Seeding `this.error` raised the site floor to 131, measured on
+ * `bee8d1c62c` over the same 65 commands: the 127 `this.exit` sites, plus
+ * four `this.error` sites — `compile.ts`'s bundling refusal, counted for
+ * `os compile` and again for `os build` through it, and `os init`'s two
+ * refusals inside its outer `try`.
  */
 const POPULATION_FLOOR = 65;
-const SITE_FLOOR = 127;
+const SITE_FLOOR = 131;
 /** The first population's floor, kept so a face-label regression is seen too. */
 const JSON_FACE_FLOOR = 46;
 
@@ -523,6 +569,32 @@ const FIXTURES: Array<{ name: string; src: string; sites: number; leaks: number 
     src: `class C { async run() { try { await Promise.all([1].map(async () => { this.exit(1); })); } catch (e) { report(e); } } }`,
     sites: 1, leaks: 1,
   },
+  // The second seed: `this.error` throws a CLIError that leaks the same way.
+  {
+    name: 'an error inside a try whose catch re-reports it (`os init`, before its repair)',
+    src: `class C { async run() { try { this.error('install failed'); } catch (error) { report(error); this.error(error.message); } } }`,
+    sites: 1, leaks: 1,
+  },
+  {
+    name: 'an error under the idiom',
+    src: `${IMPORT_GUARD} class C { async run() { try { this.error('install failed'); } catch (error) { if (isExitSignal(error)) throw error; report(error); } } }`,
+    sites: 1, leaks: 0,
+  },
+  {
+    name: 'an error outside every try (the refusal the catch-all itself raises)',
+    src: `class C { async run() { try { work(); } catch (e) { report(e); this.error(e.message); } } }`,
+    sites: 0, leaks: 0,
+  },
+  {
+    name: 'an error reached through a same-class helper',
+    src: `class C { async run() { try { this.fail('no'); } catch (e) { report(e); } } private fail(msg) { this.error(msg); } }`,
+    sites: 1, leaks: 1,
+  },
+  {
+    name: 'an error sharing a guarded catch with an exit (`os compile`)',
+    src: `${IMPORT_GUARD} class C { async run() { try { try { bundle(); } catch (err) { if (json) this.exit(1); this.error(err.message); } } catch (error) { if (isExitSignal(error)) throw error; report(error); } } }`,
+    sites: 2, leaks: 0,
+  },
 ];
 
 describe('the analyzer decides the fixtures it was written against', () => {
@@ -558,7 +630,7 @@ describe('every command lets the exit signal through', () => {
       expect(ids).toContain(anchor);
     }
     // The text-face commands this was widened on: members with no JSON face.
-    for (const anchor of ['package install', 'package publish', 'plugin sign']) {
+    for (const anchor of ['package install', 'package publish', 'plugin sign', 'init']) {
       expect(POPULATION.find((c) => c.id === anchor)?.faces).toEqual(['text']);
     }
     // Inheritance is followed: `os build` declares nothing itself.
@@ -567,13 +639,23 @@ describe('every command lets the exit signal through', () => {
 
   it('the scan reaches the sites — including the completed-apply exit and the text-face refusals this was filed on', () => {
     const total = [...FLOW.values()].reduce((n, f) => n + f.sites.length, 0);
-    expect(total, 'fewer this.exit-in-try sites found than this pin was widened over').toBeGreaterThanOrEqual(SITE_FLOOR);
+    expect(total, 'fewer signal-raising calls inside a try found than this pin was widened over').toBeGreaterThanOrEqual(SITE_FLOOR);
     expect(FLOW.get('migrate recorded-by')?.sites.map((s) => s.call)).toContain(
       "this.exit(result.status === 'completed' ? 0 : 1)",
     );
     for (const id of ['package install', 'package publish', 'plugin sign']) {
       expect(FLOW.get(id)?.sites.map((s) => s.call), `os ${id}`).toContain('this.exit(1)');
     }
+  });
+
+  it("the scan reaches the `this.error` seed — `os init`'s two refusals inside its outer try, and `os compile`'s bundling refusal", () => {
+    const errorCalls = (id: string) => FLOW.get(id)?.sites.map((s) => s.call).filter((call) => call.startsWith('this.error(')) ?? [];
+    expect(errorCalls('init')).toEqual(expect.arrayContaining([
+      "this.error('Scaffold validation failed')",
+      "this.error('Dependency installation failed')",
+    ]));
+    // Inherited: `os build` is judged on `compile.ts`'s site as well.
+    for (const id of ['compile', 'build']) expect(errorCalls(id), `os ${id}`).toContain('this.error(err.message)');
   });
 
   it.each(POPULATION.map((c) => [c.id, c.faces.join(' | ')]))('os %s (%s)', (id) => {
@@ -819,6 +901,9 @@ writeFileSync(OSPLUGIN, 'artifact bytes');
 const KEY = join(SCRATCH, 'publisher.key.pem');
 writeFileSync(KEY, generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString());
 const SIDECAR = join(SCRATCH, 'pin.osplugin.sig');
+/** The working directory `os init` resolves its target against: each case scaffolds a fresh child of it. */
+const INIT_CWD = join(SCRATCH, 'init');
+mkdirSync(INIT_CWD);
 
 afterAll(() => {
   rmSync(SCRATCH, { recursive: true, force: true });
@@ -839,7 +924,7 @@ interface DrivenText {
   exit: number;
 }
 
-async function driveText(cmd: Runnable, argv: string[]): Promise<DrivenText> {
+async function driveText(cmd: Runnable, argv: string[], cwd?: string): Promise<DrivenText> {
   const lines: string[] = [];
   const capture = (...args: unknown[]): void => {
     lines.push(...args.map(String).join(' ').replace(SGR, '').split('\n'));
@@ -850,12 +935,15 @@ async function driveText(cmd: Runnable, argv: string[]): Promise<DrivenText> {
     if (typeof done === 'function') done();
     return true;
   }) as typeof process.stdout.write;
-  const spies = [
+  const spies: Array<{ mockRestore(): void }> = [
     vi.spyOn(console, 'log').mockImplementation(capture),
     vi.spyOn(console, 'error').mockImplementation(capture),
     vi.spyOn(process.stdout, 'write').mockImplementation(captureWrite),
     vi.spyOn(process.stderr, 'write').mockImplementation(captureWrite),
   ];
+  // A command that resolves its target against the working directory reads
+  // the case's scratch directory instead, so nothing lands in this package.
+  if (cwd !== undefined) spies.push(vi.spyOn(process, 'cwd').mockReturnValue(cwd));
   process.exitCode = undefined;
   let exit: number;
   try {
@@ -873,15 +961,17 @@ async function driveText(cmd: Runnable, argv: string[]): Promise<DrivenText> {
 
 /**
  * The refusal is reported ONCE, the signal is never named, and the status is
- * the 1 it always was. `subject` is what the one line must be about — a path
- * or a URL the case chose, never the refusal's wording.
+ * the one it always was: 1 for a `this.exit(1)` refusal, 2 for a `this.error`
+ * one (oclif's default, which `os init` never overrides). `subject` is what
+ * the one line must be about — a path, a URL or an error the case chose, never
+ * the refusal's wording.
  */
-function expectOneRefusal(run: DrivenText, subject?: string): void {
+function expectOneRefusal(run: DrivenText, subject?: string, exit = 1): void {
   const output = run.lines.join('\n');
   expect(run.errors, `expected ONE error line; the command printed:\n${output}`).toHaveLength(1);
   if (subject !== undefined) expect(run.errors[0]).toContain(subject);
   expect(output).not.toContain('EEXIT');
-  expect(run.exit).toBe(1);
+  expect(run.exit).toBe(exit);
 }
 
 const fetchStub = vi.fn<typeof fetch>();
@@ -933,5 +1023,27 @@ describe('the text-face members, driven — ONE error line, the exit status unch
     expectOneRefusal(run);
     expect(seams.verifyPayload).toHaveBeenCalledTimes(1);
     expect(existsSync(SIDECAR)).toBe(false);
+  });
+
+  it('os init, a dependency install that fails (refused inside its outer try): ONE error line, exit 2', async () => {
+    seams.execSync.mockImplementation(() => {
+      throw new Error('exit-signal pin: npm install exited 1');
+    });
+    const run = await driveText(Init, ['install-refused', '-p', 'npm'], INIT_CWD);
+    expectOneRefusal(run, undefined, 2);
+    expect(seams.execSync).toHaveBeenCalledTimes(1);
+    expect(seams.execSync.mock.calls[0]?.[1]).toMatchObject({ cwd: join(INIT_CWD, 'install-refused') });
+    // A failed install never reaches the self-test.
+    expect(seams.validateScaffold).not.toHaveBeenCalled();
+  });
+
+  it('os init, a scaffold its own self-test rejects (refused inside its outer try): ONE error line, exit 2', async () => {
+    const rejection = 'exit-signal pin: the rendered config did not load';
+    seams.validateScaffold.mockRejectedValue(new Error(rejection));
+    const run = await driveText(Init, ['scaffold-refused', '-p', 'npm'], INIT_CWD);
+    expectOneRefusal(run, rejection, 2);
+    // The install "succeeded" (the seam returned), so the self-test ran.
+    expect(seams.execSync).toHaveBeenCalledTimes(1);
+    expect(seams.validateScaffold).toHaveBeenCalledWith(join(INIT_CWD, 'scaffold-refused'));
   });
 });

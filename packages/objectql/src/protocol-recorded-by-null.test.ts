@@ -184,7 +184,8 @@ function makeStubDriver() {
     return { driver, stores };
 }
 
-const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
+// [#21470] `name` is the row's: a body `name` that is not its row's is refused by the write doors.
+const viewBody = (label: string, name = 'cases') => ({ name, type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
 
 describe('#4556 — protocol write paths store NULL, not the sentinel string', () => {
     let engine: ObjectQL;
@@ -253,11 +254,11 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
     it('no history row on ANY path carries a value that is not a sys_user id', async () => {
         // The three authoring paths #4441 was bitten by: create, publish, delete.
         await protocol.saveMetaItem({
-            type: 'view', name: 'a', organizationId: 'org_x', item: viewBody('a'), mode: 'draft',
+            type: 'view', name: 'a', organizationId: 'org_x', item: viewBody('a', 'a'), mode: 'draft',
         });
         await protocol.publishMetaItem({ type: 'view', name: 'a', organizationId: 'org_x' });
         await protocol.saveMetaItem({
-            type: 'view', name: 'b', organizationId: 'org_x', item: viewBody('b'), actor: 'usr_alice',
+            type: 'view', name: 'b', organizationId: 'org_x', item: viewBody('b', 'b'), actor: 'usr_alice',
         });
         await protocol.deleteMetaItem({ type: 'view', name: 'b', organizationId: 'org_x' });
 
