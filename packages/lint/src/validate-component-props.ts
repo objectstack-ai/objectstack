@@ -322,8 +322,9 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           message: `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)}`,
           hint:
             `\`${type}\`'s props are declared by ComponentPropsMap (@objectstack/spec/ui) — the ` +
-            'rejection above carries the fix. Advisory for now: the props bag is not parsed on the ' +
-            'storage path either, so nothing rejects this today (objectstack#5068).',
+            'rejection above carries the fix. Advisory for now: props are judged here, at the authoring ' +
+            'door, as a warning before they become an error, and the props bag is not parsed on the ' +
+            'storage path either, so nothing rejects this today.',
         });
       }
     }

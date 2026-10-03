@@ -412,8 +412,8 @@ export function checkSortDeclaration(
             `Measured on a federated object over a real remote table, 'asc' and ` +
             `'desc' return BYTE-IDENTICAL row order under a 200 while the same ` +
             `query on a real column reverses. Unlike this rule's other two ` +
-            `verdicts nothing refuses it: the REST ingress (#6994) and the engine ` +
-            `(#7095) both judge only 'formula', so the view's FIRST fetch — and ` +
+            `verdicts nothing refuses it: the REST ingress and the engine ` +
+            `both judge only 'formula', so the view's FIRST fetch — and ` +
             `every fetch after it — silently answers in an arbitrary order, which ` +
             `'limit'/'offset' then slice into an arbitrary page.`,
           hint: unprovisionedAnchorHint(objectName, name),
@@ -432,7 +432,7 @@ export function checkSortDeclaration(
         message:
           `${subject} orders by "${name}", which is not a field on object ` +
           `"${objectName}". The runtime refuses the sort rather than dropping it: ` +
-          `every load of this view answers 400 INVALID_SORT (#6994), because a sort ` +
+          `every load of this view answers 400 INVALID_SORT, because a sort ` +
           `is the view's FIRST fetch and not an optional interaction.` +
           (dotted ? '' : suggestName(head, known)),
         hint:
@@ -468,7 +468,7 @@ export function checkSortDeclaration(
           `Denormalise the value onto "${objectName}" (a stored field, written when ` +
           `the source changes) and sort by that, or drop "${name}" from this sort. ` +
           `At runtime both doors now refuse it with 400 INVALID_SORT — the REST ` +
-          `ingress (#6994) and the engine itself (#7095) — so the declaration ` +
+          `ingress and the engine itself — so the declaration ` +
           `breaks the view's first fetch, and every fetch after it.`,
       });
     }

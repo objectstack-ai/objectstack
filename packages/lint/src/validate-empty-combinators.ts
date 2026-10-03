@@ -228,13 +228,16 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
 
   const message =
     key === '$and'
-      ? '`$and: []` is a conjunction of ZERO conditions. Under the #5322 identity ruling it ' +
+      ? '`$and: []` is a conjunction of ZERO conditions. Every backend reduces an empty combinator to ' +
+        'its boolean identity, so it ' +
         `${rows(VERDICT_OF.$and)} — the key is authored, and it constrains nothing, so this surface ` +
         'reads as filtered and is not.'
       : key === '$or'
-        ? '`$or: []` is a disjunction of ZERO branches. Under the #5322 identity ruling it ' +
+        ? '`$or: []` is a disjunction of ZERO branches. Every backend reduces an empty combinator to ' +
+          'its boolean identity, so it ' +
           `${rows(VERDICT_OF.$or)}: this surface renders permanently empty, and on a read scope it hides ` +
-          'every row (fail-closed by design — #5134).'
+          'every row (fail-closed by design: an empty disjunction never opens a read scope to the whole ' +
+          'table).'
         : '`$not: {}` negates an EMPTY node. An empty node is TRUE and NOT TRUE is FALSE, so it ' +
           `${rows(VERDICT_OF.$not)} — the opposite of the "no filter" an empty operand looks like.`;
 
@@ -253,7 +256,7 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
     rule: FILTER_EMPTY_COMBINATOR,
     where: ctx.where,
     path,
-    message: `${message} A literal ${spelling} is not an authoring surface (#5330).`,
+    message: `${message} A literal ${spelling} is not an authoring surface.`,
     hint:
       `${hint} A PROGRAMMATIC producer that loops to zero operands keeps the runtime identity ` +
       'unchanged — this rule judges only what is written in the metadata.',
@@ -268,7 +271,8 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
       where: ctx.where,
       path,
       message:
-        'An EMPTY filter node (`{}`) is authored here. Under the #5322 identity ruling an empty node is ' +
+        'An EMPTY filter node (`{}`) is authored here. Every backend reduces an empty node to its boolean ' +
+        'identity, so it is ' +
         `TRUE — it ${rows(VERDICT_OF.node)}, exactly as if the key were absent — so a filter is declared ` +
         'and enforces nothing.',
       hint:
@@ -291,8 +295,7 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
       hint:
         'Delete the empty branch — the `$or` then means what it looks like. If it was meant to carry a ' +
         'condition, write it. (A compiler that DROPPED the empty branch instead would silently NARROW ' +
-        'the scope to the surviving branches, which is why the runtime absorbs rather than filters — ' +
-        '#5297.)',
+        'the scope to the surviving branches, which is why the runtime absorbs rather than filters.)',
     });
     return;
   }

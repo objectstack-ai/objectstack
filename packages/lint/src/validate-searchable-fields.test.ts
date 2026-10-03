@@ -757,7 +757,7 @@ describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', 
       + 'declared searchableFields (subject, case_number, description) — the set \'search\' '
       + 'scans. Clients echo this declaration verbatim as the \'$searchFields\' override, '
       + 'and the runtime refuses an entry outside the allowed set: every toolbar search on '
-      + 'this list returns 400 INVALID_FIELD (#4254).',
+      + 'this list returns 400 INVALID_FIELD.',
     );
   });
 

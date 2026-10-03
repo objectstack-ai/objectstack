@@ -455,7 +455,7 @@ function checkChartAggregate(
       REACT_CHART_AGGREGATE_INVALID,
       'aggregate.groupBy is not set, so the aggregate returns ONE ungrouped row and the chart plots a single point.',
       'Add aggregate.groupBy (a field name, or { field, dateGranularity } to bucket dates) to give the chart a category axis. ' +
-        'objectstack#5583 ruled that an ungrouped single-value chart is NOT a supported <ObjectChart> shape — groupBy stays required, and a single number belongs in an object-metric block instead. ' +
+        'An ungrouped single-value chart is NOT a supported <ObjectChart> shape — groupBy stays required, and a single number belongs in an object-metric block instead. ' +
         'This stays a warning rather than an error only because promoting it is its own step.',
     );
   }

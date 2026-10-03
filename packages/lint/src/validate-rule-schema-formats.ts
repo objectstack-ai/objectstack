@@ -323,7 +323,8 @@ export function validateRuleSchemaFormats(stack: unknown): RuleSchemaFormatFindi
       hint:
         (suggestion ? `Did you mean \`format: '${suggestion}'\`? ` : '') +
         `The registered names are: ${registered.join(', ')} — the default \`ajv-formats\` set, the one ` +
-        `\`rule-validator.ts\` registers (#5029). Names are case-sensitive and hyphenated ` +
+        `\`rule-validator.ts\` registers so that a \`format\` is enforced on every write. Names are ` +
+        `case-sensitive and hyphenated ` +
         `(\`date-time\`, not \`datetime\`). If you meant a constraint ajv has no format for, express it ` +
         `with \`pattern\` instead — a regex is enforced, an unknown format name is not.`,
     });
