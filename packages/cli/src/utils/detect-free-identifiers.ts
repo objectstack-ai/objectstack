@@ -140,7 +140,7 @@ export interface FreeIdentifierResult {
  * function expression/declaration, and object-method shorthand — so we try
  * three wraps and take the first that yields exactly one function-like node.
  */
-function parseFunction(rawFunctionSource: string): ts.FunctionLikeDeclarationBase | null {
+export function parseFunction(rawFunctionSource: string): ts.FunctionLikeDeclarationBase | null {
   const wraps = [
     rawFunctionSource, // function decl / named function expression statement
     `(${rawFunctionSource})`, // arrow / anonymous function expression
