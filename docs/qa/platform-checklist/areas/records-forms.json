@@ -4309,7 +4309,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the script action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — body writes { id, done: false } through ctx.api, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item + record_header)",
+          "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the script action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — body writes { id, done: false } through ctx.api, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item only — the Task Detail page is kind:'full' and renders no record_header bar)",
           "the refusal sentence, verbatim: 'A finished task cannot be reopened. Create a follow-up task instead.' (TASK_REOPEN_REFUSAL in the hooks file — re-read it there before the run, never from this line)",
           "a seeded FINISHED task (done: true) — 'Audit current IA' or 'App wireframes' (examples/app-showcase/src/data/seed/index.ts) — which is the only kind of record the action is offered on",
           "a console built at this repo's .objectui-sha (pnpm objectui:build), served by the same boot the run drives",
@@ -4323,7 +4323,7 @@
       "steps": [
         "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin) with the console built at .objectui-sha; sign in through the form as the seeded admin",
         "pick a finished task: GET /api/v1/data/showcase_task?where=... (or the list) and record its id, done, progress and modified timestamp — this is the before-image",
-        "open that task's record page in the console; screenshot after render settles and confirm the 'Reopen' action is offered (record header, or the row menu on the task list)",
+        "open the showcase_task list in the console (/_console/apps/showcase_app/showcase_task); screenshot after render settles; open the finished task's row menu ('Open menu' on its row) and confirm 'Reopen' is offered there",
         "start capturing the network log and, before clicking, count toast nodes: document.querySelectorAll('[data-sonner-toast]:not([data-removed=\"true\"])').length — the baseline (expected 0)",
         "click 'Reopen' with a ref-targeted click (RUNNER automation self-check); wait for the response of POST /api/v1/actions/showcase_task/showcase_reopen_task (the request URL may carry the record id as a further path segment) — record its status and its JSON body",
         "within 2s of that response landing (the 4s auto-dismiss window), screenshot, then read every live toast node: count, data-type attribute, textContent — and compute count minus baseline",

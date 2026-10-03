@@ -114,7 +114,10 @@ export const ReopenTaskAction = defineAction({
   execution: 'perRecord',
   // #8990 — `has()` guards the sparse `list_item` face, as on Mark Done.
   visible: 'has(record.done) && record.done == true',
-  locations: ['list_item', 'record_header'],
+  // The task list's row menu only. `record_header` would be inert here: the
+  // Task Detail page (`showcase_task_detail`, `kind: 'full'`) owns the whole
+  // record layout and renders no header action bar.
+  locations: ['list_item'],
   refreshAfter: true,
 });
 
