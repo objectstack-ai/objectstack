@@ -163,7 +163,16 @@ export interface MigrationPlanStep<TRow = unknown> {
    * step 1 (ADR-0117 D8's fail-closed enable gate, generalized).
    */
   preflight?(engine: IObjectQLEngine): Promise<void>;
-  /** The rows this step processes. Called once, before chunking. */
+  /**
+   * The rows this step processes. Called once, before chunking.
+   *
+   * A resume calls it again and binds what it returns to the chunk plan the
+   * run started with (#21528). Two answers bind, in the order the run first
+   * loaded them: every row the run started over (a chunk's rows are where the
+   * journal put them), or exactly the rows of the chunks not yet committed (a
+   * `load()` that selects only the work still to do shrinks as the run
+   * commits). Any other count is refused `PLAN_CHANGED`.
+   */
   load(engine: IObjectQLEngine): Promise<TRow[]>;
   /** Forward work for one chunk. Runs INSIDE the chunk's transaction. */
   forward(rows: TRow[], ctx: MigrationChunkContext, engine: IObjectQLEngine): Promise<void>;
@@ -314,6 +323,12 @@ export function planChunks(
  * the journal never described: "chunk 7 done" would name a different range of
  * different rows, and the resume would skip work it never did. So the hash
  * covers exactly what a chunk index means, and a mismatch REFUSES.
+ *
+ * A new run hashes the boundaries it derives from its rows. A resume hashes
+ * the boundaries `run_started` recorded (#21528), so it compares the plan's
+ * declared identity against what the run STARTED over — not against a chunk
+ * plan recomputed from rows that the run's own progress, or a chunk size
+ * other than the one it started with, has since changed.
  */
 export function hashMigrationPlan(plan: MigrationPlan, chunks: readonly MigrationChunk[]): string {
   const shape = JSON.stringify({
@@ -429,6 +444,12 @@ export async function findInterruptedRuns(engine: IObjectQLEngine): Promise<Inte
 export interface RunMigrationJournalOptions {
   /** Supply to resume an existing run; omit to start a new one. */
   readonly runId?: string;
+  /**
+   * Rows per chunk for a new run (else the plan's `chunkSize`, else 200). A
+   * resume runs the chunk plan its `run_started` recorded — every run this
+   * runner starts records one — so a run resumes at the size it started
+   * with, whatever is passed here.
+   */
   readonly chunkSize?: number;
   /** Injectable for deterministic tests. */
   readonly now?: () => string;
@@ -437,19 +458,149 @@ export interface RunMigrationJournalOptions {
 interface LoadedPlan {
   readonly chunks: MigrationChunk[];
   readonly planHash: string;
-  readonly rowsByStep: unknown[][];
+  /**
+   * A chunk's rows. `undefined` only for a chunk committed before a resume
+   * whose `load()` no longer returns that chunk's rows — nothing in this
+   * process can say which rows it covered, so nothing may compensate it.
+   */
+  readonly rowsOf: (c: MigrationChunk) => unknown[] | undefined;
 }
 
-/** Load every step's rows, derive the chunk plan, hash it. */
-async function loadPlan(
-  engine: IObjectQLEngine,
-  plan: MigrationPlan,
-  chunkSize?: number,
-): Promise<LoadedPlan> {
+/** Load every step's rows, in declaration order. */
+async function loadRows(engine: IObjectQLEngine, plan: MigrationPlan): Promise<unknown[][]> {
   const rowsByStep: unknown[][] = [];
   for (const step of plan.steps) rowsByStep.push((await step.load(engine)) ?? []);
+  return rowsByStep;
+}
+
+/** A chunk's rows where the chunk plan put them: `offset`, `length`. */
+const sliceOf = (rowsByStep: unknown[][]) => (c: MigrationChunk): unknown[] =>
+  rowsByStep[c.stepIndex].slice(c.offset, c.offset + c.length);
+
+/** A new run: derive the chunk plan from the rows, and hash it. */
+function planNewRun(plan: MigrationPlan, rowsByStep: unknown[][], chunkSize?: number): LoadedPlan {
   const chunks = planChunks(plan, rowsByStep.map((r) => r.length), chunkSize ?? plan.chunkSize);
-  return { chunks, planHash: hashMigrationPlan(plan, chunks), rowsByStep };
+  return { chunks, planHash: hashMigrationPlan(plan, chunks), rowsOf: sliceOf(rowsByStep) };
+}
+
+/**
+ * The chunk plan `run_started` recorded, or `undefined` when its `detail`
+ * carries none — which this runner has written on every run since its first
+ * commit, so only a journal it did not write lacks one.
+ *
+ * The record names each chunk's step, not its index. Steps are recorded in
+ * declaration order and each one's chunks start at offset 0, so a chunk's step
+ * is the first at or after the previous chunk's step that carries its name —
+ * advancing past it on a new offset-0 chunk. A name no step carries maps to
+ * -1, which no hash the runner wrote can match.
+ */
+function recordedChunks(plan: MigrationPlan, start: MigrationJournalEvent | undefined): MigrationChunk[] | undefined {
+  let recorded: unknown;
+  try {
+    recorded = start?.detail ? (JSON.parse(start.detail) as { chunks?: unknown }).chunks : undefined;
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(recorded)) return undefined;
+  const chunks: MigrationChunk[] = [];
+  let stepIndex = 0;
+  for (const entry of recorded as Array<Record<string, unknown> | null>) {
+    const { step, offset, length } = entry ?? {};
+    if (
+      typeof step !== 'string' || !Number.isInteger(offset) || (offset as number) < 0
+      || !Number.isInteger(length) || (length as number) < 1
+    ) {
+      return undefined;
+    }
+    if (chunks.length > 0 && offset === 0) stepIndex++;
+    while (stepIndex < plan.steps.length && plan.steps[stepIndex].name !== step) stepIndex++;
+    chunks.push({
+      index: chunks.length,
+      stepIndex: stepIndex < plan.steps.length ? stepIndex : -1,
+      stepName: step,
+      offset: offset as number,
+      length: length as number,
+    });
+  }
+  return chunks;
+}
+
+/**
+ * A resume: compare the plan against what its run STARTED over, then bind the
+ * rows `load()` returns now to that chunk plan (#21528, ADR-0119 D2 item 5).
+ *
+ * The identity check hashes the journal's own chunk boundaries with the plan's
+ * declared id and step names. So the size the run started with comes back from
+ * the journal, and a plan whose `load()` selects only the remaining work is
+ * not mistaken for a changed one; a plan whose id or steps changed still
+ * refuses `PLAN_CHANGED`.
+ *
+ * Binding is per step, against the rows that step's chunks started over (N)
+ * and the rows in its committed chunks (K). `load()` may return N rows — it
+ * does not shrink, so a chunk's rows are where the journal put them — or N − K
+ * — it selects only the work still to do, so those rows belong, in order, to
+ * the chunks not yet committed. Any other count means the rows moved under the
+ * run, and the journal's boundaries describe none of them: refused.
+ */
+function planResumedRun(
+  plan: MigrationPlan,
+  runId: string,
+  start: MigrationJournalEvent | undefined,
+  rowsByStep: unknown[][],
+  committed: ReadonlySet<number>,
+  chunkSize?: number,
+): LoadedPlan {
+  const recorded = recordedChunks(plan, start);
+  // No recorded chunk plan to read back: reproducing the journal's hash from
+  // the rows `load()` returns now is the only identity proof left.
+  const chunks = recorded ?? planNewRun(plan, rowsByStep, chunkSize).chunks;
+  const planHash = hashMigrationPlan(plan, chunks);
+  if (start?.plan_hash && start.plan_hash !== planHash) {
+    // The plan changed under a journal that describes the old one. Chunk 7
+    // in the journal and chunk 7 in this plan are different rows; resuming
+    // would skip work that was never done.
+    throw new MigrationJournalRefusal(
+      'PLAN_CHANGED',
+      `Refusing to resume run '${runId}': plan hash ${planHash} does not match the journal's ${start.plan_hash}. ` +
+        `The chunk boundaries recorded in the journal describe a different plan.`,
+    );
+  }
+
+  const rowsByChunk = new Map<number, unknown[]>();
+  plan.steps.forEach((step, stepIndex) => {
+    const own = chunks.filter((c) => c.stepIndex === stepIndex);
+    const startedOver = own.reduce((n, c) => n + c.length, 0);
+    const inCommitted = own.filter((c) => committed.has(c.index)).reduce((n, c) => n + c.length, 0);
+    const loaded = rowsByStep[stepIndex];
+    if (loaded.length === startedOver) {
+      for (const c of own) rowsByChunk.set(c.index, loaded.slice(c.offset, c.offset + c.length));
+    } else if (loaded.length === startedOver - inCommitted) {
+      let cursor = 0;
+      for (const c of own) {
+        if (committed.has(c.index)) continue;
+        rowsByChunk.set(c.index, loaded.slice(cursor, cursor + c.length));
+        cursor += c.length;
+      }
+    } else {
+      throw new MigrationJournalRefusal(
+        'PLAN_CHANGED',
+        `Refusing to resume run '${runId}': step '${step.name}' now loads ${loaded.length} row(s); the run started ` +
+          `over ${startedOver}, ${inCommitted} of them in committed chunks. That is neither every row the run started ` +
+          `over nor exactly the rows it had left, so the chunk boundaries recorded in the journal describe none of them.`,
+      );
+    }
+  });
+  // Only a chunk of a step this plan does not declare is still unbound; with
+  // a recorded hash that refusal already happened above.
+  const unbound = chunks.find((c) => !committed.has(c.index) && !rowsByChunk.has(c.index));
+  if (unbound) {
+    throw new MigrationJournalRefusal(
+      'PLAN_CHANGED',
+      `Refusing to resume run '${runId}': the journal's chunk ${unbound.index} belongs to step '${unbound.stepName}', ` +
+        `which this plan does not declare.`,
+    );
+  }
+  return { chunks, planHash, rowsOf: (c) => rowsByChunk.get(c.index) };
 }
 
 /**
@@ -457,7 +608,9 @@ async function loadPlan(
  *
  * Refuses (never partially runs) when: the runtime cannot roll back; any
  * step's preflight fails; the plan declares `onCrash: 'compensate'` but some
- * step cannot compensate; or a resume's plan hash disagrees with the journal.
+ * step cannot compensate; or a resume's plan disagrees with what its run
+ * started over — its hash, or rows that bind to that chunk plan under neither
+ * reading {@link MigrationPlanStep.load} documents.
  */
 export async function runMigrationJournal(
   engine: IObjectQLEngine,
@@ -478,8 +631,6 @@ export async function runMigrationJournal(
     );
   }
 
-  const { chunks, planHash, rowsByStep } = await loadPlan(engine, plan, options.chunkSize);
-
   // ── resume bookkeeping ────────────────────────────────────────────────
   const resuming = Boolean(options.runId);
   const runId = options.runId ?? randomUUID();
@@ -494,17 +645,17 @@ export async function runMigrationJournal(
     if (events.length === 0) {
       throw new MigrationJournalRefusal('NO_SUCH_RUN', `No journal rows for run '${runId}'.`);
     }
-    const start = events.find((e) => e.kind === 'run_started');
-    if (start?.plan_hash && start.plan_hash !== planHash) {
-      // The plan changed under a journal that describes the old one. Chunk 7
-      // in the journal and chunk 7 in this plan are different rows; resuming
-      // would skip work that was never done.
-      throw new MigrationJournalRefusal(
-        'PLAN_CHANGED',
-        `Refusing to resume run '${runId}': plan hash ${planHash} does not match the journal's ${start.plan_hash}. ` +
-          `The chunk boundaries recorded in the journal describe a different plan.`,
-      );
-    }
+    committed = chunkSetOf(events, 'chunk_done');
+  }
+
+  const rowsByStep = await loadRows(engine, plan);
+  const { chunks, planHash, rowsOf } = resuming
+    ? planResumedRun(
+        plan, runId, events.find((e) => e.kind === 'run_started'), rowsByStep, committed, options.chunkSize,
+      )
+    : planNewRun(plan, rowsByStep, options.chunkSize);
+
+  if (resuming) {
     if (events.some((e) => e.kind === 'run_done')) {
       return {
         runId, status: 'completed', chunksTotal: chunks.length,
@@ -513,7 +664,6 @@ export async function runMigrationJournal(
       };
     }
     seq = events.reduce((m, e) => Math.max(m, Number(e.seq) + 1), 0);
-    committed = chunkSetOf(events, 'chunk_done');
     compensated = chunkSetOf(events, 'compensated');
     for (const e of events) {
       if (e.kind === 'chunk_started' && typeof e.chunk_index === 'number') {
@@ -552,7 +702,6 @@ export async function runMigrationJournal(
     }
   }
 
-  const rowsOf = (c: MigrationChunk): unknown[] => rowsByStep[c.stepIndex].slice(c.offset, c.offset + c.length);
   const next = (): number => seq++;
 
   if (!resuming) {
@@ -583,7 +732,8 @@ export async function runMigrationJournal(
     const attempt = (attemptsByChunk.get(chunk.index) ?? 0) + 1;
     attemptsByChunk.set(chunk.index, attempt);
     const step = plan.steps[chunk.stepIndex];
-    const rows = rowsOf(chunk);
+    // Bound for every chunk not committed — `planResumedRun` refuses otherwise.
+    const rows = rowsOf(chunk)!;
 
     // Autonomous, BEFORE the transaction: this is what makes an interrupted
     // chunk visible as "started, outcome unknown" rather than invisible.
@@ -629,7 +779,7 @@ interface UnwindArgs {
   runId: string;
   planHash: string;
   chunks: readonly MigrationChunk[];
-  rowsOf: (c: MigrationChunk) => unknown[];
+  rowsOf: LoadedPlan['rowsOf'];
   next: () => number;
   now: () => string;
   committed: Set<number>;
@@ -660,15 +810,24 @@ async function unwind(
     if (a.compensated.has(index)) continue;
     const chunk = a.chunks[index];
     const step = plan.steps[chunk.stepIndex];
+    const rows = a.rowsOf(chunk);
 
-    if (!step.compensate) {
-      // Nothing to undo this with. Say so loudly and stop — a silent skip
-      // would leave the row written and the journal claiming a clean unwind.
+    // Nothing to undo this with — no compensate(), or (#21528) a chunk a
+    // resumed run's earlier process committed, whose rows `load()` no longer
+    // returns, so nothing here knows which rows it covered. Say so loudly and
+    // stop: a silent skip, or a compensate() over other rows, would leave the
+    // rows written and the journal claiming a clean unwind.
+    const reason = !step.compensate
+      ? 'step declares no compensate()'
+      : rows === undefined
+        ? 'committed before this resume, and load() no longer returns its rows'
+        : undefined;
+    if (reason) {
       await appendEvent(engine, {
         run_id: a.runId, seq: a.next(), kind: 'run_failed',
         chunk_index: index, migration_id: plan.migrationId, created_at: a.now(),
         detail: JSON.stringify({
-          phase: 'compensate', reason: 'step declares no compensate()',
+          phase: 'compensate', reason,
           step: step.name, cause: errText(a.cause),
         }),
       });
@@ -682,7 +841,7 @@ async function unwind(
     const attempt = 1;
     try {
       await engine.transaction(async (trxCtx: unknown) => {
-        await step.compensate!(a.rowsOf(chunk), { runId: a.runId, chunkIndex: index, attempt, context: trxCtx }, engine);
+        await step.compensate!(rows!, { runId: a.runId, chunkIndex: index, attempt, context: trxCtx }, engine);
         await appendEvent(
           engine,
           {

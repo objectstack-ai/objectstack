@@ -39,6 +39,7 @@ import {
   hashMigrationPlan,
   MigrationJournalRefusal,
   MigrationPlanRegistry,
+  type MigrationChunkContext,
   type MigrationPlan,
   type MigrationPlanStep,
 } from './migration-journal';
@@ -410,6 +411,199 @@ describe('plan-hash mismatch on resume (acceptance case 3)', () => {
     // Same steps, same rows, different chunking — "chunk 1" means something
     // different in each, so resuming across them must not be allowed.
     expect(a).not.toBe(b);
+  });
+});
+
+// ── a resume compares what the run started over (#21528) ─────────────────
+
+/**
+ * Run `plan` until a forward reaches run-global chunk `killAt`, and hand back
+ * the database as a process killed there leaves it: the runner's own
+ * `run_started` and every committed chunk, `chunk_started(killAt)` with no
+ * `chunk_done`. The killed forward writes nothing before it stops, so the
+ * tables at that moment ARE the post-crash state; a second engine gets a
+ * copy, because the first one is still inside the dead chunk's transaction.
+ */
+async function crashAt(
+  engine: FakeEngine,
+  plan: MigrationPlan,
+  killAt: number,
+  options: { chunkSize?: number } = {},
+): Promise<{ restarted: FakeEngine; runId: string }> {
+  let runId = '';
+  let reached: () => void = () => {};
+  const atKill = new Promise<void>((resolve) => { reached = resolve; });
+  const crashing: MigrationPlan = {
+    ...plan,
+    steps: plan.steps.map((s) => ({
+      ...s,
+      async forward(rows: unknown[], ctx: MigrationChunkContext, e: Parameters<typeof runMigrationJournal>[0]) {
+        if (ctx.chunkIndex !== killAt) return s.forward(rows, ctx, e);
+        runId = ctx.runId;
+        reached();
+        return new Promise<void>(() => {});
+      },
+    })),
+  };
+  void runMigrationJournal(asEngine(engine), crashing, options);
+  await atKill;
+  const restarted = new FakeEngine();
+  restarted.tables = new Map([...engine.tables].map(([k, v]) => [k, v.map((r) => ({ ...r }))]));
+  return { restarted, runId };
+}
+
+const ITEMS = 'items';
+const ITEMS_DONE = 'items_done';
+
+/**
+ * A step whose `load()` selects only the work still to do — `items` rows
+ * without an `items_done` row — so it shrinks as the run commits chunks, the
+ * shape `recorded-by`'s plan has. Its forward writes through the engine, so a
+ * rolled-back chunk takes its writes with it.
+ */
+function makeShrinkingStep(
+  engine: FakeEngine,
+  n: number,
+  overrides: Partial<MigrationPlanStep<{ id: string }>> = {},
+): MigrationPlanStep<{ id: string }> & { forwarded: string[][]; compensated: string[][] } {
+  engine.tables.set(ITEMS, Array.from({ length: n }, (_, i) => ({ id: `i${i}` })));
+  const forwarded: string[][] = [];
+  const compensated: string[][] = [];
+  return {
+    name: 'shrinking',
+    forwarded,
+    compensated,
+    async load(e) {
+      const done = new Set((await e.find(ITEMS_DONE, {})).map((r: { id: string }) => r.id));
+      return (await e.find(ITEMS, {}))
+        .filter((r: { id: string }) => !done.has(r.id))
+        .map((r: { id: string }) => ({ id: r.id }));
+    },
+    async forward(rows, ctx, e) {
+      forwarded.push(rows.map((r) => r.id));
+      for (const r of rows) await e.insert(ITEMS_DONE, { id: r.id }, { context: ctx.context as never });
+    },
+    async compensate(rows) { compensated.push(rows.map((r) => r.id)); },
+    ...overrides,
+  };
+}
+
+const doneIds = (e: FakeEngine) => (e.tables.get(ITEMS_DONE) ?? []).map((r) => r.id);
+const chunkEvents = async (e: FakeEngine, runId: string, kind: string) =>
+  (await readRunJournal(asEngine(e), runId)).filter((ev) => ev.kind === kind).map((ev) => ev.chunk_index);
+
+describe('a resume compares what the run started over, not what load() returns now (#21528)', () => {
+  it('resumes a run killed after a committed chunk when load() selects only the remaining work', async () => {
+    const engine = new FakeEngine();
+    const step = makeShrinkingStep(engine, 5);
+    const plan: MigrationPlan = { id: 'p', steps: [step], chunkSize: 2, onCrash: 'resume' };
+    const { restarted, runId } = await crashAt(engine, plan, 1);
+    expect(doneIds(restarted)).toEqual(['i0', 'i1']); // chunk 0 committed
+
+    const result = await resumeMigrationJournal(asEngine(restarted), plan, runId);
+
+    expect(result).toMatchObject({ status: 'completed', chunksTotal: 3, chunksCommitted: 3 });
+    // The rows load() returns now belong, in order, to chunks 1 and 2; chunk 0
+    // is not run again.
+    expect(step.forwarded).toEqual([['i0', 'i1'], ['i2', 'i3'], ['i4']]);
+    expect(doneIds(restarted)).toEqual(['i0', 'i1', 'i2', 'i3', 'i4']);
+    expect(await chunkEvents(restarted, runId, 'chunk_started')).toEqual([0, 1, 1, 2]);
+    expect(await chunkEvents(restarted, runId, 'chunk_done')).toEqual([0, 1, 2]);
+  });
+
+  it('resumes a run whose load() does not shrink with each chunk\'s rows where the journal put them', async () => {
+    const engine = new FakeEngine();
+    const step = makeStep(6);
+    const plan: MigrationPlan = { id: 'p', steps: [step], chunkSize: 2, onCrash: 'resume' };
+    const { restarted, runId } = await crashAt(engine, plan, 1);
+
+    const result = await resumeMigrationJournal(asEngine(restarted), plan, runId);
+
+    expect(result).toMatchObject({ status: 'completed', chunksTotal: 3, chunksCommitted: 3 });
+    expect(step.written).toEqual([0, 1, 2, 3, 4, 5]); // each row once; chunk 0 not redone
+  });
+
+  it('resumes a run with the chunk size it started with, from the journal — not the plan\'s current one', async () => {
+    const engine = new FakeEngine();
+    const step = makeShrinkingStep(engine, 5);
+    // Started at 2, the way `--chunk-size 2` starts one; the plan handed back
+    // for the resume declares no size, so its own would be the default 200.
+    const { restarted, runId } = await crashAt(engine, { id: 'p', steps: [step] }, 0, { chunkSize: 2 });
+
+    const result = await resumeMigrationJournal(asEngine(restarted), { id: 'p', steps: [step] }, runId);
+
+    expect(result).toMatchObject({ status: 'completed', chunksTotal: 3, chunksCommitted: 3 });
+    expect(step.forwarded).toEqual([['i0', 'i1'], ['i2', 'i3'], ['i4']]);
+  });
+
+  it('still refuses PLAN_CHANGED a plan whose declared identity changed (the control), and writes nothing', async () => {
+    for (const changed of [
+      (s: MigrationPlanStep<{ id: string }>): MigrationPlan => ({ id: 'p', steps: [{ ...s, name: 'shrinking, v2' }], chunkSize: 2 }),
+      (s: MigrationPlanStep<{ id: string }>): MigrationPlan => ({ id: 'p.v2', steps: [s], chunkSize: 2 }),
+      (s: MigrationPlanStep<{ id: string }>): MigrationPlan => ({ id: 'p', steps: [s, { ...s, name: 'added' }], chunkSize: 2 }),
+    ]) {
+      const engine = new FakeEngine();
+      const step = makeShrinkingStep(engine, 5);
+      const { restarted, runId } = await crashAt(engine, { id: 'p', steps: [step], chunkSize: 2 }, 1);
+      const before = (restarted.tables.get(JOURNAL) ?? []).length;
+
+      await expect(resumeMigrationJournal(asEngine(restarted), changed(step), runId))
+        .rejects.toMatchObject({ name: 'MigrationJournalRefusal', code: 'PLAN_CHANGED' });
+      expect((restarted.tables.get(JOURNAL) ?? []).length).toBe(before);
+      expect(doneIds(restarted)).toEqual(['i0', 'i1']);
+    }
+  });
+
+  it('refuses PLAN_CHANGED when load() returns neither every row the run started over nor exactly the rows it had left', async () => {
+    const engine = new FakeEngine();
+    const step = makeShrinkingStep(engine, 5);
+    const plan: MigrationPlan = { id: 'p', steps: [step], chunkSize: 2 };
+    const { restarted, runId } = await crashAt(engine, plan, 1);
+    // A row appeared under the run: it started over 5 rows and had 3 left,
+    // and load() now returns 4.
+    restarted.tables.get(ITEMS)!.push({ id: 'i5' });
+    const before = (restarted.tables.get(JOURNAL) ?? []).length;
+
+    const refusal = await resumeMigrationJournal(asEngine(restarted), plan, runId).catch((e: unknown) => e);
+
+    expect(refusal).toBeInstanceOf(MigrationJournalRefusal);
+    expect(refusal).toMatchObject({ code: 'PLAN_CHANGED' });
+    expect((refusal as Error).message).toContain("step 'shrinking'"); // the binding refusal names its step
+    expect((restarted.tables.get(JOURNAL) ?? []).length).toBe(before);
+  });
+
+  it('halts the unwind at a chunk an earlier process committed, rather than compensating other rows', async () => {
+    const engine = new FakeEngine();
+    const step = makeShrinkingStep(engine, 5);
+    const plan: MigrationPlan = { id: 'p', steps: [step], chunkSize: 2, onCrash: 'resume' };
+    const { restarted, runId } = await crashAt(engine, plan, 1);
+    const failing: MigrationPlan = {
+      ...plan,
+      steps: [{
+        ...step,
+        async forward(rows, ctx, e) {
+          if (ctx.chunkIndex === 2) throw new Error('chunk 2 fails on the resume');
+          return step.forward(rows, ctx, e);
+        },
+      }],
+    };
+
+    const result = await resumeMigrationJournal(asEngine(restarted), failing, runId);
+
+    // Chunk 1, committed by this process, is compensated with its own rows.
+    // Chunk 0's rows left load() when it committed, so nothing here knows
+    // them: the run halts `failed` instead of compensating some other rows
+    // and journalling a clean unwind.
+    expect(result.status).toBe('failed');
+    expect(step.compensated).toEqual([['i2', 'i3']]);
+    expect(await chunkEvents(restarted, runId, 'compensated')).toEqual([1]);
+    const failure = (await readRunJournal(asEngine(restarted), runId)).at(-1)!;
+    expect(failure).toMatchObject({ kind: 'run_failed', chunk_index: 0 });
+    const detail = JSON.parse(failure.detail!);
+    expect(detail).toMatchObject({ phase: 'compensate', step: 'shrinking' });
+    // A halt that says why — not a compensate() that was handed no rows and threw.
+    expect(detail).toHaveProperty('reason');
+    expect(detail).not.toHaveProperty('error');
   });
 });
 
