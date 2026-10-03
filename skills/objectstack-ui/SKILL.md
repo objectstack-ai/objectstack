@@ -205,7 +205,7 @@ Use this CRM-style structure as the canonical UI assembly reference:
 | UI Surface | Typical Location | Pattern to Follow |
 |:--|:--|:--|
 | Multi-view object UI | `src/views/*.view.ts` | Define default `list` + `form`, then named `listViews` / `formViews` for scenarios |
-| **Public / anonymous form** | `src/views/*.view.ts` (formView with `sharing.allowAnonymous: true`) | Web-to-Lead / Web-to-Case. Auto-exposed at `GET/POST /api/v1/forms/:slug` |
+| **Public form** | `src/views/*.view.ts` (formView with `sharing: { enabled: true, allowAnonymous: true, publicLink: 'slug' }`) | Web-to-Lead at `GET/POST /api/v1/forms/:slug` |
 | App navigation | `src/apps/*.app.ts` | Use grouped nav trees, `viewName` shortcuts, and `requiresObject` for capability-aware visibility |
 | **Analytics dataset** | `src/datasets/*.dataset.ts` | One per object you want reportable — dashboards and reports bind a **declared** dataset by name, so an object without one has no analytics face |
 | Dashboards | `src/dashboards/*.dashboard.ts` | Combine KPI + chart + table widgets with shared `dateRange` and `globalFilters` |
