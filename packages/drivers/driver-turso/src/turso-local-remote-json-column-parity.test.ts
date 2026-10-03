@@ -12,7 +12,7 @@
  * in `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS` on a column it
  * stores as JSON TEXT (#7398, the set widened by #21009) and answers
  * `$contains` / `$notContains` by MEMBERSHIP through `jsonMembershipPredicate`
- * (#17590 / #20987). REMOTE mode compiles in `RemoteTransport.buildWhereSQL`,
+ * (commit e04a0aff2 / #20987). REMOTE mode compiles in `RemoteTransport.buildWhereSQL`,
  * an independent emitter that read neither, so over the same multi-value
  * lookup holding `["u1","u2"]`, `["u2"]`, `["u3","u1"]` and `["u10"]` it
  * answered — measured on this harness before the change:
