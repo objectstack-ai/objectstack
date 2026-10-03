@@ -28,9 +28,11 @@
  * ## The dialect axis
  *
  * The SQLite cell always runs. The PostgreSQL cell runs where
- * `OS_TEST_POSTGRES_URL` is set and is a named skip otherwise; no CI step
- * provisions that variable for this package, so the live cell is red-capable
- * and un-run in CI. The live cell owns its table, dropped before and after.
+ * `OS_TEST_POSTGRES_URL` is set and is a named skip otherwise; CI provisions
+ * that variable for this package in the Temporal Conformance job's step
+ * "Run the non-SQL temporal backends under the skewed process zone"
+ * (`.github/workflows/ci.yml`), so the live cell is red-capable and runs in
+ * CI. The live cell owns its table, dropped before and after.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

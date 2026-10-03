@@ -1362,8 +1362,16 @@ const actionObject = () => strictObject({
    * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, and an
    * object-less action reads `globalActions.<action>.outcomeMessages.<outcome>`.
    *
-   * Liveness `planned` until the console reader lands — the ledger row names
-   * its carrier.
+   * Liveness: the ledger row was `planned` until the console reader landed,
+   * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `ab1879721`, read 2026-10-03). The reader is objectui#11344 (objectui
+   * `c476be0e0`): `ActionRunner.composeSuccessMessage`
+   * (`core/src/actions/ActionRunner.ts:1497`) picks `outcomeMessages[outcome]`
+   * off the handler's return value, falls back to `successMessage` and then to
+   * the runner's default text, and fills `${result.*}` in whichever it shows.
+   * The four action renderers forward the key to the runner (`action:bar`
+   * spreads a registered action onto `action:button` whole). At `89cad75d5570`
+   * no objectui source outside its types named the key.
    */
   outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
   // Runtime (ActionRunner) already honours this — declared here so authors can

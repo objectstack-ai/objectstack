@@ -73,6 +73,14 @@
  * (`judgeJobBody`) — and the install-local install route refuses a package that
  * declares one enabled.
  *
+ * A job's identity is the package's and the job's name together, as the
+ * metadata registry keys it (`<packageId>:<name>`), so two packages may each
+ * declare a job of the same name and both run (#21602). The job service keys by
+ * one string, so a job is scheduled under its authored name unless another
+ * package already holds that name on the service, and then under the registry's
+ * package-scoped key ({@link jobKeyFor}). A runtime where no two packages share
+ * a job name schedules every job under its authored name, exactly as before.
+ *
  * ## A hook with no `body`, on a door that carries no runtime module (#21585)
  *
  * The same holds for a hook in the deprecated function-name `handler` form, with
@@ -452,13 +460,21 @@ export interface AppArtifactJobScheduling {
  * job the same `timeoutMs` also bounds the sandbox run — the one limit
  * `JobSchema.timeoutMs` states.
  *
+ * Each job is scheduled under the key {@link jobKeyFor} gives it (#21602): its
+ * authored name, or — when another package already holds that name on the job
+ * service — the registry's package-scoped `<appId>:<name>`, so the two coexist
+ * rather than the later one replacing the earlier. The key is the job SERVICE's
+ * name for the job (the `sys_job` / `sys_job_run` name an operator reads); the
+ * job's own code and every count this function returns keep the authored name.
+ *
  * Re-scheduling replaces, it never accumulates (#21489), as the hook and
- * action halves do: `IJobService.schedule` replaces a job of the same name, and
- * every job this app scheduled on the job service before and does not schedule
- * now — dropped by the new version, disabled, or no longer runnable — is
- * CANCELLED ({@link retireAppJobs}). A call with no jobs at all cancels
- * everything the app scheduled. The package's uninstall cancels the rest, through
- * the uninstall cleanup this function registers ({@link ensureJobUninstallCleanup}).
+ * action halves do: a reinstall schedules each job under the key it already
+ * holds, which `IJobService.schedule` replaces, and every job this app
+ * scheduled on the job service before and does not schedule now — dropped by
+ * the new version, disabled, or no longer runnable — is CANCELLED
+ * ({@link retireAppJobs}). A call with no jobs at all cancels everything the
+ * app scheduled. The package's uninstall cancels the rest, through the
+ * uninstall cleanup this function registers ({@link ensureJobUninstallCleanup}).
  *
  * Never throws: a job that fails to schedule is logged at `error` with its own
  * counter (a silent outage otherwise — the app looks healthy and the work never
@@ -589,9 +605,12 @@ export async function scheduleAppArtifactJobs(
             form = 'handler';
         }
 
+        // [#21602] The job service's name for this job: the authored name, or
+        // the package-scoped key when another package already holds it.
+        const { key, heldBy } = jobKeyFor(jobService, appId, jobName);
         try {
             await jobService.schedule(
-                jobName,
+                key,
                 // #4567: authoring tier → boundary tier. `job.schedule` is the
                 // PARSED `Schedule`, whose cron `expression` is the ADR
                 // expression envelope `{dialect,source}`; `IJobService.schedule`
@@ -604,7 +623,14 @@ export async function scheduleAppArtifactJobs(
                     : undefined,
             );
             (form === 'body' ? out.bodies : out.handlers).push(jobName);
-            claimJobName(jobService, appId, jobName);
+            claimJobKey(jobService, appId, jobName, key);
+            if (heldBy !== undefined) {
+                logger.info(
+                    `${tag} job '${jobName}' is also declared by package '${heldBy}', which holds that name on the job service — `
+                    + `scheduled under its package-scoped identity '${key}', the name it carries in the job catalogue and run history`,
+                    { appId, job: jobName, scheduledAs: key, heldBy },
+                );
+            }
         } catch (err: any) {
             out.failed.push(jobName);
             // #4567: a job that fails to schedule is a SILENT OUTAGE — the app
@@ -646,18 +672,17 @@ export async function scheduleAppArtifactJobs(
 // ─── Cancelling a package's jobs: replace, and uninstall (#21489) ───────
 
 /**
- * Which job names each app's scheduling put on a job service, keyed by the job
- * service instance — one per kernel, so two kernels in one process never share
- * a record, and a record goes with its kernel.
+ * Which jobs each app's scheduling put on a job service — per app, each
+ * authored job name and the KEY it is scheduled under ({@link jobKeyFor}) —
+ * keyed by the job service instance: one per kernel, so two kernels in one
+ * process never share a record, and a record goes with its kernel.
  *
- * A job's `name` is its identity on the job service, and it is not namespaced
- * by package: the LAST app to schedule a name owns it ({@link claimJobName}),
- * so cancelling one app's jobs never stops a job another app scheduled under
- * the same name afterwards.
+ * A key is held by one app at a time, so cancelling one app's jobs — a replace
+ * or its uninstall — never stops a job another app scheduled (#21602).
  */
-const SCHEDULED_BY_APP = new WeakMap<object, Map<string, Set<string>>>();
+const SCHEDULED_BY_APP = new WeakMap<object, Map<string, Map<string, string>>>();
 
-function scheduledByApp(svc: IJobService): Map<string, Set<string>> {
+function scheduledByApp(svc: IJobService): Map<string, Map<string, string>> {
     let record = SCHEDULED_BY_APP.get(svc);
     if (!record) {
         record = new Map();
@@ -666,26 +691,73 @@ function scheduledByApp(svc: IJobService): Map<string, Set<string>> {
     return record;
 }
 
-/** `appId` now owns `jobName` on `svc`; no other app's record still claims it. */
-function claimJobName(svc: IJobService, appId: string, jobName: string): void {
-    const record = scheduledByApp(svc);
-    for (const [owner, names] of record) {
-        if (owner !== appId) names.delete(jobName);
+/** The app whose record holds `key` on `svc`, other than `appId` — or `undefined`. */
+function otherHolderOf(svc: IJobService, appId: string, key: string): string | undefined {
+    for (const [owner, jobs] of scheduledByApp(svc)) {
+        if (owner === appId) continue;
+        for (const held of jobs.values()) if (held === key) return owner;
     }
-    const mine = record.get(appId) ?? new Set<string>();
-    mine.add(jobName);
-    record.set(appId, mine);
+    return undefined;
 }
 
 /**
- * Cancel every job `appId` scheduled on `svc` that is not in `keep`, through
- * `IJobService.cancel` — the verb every adapter implements (the cron adapter
- * stops its timer, the DB adapter also marks the `sys_job` row inactive).
- * Returns the names cancelled.
+ * The key `appId`'s job `jobName` is scheduled under on `svc` (#21602).
+ *
+ * The job's identity is `(appId, jobName)` — the metadata registry keys a
+ * packaged item `<packageId>:<name>` — but the job service keys by one string
+ * and REPLACES a job of the same name, so two packages' same-named jobs need two
+ * strings. In order:
+ *
+ *   1. the key this app already holds the job under — a reinstall replaces its
+ *      own job and keeps its catalogue row and run history;
+ *   2. else the authored name, when no other package holds it — so a runtime
+ *      in which no two packages share a job name schedules every job under its
+ *      authored name, unchanged;
+ *   3. else the registry's package-scoped key `<appId>:<jobName>`, which no
+ *      authored name can equal (`JobSchema.name` is snake_case, so it never
+ *      carries the `:`) and no other app ever derives.
+ *
+ * `heldBy` names the package that holds the authored name when (3) applies:
+ * the package that scheduled it first in this process — on a restart, the
+ * first package the boot schedules.
+ */
+function jobKeyFor(svc: IJobService, appId: string, jobName: string): { key: string; heldBy?: string } {
+    const mine = scheduledByApp(svc).get(appId)?.get(jobName);
+    if (mine !== undefined) return { key: mine };
+    const heldBy = otherHolderOf(svc, appId, jobName);
+    return heldBy === undefined ? { key: jobName } : { key: `${appId}:${jobName}`, heldBy };
+}
+
+/**
+ * `appId` now holds `jobName` on `svc` under `key`. No other app's record still
+ * claims that key — so another app's replace or uninstall can never cancel it.
+ */
+function claimJobKey(svc: IJobService, appId: string, jobName: string, key: string): void {
+    const record = scheduledByApp(svc);
+    for (const [owner, jobs] of record) {
+        if (owner === appId) continue;
+        for (const [name, held] of jobs) if (held === key) jobs.delete(name);
+    }
+    const mine = record.get(appId) ?? new Map<string, string>();
+    mine.set(jobName, key);
+    record.set(appId, mine);
+}
+
+/** `name`, or `name (scheduled as key)` when the job service knows the job by its package-scoped key. */
+function describeScheduledJob(name: string, key: string): string {
+    return key === name ? name : `${name} (scheduled as ${key})`;
+}
+
+/**
+ * Cancel every job `appId` scheduled on `svc` whose authored name is not in
+ * `keep`, through `IJobService.cancel` on the key it was scheduled under — the
+ * verb every adapter implements (the cron adapter stops its timer, the DB
+ * adapter also marks the `sys_job` row inactive). Returns the authored names
+ * cancelled.
  *
  * A cancel that throws leaves its job RUNNING for a package that no longer
  * declares it — code that should have stopped keeps executing while the
- * install answered success — so it is logged at `error`, and the name stays on
+ * install answered success — so it is logged at `error`, and the job stays on
  * the record for the next replace or the uninstall to retry.
  */
 async function retireAppJobs(
@@ -698,18 +770,21 @@ async function retireAppJobs(
     const record = scheduledByApp(svc);
     const previous = record.get(appId);
     const cancelled: string[] = [];
-    const remaining = new Set<string>(keep);
-    for (const name of previous ?? []) {
-        if (keep.has(name)) continue;
+    const remaining = new Map<string, string>();
+    for (const [name, key] of previous ?? []) {
+        if (keep.has(name)) {
+            remaining.set(name, key);
+            continue;
+        }
         try {
-            await svc.cancel(name);
+            await svc.cancel(key);
             cancelled.push(name);
         } catch (err: any) {
-            remaining.add(name);
+            remaining.set(name, key);
             logger.error(
                 `${tag} a job its package no longer schedules could NOT be cancelled — it keeps running until the runtime restarts`,
                 err as Error,
-                { appId, job: name },
+                { appId, job: name, scheduledAs: key },
             );
         }
     }
@@ -742,7 +817,9 @@ const JOB_CLEANUP_REGISTERED = new WeakSet<object>();
  *
  * Registered from here, the moment a package's jobs are first scheduled on a
  * kernel, because scheduling is what creates something to cancel; the record
- * the cleanup reads is the one {@link claimJobName} keeps. The package id the
+ * the cleanup reads is the one {@link claimJobKey} keeps, so it cancels each
+ * job under the key it was scheduled under and never another package's job of
+ * the same name (#21602). The package id the
  * cleanup receives is the app id the jobs were scheduled under: install-local
  * passes the manifest id, which is what it schedules under. A protocol without
  * the registry registers nothing, and says nothing here: the uninstall door
@@ -763,13 +840,14 @@ function ensureJobUninstallCleanup(ctx: PluginContext, svc: IJobService): void {
         const before = [...(scheduledByApp(svc).get(packageId) ?? [])];
         if (before.length === 0) return { success: true, removed: 0 };
         const cancelled = await retireAppJobs(svc, packageId, new Set(), logger, '[uninstall]');
-        const left = before.filter((name) => !cancelled.includes(name));
+        const left = before.filter(([name]) => !cancelled.includes(name));
         return left.length === 0
             ? { success: true, removed: cancelled.length }
             : {
                 success: false,
                 removed: cancelled.length,
-                error: `${left.length} job(s) of the uninstalled package could not be cancelled and keep running until the runtime restarts: ${left.join(', ')}`,
+                error: `${left.length} job(s) of the uninstalled package could not be cancelled and keep running until the runtime restarts: `
+                    + left.map(([name, key]) => describeScheduledJob(name, key)).join(', '),
             };
     });
 }

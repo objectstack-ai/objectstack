@@ -1070,38 +1070,55 @@ jobs:
               ;;
           esac
 
-          # ── the publish in flight, before any Releases backfill ───────────
+          # ── the publish in flight, before any backfill ────────────────────
           # npm settles BEFORE the publish job reaches its own "Create GitHub
-          # Releases" step, so a landing audited in that window found the group
-          # complete and wrote the same Releases beside it: on 17.6.0 the
-          # publish of run 36955885276 wrote them 03:03:47Z -> 03:05:42Z, this
-          # backfill in run 36958423332 started at 03:04:37Z, and five tags got
-          # two Release objects each. The two writers are in different runs,
-          # so no `needs:` can order them; the publish's own run creates its
-          # Releases and D4 asset, and a landing after it finishes backfills
-          # whatever it did not. scripts/release-pending-publish.mjs `in-flight`
-          # (its --self-test, run by lint.yml, holds the rule) answers
-          # `in-flight` on anything it cannot read, so nothing is backfilled off
-          # a guess. It only ever leaves `releases-missing` unset: this step
-          # stays green and the image request below is not its business.
+          # Releases" step, and before that run's `docker` job even exists (it
+          # needs `publish`, so GitHub creates it when the publish job
+          # completes). A landing audited in that window found the group
+          # complete and wrote beside the publishing run. On 17.6.0 the publish
+          # of run 36955885276 wrote its Releases 03:03:47Z -> 03:05:42Z, this
+          # backfill in run 36958423332 started writing them at 03:04:37Z, and
+          # five tags got two Release objects each; and both runs built and
+          # pushed the 17.6.0 image, 03:05:49Z -> 03:10:02Z beside 03:05:48Z ->
+          # 03:09:18Z. The writers are in different runs, so no `needs:` can
+          # order them; the publishing run creates its Releases, D4 asset and
+          # image, and a landing after it finishes backfills whatever it did
+          # not. scripts/release-pending-publish.mjs `in-flight` (its
+          # --self-test, run by lint.yml, holds the rule) answers both in one
+          # read: `.state` for the publish job, `.docker.state` for that run's
+          # image build, in flight from the approval until its docker job
+          # completes. Anything it cannot read answers `in-flight`, so nothing
+          # is backfilled off a guess. It only ever leaves `releases-missing`
+          # and `image-missing` unset: this step stays green.
+          flight_asked=true
+          flight=$(GITHUB_TOKEN="$GH_TOKEN" node scripts/release-pending-publish.mjs in-flight --version "$version" --version-commit "$version_commit" --head "$SHA" --workflow release.yml) || flight_asked=false
+          if [ "$flight_asked" = true ]; then
+            jq -c . <<<"$flight"
+          fi
           if [ "$releases_ok" = true ]; then
             echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
-          elif ! flight=$(GITHUB_TOKEN="$GH_TOKEN" node scripts/release-pending-publish.mjs in-flight --version "$version" --version-commit "$version_commit" --head "$SHA" --workflow release.yml); then
+          elif [ "$flight_asked" != true ]; then
             echo "::warning::${version}'s GitHub Releases or ADR-0087 D4 asset are incomplete, and whether its publish is still in flight could not be asked (reason above). Nothing is backfilled off a guess; the next landing reads again."
           elif [ "$(jq -r '.state' <<<"$flight")" != 'clear' ]; then
-            jq -c . <<<"$flight"
             if [ "$(jq -r '.reason' <<<"$flight")" = 'publish-in-flight' ]; then
               echo "::notice::${version}'s GitHub Releases or ADR-0087 D4 asset are incomplete, but its publish is still in flight ($(jq -r '.detail' <<<"$flight")). That run creates them; nothing is backfilled beside it. A landing after it finishes backfills whatever it did not."
             else
               echo "::warning::${version}'s GitHub Releases or ADR-0087 D4 asset are incomplete, and whether its publish is still in flight could not be read ($(jq -r '.detail' <<<"$flight")). Nothing is backfilled off a guess; the next landing reads again."
             fi
           else
-            jq -c . <<<"$flight"
             echo "::warning::${version} is on npm but its GitHub Releases or the ADR-0087 D4 asset are incomplete (#4900) — backfilling."
             echo "releases-missing=true" >> "$GITHUB_OUTPUT"
           fi
           if [ "$image_ok" = true ]; then
             echo "ghcr: image for $version is present."
+          elif [ "$flight_asked" != true ]; then
+            echo "::warning::No ghcr image for ${version} (or the registry could not be probed), and whether its publishing run is still building it could not be asked (reason above). No Docker job is requested off a guess; the next landing reads again."
+          elif [ "$(jq -r '.docker.state' <<<"$flight")" != 'clear' ]; then
+            if [ "$(jq -r '.docker.reason' <<<"$flight")" = 'docker-in-flight' ]; then
+              echo "::notice::No ghcr image for ${version} yet, but its publishing run has not finished building it ($(jq -r '.docker.detail' <<<"$flight")). That run pushes the image; no Docker job is requested beside it. A landing after it finishes requests one if the image is still missing."
+            else
+              echo "::warning::No ghcr image for ${version} (or the registry could not be probed), and whether its publishing run is still building it could not be read ($(jq -r '.docker.detail' <<<"$flight")). No Docker job is requested off a guess; the next landing reads again."
+            fi
           else
             echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
             echo "image-missing=true" >> "$GITHUB_OUTPUT"

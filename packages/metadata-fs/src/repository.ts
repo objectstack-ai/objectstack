@@ -227,7 +227,7 @@ export class FileSystemRepository implements MetadataRepository {
    * `terminate()`, which is the same routine the consumer's own
    * `iterator.return()` runs, so no consumer has to tell "the repository shut
    * down under me" apart from "I broke my own loop". A synthetic drain event
-   * would be the wrong shape and was measured to be so (#11021): the
+   * would be the wrong shape and was measured to be so (commit 7d81c889f): the
    * subscriptions most in need of draining are exactly the ones whose filter
    * or numeric `since` drops it, and delivering an event has never ended an
    * iterator.

@@ -4,8 +4,9 @@
 /**
  * release-pending-publish -- WHICH commit a release publishes, WHICH push queues
  * its approval prompt, WHICH waiting prompts are no longer a release
- * (ADR-0125 D1, as amended 2026-09-29), and WHETHER a version's publish is in
- * flight, so the Releases backfill does not write beside it.
+ * (ADR-0125 D1, as amended 2026-09-29), and WHETHER a version's publish, or its
+ * publishing run's image build, is in flight, so neither backfill (the
+ * Releases, the runtime image) writes beside it.
  *
  *   node scripts/release-pending-publish.mjs select --event push --head SHA --before SHA
  *   node scripts/release-pending-publish.mjs select --event workflow_dispatch --head SHA
@@ -135,7 +136,7 @@
  * `--dry-run` reports what `sweep` would cancel and refuses any non-GET request
  * at the HTTP layer, so it is safe to point at the live repository.
  *
- * `in-flight` -- the Releases backfill's guard. `release-integrity` backfills
+ * `in-flight` -- the backfills' guard. `release-integrity` backfills
  * the GitHub Releases of a version whose whole fixed group is on npm, and npm
  * settles BEFORE the publish job reaches its own "Create GitHub Releases"
  * step. So a landing audited in that window used to write the same Releases
@@ -163,10 +164,26 @@
  * cannot find is not unreadable: the filters still speak for it, and a guard
  * that blocked on it would block the repair of that version for good.
  *
- * It skips writes and refuses nothing: the audit leaves `releases-missing`
- * unset, says why, and stays green. Read-only by construction: it runs over
- * the `--dry-run` HTTP layer, so a non-GET cannot leave it. Permission:
- * `actions: read`.
+ * The same read answers the image backfill (`docker` in the answer, beside the
+ * publish job's top-level verdict). `release-integrity` requests the runtime
+ * image of a version whose whole group is on npm and whose image is missing,
+ * and npm settles before the publishing run's own `docker` job even exists:
+ * that job is `needs: [release-integrity, publish]`, so GitHub creates it when
+ * the publish job completes. Measured on 17.6.0: run 36955885276's publish job
+ * completed at 03:05:45Z and its docker job was created that second and built
+ * 03:05:49Z -> 03:10:02Z, while the backfill of run 36958423332, requested by
+ * an audit that read the image missing at about 03:04Z, built 03:05:48Z ->
+ * 03:09:18Z. Both pushed the 17.6.0 tag. So the image is in flight in a run
+ * that holds the version's publish job past the `release` environment (not
+ * `waiting`) until every docker job of that run is `completed` -- including
+ * while it has none yet. A publish held at the environment builds nothing
+ * before a human approves it, so it is not in flight for the image either, and
+ * an unreadable read answers `in-flight` with reason `unreadable` here too.
+ *
+ * It skips writes and refuses nothing: the audit leaves `releases-missing` and
+ * `image-missing` unset, says why, and stays green. Read-only by construction:
+ * it runs over the `--dry-run` HTTP layer, so a non-GET cannot leave it.
+ * Permission: `actions: read`.
  *
  * ## Why the pins live here, not in the workflow
  *
@@ -759,7 +776,7 @@ async function sweep({ workflow, dryRun }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Is this version's publish in flight? (the Releases backfill's guard)
+// Is this version's publish, or its image build, in flight? (the backfills' guard)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -773,30 +790,83 @@ export const PUBLISH_SETTLED_JOB_STATUSES = Object.freeze(['completed', 'waiting
 export const IN_FLIGHT_RUN_FILTERS = Object.freeze(['in_progress', 'queued']);
 
 /**
+ * `release.yml`'s `docker` job as the jobs API names it: `Docker image` while
+ * it is skipped, `Docker image / <the called job>` once the reusable workflow
+ * it calls runs. Measured: run 36955885276's `Docker image / Build & push
+ * ghcr.io/objectstack-ai/objectstack`, run 37148267152's skipped `Docker image`.
+ * A rename that this misses reads as "not yet created", so the image counts as
+ * in flight until the publishing run completes: late, never early.
+ */
+export const DOCKER_JOB_NAME = /^Docker image(?: \/ .+)?$/;
+
+/**
+ * The publishing run's image build -- pure, one run. A run is the version's
+ * publishing run when it holds the version's publish job past the `release`
+ * environment (any status but `waiting`: approved, running or done). Its
+ * `docker` job is `needs: [release-integrity, publish]`, so GitHub creates it
+ * only when the publish job completes: until every docker job of the run is
+ * `completed`, including while there is none yet, the image is in flight.
+ * Null when the run is not that version's publishing run.
+ */
+function dockerInFlightIn(run, publishName) {
+  const publish = run.jobs.find((j) => j.name === publishName && j.status !== 'waiting');
+  if (!publish) return null;
+  const docker = run.jobs.filter((j) => DOCKER_JOB_NAME.test(j.name));
+  if (docker.length > 0 && docker.every((j) => j.status === 'completed')) return null;
+  return {
+    run: String(run.id),
+    event: run.event,
+    publish: publish.status,
+    docker: docker.length === 0 ? 'not yet created' : docker.map((j) => j.status).join('+'),
+  };
+}
+
+/**
  * Judge the runs read for one version -- pure. Each run is `{ id, event,
  * status, jobs }`; `jobs` may be null only for a completed run. A run that is
  * not completed and was not read past its status answers `unreadable`.
+ *
+ * Two answers from one read: the top level is the publish job's (the Releases
+ * backfill's guard), and `docker` is the image build of that version's
+ * publishing run (the image backfill's guard), each `in-flight` or `clear`.
+ * A completed run is settled for both: its jobs, the docker job included,
+ * have all finished.
  */
 export function judgePublishInFlight({ version, runs, currentRunId }) {
   const name = `Publish ${version} to npm (awaiting approval)`;
   const inFlight = [];
+  const building = [];
   for (const run of runs) {
     const id = String(run.id);
     if (id === String(currentRunId) || run.status === 'completed') continue;
     if (!Array.isArray(run.jobs)) {
-      return { state: 'in-flight', reason: 'unreadable', detail: `run ${id} is ${run.status} and its jobs were not read`, inFlight };
+      const detail = `run ${id} is ${run.status} and its jobs were not read`;
+      return { state: 'in-flight', reason: 'unreadable', detail, inFlight, docker: { state: 'in-flight', reason: 'unreadable', detail, inFlight: building } };
     }
     for (const job of run.jobs) {
       if (job.name === name && !PUBLISH_SETTLED_JOB_STATUSES.includes(job.status)) {
         inFlight.push({ run: id, event: run.event, status: job.status });
       }
     }
+    const image = dockerInFlightIn(run, name);
+    if (image) building.push(image);
   }
+  const docker =
+    building.length > 0
+      ? {
+          state: 'in-flight',
+          reason: 'docker-in-flight',
+          detail: `image build not finished in ${building
+            .map((b) => `run ${b.run} (${b.event}, publish job ${b.publish}, Docker image ${b.docker})`)
+            .join(', ')}`,
+          inFlight: building,
+        }
+      : { state: 'clear', reason: 'none-in-flight', detail: `no other run is still building ${version}'s image after publishing it`, inFlight: building };
   if (inFlight.length > 0) {
     const where = inFlight.map((f) => `run ${f.run} (${f.event}, job ${f.status})`).join(', ');
-    return { state: 'in-flight', reason: 'publish-in-flight', detail: `"${name}" is in flight in ${where}`, inFlight };
+    return { state: 'in-flight', reason: 'publish-in-flight', detail: `"${name}" is in flight in ${where}`, inFlight, docker };
   }
-  return { state: 'clear', reason: 'none-in-flight', detail: `no other run holds "${name}" in flight`, inFlight };
+  return { state: 'clear', reason: 'none-in-flight', detail: `no other run holds "${name}" in flight`, inFlight, docker };
 }
 
 /**
@@ -853,9 +923,10 @@ export async function collectPublishRuns({ http, repo, workflow, tips, currentRu
 
 /**
  * The guard's whole answer for one version, never a throw: whatever cannot be
- * read answers `in-flight` with reason `unreadable`, so the caller backfills
- * nothing off a guess. `walk` yields the version commits of the head
- * (`versionCommitsOf`); the first must be the one the caller names.
+ * read answers `in-flight` with reason `unreadable`, for the publish job and
+ * the image build alike, so the caller backfills nothing off a guess. `walk`
+ * yields the version commits of the head (`versionCommitsOf`); the first must
+ * be the one the caller names.
  */
 export async function publishInFlight({ http, repo, workflow, version, versionCommit, walk, currentRunId = '' }) {
   try {
@@ -868,12 +939,23 @@ export async function publishInFlight({ http, repo, workflow, version, versionCo
     }
     const read = await collectPublishRuns({ http, repo, workflow, tips: first.tips, currentRunId });
     const verdict = judgePublishInFlight({ version, runs: read.runs, currentRunId });
-    if (read.pushRuns.length === 0 && verdict.state === 'clear') {
-      verdict.detail += `; no push run of ${workflow} was found at the version commit, so the run-list filters alone speak for it`;
+    if (read.pushRuns.length === 0) {
+      const note = `; no push run of ${workflow} was found at the version commit, so the run-list filters alone speak for it`;
+      if (verdict.state === 'clear') verdict.detail += note;
+      if (verdict.docker.state === 'clear') verdict.docker.detail += note;
     }
     return { version, ...verdict, readings: read.readings };
   } catch (err) {
-    return { version, state: 'in-flight', reason: 'unreadable', detail: err instanceof Error ? err.message : String(err), inFlight: [], readings: '' };
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      version,
+      state: 'in-flight',
+      reason: 'unreadable',
+      detail,
+      inFlight: [],
+      docker: { state: 'in-flight', reason: 'unreadable', detail, inFlight: [] },
+      readings: '',
+    };
   }
 }
 
@@ -912,8 +994,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a shallow clone or an unresolvable version commit -> refused, never a boundary commit or an empty answer': 2,
   'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
   "a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight": 12,
+  "the publishing run's image build -> in flight from the approval until its docker job completes, and an unreadable read is in flight": 12,
 });
-const SELF_TEST_BATTERY_FLOOR = 21;
+const SELF_TEST_BATTERY_FLOOR = 22;
 
 async function selfTest() {
   let failed = 0;
@@ -1511,6 +1594,86 @@ async function selfTest() {
       readOnly = /--dry-run refuses POST/.test(String(err && err.message));
     }
     check(readOnly, 'the HTTP layer in-flight runs over refuses a non-GET before it is sent');
+
+    // The same read, asked about the publishing run's image build. Opened in
+    // this block on purpose: it reuses the stub API above rather than a copy.
+    battery("the publishing run's image build -> in flight from the approval until its docker job completes, and an unreadable read is in flight");
+    const docker = (status, name = 'Docker image / Build & push ghcr.io/objectstack-ai/objectstack') => ({ name, status });
+    const run176 = (jobs, status = 'in_progress') => ({ id: 36955885276, event: 'push', status, jobs: [integrity, ...jobs] });
+    const publishing = judge([run176([job('17.6.0', 'in_progress')])]);
+    check(
+      publishing.docker.state === 'in-flight' && publishing.docker.reason === 'docker-in-flight' &&
+        /run 36955885276 \(push, publish job in_progress, Docker image not yet created\)/.test(publishing.docker.detail),
+      'the 17.6.0 audit at 03:04Z: the publish job runs and its docker job does not exist yet -> the image is in flight, naming the run',
+    );
+    const between = judge([run176([job('17.6.0', 'completed')])]);
+    check(
+      between.state === 'clear' && between.docker.state === 'in-flight' && /Docker image not yet created/.test(between.docker.detail),
+      'the publish job completed and GitHub has not created the docker job yet -> the publish is clear, the image still in flight',
+    );
+    check(
+      ['queued', 'in_progress', 'waiting', 'some_new_status'].every((s) => judge([run176([job('17.6.0', 'completed'), docker(s)])]).docker.state === 'in-flight') &&
+        judge([run176([job('17.6.0', 'completed'), docker('queued', 'Docker image')])]).docker.state === 'in-flight',
+      'the docker job queued, in_progress, waiting or in a status this script does not know, under either of its names -> in flight',
+    );
+    check(
+      judge([run176([job('17.6.0', 'completed'), docker('completed')])]).docker.state === 'clear' &&
+        judge([run176([job('17.6.0', 'completed'), docker('completed', 'Docker image')])]).docker.state === 'clear' &&
+        judge([{ id: 36955885276, event: 'push', status: 'completed', jobs: null }]).docker.state === 'clear',
+      'a completed docker job, in a run still finishing or in a completed run -> clear, so the image probe alone decides the backfill',
+    );
+    const held = judge([{ id: 3, event: 'workflow_dispatch', status: 'waiting', jobs: [integrity, job('17.6.0', 'waiting')] }]);
+    check(
+      held.state === 'clear' && held.docker.state === 'clear',
+      'a publish held at the release environment builds nothing before a human approves it -> clear for the image too',
+    );
+    check(
+      judge([
+        { id: 900, event: 'push', status: 'in_progress', jobs: [job('17.6.0', 'completed')] },
+        { id: 6, event: 'push', status: 'in_progress', jobs: [job('17.7.0', 'completed')] },
+        { id: 7, event: 'push', status: 'in_progress', jobs: [{ name: 'Publish ${{ needs.release-integrity.outputs.cli-version }} to npm (awaiting approval)', status: 'completed' }, docker('in_progress')] },
+      ]).docker.state === 'clear',
+      "the calling run, another version's publishing run, and a run whose skipped publish job names no version -> clear",
+    );
+    const unreadJobs = judge([{ id: 8, event: 'push', status: 'in_progress', jobs: null }]);
+    check(
+      unreadJobs.docker.state === 'in-flight' && unreadJobs.docker.reason === 'unreadable',
+      'a run still running whose jobs were never read -> unreadable for the image too, never clear',
+    );
+
+    const pushedAt = { dcc5ef4c: [runAt(36955885276, 'push', 'in_progress')] };
+    const imageWindow = await flightWith({
+      tips: pushedAt,
+      direct: { 36955885276: runAt(36955885276, 'push', 'in_progress', [integrity, job('17.6.0', 'completed')]) },
+    });
+    check(
+      imageWindow.answer.state === 'clear' && imageWindow.answer.docker.state === 'in-flight' && imageWindow.answer.docker.reason === 'docker-in-flight',
+      'through the whole read: the push run at the version commit has published and not built its image -> the publish clear, the image in flight',
+    );
+    const imageBuilt = await flightWith({
+      tips: pushedAt,
+      direct: { 36955885276: runAt(36955885276, 'push', 'in_progress', [integrity, job('17.6.0', 'completed'), docker('completed')]) },
+    });
+    check(imageBuilt.answer.state === 'clear' && imageBuilt.answer.docker.state === 'clear', '...and once that docker job completed -> clear for both');
+    const dispatchedImage = await flightWith({
+      filters: { in_progress: [runAt(77, 'workflow_dispatch', 'in_progress')] },
+      direct: { 77: runAt(77, 'workflow_dispatch', 'in_progress', [job('17.6.0', 'completed'), docker('in_progress')]) },
+    });
+    check(dispatchedImage.answer.docker.state === 'in-flight', "a repair-lane run's image build, which only the in_progress filter lists -> in flight");
+    const unreadImage = await Promise.all([
+      flightWith({ fail: /status=queued/ }),
+      flightWith({ tips: pushedAt, direct: { 36955885276: runAt(36955885276, 'push', 'in_progress') }, fail: /\/jobs/ }),
+      flightWith({ walk: (function* shallow() { throw new Error('refusing to list version commits in a shallow clone'); })() }),
+    ]);
+    check(
+      unreadImage.every((u) => u.answer.docker.state === 'in-flight' && u.answer.docker.reason === 'unreadable'),
+      'a filter answering non-200, jobs answering non-200, or a shallow clone -> the image is unreadable, so in flight',
+    );
+    const lostImage = await flightWith();
+    check(
+      lostImage.answer.docker.state === 'clear' && /no push run of release\.yml was found/.test(lostImage.answer.docker.detail),
+      'no push run found and nothing in flight -> the image is clear on the filters, and the answer says so',
+    );
   }
 
   battery('an event with no release predicate -> refused');

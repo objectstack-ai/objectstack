@@ -117,7 +117,7 @@ export function buildEnv(
  * `*When` gate is exactly such a surface — it binds `record` / `previous` /
  * `parent` and nothing else — and it used to carry a hand-written DENYLIST of
  * three roots instead. A denylist structurally cannot track this list: every
- * root added here (`current_user` arrived in #6290) is silently unreported at
+ * root added here (`current_user` arrived in commit e9b526597) is silently unreported at
  * that surface until somebody remembers to copy it over, and #6713 measured 21
  * roots sitting in that gap.
  *
@@ -144,7 +144,7 @@ export const SCOPE_ROOTS = [
   // env doesn't misread `current.x` as a bare field reference.
   'current',
   // ADR-0068 D1's CANONICAL user root, and the last one this list was missing
-  // (#6290). `buildScope` mounts the same `EvalUser` object under
+  // (commit e9b526597). `buildScope` mounts the same `EvalUser` object under
   // `current_user` / `user` / `ctx.user` / `os.user` whenever the evaluation
   // carries a user, and this package already told the rest of the platform so:
   // `introspectScope` lists `current_user` among the roots it hands an author,
@@ -157,7 +157,7 @@ export const SCOPE_ROOTS = [
 
 /*
  * Why widening this list is the safe direction, and where the narrow verdict
- * lives instead (#6290).
+ * lives instead (commit e9b526597).
  *
  * This list is a "never faults" BASELINE, not a per-surface contract —
  * `SCOPE_ROOTS`'s own doc-comment opens by saying exactly that, and every entry
@@ -170,7 +170,7 @@ export const SCOPE_ROOTS = [
  *
  * That matters here because field- and section-level `visibleWhen` genuinely do
  * NOT bind `current_user` (#6146, measured at both ends: `evalFieldPredicate`
- * binds `record` + `previous` + `parent` and nothing else). Before #6290 that
+ * binds `record` + `previous` + `parent` and nothing else). Before commit e9b526597 that
  * surface's rejection came out of this list's omission as a SIDE EFFECT, and it
  * showed: the diagnostic was the generic bare-field one, so it prescribed
  * "Write `record.current_user`" — a shape that binds on no layer at all. A
