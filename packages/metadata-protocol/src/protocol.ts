@@ -18018,9 +18018,14 @@ export class ObjectStackProtocolImplementation implements
      * as the row's failure instead of re-saving it.
      *
      * `VALIDATION_ERROR` / 400, the envelope of the two name checks it sits
-     * beside. The prescription is the ruling's: save the container under its
-     * object's name, or save a view item under the expanded name. Runtime
-     * words carry no tracker number.
+     * beside. The prescription names the stored container that expands the
+     * name, and gives two arms: add the view as a member of THAT container, or
+     * save a view item under the expanded name. ⛔ It never prescribes a save
+     * under a name another stored container holds — not even the object's own
+     * name, which in the card's pair IS the sibling: an author (or an AI)
+     * following such an arm literally would replace the sibling's row and drop
+     * the very view this refusal keeps serving. Runtime words carry no tracker
+     * number.
      */
     private async containerSiblingExpansionNameRefusal(
         type: string,
@@ -18052,9 +18057,9 @@ export class ObjectStackProtocolImplementation implements
             `Invalid view container: it is saved under '${saveName}', which is a name the stored container `
             + `'${hit.container.name}' expands (its ${String(hit.item.viewKind)} view on '${object}'). An expanded `
             + `view fills only a name that has no stored row of its own, and this container would be that row, so `
-            + `that view would no longer be served and no read would answer a view under '${saveName}'. Save the `
-            + `container under its object's name, '${object}', or save a view item (name, object, viewKind and `
-            + `config) under '${saveName}'.`,
+            + `that view would no longer be served and no read would answer a view under '${saveName}'. Add the `
+            + `view as a member of the container '${hit.container.name}' (its list, listViews, form or formViews), `
+            + `or save a view item (name, object, viewKind and config) under '${saveName}'.`,
         ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
         err.code = 'VALIDATION_ERROR';
         err.status = 400;

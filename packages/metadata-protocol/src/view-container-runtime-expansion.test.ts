@@ -1474,6 +1474,21 @@ describe('#21334 a container on another package\'s object never takes that packa
                     });
                 }
 
+                it('the prescription names the sibling container that expands the name and never prescribes a save under it — in the card\'s pair the object\'s own name IS that sibling', async () => {
+                    const { protocol, rows, registry } = showcaseHarness(environmentId);
+                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
+                    const PIPELINE = `${LEAD}.pipeline`;
+                    const error = await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE)));
+                    // The envelope, and the sibling named as the container that expands the name.
+                    expectRefused(error, PIPELINE, LEAD);
+                    // A save under the sibling's name would replace its row and drop `pipeline`,
+                    // the view this refusal keeps serving: no arm may name that save.
+                    expect(error.message, 'no save is prescribed under the sibling\'s (here the object\'s) name')
+                        .not.toContain(`under '${LEAD}'`);
+                    expectNothingWritten(rows, registry, [LEAD], PIPELINE);
+                    await expectServed(protocol, PIPELINE, undefined, 'Lead Pipeline');
+                });
+
                 it('an environment-wide sibling is in an organization caller\'s selection: that caller\'s save under its expanded name is refused', async () => {
                     const { protocol, rows, registry } = showcaseHarness(environmentId);
                     await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
