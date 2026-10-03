@@ -54,7 +54,34 @@ import { MIGRATION_JOURNAL_OBJECT } from '@objectstack/spec/system';
  * operators to ignore this plugin's output, which is the one thing it cannot
  * afford. A scan that FAILS, by contrast, is reported: "I could not check" and
  * "there is nothing to find" are different answers.
+ *
+ * ## Where it is composed (#21498)
+ *
+ * Once per kernel that can host a plan — never twice, because the registry is
+ * the one place a plan's owner and `os migrate resume` meet:
+ *
+ *  - every `os serve` boot (and so `os start` / `os dev`, which spawn it),
+ *    beside `PlatformObjectsPlugin`, which registers the journal this scans.
+ *    A host config that composes its own instance keeps it;
+ *  - the `os migrate` data boot (`buildDataMigrationPlugins` in the CLI), with
+ *    `bootScan: false` — see {@link MigrationRecoveryPluginOptions.bootScan}.
  */
+export interface MigrationRecoveryPluginOptions {
+  /**
+   * Run the `kernel:ready` journal scan. Default `true`: a serving boot is
+   * discovery.
+   *
+   * `false` composes the `migration-plans` registry alone, which is what a
+   * one-shot `os migrate` boot takes (#21498). That boot IS the action surface
+   * the scan points an operator at — `os migrate resume` lists the journal
+   * itself — and its read-only modes hold schema DDL back, so on a database the
+   * journal table was never created on the scan can only answer "scan failed".
+   * Measured: composed with the scan, a dry run on a fresh database gained that
+   * warning, and `os migrate resume` printed every interrupted run twice.
+   */
+  readonly bootScan?: boolean;
+}
+
 export class MigrationRecoveryPlugin implements Plugin {
   readonly name = 'com.objectstack.migration-recovery';
   readonly type = 'standard';
@@ -64,6 +91,11 @@ export class MigrationRecoveryPlugin implements Plugin {
   readonly optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
 
   private readonly registry = new MigrationPlanRegistry();
+  private readonly bootScan: boolean;
+
+  constructor(options: MigrationRecoveryPluginOptions = {}) {
+    this.bootScan = options.bootScan !== false;
+  }
 
   async init(ctx: PluginContext): Promise<void> {
     // Registered in init so plugins that contribute plans can find the service
@@ -72,6 +104,7 @@ export class MigrationRecoveryPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    if (!this.bootScan) return; // registry only — see MigrationRecoveryPluginOptions.bootScan
     (ctx as any)?.hook?.('kernel:ready', async () => {
       const logger = (ctx as any)?.logger;
       let engine: IObjectQLEngine | undefined;

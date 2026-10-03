@@ -56,6 +56,7 @@ export { DriverPlugin } from './driver-plugin.js';
 // runs that started and never concluded, and owns the `migration-plans`
 // registry `os migrate resume` looks plans up in.
 export { MigrationRecoveryPlugin, describeInterruptedRun } from './migration-recovery-plugin.js';
+export type { MigrationRecoveryPluginOptions } from './migration-recovery-plugin.js';
 export { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from './default-datasource-plugin.js';
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFunctionEntries, collectBundleActions } from './app-plugin.js';
