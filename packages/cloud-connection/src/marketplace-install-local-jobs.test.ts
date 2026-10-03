@@ -22,6 +22,8 @@
  *   - refusal: a handler-only enabled job answers `422 VALIDATION_ERROR` naming
  *     the job, its handler and both remedies, and the runtime is left exactly as
  *     it was found — nothing registered, persisted or scheduled;
+ *   - #21585: so does an enabled job whose `body` the declaration refuses (an
+ *     expression body, a `body.timeoutMs`), naming the refused key;
  *   - a package without jobs, and one whose handler-only job is DISABLED,
  *     install unchanged.
  *
@@ -321,6 +323,44 @@ describe('#21489: install-local refuses an enabled job with no body', () => {
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(registered(register)).toEqual([APP_ID]);
         expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+
+    it('#21585: an enabled job whose body is an expression (L1) is refused, naming the key the declaration refuses — and changes nothing', async () => {
+        const { install, jobs, register } = await bootPlugin();
+        const l1 = { name: 'jobs_app_expr', schedule: INTERVAL, body: { language: 'expression', source: '1 + 1' } };
+
+        const res = await install(artifact([BODY_JOB, l1]));
+
+        expect(res.status).toBe(422);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        const message: string = res.payload.error.message;
+        expect(message).toContain(`its enabled job 'jobs_app_expr' (body.language: `);
+        expect(message).toContain('has a `body` the declaration refuses');
+        expect(message).toContain('os validate');
+        expect(registered(register)).toEqual([]);
+        expect(new LocalManifestSource(dir).read(APP_ID).entry).toBeNull();
+        expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+
+    it('#21585: an enabled job whose body carries timeoutMs is refused, naming the one limit', async () => {
+        const { install, jobs } = await bootPlugin();
+        const twoLimits = { ...BODY_JOB, name: 'jobs_app_two_limits', body: { ...BODY_JOB.body, timeoutMs: 5_000 } };
+
+        const res = await install(artifact([twoLimits]));
+
+        expect(res.status).toBe(422);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        expect(res.payload.error.message).toContain(`its enabled job 'jobs_app_two_limits' (body.timeoutMs: `);
+        expect(res.payload.error.message).toContain("job's own `timeoutMs`");
+        expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+
+    it('#21585: a DISABLED job with an off-spec body does not block the install', async () => {
+        const { install } = await bootPlugin();
+
+        const res = await install(artifact([{ name: 'jobs_app_off', schedule: INTERVAL, enabled: false, body: { language: 'expression', source: '1' } }]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
     });
 
     it('a package without jobs installs unchanged — the same answer, nothing scheduled', async () => {

@@ -103,12 +103,13 @@ describe('SqliteWasmDriver date bucket (dateGranularity)', () => {
       expect(caps.month).toBe(true);
       expect(caps.quarter).toBe(true);
       expect(caps.year).toBe(true);
-      // SQLite-specific: ISO week (%V) is not assumed.
-      expect(caps.week).toBe(false);
+      // [#21595] The ISO week too, inherited from SqlDriver's SQLite arm. It
+      // uses no `%V`, so it runs on the SQLite sql.js bundles (3.49.1).
+      expect(caps.week).toBe(true);
     });
   });
 
-  describe.each<Granularity>(['day', 'month', 'quarter', 'year'])(
+  describe.each<Granularity>(['day', 'week', 'month', 'quarter', 'year'])(
     'granularity=%s — native SQL matches bucketDateValue',
     (g) => {
       it('produces the same label set as the in-memory reference', async () => {
@@ -171,30 +172,10 @@ describe('SqliteWasmDriver date bucket (dateGranularity)', () => {
     });
   });
 
-  describe('unsupported granularity', () => {
-    /**
-     * [#6212] The twin of `driver-sql`'s case, moved for the same reason and
-     * kept here rather than dropped: this driver inherits `SqlDriver.aggregate`
-     * but reports a DIFFERENT dialect name in the refusal's tail, which is the
-     * one part of the message a shared implementation cannot prove.
-     */
-    it('refuses week on SQLite with NOT_IMPLEMENTED / 501 (so engine routes to in-memory)', async () => {
-      const err = await driver
-        .aggregate('events', {
-          groupBy: [{ field: 'ts', dateGranularity: 'week' }],
-          aggregations: [{ function: 'count', alias: 'n' }],
-        })
-        .then(
-          () => { throw new Error('expected the driver to refuse week on SQLite'); },
-          (e) => e as Error & { code?: string; status?: number },
-        );
-
-      expect(err.code).toBe('NOT_IMPLEMENTED');
-      expect(err.status).toBe(501);
-      expect(err.message.startsWith("Date bucketing by 'week' is not supported by this backend.")).toBe(true);
-      expect(err.message).toContain('Bucketed here: day, month, quarter, year');
-    });
-  });
+  // [#21595] The `unsupported granularity` twin of driver-sql's #6212 refusal
+  // case used to live here, on `week`. This driver now buckets all five, so no
+  // granularity reaches that refusal on it; driver-sql pins the refusal on a
+  // client it does not model, and `week` runs above with the other four.
 
   describe('mixed groupBy', () => {
     it('combines a plain field with a structured dateGranularity item', async () => {

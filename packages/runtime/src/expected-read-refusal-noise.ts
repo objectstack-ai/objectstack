@@ -16,12 +16,15 @@
  *   * `resolveUserAuthzGrants` (`core/src/security/resolve-authz-context.ts`)
  *     `tryFind`s six `sys_*` tables per grant resolution — the resolver is
  *     fail-closed and must always resolve;
- *   * `ObjectQL.probeInstallOrganizations` (`objectql/src/engine.ts`) reads
- *     `sys_organization` and catches `isMissingTableError` **only**, which its
- *     own doc comment names as "the one benign cause";
- *   * `SeedLoaderService.resolveSoleOrganizationId`
- *     (`metadata-protocol/src/seed-loader.ts`) and
- *     `LifecycleService`'s governance snapshot read the same table best-effort;
+ *   * `ObjectQL.probeInstallOrganizations` (`objectql/src/engine.ts`) asks the
+ *     registry first and never reads an UNREGISTERED `sys_organization`; for a
+ *     registered one it catches `isMissingTableError` **only**, which its own
+ *     doc comment names as the one benign driver cause;
+ *   * `LifecycleService`'s governance snapshot takes the same registry-first
+ *     shape on the same table, and `SeedLoaderService.resolveSoleOrganizationId`
+ *     (`metadata-protocol/src/seed-loader.ts`) reads it best-effort, accepting a
+ *     missing table or the engine's `OBJECT_NOT_FOUND` refusal attributed to
+ *     `sys_organization` itself;
  *   * `runBuildProbes` (`metadata-protocol/src/build-probes.ts`) reads the
  *     object a published view is bound to, and turns a failure into a
  *     `view_read_failed` publish issue rather than an exception;

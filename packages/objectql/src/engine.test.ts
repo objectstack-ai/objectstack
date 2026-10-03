@@ -1406,6 +1406,10 @@ describe('ObjectQL Engine', () => {
                 name: 'invoice',
                 fields: {
                     amount: { type: 'number', readonlyWhen: 'record.locked == true' },
+                    // [#21613] Declared: the rules below read them, and a
+                    // write's prior read now carries the declared fields only.
+                    locked: { type: 'boolean' },
+                    limit: { type: 'number' },
                 },
                 validations: [{ type: 'cross_field', name: 'amount_cap', message: 'amount exceeds limit', condition: 'record.amount > record.limit', fields: ['amount'] }],
             } as any);
@@ -1466,7 +1470,9 @@ describe('ObjectQL Engine', () => {
         it('reports a readonlyWhen-locked field on a single-id update (reason readonly_when)', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'invoice',
-                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' } },
+                // [#21613] `locked` is declared: the prior read the rule
+                // reads carries the declared fields only.
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' } },
             } as any);
             vi.mocked(mockDriver.findOne).mockResolvedValue({ id: '1', locked: true, amount: 100 } as any);
 
@@ -1483,7 +1489,9 @@ describe('ObjectQL Engine', () => {
         it('reports bulk-path strips too (multi update — locked in ≥1 matched row)', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'invoice',
-                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' } },
+                // [#21613] `locked` is declared: the prior read the rule
+                // reads carries the declared fields only.
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' } },
             } as any);
             vi.mocked(mockDriver.find).mockResolvedValue([
                 { id: 'a', locked: false, amount: 10 },

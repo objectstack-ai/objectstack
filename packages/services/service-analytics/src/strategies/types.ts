@@ -163,10 +163,11 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
   /**
    * [#21441] The date-bucket expression the driver backing `objectName`
    * groups `field` by at `granularity`, as SQL text in that driver's dialect:
-   * `strftime('%Y-%m', …)` on SQLite, `to_char(… AT TIME ZONE 'UTC',
-   * 'YYYY-MM')` on PostgreSQL. `undefined` when the host cannot answer: no
-   * hook wired, a driver with no bucket expression (a non-SQL driver), or a
-   * granularity the driver buckets in memory (`week` on SQLite).
+   * `strftime('%Y-%m', …)` on SQLite, `to_char(…, 'YYYY-MM')` on PostgreSQL
+   * (over `(col)::timestamptz AT TIME ZONE 'UTC'` for a `datetime`, and
+   * `(col)::date::timestamp` for a `date` since #21485). `undefined` when the
+   * host cannot answer: no hook wired, a driver with no bucket expression (a
+   * non-SQL driver), or a SQL client that driver does not model.
    *
    * `ObjectQLStrategy.generateSql` prints a date-bucketed dimension in this
    * expression, so its echo runs on that dialect and answers the face's

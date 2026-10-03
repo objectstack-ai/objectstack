@@ -18,6 +18,14 @@ import type {
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import {
+    ephemeralStoredHashDigest,
+    redactStoredMetadataRows,
+    serveStoredMetadataHashColumnRows,
+    storedMetadataBodyProjection,
+    type StoredHashDigest,
+} from '@objectstack/metadata-protocol';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate, interpolateFilter, type VariableMap } from './template.js';
 import { refuseNode } from '../guard-refusal.js';
@@ -197,6 +205,72 @@ function resolveFieldValues(
 }
 
 /**
+ * [#21519] The keyed digest a stored content hash is served under: the data
+ * engine's registered crypto provider's (`getKeyedDigest`, read at the moment
+ * of use, because a host registers the provider after the kernel starts), else
+ * `@objectstack/metadata-protocol`'s process-scoped ephemeral key. The same two
+ * sources, in the same order, the generic data door reads, so the hash this
+ * node serves is the hash the door serves for the same row: one key, never a
+ * second one.
+ */
+function storedHashDigestOf(data: IDataEngine): StoredHashDigest {
+    const accessor = (data as { getKeyedDigest?: () => StoredHashDigest | undefined }).getKeyedDigest;
+    const provider = typeof accessor === 'function' ? accessor.call(data) : undefined;
+    return provider ?? ephemeralStoredHashDigest;
+}
+
+/**
+ * [#21519] Run one `get_record` read and serve its answer the way the generic
+ * data door serves the same rows.
+ *
+ * The stored-metadata-body family (`sys_metadata` / `sys_metadata_history`,
+ * judged by the family's own predicate, `isStoredMetadataBodyObject`) holds a
+ * stored metadata body, credential material included, and a content hash over
+ * that whole body. Every door that serves either serves the body as its type's
+ * read projection and the hash in keyed form. A flow's read node is such a
+ * door: what it reads becomes the run's output, a flow caller is handed that
+ * back, and any record the flow writes from it is a copy. Both run identities
+ * are served the same way: `runAs: 'system'` reads elevated, so the engine
+ * cannot tell this read from the platform's own internal readers, which need
+ * the stored form. The rule is therefore applied here, at the node.
+ *
+ * Built only from the door's own functions (`@objectstack/metadata-protocol`),
+ * never a copy: the projection (`storedMetadataBodyProjection`, which adds the
+ * `type` column a body-only projection needs to choose its redactor; it is
+ * taken back off the served rows), the redactor (`redactStoredMetadataRows`)
+ * and the keyed serve (`serveStoredMetadataHashColumnRows`, under
+ * {@link storedHashDigestOf}). Any other object is read and returned as is.
+ */
+async function serveFamilyRead<A>(
+    data: IDataEngine,
+    objectName: string,
+    fields: string[] | undefined,
+    read: (fields: string[] | undefined) => Promise<A>,
+): Promise<A> {
+    if (!isStoredMetadataBodyObject(objectName)) return read(fields);
+    const projection = storedMetadataBodyProjection(objectName, fields);
+    const answer = await read(projection.fields as string[] | undefined);
+    const opts = { dropType: projection.addedType };
+    const digest = storedHashDigestOf(data);
+    if (Array.isArray(answer)) {
+        return (await serveStoredMetadataHashColumnRows(
+            objectName,
+            redactStoredMetadataRows(objectName, answer, opts),
+            digest,
+        )) as A;
+    }
+    if (answer !== null && typeof answer === 'object') {
+        const [served] = await serveStoredMetadataHashColumnRows(
+            objectName,
+            redactStoredMetadataRows(objectName, [answer], opts),
+            digest,
+        );
+        return served as A;
+    }
+    return answer;
+}
+
+/**
  * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
  * `delete_record`, wired to the runtime data layer (ObjectQL / IDataEngine).
  * Part of the platform baseline, so the core {@link AutomationServicePlugin}
@@ -288,9 +362,12 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #1888 — honor flow.runAs: read under the run's effective identity
                 // (system → RLS-bypassing; user → the triggering user).
                 const dataCtx = resolveRunDataContext(context);
+                // [#21519] A read of the stored-metadata family is served the
+                // data door's way under either identity: body projected, hash keyed.
                 try {
                     if (limit && limit > 1) {
-                        const records = await data.find(objectName, { where: filter, fields, limit, context: dataCtx });
+                        const records = await serveFamilyRead(data, objectName, fields, (projection) =>
+                            data.find(objectName, { where: filter, fields: projection, limit, context: dataCtx }));
                         if (outputVariable) variables.set(outputVariable, records);
                         // #4354 — the `selected` half of the broken-sweep signal:
                         // this is the count that made #4347 diagnosable at all
@@ -301,7 +378,8 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             metrics: { selected: Array.isArray(records) ? records.length : 0 },
                         };
                     }
-                    const record = await data.findOne(objectName, { where: filter, fields, context: dataCtx });
+                    const record = await serveFamilyRead(data, objectName, fields, (projection) =>
+                        data.findOne(objectName, { where: filter, fields: projection, context: dataCtx }));
                     if (outputVariable) variables.set(outputVariable, record);
                     return {
                         success: true,

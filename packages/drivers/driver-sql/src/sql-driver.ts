@@ -6101,9 +6101,14 @@ export class SqlDriver implements IDataDriver {
       return { day: true, month: true, quarter: true, year: true, week: true };
     }
     if (this.isSqlite) {
-      // SQLite's strftime gained ISO week (%V) in 3.46 (2024-05-23); play it safe
-      // and bucket week in-memory. Day/month/year/quarter are universally available.
-      return { day: true, month: true, quarter: true, year: true, week: false };
+      // [#21595] All five, `week` included. The ISO week is computed by the
+      // Thursday rule through date modifiers (the `week` arm of
+      // `buildDateBucketExpr`), never `strftime('%V')` / `'%G'`: those arrived
+      // in SQLite 3.46, and libSQL (`driver-turso`) bundles an older engine.
+      // Measured: better-sqlite3 13.0.3 runs 3.53.4, `@libsql/client` 0.18.0
+      // runs 3.45.1 (where `%V` answers NULL), sql.js 1.14.2
+      // (`driver-sqlite-wasm`) runs 3.49.1. The expression runs on all three.
+      return { day: true, month: true, quarter: true, year: true, week: true };
     }
     return {};
   }
@@ -6185,7 +6190,22 @@ export class SqlDriver implements IDataDriver {
         case 'month':   return fmt('%Y-%m');
         case 'day':     return fmt('%Y-%m-%d');
         case 'quarter': return { sql: `(strftime('%Y', ${arg}) || '-Q' || ((cast(strftime('%m', ${arg}) as integer) - 1) / 3 + 1))`, bindings: [...argBindings, ...argBindings] };
-        case 'week':    return null; // see capabilities note
+        case 'week': {
+          // [#21595] The ISO 8601 week, `YYYY-Www`: the label the PostgreSQL
+          // arm's `IYYY"-W"IW` and the MySQL arm's `%x-W%v` answer. A week
+          // belongs to the year of its Thursday. `'-3 days', 'weekday 4'` moves
+          // any day to the Thursday of its Monday-start week (a Monday moves
+          // +3, a Sunday -3), so that Thursday's `%Y` is the week-numbering
+          // year and `(%j - 1) / 7 + 1` of it is the week number. Both
+          // modifiers predate every SQLite this platform ships, unlike `%V`
+          // (see `dateGranularityCapabilities`). No zone is read, so a
+          // `Field.date` stays its calendar day.
+          const thursday = (f: string) => `strftime('${f}', ${arg}, '-3 days', 'weekday 4')`;
+          return {
+            sql: `(${thursday('%Y')} || '-W' || printf('%02d', (cast(${thursday('%j')} as integer) - 1) / 7 + 1))`,
+            bindings: [...argBindings, ...argBindings],
+          };
+        }
       }
     }
 
@@ -6195,10 +6215,9 @@ export class SqlDriver implements IDataDriver {
   /**
    * [#21441] The date-bucket expression this dialect groups `field` by at
    * `granularity` (the one {@link aggregate} runs), rendered as SQL text, or
-   * `null` where {@link buildDateBucketExpr} has none: a granularity this
-   * dialect buckets in memory (`week` on SQLite, see
-   * {@link dateGranularityCapabilities}), or a client this driver does not
-   * model.
+   * `null` where {@link buildDateBucketExpr} has none: a client this driver
+   * does not model, whose {@link dateGranularityCapabilities} row is empty.
+   * SQLite, PostgreSQL and MySQL render all five granularities.
    *
    * It is for callers that PRINT the statement an aggregate stands for rather
    * than run it. `service-analytics`' ObjectQL face echoes a date-bucketed
