@@ -460,8 +460,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             where,
             path: `${path}.type`,
             message:
-              `approver type '${type}' is declared but not implemented by the runtime (#3508) — ` +
-              `the slot resolves to nobody and the request stalls.`,
+              `approver type '${type}' is declared but not implemented by the runtime: it was deprecated ` +
+              `rather than built, and is no longer offered for authoring — the slot resolves to nobody and ` +
+              `the request stalls.`,
             hint:
               `Route to people the engine can expand: { type: 'team' | 'department' | 'position', ... }. ` +
               `Queue approvers need a real ownership-queue implementation before they take effect.`,
@@ -524,7 +525,8 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `approver entry, e.g. { type: 'org_membership_level', value: 'owner' }, or declare ` +
             `onEmptyApprovers: 'fallback' with a fallbackApprovers list for the node to open on ` +
             `when the groups come back empty. A request that still lands empty is recoverable ` +
-            `only by a platform/tenant admin override (#3424).`,
+            `only by a platform/tenant admin override, which may act on any pending request so that ` +
+            `one nobody in its slate can decide never stays stuck.`,
         });
       }
 

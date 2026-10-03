@@ -507,6 +507,36 @@ const PARITY: Record<string, { def: Record<string, unknown>; blank: 'refused' | 
   },
 };
 
+/**
+ * The parity case's own budget (#21428): {@link PARITY_MS_PER_SHAPE} per shape,
+ * so it grows with the battery. Vitest's default 5000ms is one budget for the
+ * whole case, and this case is a loop. It ran past 5000ms twice on a loaded
+ * Test Core shard.
+ *
+ * Measured with phase timers in a throwaway copy of this file, on a 4-vCPU box
+ * that other jobs shared. The whole file ran each time, so this case ran after
+ * the 25 cases above it, as it does in CI.
+ *
+ *   load                         whole case    boot     register+sync  loop
+ *   idle, 5 runs                 941-1085ms    5-6ms    14-15ms        920-1063ms
+ *   2 runs of the file at once   1105-1671ms   5-7ms    15-21ms        1084-1642ms
+ *   8 busy loops, 3 runs         2232-2632ms   9-10ms   31-46ms        2190-2576ms
+ *   24 busy loops, 3 runs        7654-8371ms   36-44ms  91-142ms       7525-8165ms
+ *
+ * The loop is 98% of the case under every load, and its cost is the work this
+ * case asserts on. Each shape builds a template through the real route, parses
+ * the workbook, and imports a row through the real import door, about a third
+ * of the loop each. The engine boot is already warm at this point in the file,
+ * and boot plus registering and syncing the 20 objects is 2% of the case, so
+ * moving the boot into a `beforeAll` would not fix this.
+ *
+ * The budget per shape: the slowest per-shape cost measured above is 419ms
+ * (8371ms / 20, at 24 busy loops). 1000ms is about 2.4x that, and about 18x the
+ * slowest idle cost (1085ms / 20 = 54ms). For the 20 shapes here the case gets
+ * 20000ms.
+ */
+const PARITY_MS_PER_SHAPE = 1_000;
+
 describe('the `*` agrees with the engine: starred exactly when the import door refuses a blank', () => {
   it('for every shape of default the engine reads', async () => {
     const { get, importRoute, engine } = await boot();
@@ -546,7 +576,7 @@ describe('the `*` agrees with the engine: starred exactly when the import door r
       }
     }
     expect(disagreements).toEqual([]);
-  });
+  }, Object.keys(PARITY).length * PARITY_MS_PER_SHAPE);
 });
 
 // ---------------------------------------------------------------------------

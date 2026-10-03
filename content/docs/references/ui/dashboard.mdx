@@ -31,13 +31,13 @@ const result = DashboardSchema.parse(data);
 | **name** | `string` | ✅ | Dashboard unique name |
 | **label** | `string \| Record<string, string>` | ✅ | Dashboard label |
 | **description** | `string \| Record<string, string>` | optional | Dashboard description |
-| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: object[] }` | optional | Dashboard header configuration |
-| **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; … }[]` | ✅ | Widgets to display |
+| **header** | `{ showTitle?: boolean; showDescription?: boolean; actions?: object[] }` | optional | Dashboard header configuration |
+| **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
 | **gap** | `integer` | optional | Space between widgets, in steps of 0.25rem (4 = 1rem) |
 | **refreshIntervalSeconds** | `number` | optional | Auto-refresh interval in seconds |
 | **refreshInterval** | `never` | optional | [REMOVED] `dashboard.refreshInterval` was renamed to `refreshIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `refreshIntervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
+| **dateRange** | `{ field?: string; defaultRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange?: boolean }` | optional | Global dashboard date range filter configuration |
 | **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
 | **aria** | `never` | optional | [REMOVED] `dashboard.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no dashboard renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **performance** | `never` | optional | [REMOVED] `dashboard.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
@@ -228,8 +228,8 @@ Dashboard header action
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |
 | **showDataLabels** | `boolean` | optional (default: `false`) | Display data labels |
-| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
-| **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
+| **annotations** | `{ type?: Enum<'line' \| 'region'>; axis?: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
+| **interaction** | `{ tooltips?: boolean; brush?: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `never` | optional | [REMOVED] `ChartConfig.aria` — authored as `dashboard.widgets[].chartConfig.aria`, `report.chart.aria` and `report.blocks[].chart.aria` — was removed in @objectstack/spec 17 (ADR-0049 D2). No chart renderer ever applied it: the chart implementation declares no `aria` prop, the presentation lowering names it nowhere, and the react `<ObjectChart>` block never published it, so ARIA attributes declared here parsed and then silently did not reach the DOM. Delete the key. The accessible name that IS applied on this same chart config is its sibling `description`, which the chart renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared `AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Nested Shape: `DashboardWidget.compareTo`
@@ -271,8 +271,8 @@ Chart APPEARANCE for a dataset-bound widget (ADR-0021): title, subtitle, descrip
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |
 | **showDataLabels** | `boolean` | optional (default: `false`) | Display data labels |
-| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
-| **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
+| **annotations** | `{ type?: Enum<'line' \| 'region'>; axis?: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
+| **interaction** | `{ tooltips?: boolean; brush?: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `never` | optional | [REMOVED] `ChartConfig.aria` — authored as `dashboard.widgets[].chartConfig.aria`, `report.chart.aria` and `report.blocks[].chart.aria` — was removed in @objectstack/spec 17 (ADR-0049 D2). No chart renderer ever applied it: the chart implementation declares no `aria` prop, the presentation lowering names it nowhere, and the react `<ObjectChart>` block never published it, so ARIA attributes declared here parsed and then silently did not reach the DOM. Delete the key. The accessible name that IS applied on this same chart config is its sibling `description`, which the chart renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared `AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Nested Shape: `DashboardWidgetChartConfig.annotations[number]`

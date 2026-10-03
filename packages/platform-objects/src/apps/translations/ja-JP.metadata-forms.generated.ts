@@ -2400,10 +2400,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "メモリ",
         helpText: "長期メモリ: ユーザーごとに保持される要約ノート。各会話の前に呼び出され、配信済みのやり取り reflectionInterval 回ごとに 1 回のリフレクションで書き込まれます。長期メモリを有効にする場合、maxEntries と reflectionInterval は必須です。クラウド AI ランタイムが適用します。"
       },
-      lifecycle: {
-        label: "ライフサイクル",
-        helpText: "会話フローを定義するステートマシン"
-      },
       structuredOutput: {
         label: "構造化出力",
         helpText: "エージェントの最終回答に対する出力契約: JSON 形式、回答の検証に使う JSON Schema、リトライ、フォールバック形式、変換ステップ。クラウド AI ランタイムが適用します。"

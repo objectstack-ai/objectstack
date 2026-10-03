@@ -46,7 +46,15 @@ export const entry: SemanticMigration = {
     + 'own html-page compile refuses `div` the same way. A `div` in such a page, which used to '
     + 'pass unchecked, now fails the command with `jsx-forbidden-tag` and '
     + '`jsx-unknown-component`. A project that keeps its own `sdui.manifest.json` is checked '
-    + 'against that file, as before.',
+    + 'against that file, as before. The runtime save door now holds pages to the same manifest: '
+    + 'a server that `objectstack serve` runs (`dev` and `start` run it too) resolves the '
+    + 'deployment\'s manifest the same way, from the `sdui.manifest.json` beside the served config '
+    + 'and then the copy `@objectstack/console` ships, and the metadata save door compiles an html '
+    + 'page\'s source against it on every publish. A `div` page saved from Studio or through the '
+    + 'metadata API is refused with a `422` under the same rule ids, and a draft is stored as '
+    + 'written and refused at its publish. A server that resolves no manifest says so once at boot '
+    + 'and stores html pages unjudged, as before. Pages already stored are not rewritten; each is '
+    + 'judged the next time it is saved.',
   acceptanceCriteria:
     '`objectstack validate` reports no `jsx-forbidden-tag`, `jsx-unknown-component` or '
     + '`jsx-unknown-prop` finding on any `kind:\'html\'` page and prints no '

@@ -109,11 +109,14 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * parse is DEFENCE IN DEPTH behind a compile-time check, not the only check
  * (#11833).
  *
- * That is a reason to keep it, not to delete it. Types are erased: a
- * JavaScript app supplying its own `executeAggregate`, or host drift arriving
- * through a cube object that never met `CubeSchema`'s parse (the path
- * `aggregate-bridge-function-vocabulary.test.ts` drives end to end), still
- * reaches this seam carrying a method the engine does not declare. What the
+ * That is a reason to keep it, not to delete it. Types are erased, so the
+ * compile-time check proves nothing about the value a caller hands this seam
+ * at run time. A cube object that never met `CubeSchema`'s parse no longer
+ * reaches it with a non-aggregate type — since #21000 the strategy's resolver
+ * refuses that one step earlier (`aggregateOfMeasure`), in the same tier — so
+ * what this guards is the bridge itself: any method that arrives here, from
+ * whatever produced it, is still parsed before the engine sees it
+ * (`aggregate-bridge-function-vocabulary.test.ts` drives both). What the
  * refusal buys is in `plugin.ts`'s forward below and in commit 017130a09: the engine is
  * never handed a `function` no driver declares.
  *
@@ -130,10 +133,10 @@ function parseEngineAggregateFunction(
     throw new Error(
       `[Analytics] The aggregate bridge cannot forward the aggregation ` +
       `"${alias}": "${method}" is not one of the engine's aggregate functions ` +
-      `(${AggregationFunction.options.join(', ')}). A custom-SQL measure is ` +
-      `refused earlier, with a caller-facing diagnostic, by ObjectQLStrategy; ` +
-      `reaching this point means the analytics layer produced a method the ` +
-      `engine contract does not declare.`,
+      `(${AggregationFunction.options.join(', ')}). A cube measure whose type ` +
+      `names no aggregate is refused earlier, by ObjectQLStrategy; reaching ` +
+      `this point means the analytics layer produced a method the engine ` +
+      `contract does not declare.`,
     );
   }
   return parsed.data;
@@ -386,15 +389,19 @@ export class AnalyticsServicePlugin implements Plugin {
             // so there is one vocabulary, and its own error map already
             // carries the `array_agg`/`string_agg` retirement prescriptions.
             //
-            // TIERING, deliberately: the reachable producer of a non-aggregate
-            // method — a custom-SQL measure (`AggregationMetricType`
-            // `number`/`string`/`boolean`) — is already refused upstream with a
-            // caller-blaming 400 by `ObjectQLStrategy.resolveMeasureAggregation`
-            // (commit 017130a09). Anything still arriving here is host drift, which that
-            // refusal's docblock assigns to the undeclared-500 tier — so this
-            // throws rather than re-blaming the caller, and it answers loudly
-            // instead of letting the engine answer `null` per bucket under the
-            // author's own measure name (the #4157 class).
+            // TIERING, deliberately: the producer of a non-aggregate method —
+            // a cube measure whose `type` names no aggregate: a custom-SQL
+            // type (`number`/`string`/`boolean`, retired from
+            // `AggregationMetricType`, #21000) or one the spec never declared
+            // — is already refused upstream by
+            // `ObjectQLStrategy.resolveMeasureAggregation`, in the
+            // undeclared-500 tier with the spec's own words
+            // (`aggregateOfMeasure`). So no cube measure reaches this point
+            // with one; what still could is a method the analytics layer
+            // itself produced, our own drift — so this throws in the same tier
+            // rather than blaming the caller, and it answers loudly instead of
+            // letting the engine answer `null` per bucket under the author's
+            // own measure name (the #4157 class).
             function: parseEngineAggregateFunction(a.method, a.alias),
             field: a.field,
             alias: a.alias,

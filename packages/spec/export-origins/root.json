@@ -131,7 +131,6 @@
     "STACK_RUNTIME_MEMBERS": "src/data/authoring-key-lint.ts#STACK_RUNTIME_MEMBERS (const)",
     "Skill": "src/ai/skill.zod.ts#Skill (type)",
     "StackDefinitionKey": "src/stack.zod.ts#StackDefinitionKey (type)",
-    "StateNodeConfig": "src/automation/state-machine.zod.ts#StateNodeConfig (type)",
     "StoredConversionOptions": "src/conversions/stored.ts#StoredConversionOptions (type)",
     "TemplateExpressionInputSchema": "src/shared/expression.zod.ts#TemplateExpressionInputSchema (const)",
     "Tool": "src/ai/tool.zod.ts#Tool (type)",

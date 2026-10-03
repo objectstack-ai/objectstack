@@ -3,6 +3,7 @@
 import type {
   AuthoredRowWriteOperation,
   AuthoredRowWriteVerdict,
+  ExplainAccessRequest,
   ISharingService,
   IHierarchyScopeResolver,
   RecordShare,
@@ -13,6 +14,7 @@ import type {
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
+  type ExplainDecision,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 // [#7136] Every enforcement method below takes the FULL `resolveAuthzContext`
@@ -287,6 +289,20 @@ export interface SharingSecurityProbe {
     object: string,
     context: unknown,
   ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
+  /**
+   * [ADR-0111 D8 rule 1 — the capability hard stop] `ISecurityService.explain`,
+   * a declared (not optional) contract method, read here for ONE layer of its
+   * declared report: `required_permissions`, the ADR-0066 D3 capability
+   * AND-gate. The explain engine computes that layer with the middleware's own
+   * capability fold, so its `denies` is the refusal the read gate throws.
+   * Used by {@link SharingService.canMintWithoutVisibility} only. Absent while
+   * the service is present, a throw, or a report that does not carry the layer
+   * answers as a refusal.
+   */
+  explain?(
+    request: ExplainAccessRequest,
+    callerContext?: unknown,
+  ): Promise<Pick<ExplainDecision, 'layers'>>;
 }
 
 /** [#5103] The table whose orphans this service owns. */
@@ -364,6 +380,17 @@ export interface SharingServiceOptions {
     debug?: (msg: any, ...rest: any[]) => void;
   };
 }
+
+/**
+ * [ADR-0111 D1] What `SharingService.ownerOrBypass` concluded about a record:
+ * the caller owns it or holds the Modify-All bypass (`admit`), there is
+ * nothing to decide on (`refuse`), or neither branch applies and the record's
+ * `owner` is handed on to the DEPTH branch (`undecided`).
+ */
+type OwnerOrBypassVerdict =
+  | { readonly kind: 'admit' }
+  | { readonly kind: 'refuse' }
+  | { readonly kind: 'undecided'; readonly owner: unknown };
 
 /**
  * Default `ISharingService` implementation.
@@ -950,31 +977,15 @@ export class SharingService implements ISharingService {
     context: ExecutionContext,
   ): Promise<boolean> {
     if (context?.isSystem) return true;
-    if (!object || !recordId || !context?.userId) return false;
 
-    // Ownership — read under system context so field-level masking cannot
-    // hide the owner column from the decision itself. Keep the owner value:
-    // the DEPTH branch below reuses it rather than re-reading the row.
-    let owner: unknown;
-    try {
-      const rows = await this.engine.find(object, {
-        where: { id: recordId },
-        fields: ['id', OWNER_FIELD],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const row: any = Array.isArray(rows) ? rows[0] : undefined;
-      if (!row) return false;
-      owner = row[OWNER_FIELD];
-      if (owner != null && String(owner) === String(context.userId)) return true;
-    } catch {
-      return false;
-    }
-
-    // Modify All Data — the EXPLICIT bypass only (ADR-0111 D1/D2; never the
-    // effective write scope, whose unmatched-object case fails open to 'org').
-    // [#4647] Shared with `canEdit`/`canDelete` so the three gates cannot drift.
-    if (await this.hasModifyAllBypass(object, context)) return true;
+    // The record owner and the Modify-All bypass, read in `ownerOrBypass` —
+    // the two branches this gate shares with mint authority
+    // (`canMintWithoutVisibility`). A verdict there is final; `undecided`
+    // hands the owner value on, so the DEPTH branch below does not re-read
+    // the row.
+    const direct = await this.ownerOrBypass(object, recordId, context);
+    if (direct.kind !== 'undecided') return direct.kind === 'admit';
+    const owner = direct.owner;
 
     const probe = this.securityService?.();
 
@@ -999,6 +1010,148 @@ export class SharingService implements ISharingService {
       }
     }
     return false;
+  }
+
+  /**
+   * [ADR-0111 D8 rule 1 — ruling 5950188467, A′] May `context` mint a share
+   * link on `(object, recordId)` WITHOUT being able to see it?
+   *
+   * Mint authority is "visibility, or the record owner, or an explicit
+   * Modify-All bypass". The link service runs the visibility read itself; this
+   * answers the other two alternatives, and it answers them with
+   * {@link canManageShares}' own first two branches (`ownerOrBypass`) — the
+   * same owner column and the same `hasWriteBypass` probe, so there is one
+   * notion of ownership, not two.
+   *
+   * ## What it deliberately leaves out
+   *
+   * **The hierarchy-depth branch.** A manager whose write DEPTH covers the
+   * owner manages the record's shares (revoke, grant, list — D8 rule 2), but a
+   * link CREATES access, and that manager may hold write depth over a record
+   * the data door will not let them read. Admitting them would let minting
+   * outrun reading; so a hierarchy manager still needs visibility to mint. This
+   * method never calls `resolveWriteScope` or the hierarchy resolver.
+   *
+   * **A deployment that walls organizations.** Under the `group` / `isolated`
+   * postures the visibility read applies Layer 0 (ADR-0095 D1 / ADR-0105 D1),
+   * and neither alternative here knows the record's organization: the owner
+   * column outlives a membership, and `hasWriteBypass` is object-wide. So where
+   * a wall is in force both alternatives are withheld and visibility alone
+   * admits — a member who left an organization cannot mint a public link to a
+   * record they still own in it. The posture is the one
+   * {@link organizationScopeRequired} reads, fail-closed: an unresolvable
+   * posture counts as walled.
+   *
+   * **A capability the object requires.** When the caller lacks a capability
+   * the object's `requiredPermissions` demands for a read (ADR-0066 D3), the
+   * visibility read was refused by that AND-gate, and the gate is a hard stop:
+   * neither alternative applies past it. The owner exception is about the
+   * record ROW (the owner's own record is the thing shared), not about a
+   * capability an administrator withheld from the caller for the whole object;
+   * and a Modify-All holder who lacks it does not "already read everything".
+   * The verdict is the declared `required_permissions` layer of
+   * `ISecurityService.explain` (`capabilityGateRefusesRead`).
+   *
+   * Everything else fails CLOSED to `false`: a missing record, a
+   * principal-less context, a failed read or probe.
+   */
+  async canMintWithoutVisibility(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    if (this.organizationScopeRequired()) return false;
+    if ((await this.ownerOrBypass(object, recordId, context)).kind !== 'admit') return false;
+    // Asked last, and only of a principal an alternative admitted, so a
+    // refused stranger never pays for the explain walk.
+    return !(await this.capabilityGateRefusesRead(object, context));
+  }
+
+  /**
+   * [ADR-0111 D8 rule 1 — the capability hard stop] Does the ADR-0066 D3
+   * capability AND-gate refuse `context` a READ of `object`?
+   *
+   * Answered by `ISecurityService.explain`, a declared contract method, from
+   * the one layer of its declared report that IS that gate:
+   * `required_permissions`. The explain engine computes the layer with the
+   * read middleware's own capability fold (the same `requiredPermissions`
+   * normalisation, the same held-capability union, the same ADR-0090 D10
+   * delegator intersection), so `denies` there is the refusal the visibility
+   * read threw. It is NOT the owner-private CRUD refusal, which the same report
+   * attributes to `object_crud` with this layer `not_applicable` — which is
+   * what lets the hard stop leave the owner alternative standing on an object
+   * that requires no capability.
+   *
+   * `false` (the gate admits) needs POSITIVE evidence: the layer present with
+   * `neutral` (capabilities held) or `not_applicable` (none required). A
+   * security service without `explain`, a throw, a report missing the layer or
+   * carrying any other verdict answers `true` — a stop. The one exception is a
+   * deployment with NO security service at all: nothing there enforces a
+   * capability gate, so no read was refused by one.
+   */
+  private async capabilityGateRefusesRead(
+    object: string,
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    let probe: SharingSecurityProbe | null | undefined;
+    try {
+      probe = this.securityService?.();
+    } catch {
+      return true;
+    }
+    if (!probe) return false;
+    if (typeof probe.explain !== 'function') return true;
+    try {
+      const decision = await probe.explain({ object, operation: 'read' }, context);
+      const gate = decision?.layers?.find((layer) => layer?.layer === 'required_permissions');
+      return !(gate && (gate.verdict === 'neutral' || gate.verdict === 'not_applicable'));
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * [ADR-0111 D1] The record OWNER and the explicit Modify-All bypass — the
+   * branches {@link canManageShares} and {@link canMintWithoutVisibility} both
+   * read, written once.
+   *
+   * `admit`: the caller owns the record, or holds `modifyAllRecords` on the
+   * object. `refuse`: there is nothing to decide on — no object, record or
+   * user identity, no such record, or the owner read failed. `undecided`: the
+   * record exists and the caller is neither; `owner` is carried for the DEPTH
+   * branch, which only `canManageShares` consults.
+   *
+   * Ownership is read under the system context so field-level masking cannot
+   * hide the owner column from the decision itself. The bypass is the EXPLICIT
+   * one only (ADR-0111 D1/D2; never the effective write scope, whose
+   * unmatched-object case fails open to 'org'), shared with `canEdit` /
+   * `canDelete` [#4647] so the gates cannot drift.
+   */
+  private async ownerOrBypass(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<OwnerOrBypassVerdict> {
+    if (!object || !recordId || !context?.userId) return { kind: 'refuse' };
+
+    let owner: unknown;
+    try {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId },
+        fields: ['id', OWNER_FIELD],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      const row: any = Array.isArray(rows) ? rows[0] : undefined;
+      if (!row) return { kind: 'refuse' };
+      owner = row[OWNER_FIELD];
+      if (owner != null && String(owner) === String(context.userId)) return { kind: 'admit' };
+    } catch {
+      return { kind: 'refuse' };
+    }
+
+    if (await this.hasModifyAllBypass(object, context)) return { kind: 'admit' };
+    return { kind: 'undecided', owner };
   }
 
   /**

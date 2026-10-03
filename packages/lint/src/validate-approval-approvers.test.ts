@@ -80,7 +80,7 @@ describe('validateApprovalApprovers', () => {
     expect(findings[0].rule).toBe(APPROVAL_APPROVER_TYPE_UNSUPPORTED);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers[0].type');
-    expect(findings[0].message).toContain('#3508');
+    expect(findings[0].message).toContain('it was deprecated rather than built');
   });
 
   // ── the deprecated `role` spelling (ADR-0090 D3, #3133) ──────────────────

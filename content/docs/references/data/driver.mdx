@@ -77,7 +77,7 @@ const result = DriverCapabilitiesSchema.parse(data);
 | **type** | `Enum<'sql' \| 'nosql' \| 'cache' \| 'search' \| 'graph' \| 'timeseries'>` | ✅ | Driver type category |
 | **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; transactionsUnsupported?: boolean }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
-| **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
+| **poolConfig** | `{ min?: number; max?: number; idleTimeoutMillis?: number; connectionTimeoutMillis?: number }` | optional | Connection pool configuration |
 
 ### Nested Shape: `DriverConfig.capabilities`
 

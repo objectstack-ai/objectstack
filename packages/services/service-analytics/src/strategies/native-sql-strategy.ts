@@ -2,7 +2,7 @@
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
-import { NUMERIC_VALUE_TYPES, type AggregationFunction } from '@objectstack/spec/data';
+import { AggregationMetricType, NUMERIC_VALUE_TYPES, type AggregationFunction } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   declaredDatetimeLowering,
@@ -69,9 +69,10 @@ import { explicitDateRangeWindow } from '../date-range-array-arm.js';
  * `default: COUNT(*)`, so an aggregate the spec grew would have returned a row
  * count instead of the number the author asked for, silently. objectui#2945.
  *
- * Non-aggregate metric types (`number`/`string`/`boolean`) are deliberately
- * absent — they are handled by {@link EXPRESSION_METRIC_TYPES}, which emits the
- * author's expression rather than wrapping it.
+ * [#21000] These six are also the whole cube metric vocabulary: the
+ * custom-SQL-expression metric types (`number`/`string`/`boolean`) were retired
+ * from `AggregationMetricType`, so a measure type this table does not key is
+ * one the spec does not declare, refused by {@link aggregateOfMeasure}.
  */
 const AGGREGATE_SQL: Record<string, (col: string) => string> = {
   // [#10298] `count` takes its COLUMN when the measure declares one. The
@@ -129,27 +130,57 @@ export const SUPPORTED_AGGREGATE_SQL_KEYS = Object.keys(AGGREGATE_SQL);
 export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_SQL);
 
 /**
- * Metric types that are a custom SQL *expression*, not an aggregate to wrap.
+ * [#21000] The ONE verdict both strategies give a cube measure's `type`: the
+ * aggregate it names, or a refusal.
  *
- * `AggregationMetricType` (`data/analytics.zod.ts`) documents these three as
- * "Custom SQL expression returning a number / string / boolean" — the measure's
- * `sql` IS the whole computation (a ratio, a `CASE`, a window function), so the
- * only correct emission is the expression itself. They used to fall through to
- * `resolveMeasureSql`'s `COUNT(*)` fallback, which threw the expression away and
- * returned a row count. #4157.
+ * The cube metric vocabulary IS the six aggregates {@link AGGREGATE_SQL}
+ * lowers. It used to carry three more — `number` / `string` / `boolean`, "a
+ * custom SQL expression returning …", which this strategy emitted verbatim and
+ * `ObjectQLStrategy` refused, partitioned by a shared `EXPRESSION_METRIC_TYPES`
+ * set. A cube member's `sql` became a column reference, so the three had
+ * nothing left to compute (this strategy emitted the column UNAGGREGATED in a
+ * grouped statement), and they were retired from `AggregationMetricType` with
+ * a prescription. The partition went with them.
  *
- * Named rather than derived as "everything that is not an aggregate": deriving it
- * would silently classify a *new* aggregate the spec grows (`median`, …) as an
- * expression and emit a bare column. `metric-type-coverage.test.ts` asserts these
- * two sets partition `AggregationMetricType`, so a new member fails a test
- * instead of picking a default.
+ * So a type outside the table is one the spec does not declare, and only a
+ * cube that never met `CubeSchema`'s parse can carry one: every door that
+ * parses a cube — `defineStack`, the artifact boot, the `analytics_cube` write
+ * door — refuses it first. What still arrives here is a cube a host registered
+ * in-process from a literal (`CubeRegistry.register` never parses), one stored
+ * under the retired vocabulary included. It is REFUSED, never stood down:
+ * served, a retired type answered one row's value per group on this path, and
+ * the engine path would hand the engine a method no driver declares.
  *
- * [commit 017130a09] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
- * this same set — the engine aggregate AST cannot carry a raw SQL expression,
- * so the ObjectQL path REFUSES exactly what this strategy emits verbatim. One
- * set, two strategies, so the partition cannot fork per path.
+ * The words are the SPEC's, read off the enum itself — no local list of metric
+ * types, retired or otherwise, to drift. For a retired member the enum's error
+ * map answers the retirement prescription (the aggregate to write instead);
+ * for a value it never declared, zod's own message listing the six. An
+ * operator reads the sentence `os validate` would have printed for the cube.
+ *
+ * Bare `Error` — the undeclared-500 tier, unchanged: no spec-valid cube can
+ * reach it, and `dataset-refusal.ts`'s header assigns a cube registered
+ * without the parse to that tier, never to a 400 that would tell a dashboard
+ * user to fix metadata they cannot see. The message is self-authored, so the
+ * analytics doors still relay it readable.
+ *
+ * Keyed on what this runtime can LOWER, with the spec supplying the verdict:
+ * `metric-type-coverage.test.ts` pins the table's keys equal to the enum's
+ * options, so a member the spec grows fails a test before it reaches the
+ * drift sentence below.
  */
-export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
+export function aggregateOfMeasure(cube: string, member: string, type: unknown): AggregationFunction {
+  if (typeof type === 'string' && Object.prototype.hasOwnProperty.call(AGGREGATE_SQL, type)) {
+    return type as AggregationFunction;
+  }
+  const verdict = AggregationMetricType.safeParse(type);
+  const why = verdict.success
+    ? `@objectstack/spec declares it, but no aggregate here lowers it (${SUPPORTED_AGGREGATE_SQL_KEYS.join(', ')}) — the two vocabularies have drifted.`
+    : (verdict.error.issues[0]?.message ?? 'It is not a declared metric type.');
+  throw new Error(
+    `[Analytics] measure "${member}" on cube "${cube}" cannot be served: its type ` +
+      `${JSON.stringify(type)} is not one of the aggregates a cube measure declares. ${why}`,
+  );
+}
 
 /**
  * [#21365] The `LIMIT` an offset-only window carries, per dialect — `null`
@@ -517,8 +548,9 @@ function judgedComparands(source: unknown, typeOf: MemberDeclaredType | null): u
  * `resolveMeasureSql` used to answer `COUNT(*)` to three different questions it
  * could not otherwise answer — an undeclared measure, a custom-SQL-expression
  * metric type, and an unrecognised type. All three returned a plausible number
- * for a query that asked for something else. They now emit the expression or
- * throw; see that method. #4157.
+ * for a query that asked for something else. They now throw; see that method
+ * (#4157). The expression metric types, once emitted verbatim here, were
+ * retired from the spec (#21000) and are refused with the rest.
  */
 export class NativeSQLStrategy implements AnalyticsStrategy {
   readonly name = 'NativeSQLStrategy';
@@ -1024,8 +1056,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // `foldEmptyAggregateAnswers`, the rows path); this face answered `null` for
     // the same group. Read from the policy, never restated, for EVERY measure —
     // a measure-scoped one carries its aggregate in the same `type` — so
-    // `avg` / `min` / `max` (no identity) and the expression metric types
-    // (`undefined` too) keep their NULL. Only `null` folds, before the
+    // `avg` / `min` / `max` (no identity, `undefined`) keep their NULL. Only `null` folds, before the
     // presenter, in `driver-sql`'s order: an `undefined` would be a column
     // never projected, a different defect that must stay visible. The dataset
     // door's `DatasetExecutor` fill still runs after this and is idempotent on
@@ -1063,9 +1094,8 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // `declaredFieldType` on the object that declares the column
     // ({@link measureColumnOf}) — [#21129] for a relationship path, the object
     // its last hop reaches, as the statement joined it. A host that cannot
-    // answer leaves the value as the client gave it. Expression metric types
-    // (`number` / `string` / `boolean`) are the author's SQL and stay as they
-    // are. Rows are presented in place, as the driver presents its own.
+    // answer leaves the value as the client gave it. Rows are presented in
+    // place, as the driver presents its own.
     const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
     const referenceOf = relationshipReferenceOf(ctx);
     const numberMeasures = (query.measures ?? []).filter((member) => {
@@ -1622,6 +1652,14 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       );
     }
 
+    // [#21000] The aggregate the measure names — or the one refusal both
+    // strategies give a type no aggregate lowers ({@link aggregateOfMeasure}):
+    // a retired custom-SQL-expression type (`number` / `string` / `boolean`),
+    // whose column this path used to emit unaggregated, or a type the spec
+    // never declared. Asked before anything is lowered, so nothing else the
+    // statement carries can route around it.
+    const aggregate = aggregateOfMeasure(cube.name, member, measure.type);
+
     const column = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
@@ -1639,13 +1677,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // relationship path's last hop reads ({@link measureColumnOf}, through the
     // one hop resolver). An expression, a column the host cannot describe, or a host
     // that names no dialect gets no class or no policy, and is aggregated as
-    // stored. The expression metric types are not aggregates and are never
-    // wrapped.
+    // stored.
     const target = measureColumnOf(cube, parentTable, measure.sql, joins.referenceOf);
-    const col = column === '*' || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)
+    const col = column === '*' || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, aggregate)
       ? column
       : aggregandOperandSql(
-          measure.type as AggregationFunction,
+          aggregate,
           target
             ? aggregandColumnClass(declaredValueShapeResolver(ctx, target.object)?.(target.field))
             : undefined,
@@ -1654,51 +1691,27 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         );
 
     if (predicate !== null) {
-      const wrapConditional = CONDITIONAL_AGGREGATE_SQL[measure.type];
+      const wrapConditional = CONDITIONAL_AGGREGATE_SQL[aggregate];
       if (wrapConditional) return wrapConditional(col, predicate);
-      // [#10298] Deliberately BARE — an undeclared 500, same tier and same
-      // reasoning as the "unrecognised type" throw below. A measure filter only
-      // ever arrives here from a COMPILED DATASET, and `DatasetMeasure.aggregate`
-      // is `AggregationFunction`, whose every member is a key of the table
-      // above — so an expression metric type (`number`/`string`/`boolean`,
-      // where `sql` IS the whole computation and there is no aggregate to make
-      // conditional) cannot carry one. What would reach here is our own drift.
-      // Emitting the unfiltered aggregate instead is precisely the defect this
-      // card closes: a 200 carrying different arithmetic than the author declared.
+      // [#10298] Deliberately BARE — an undeclared 500, the tier
+      // {@link aggregateOfMeasure} answers in. The conditional table is keyed
+      // identically to {@link AGGREGATE_SQL} (`aggregation-lockstep.test.ts`),
+      // and the aggregate above was admitted from that table, so what would
+      // reach here is our own drift between the two. Emitting the unfiltered
+      // aggregate instead is precisely the defect this card closes: a 200
+      // carrying different arithmetic than the author declared.
       throw new Error(
         `[native-sql-strategy] measure "${member}" on cube "${cube.name}" carries a ` +
-          `scoped filter, but its type "${measure.type}" has no conditional form ` +
+          `scoped filter, but its type "${aggregate}" has no conditional form ` +
           `(conditional: ${CONDITIONAL_AGGREGATE_SQL_KEYS.join(', ')}).`,
       );
     }
 
-    const wrap = AGGREGATE_SQL[measure.type];
-    if (wrap) return wrap(col);
-    // A custom SQL expression: the measure's `sql` IS the computation, so emit
-    // it unwrapped. In a grouped query the expression must itself be
-    // aggregate-shaped — measures never join `GROUP BY` (only dimensions do), so
-    // a scalar expression there is invalid SQL. That is the author's contract to
-    // keep; silently substituting `COUNT(*)` did not keep it for them.
-    if (EXPRESSION_METRIC_TYPES.has(measure.type)) return col;
-
-    // [#5716] Deliberately BARE — an undeclared 500, and the one site on that
-    // issue's list of nine that is NOT the author's mistake. `Metric.type` is the
-    // CLOSED `AggregationMetricType` enum; `metric-type-coverage.test.ts` pins
-    // that {@link AGGREGATE_SQL} ∪ {@link EXPRESSION_METRIC_TYPES} partitions it
-    // exactly, `dataset-compiler` only ever writes a `SUPPORTED_AGGREGATES`
-    // member into a cube, and `inferMeasure` mints six known types. So no
-    // spec-valid cube can arrive here: what does is our own drift or a host
-    // registering a cube object that never met `CubeSchema`. Answering the
-    // CALLER 400 for that would hide a platform bug from ops alerting and tell a
-    // dashboard user to fix metadata they cannot see. Same tier as
-    // `dataset-compiler`'s "non-derived measure has no aggregate"; the reasoning
-    // is written once in `dataset-refusal.ts`'s header.
-    throw new Error(
-      `[native-sql-strategy] measure "${member}" on cube "${cube.name}" has ` +
-        `unrecognised type "${measure.type}" — expected an aggregate ` +
-        `(${SUPPORTED_AGGREGATE_SQL_KEYS.join(', ')}) or a custom-expression type ` +
-        `(${[...EXPRESSION_METRIC_TYPES].join(', ')}).`,
-    );
+    // [#5716 → #21000] Never `COUNT(*)` for a type this table does not key —
+    // {@link aggregateOfMeasure} admitted `aggregate` FROM this table, and
+    // refused (bare, undeclared 500, the spec's own words) every type it does
+    // not key, before anything was lowered.
+    return AGGREGATE_SQL[aggregate](col);
   }
 
   private resolveFieldSql(

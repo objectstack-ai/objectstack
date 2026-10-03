@@ -219,9 +219,20 @@ export interface IShareLinkService {
    * Mint a new link. Throws when the object is not opt-in or limits are exceeded.
    *
    * ENFORCEMENT PATH: implementations re-read the target record under
-   * `context` ([Finding-2] — you may only link-share a record you can
-   * yourself see), so `context` must be the caller's complete resolved
-   * envelope. A trimmed one silently changes the verdict of that read.
+   * `context`, so `context` must be the caller's complete resolved envelope. A
+   * trimmed one silently changes the verdict of that read.
+   *
+   * WHO MAY MINT (ADR-0111 D8 rule 1): the object's `publicSharing` opt-in,
+   * checked first; then authority over the record — that read SEES it
+   * ([Finding-2]), OR the caller is the record's owner, OR holds an explicit
+   * Modify-All (`modifyAllRecords`) bypass on the object; then
+   * `publicSharing.eligibility`, checked last. A hierarchy manager who manages
+   * the record's shares (revoke, grant, list) but cannot see it is NOT
+   * admitted: a link creates access. The owner and Modify-All alternatives are
+   * withheld where an organization wall is in force (the `group` / `isolated`
+   * tenancy postures), and they never apply past a capability the object
+   * requires (`requiredPermissions`, ADR-0066 D3). A caller refused on those
+   * grounds is answered with the read's own refusal.
    */
   createLink(input: CreateShareLinkInput, context: ExecutionContext): Promise<ShareLink>;
 

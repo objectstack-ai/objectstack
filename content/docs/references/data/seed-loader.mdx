@@ -62,7 +62,7 @@ Object node in the seed data dependency graph
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (snake_case) |
 | **dependsOn** | `string[]` | ✅ | Objects this object depends on |
-| **references** | `{ field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[]` | ✅ | Field-level reference details |
+| **references** | `{ field: string; targetObject: string; targetField?: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[]` | ✅ | Field-level reference details |
 
 
 ---
@@ -77,7 +77,7 @@ Object node in the seed data dependency graph
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (snake_case) |
 | **dependsOn** | `string[]` | ✅ | Objects this object depends on |
-| **references** | `{ field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[]` | ✅ | Field-level reference details |
+| **references** | `{ field: string; targetObject: string; targetField?: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[]` | ✅ | Field-level reference details |
 
 ### Nested Shape: `ObjectDependencyNode.references[number]`
 
@@ -219,8 +219,8 @@ Seed loader request with datasets and configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **seeds** | `{ object: string; externalId: string \| string[]; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | ✅ | Seeds to load |
-| **config** | `{ dryRun: boolean; haltOnError: boolean; multiPass: boolean; defaultMode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | optional (has default) | Loader configuration |
+| **seeds** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | ✅ | Seeds to load |
+| **config** | `{ dryRun?: boolean; haltOnError?: boolean; multiPass?: boolean; defaultMode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | optional (has default) | Loader configuration |
 
 ### Nested Shape: `SeedLoaderRequest.seeds[number]`
 
@@ -268,7 +268,7 @@ Complete seed loader result
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Overall success status |
 | **dryRun** | `boolean` | ✅ | Whether this was a dry-run |
-| **dependencyGraph** | `{ nodes: object[]; insertOrder: string[]; circularDependencies: string[][] }` | ✅ | Object dependency graph |
+| **dependencyGraph** | `{ nodes: object[]; insertOrder: string[]; circularDependencies?: string[][] }` | ✅ | Object dependency graph |
 | **results** | `{ object: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | All reference resolution errors |
 | **summary** | `{ objectsProcessed: integer; totalRecords: integer; totalInserted: integer; totalUpdated: integer; … }` | ✅ | Summary statistics |

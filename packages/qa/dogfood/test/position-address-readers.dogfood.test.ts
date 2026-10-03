@@ -25,7 +25,9 @@
 //   ⭐ can_act is the default actor's decision answer, row for row — holder,
 //      bystander, submitter, admin;
 //   ⭐ the holder decides with the default actor AND with the console's
-//      spelling; the decision is recorded under the slot's stored spelling;
+//      spelling; the decision records the holder in `actor_id` and the slot's
+//      stored spelling in `acted_as` (#21411: the person and the slot are two
+//      facts, in two columns);
 //   ⭐ the holder keeps sight of the request after deciding it; the bystander
 //      never sees it (this widens nobody);
 //   ⭐ the email-keyed slot is listed, flagged, decided and kept in sight.
@@ -93,7 +95,7 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
           const rows: any[] = await ql.find('sys_approval_action', {
             where: { request_id: id, action: 'approve' }, context: SYS.context,
           });
-          return rows.map((r) => ({ actor_id: r.actor_id, via_override: r.via_override }));
+          return rows.map((r) => ({ actor_id: r.actor_id ?? null, acted_as: r.acted_as ?? null, via_override: r.via_override }));
         };
         const seen = new Set<string>();
         /** Open one position-routed request while NOBODY holds the position. */
@@ -135,10 +137,13 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         expect([submitterTry.status, submitterTry.code]).toEqual([403, 'FORBIDDEN']);
         const holderDecision = await approve(holderToken, tableRequest);
         expect([holderDecision.status, holderDecision.requestStatus]).toEqual([200, 'approved']);
-        expect(await recorded(tableRequest)).toEqual([{ actor_id: SLOT, via_override: false }]);
+        expect(await recorded(tableRequest)).toEqual([{ actor_id: holderId, acted_as: SLOT, via_override: false }]);
         const adminDecision = await approve(adminToken, adminRequest);
         expect([adminDecision.status, adminDecision.requestStatus]).toEqual([200, 'approved']);
-        expect((await recorded(adminRequest)).map((r) => r.via_override)).toEqual([true]);
+        // An override records the admin — the person — and no slot.
+        const adminId = await idOf('admin@objectos.ai');
+        expect(adminId).not.toBe('');
+        expect(await recorded(adminRequest)).toEqual([{ actor_id: adminId, acted_as: null, via_override: true }]);
 
         // ⭐ The holder keeps sight of what they decided; the bystander never had it.
         expect(await detail(holderToken, tableRequest)).toBe(200);
@@ -147,7 +152,7 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         // ⭐ The console's spelling reaches the same slot.
         const viaRole = await approve(holderToken, consoleSpellingRequest, { actorId: `role:${ROUTED_POSITION}` });
         expect([viaRole.status, viaRole.requestStatus]).toEqual([200, 'approved']);
-        expect(await recorded(consoleSpellingRequest)).toEqual([{ actor_id: SLOT, via_override: false }]);
+        expect(await recorded(consoleSpellingRequest)).toEqual([{ actor_id: holderId, acted_as: SLOT, via_override: false }]);
 
         // ⭐ The email-keyed slot, for a reviewer who did not submit it.
         const createdEmail = await stack.apiAs(submitterToken, 'POST', '/data/pa_email_request', { name: 'email' });
@@ -162,7 +167,7 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         expect(await list(bystanderToken, [bystanderId, EMAIL_APPROVER])).toEqual([]);
         const emailDecision = await approve(emailToken, emailRequest);
         expect([emailDecision.status, emailDecision.requestStatus]).toEqual([200, 'approved']);
-        expect(await recorded(emailRequest)).toEqual([{ actor_id: EMAIL_APPROVER, via_override: false }]);
+        expect(await recorded(emailRequest)).toEqual([{ actor_id: emailId, acted_as: EMAIL_APPROVER, via_override: false }]);
         expect(await detail(emailToken, emailRequest)).toBe(200);
       } finally {
         await stack.stop();

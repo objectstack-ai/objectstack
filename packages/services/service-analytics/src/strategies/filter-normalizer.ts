@@ -739,6 +739,9 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  * comparand position before this function runs (the #7872 ruling). From the
  * `where` door this gate now answers only what that face steps around — an
  * ARRAY and a `{ $field }` reference, as a list member or a LIKE comparand.
+ * [#21448] An ARRAY as a LIKE comparand is the shared comparand-SHAPE face's
+ * since, refused before this one as a list at a scalar operator; from the
+ * door, this gate's LIKE arm answers a `{ $field }` reference alone.
  *
  * ⚠️ [#7598, maintainer ruling 2026-08-12 Q1 = B] A THIRD arm briefly lived
  * here — a `{$field}` reference in the comparand of the six scalar comparison
@@ -777,7 +780,9 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
     // An array reaches this door as `values[0]` — i.e. every member after the
     // first is silently DROPPED — while `read-scope-sql` and `driver-sql`
     // stringify the whole array. That split is why an array is refused and not
-    // merely stringified consistently.
+    // merely stringified consistently. [#21448] From the `where` door the
+    // shared comparand-shape face refuses that list first (a list at a scalar
+    // operator), so this arm is `fieldLeaves`' invariant for it.
     if (!isRenderableTextComparand(value)) {
       throw invalidFilterError(`[analytics] ${unrenderableTextComparandMessage(opKey, field, value)}`);
     }
@@ -940,8 +945,11 @@ function undefinedComparandError(field: string, path: string): Error {
  * operator's comparand, each `$in` / `$nin` member — in its own sentence and at
  * its own path (the #7872 ruling). This gate's sentence is reached only where
  * that face steps around: a member of an ARRAY comparand outside the list
- * operators (`{d: {$contains: ['a', undefined]}}`) and the comparand of an
- * operator outside the vocabulary (`{d: {$wat: undefined}}`). It stays as
+ * operators and the comparand of an operator outside the vocabulary
+ * (`{d: {$wat: undefined}}`). [#21448] The array arm is reached only under an
+ * operator outside the vocabulary (`{d: {$wat: ['a', undefined]}}`): the
+ * shared comparand-shape face refuses a list at every declared scalar
+ * operator first. It stays as
  * {@link fieldLeaves}' invariant, the same stance {@link assertCompilableComparand}
  * takes, and `where-type-face-refusal.test.ts` pins those two positions.
  *
@@ -1297,6 +1305,11 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // {@link assertCompilableComparand} for why this door and not the three
         // emitters downstream of it.
         assertCompilableComparand(opKey, key, v);
+        // [#21448] Only a LIST operator's array is spread into `values` here.
+        // The shared comparand-shape face refuses a list at every scalar
+        // operator, whatever the column type, and `lowerAnalyticsWhere` hands
+        // it every field entry before any leaf exists — so no scalar leaf is
+        // built from a list, and no compiler's `values[0]` read ever drops one.
         const values = Array.isArray(v) ? v.map(comparand) : [comparand(v)];
         // [#5298] The operators that carry their own negation are NULL-safe,
         // here as everywhere else — see the module header's section on it.
@@ -2038,9 +2051,12 @@ function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
  *
  * ⛔ Not moved:
  *
- * - `$ne` with a list. The face does not judge it yet; #19886's stage 2 puts
- *   that refusal on the face, and this gate carries it the day it does, with no
- *   change here.
+ * - `$ne` with a list. The face did not judge it yet; #19886's stage 2 put
+ *   that refusal on the face, and this gate carried it the day it did, with no
+ *   change here. [#21448] The same held for a list at every other scalar
+ *   operator (`$gt`, the text operators, the flags): the face's arm for it
+ *   reached this door with no change here, so the lowering refuses the list
+ *   before any leaf, and no scalar leaf is built from one.
  * - `$in: []` / `$nin: []`, every scalar ordering comparand, a `{ $field }` in
  *   an ordering slot, and `null` in the equality slot (`{ f: null }`,
  *   `$eq: null`, `$ne: null`, the null predicate) all compile as before.
@@ -2277,7 +2293,10 @@ function assertBooleanNullFlags(node: unknown, path = 'where'): void {
  * positions the face does not judge: an array or a `{ $field }` reference as a
  * list member or a LIKE comparand (#5234 / #7598 wording), and an `undefined`
  * inside an array comparand or under an operator outside the vocabulary
- * (#6386 wording).
+ * (#6386 wording). [#21448] Less one position: an ARRAY at a scalar operator —
+ * a LIKE comparand included — is the shape face's refusal now, so an array
+ * comparand reaches those gates only as a list member or under an operator
+ * outside the vocabulary.
  *
  * ## Binary is reconciled, not kept as a local extra
  *

@@ -44,7 +44,7 @@ export const SysOauthConsent = ObjectSchema.create({
     client_id: Field.text({
       label: 'Client ID',
       required: true,
-      // [#11374] Bound from the referenced column: this is a foreign key to
+      // [commit 3954fb7df] Bound from the referenced column: this is a foreign key to
       // sys_oauth_application.client_id, which declares maxLength: 255 (and
       // upstream @better-auth/oauth-provider's oauthClient.clientId is a
       // unique string — varchar(255) on MySQL). A referencing column takes the

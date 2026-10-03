@@ -25,6 +25,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -193,6 +194,10 @@ export default class MigrateRecordedBy extends Command {
         this.exit(1);
       }
     } catch (error: any) {
+      // [#21434] The `this.exit(…)` calls above throw oclif's exit signal from
+      // inside this `try`. Re-reporting it printed a second `--json` document
+      // (`{"error":"EEXIT: 0"}`) and turned a completed apply's exit 0 into 1.
+      if (isExitSignal(error)) throw error;
       const msg = error instanceof MigrationJournalRefusal
         ? `Refused (${error.code}): ${error.message}`
         : (error?.message || String(error));

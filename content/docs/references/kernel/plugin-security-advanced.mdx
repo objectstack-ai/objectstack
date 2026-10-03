@@ -47,12 +47,12 @@ const result = KernelSecurityPolicySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **csp** | `{ directives?: Record<string, string[]>; reportOnly: boolean }` | optional |  |
-| **cors** | `{ allowedOrigins: string[]; allowedMethods: string[]; allowedHeaders: string[]; allowCredentials: boolean; … }` | optional |  |
-| **rateLimit** | `{ enabled: boolean; maxRequests: integer; windowMs: integer; strategy: Enum<'fixed' \| 'sliding' \| 'token-bucket'> }` | optional |  |
-| **authentication** | `{ required: boolean; methods: Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]; tokenExpirationSeconds?: integer }` | optional |  |
-| **encryption** | `{ dataAtRest: boolean; dataInTransit: boolean; algorithm?: string; minKeyLength?: integer }` | optional |  |
-| **auditLog** | `{ enabled: boolean; events?: string[]; retentionDays?: integer }` | optional |  |
+| **csp** | `{ directives?: Record<string, string[]>; reportOnly?: boolean }` | optional |  |
+| **cors** | `{ allowedOrigins: string[]; allowedMethods: string[]; allowedHeaders: string[]; allowCredentials?: boolean; … }` | optional |  |
+| **rateLimit** | `{ enabled?: boolean; maxRequests: integer; windowMs: integer; strategy?: Enum<'fixed' \| 'sliding' \| 'token-bucket'> }` | optional |  |
+| **authentication** | `{ required?: boolean; methods: Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]; tokenExpirationSeconds?: integer }` | optional |  |
+| **encryption** | `{ dataAtRest?: boolean; dataInTransit?: boolean; algorithm?: string; minKeyLength?: integer }` | optional |  |
+| **auditLog** | `{ enabled?: boolean; events?: string[]; retentionDays?: integer }` | optional |  |
 
 ### Nested Shape: `KernelSecurityPolicy.cors`
 
@@ -343,13 +343,13 @@ Type of resource being accessed
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 | **level** | `Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>` | optional (default: `"standard"`) |  |
-| **runtime** | `{ engine: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
-| **filesystem** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
-| **network** | `{ mode: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |
-| **process** | `{ allowSpawn: boolean; allowedCommands?: string[]; timeoutMs?: integer }` | optional |  |
+| **runtime** | `{ engine?: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
+| **filesystem** | `{ mode?: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
+| **network** | `{ mode?: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |
+| **process** | `{ allowSpawn?: boolean; allowedCommands?: string[]; timeoutMs?: integer }` | optional |  |
 | **memory** | `{ maxHeap?: integer; maxStack?: integer }` | optional |  |
 | **cpu** | `{ maxCpuPercent?: number; maxThreads?: integer }` | optional |  |
-| **environment** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
+| **environment** | `{ mode?: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
 
 ### Nested Shape: `SandboxConfig.runtime`
 

@@ -18,6 +18,7 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
@@ -196,8 +197,7 @@ export default class SecretOrphans extends Command {
     const { collectSecretReferenceUnion } = await import('../../utils/secret-reference-union.js');
     const { buildPreDeleteExport, planSysSecretOrphanSweep, useHandlePredicate } =
       await import('../../utils/sys-secret-orphan-sweep.js');
-    const { collectEncryptedSpecifierRefs, isSecretHandle, SettingsServicePlugin } =
-      await import('@objectstack/service-settings');
+    const { collectEncryptedSpecifierRefs, isSecretHandle } = await import('@objectstack/service-settings');
     const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
 
     // The legacy-inline discriminator comes from the producer that mints the
@@ -212,7 +212,11 @@ export default class SecretOrphans extends Command {
         // Settings is registered so its REGISTERED manifests are readable: the
         // attribution set is theirs, and without it nothing is attributable and
         // nothing is deletable (the safe direction, reported as a note).
-        extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
+        // [#21471] Composed through the one-shot helper, never with the
+        // service's default provider: in a development posture with no key,
+        // that default mints a key file in the key home, and this report
+        // promises to write nothing.
+        extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
         // [#21391] The report boots READ-ONLY, the boot `os migrate plan`
         // takes: `deferSchemaDdl` holds schema DDL back on every SQL
         // datasource, and `readOnlyProbe` keeps a missing sqlite file from

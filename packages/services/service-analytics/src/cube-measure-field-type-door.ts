@@ -71,8 +71,9 @@
  * - A host that wires no `sourceFieldMeta`, or a cube whose `sql` is not a
  *   bare object name (the caller stands down for both).
  * - A member that resolves to no declared measure (the source-field gate's).
- * - A measure type outside the table's vocabulary: the expression metric types
- *   (`number` / `string` / `boolean`).
+ * - A measure type outside the table's vocabulary — one the spec does not
+ *   declare, such as the retired custom-SQL types (`number` / `string` /
+ *   `boolean`): both strategies refuse it (`aggregateOfMeasure`).
  * - A `sql` that is not a column reference (`'*'`, an expression).
  * - A column the declaration hook cannot resolve — for a relationship path,
  *   one whose hop reaches an object the host does not know (the resolver's

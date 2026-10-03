@@ -509,9 +509,10 @@ opened, once someone is staffed into it). A named `actorId` must be one of those
 identities, and a position named under either spelling takes that position's
 slot. No such slot and no admin override returns 403 (`FORBIDDEN: actor '…' is
 not a pending approver`); a request that isn't pending returns 409
-(`INVALID_STATE`). The decision is recorded in `sys_approval_action.actor_id`
-under the slot it took, in that slot's stored spelling — the multi-approver
-tally counts approvals by matching that value against the slate. Always go through
+(`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
+row: `actor_id` is the user who decided, and `acted_as` is the slot the decision
+took, in that slot's stored spelling — the multi-approver tally counts approvals
+by matching `acted_as` against the slate. Always go through
 these endpoints — never resume the flow run directly, and since #3801 you
 **cannot**: `POST /api/v1/automation/{flow}/runs/{runId}/resume` answers 403 for
 a run parked on an `approval` node (including via a `subflow` pause) and changes

@@ -92,7 +92,7 @@ export const SysImportJob = ObjectSchema.create({
     // ── lifecycle timestamps ──
     started_at: Field.datetime({ label: 'Started At', required: false, group: 'State' }),
     completed_at: Field.datetime({ label: 'Completed At', required: false, group: 'State' }),
-    // [#11374 route A] The value is `context.userId`, stamped by the rest-server
+    // [commit 4805b5619, route A] The value is `context.userId`, stamped by the rest-server
     // import route (`String(context?.userId ?? context?.user?.id ?? '')` in
     // `rest-server.ts`) — i.e. a `sys_user.id`. The bound is derived by
     // referenced-column transitivity from three converging in-repo producers,

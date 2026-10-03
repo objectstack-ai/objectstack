@@ -23,6 +23,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -238,6 +239,11 @@ export default class MigrateResume extends Command {
         this.exit(1);
       }
     } catch (error: any) {
+      // [#21434] The `this.exit(…)` calls above throw oclif's exit signal from
+      // inside this `try`. Re-reporting it printed a second `--json` document
+      // and turned every exit 0 above (a resumed run, an already-concluded
+      // run) into exit 1.
+      if (isExitSignal(error)) throw error;
       const msg = error instanceof MigrationJournalRefusal
         // A refusal is the runner working, not breaking — say what it refused.
         ? `Refused (${error.code}): ${error.message}`

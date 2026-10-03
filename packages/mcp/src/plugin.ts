@@ -29,7 +29,9 @@ import {
   createStdioDataBridge,
   enforceApiExposure,
   GATED_ACTIONS,
+  serveStoredMetadataHashes,
   serveStoredMetadataRow,
+  type StoredHashDigest,
 } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
@@ -377,7 +379,14 @@ export class MCPServerPlugin implements Plugin {
     let dataBridge: McpDataBridge | undefined;
     if (shouldStart) {
       const apiKey = readEnvWithDeprecation('OS_MCP_STDIO_API_KEY', [], { silent: true });
-      let ql: (IDataEngine & { find: (object: string, opts: unknown) => Promise<unknown> }) | undefined;
+      let ql:
+        | (IDataEngine & {
+            find: (object: string, opts: unknown) => Promise<unknown>;
+            // [#21207] The engine's keyed-digest accessor (objectql), probed
+            // per call: an engine without it serves no content hash.
+            getKeyedDigest?: () => StoredHashDigest | undefined;
+          })
+        | undefined;
       try {
         ql = ctx.getService('objectql');
       } catch {
@@ -546,6 +555,10 @@ export class MCPServerPlugin implements Plugin {
       // wall that changed mid-session must take effect on the next call rather
       // than at the next process restart. See `resolveStdioTenancyPosture` for
       // why this is not hoisted next to the localization memo.
+      // [#21207] The crypto provider's keyed digest, read at each use — the
+      // host registers the provider after the kernel starts.
+      const storedHashDigest = (): StoredHashDigest | undefined =>
+        typeof scopedQl.getKeyedDigest === 'function' ? scopedQl.getKeyedDigest() : undefined;
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
         const ec = await resolveStdioExecutionContext(
           scopedQl,
@@ -561,6 +574,7 @@ export class MCPServerPlugin implements Plugin {
           engine: scopedQl,
           metadataService,
           resolvePrincipal,
+          keyedDigest: storedHashDigest,
         });
       } else {
         // Functional degradation, said once and naming the remedy: two of the
@@ -611,7 +625,12 @@ export class MCPServerPlugin implements Plugin {
         // `sys_metadata_history` row's body reaches this resource as its type's
         // read projection, never as the stored bytes — so the tool and the
         // resource cannot disagree about what a stored credential is.
-        return serveStoredMetadataRow(objectName, (row ?? null) as Record<string, unknown> | null);
+        // [#21207] …and its stored content hash keyed, or not served at all.
+        return serveStoredMetadataHashes(
+          objectName,
+          serveStoredMetadataRow(objectName, (row ?? null) as Record<string, unknown> | null),
+          storedHashDigest(),
+        );
       };
       ctx.logger.info(
         `[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity ${initial.userId} (RLS/FLS/tenant applied)`,

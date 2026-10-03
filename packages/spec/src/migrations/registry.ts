@@ -5075,6 +5075,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'nothing refuses at publish: the upgrade signal is behavioural and belongs here.',
   },
   {
+    id: 'agent-lifecycle-retired',
+    order: 62,
+    text:
+      'It also retires an agent\'s conversation state machine, `agent.lifecycle` (ADR-0049 '
+      + 'enforce-or-remove). It was parsed and never read: no runtime moved an agent through a declared '
+      + 'state or refused an undeclared transition, and enforcing it would have meant a statechart '
+      + 'interpreter beside Flow, the two-engine shape ADR-0020 rejected. What it reached for is served '
+      + 'elsewhere — a conversation phase is a skill selected by its `triggerConditions`, a multi-step '
+      + 'process is a Flow, a record\'s status transitions are the `state_machine` validation rule — so '
+      + 'authoring refuses the key with that prescription, and the D2 conversion `agent-lifecycle-removed` '
+      + 'deletes it, losslessly, retired from the load path. The XState `StateMachineSchema` family, '
+      + 'kept by ADR-0020 only for this door, left the package with it.',
+  },
+  {
     id: 'agent-memory-store-retired-and-limits-required',
     order: 61,
     text:
@@ -5333,6 +5347,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'product. No D2 conversion: an expression has no mechanical rewrite into a dataset, so '
       + 'the semantic entry `cube-member-sql-expression-retired` carries the move, including '
       + 'the scale change a ratio makes (a `derived` ratio is a 0–1 fraction).',
+  },
+  {
+    id: 'cube-metric-expression-types-retired',
+    order: 62,
+    text:
+      'It also retires a cube measure\'s custom-SQL-expression types — `number`, `string` and '
+      + '`boolean` from `AggregationMetricType`, so from `measures.<metric>.type` (ADR-0049 '
+      + 'enforce-or-remove). They marked a measure whose `sql` was the whole computation, and with '
+      + 'that `sql` now a column reference they had nothing left to compute: the raw-SQL path '
+      + 'returned the column unaggregated and the ObjectQL path refused the measure. Each is refused '
+      + 'at parse with a prescription naming the six aggregates. No D2 conversion: the column alone '
+      + 'does not say which aggregate the author meant, so the semantic entry '
+      + '`cube-metric-expression-types-retired` carries the choice, and a stored cube that still '
+      + 'carries one is refused rather than rewritten.',
   },
   {
     id: 'cube-metric-filters-retired',
@@ -5759,6 +5787,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`sort` is present (the renderer\'s own precedence made it unread then).',
   },
   {
+    id: 'object-grid-resizable-columns-retired',
+    order: 62,
+    text:
+      'It also retires `object-grid`\'s `resizableColumns` (#21445, ADR-0049 enforce-or-remove; '
+      + 'objectui#6152 ruling A, `resizable` is canonical, under the startup rule of immediate '
+      + 'retirement): the legacy second spelling of `resizable`, read only as '
+      + '`schema.resizable ?? schema.resizableColumns` (measured at the '
+      + '`.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`). One switch, two '
+      + 'spellings, and zero '
+      + 'writers in either repository, so there is no window. A retiredKey tombstone on '
+      + '`ObjectGridPropsSchema` with one D2 conversion that follows the renderer\'s precedence: the '
+      + 'value moves to `resizable` when that is absent, and strips as a lossless delete when it is '
+      + 'present (it was never read then). Its D3 record is the semantic entry '
+      + '`object-grid-resizable-columns-retired`.',
+  },
+  {
     id: 'object-kanban-quick-add-retired',
     order: 28,
     text:
@@ -6071,6 +6115,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'and loads and no conversion is registered: the bare array never worked here, and lifting it '
       + 'would change the menu a deployed grid shows. The authored census found nothing to respell. '
       + 'Its D3 record is the semantic entry `ui-object-grid-export-options-closed`.',
+  },
+  {
+    id: 'ui-object-grid-row-members-typed',
+    order: 63,
+    text:
+      'It also types seven members of an `object-grid` page block (#21445): `rowHeight`, '
+      + '`rowColor`, `navigation`, `conditionalFormatting`, `bulkActionDefs`, `aggregations` and '
+      + '`operations` were `z.unknown()` (an array of it for `bulkActionDefs`), although the grid '
+      + 'reads each with one shape, so `rowHeight: 42` passed every door and rendered as `compact`. '
+      + 'The five a list view also declares take the list view\'s own schemas by reference; '
+      + '`aggregations` takes the measured `[{ field, type }]` with the query AST\'s aggregation '
+      + 'functions, and `operations` the four booleans a grid read point names (`create`, '
+      + '`update`, `delete`, `export`), refusing `read` and `import`, which nothing reads. Read by '
+      + 'the component-props gate (advisory); a stored page still saves and loads, so no conversion '
+      + 'is registered. Its D3 record is the semantic entry `ui-object-grid-row-members-typed`.',
   },
   {
     id: 'ui-object-master-detail-form-details-closed',
@@ -6584,6 +6643,50 @@ const step18: MigrationStep = {
         + '`HotReloadManager` stay exported from `@objectstack/core` with their '
         + 'tests green. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing '
         + 'ever read the container, so removing it removes no behaviour.',
+    },
+    // #21320 — ADR-0049 enforce-or-remove (ruled D, retire, on
+    // objectstack-ai/cloud#2569) — the D3 entry of the `agent.lifecycle`
+    // retirement, one entry for the one family: the key and the XState
+    // `StateMachineSchema` exports that only it still reached leave for the same
+    // reason. The key's deletion is mechanical (the D2 conversion
+    // `agent-lifecycle-removed`); where the intent behind a deleted machine goes —
+    // a skill, a Flow, or a `state_machine` validation rule — is not, and that
+    // judgement is what this entry carries.
+    {
+      id: 'agent-lifecycle-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
+      surface:
+        'agent.lifecycle — the agent conversation state machine left the shape; with it the XState '
+        + 'StateMachineSchema family left @objectstack/spec/automation (StateMachineSchema, StateNodeSchema, '
+        + 'TransitionSchema, ActionRefSchema, GuardRefSchema and their types), and StateNodeConfig left the '
+        + 'root and /ai entries',
+      replacement:
+        'no key: delete `lifecycle` from every agent. Put what the machine meant where the platform enforces '
+        + 'it — a phase of a conversation is a skill with its own `instructions` and `tools`, selected by its '
+        + '`triggerConditions` and attached through the agent\'s `skills`; a multi-step process is a Flow; a '
+        + 'record\'s status transitions are a `state_machine` validation rule on the object (a flat table of '
+        + 'each state\'s allowed next states). Code that imported the state machine exports declares the shape '
+        + 'it needs itself, or drops it',
+      reason:
+        'ADR-0049 enforce-or-remove: `agent.lifecycle` was parsed and never read. No runtime — not this '
+        + 'repository, not the cloud AI runtime that executes agents — moved an agent through a declared '
+        + 'state or refused an undeclared transition, so an authored machine changed nothing an agent did. '
+        + 'Enforcing it would have meant a statechart interpreter beside Flow, the two-engine shape ADR-0020 '
+        + 'rejected, and what it reached for is already served: conversation phases by skills (ADR-0064), '
+        + 'orchestration by Flow (ADR-0019), record transitions by the `state_machine` validation rule '
+        + '(ADR-0020). Authoring now refuses the key with that prescription, and TypeScript rejects it. The '
+        + 'D2 conversion `agent-lifecycle-removed` deletes it from existing sources and stored agent rows, '
+        + 'losslessly. `StateMachineSchema` had kept its file only for this door (ADR-0020 implementation '
+        + 'note 1), so the family left with it — which of the three destinations each deleted machine meant '
+        + 'is the author\'s judgement, not a mechanical rewrite',
+      acceptanceCriteria:
+        'No agent declares `lifecycle`; it is refused at parse with its prescription, and TypeScript rejects '
+        + 'it. Every conversation phase a deleted machine described is a skill the agent lists in `skills`, '
+        + 'with its own `instructions`, `tools` and `triggerConditions`; every multi-step process it described '
+        + 'is a Flow; every record status transition it described is a `state_machine` validation rule on that '
+        + 'object. No source imports StateMachineSchema, StateNodeSchema, TransitionSchema, ActionRefSchema, '
+        + 'GuardRefSchema or their types from @objectstack/spec. Every agent parses under the new schema.',
+      conversionIds: ['agent-lifecycle-removed'],
     },
     // #20274 — ADR-0049 enforce-or-remove (ruling record 5950198150, letter A′) —
     // the D3 entry of the `agent.memory` contract: one entry for the one decision,
@@ -8765,6 +8868,51 @@ const step18: MigrationStep = {
         + 'ratio: the same value divided by 100 when the expression returned percentage points). '
         + 'Every dashboard, report or saved query that named the cube member now names the dataset '
         + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+    },
+    // #21000 (ADR-0049 enforce-or-remove) — `AggregationMetricType`'s `number`,
+    // `string` and `boolean` declared a custom SQL expression returning that type,
+    // and a cube member's `sql` has been a column reference since
+    // `cube-member-sql-expression-retired`, so the three had nothing left to
+    // compute. A value-level retirement (`enumWithRetiredValues`), semantic only:
+    // no D2 conversion, because no rewrite can say which aggregate the author
+    // meant, and a stored cube carrying one is refused at every door rather than
+    // rewritten.
+    {
+      id: 'cube-metric-expression-types-retired',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'analyticsCubes[].measures.<metric>.type (data.AggregationMetricType) authored as number, string '
+        + 'or boolean — the custom-SQL-expression metric types',
+      replacement:
+        'the aggregate the measure means: `sum`, `avg`, `min` or `max` over the column, `count` (over '
+        + '`\'*\'` for a row count, or over a column for its non-null values), or `count_distinct`. A value '
+        + 'computed per row becomes a field of the object (a stored or formula field) that the measure '
+        + 'aggregates; a ratio or other value derived from measures is `derived: { op, of: [...] }` on an '
+        + 'ADR-0021 dataset',
+      reason:
+        'The three types existed to mark a measure whose `sql` was the whole computation — a ratio, a '
+        + 'CASE, a window function — and named only what it returned. Since '
+        + '`cube-member-sql-expression-retired` a member\'s `sql` is a column reference, so the types had '
+        + 'nothing left to declare: measured before this retirement, the raw-SQL strategy emitted the '
+        + 'referenced column unaggregated (a bare column in a grouped statement, by SQL\'s own rules an '
+        + 'error on PostgreSQL and an arbitrary row\'s value on SQLite) and the ObjectQL strategy refused '
+        + 'the measure. There is no D2 conversion: the column alone does not say which aggregate the author '
+        + 'wanted — a `number` over `amount` may have meant its sum, its average or its largest value — '
+        + 'so only the author can choose, and a measure whose old expression computed something per row '
+        + 'needs that value stored on the object before any aggregate can read it. Nothing is rewritten '
+        + 'or dropped at rest: a stored or built cube that still carries one of the three is refused, '
+        + 'with the prescription, at the boot and write doors, and a cube that reaches the analytics '
+        + 'service without meeting the parse is refused at query time with the same text. ADR-0049 / '
+        + 'ADR-0087',
+      acceptanceCriteria:
+        'Every analytics cube parses: `CubeSchema`, the analytics_cube write door and defineStack refuse '
+        + 'a measure typed number, string or boolean at its `type` with a prescription naming the six '
+        + 'aggregates, so the sweep is mechanical — parse each cube, and each refusal is one measure to '
+        + 'retype. For each retyped measure, a query over a fixture with more than one row per group '
+        + 'returns the aggregate the author chose, and every dashboard, report or saved query that read '
+        + 'the measure is checked against the number it now returns. A measure typed with one of the six '
+        + 'aggregates parses byte-identically to before.',
     },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
@@ -14806,6 +14954,33 @@ const step18: MigrationStep = {
         + 'authored both keys, the author has compared the discarded `defaultSort` pair with the kept '
         + '`sort` and confirmed the kept one.',
     },
+    // #21445 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `object-grid-resizable-columns-removed` family (one D3 entry per retirement
+    // family, even when D2 is lossless). The conversion follows the renderer's own
+    // precedence exactly, so it preserves what every grid did — including where
+    // what the grid did was not what the author wrote.
+    {
+      id: 'object-grid-resizable-columns-retired',
+      surface: 'page.component.object-grid.resizableColumns — the legacy second spelling of the grid '
+        + 'column-resize switch',
+      replacement: '`resizable: true | false` — the one spelling the grid reads; the value is the same '
+        + 'boolean.',
+      reason: 'The D2 conversion `object-grid-resizable-columns-removed` follows the renderer\'s own '
+        + 'precedence, `resizable ?? resizableColumns`: where `resizable` was absent the legacy value WAS '
+        + 'the grid\'s setting, so it moves to `resizable` unchanged; where `resizable` held a value the '
+        + 'legacy key was never read, so it is deleted. Both are behaviour-preserving, and the second is '
+        + 'where the judgment sits. A grid that authored both keys with DIFFERENT values has always '
+        + 'behaved as `resizable` said, while its author may believe the other key governed it. The '
+        + 'conversion keeps what users have been seeing and discards the value the author also wrote; '
+        + 'only the author can say which one they meant. Code that builds object-grid props (a host, a '
+        + 'generator) must also stop emitting the key, which no conversion reaches.',
+      acceptanceCriteria: 'No `object-grid` component carries `resizableColumns`; the parse refuses it. '
+        + 'Each grid that should let users drag column borders either omits `resizable` (the renderer '
+        + 'default is on) or sets it to `true`, and each that should not sets `resizable: false`. For '
+        + 'every grid that had authored both keys, the author has compared the discarded value with the '
+        + 'kept `resizable` and confirmed the kept one.',
+      conversionIds: ['object-grid-resizable-columns-removed'],
+    },
     {
       id: 'object-index-unknown-keys-refused',
       surface: 'object `indexes[]` entries (`IndexSchema`) — undeclared keys',
@@ -18920,7 +19095,15 @@ const step18: MigrationStep = {
         + 'own html-page compile refuses `div` the same way. A `div` in such a page, which used to '
         + 'pass unchecked, now fails the command with `jsx-forbidden-tag` and '
         + '`jsx-unknown-component`. A project that keeps its own `sdui.manifest.json` is checked '
-        + 'against that file, as before.',
+        + 'against that file, as before. The runtime save door now holds pages to the same manifest: '
+        + 'a server that `objectstack serve` runs (`dev` and `start` run it too) resolves the '
+        + 'deployment\'s manifest the same way, from the `sdui.manifest.json` beside the served config '
+        + 'and then the copy `@objectstack/console` ships, and the metadata save door compiles an html '
+        + 'page\'s source against it on every publish. A `div` page saved from Studio or through the '
+        + 'metadata API is refused with a `422` under the same rule ids, and a draft is stored as '
+        + 'written and refused at its publish. A server that resolves no manifest says so once at boot '
+        + 'and stores html pages unjudged, as before. Pages already stored are not rewritten; each is '
+        + 'judged the next time it is saved.',
       acceptanceCriteria:
         '`objectstack validate` reports no `jsx-forbidden-tag`, `jsx-unknown-component` or '
         + '`jsx-unknown-prop` finding on any `kind:\'html\'` page and prints no '
@@ -19226,6 +19409,51 @@ const step18: MigrationStep = {
         + '`pageSize` shorthand are reported the same way at their own paths. The author deletes '
         + 'the key or writes the page size they meant, and `os validate` then reports no '
         + '`component-props-invalid` finding for that node.',
+    },
+    // #21445 — seven members of an `object-grid` page block's props were
+    // `z.unknown()` (`bulkActionDefs` an array of it) although the grid reads each
+    // with a fixed shape, so an off-shape value passed every door and the grid
+    // substituted a default or dropped it in silence. The row now takes the shape
+    // each read point takes. D3 only: page-component `properties` is not parsed on
+    // the metadata save or load path, so a stored page is never refused and there is
+    // no load-path refusal for a conversion to pre-empt; an off-shape value has no
+    // rewrite that says what the author meant; and the authored census found
+    // nothing in either repository's corpora to respell.
+    {
+      id: 'ui-object-grid-row-members-typed',
+      surface: 'page `object-grid` components — `properties.rowHeight`, `.rowColor`, `.navigation`, '
+        + '`.conditionalFormatting`, `.bulkActionDefs`, `.aggregations` and `.operations` (which used to '
+        + 'accept any value)',
+      replacement: 'the shape the grid reads, the list view\'s own where it has one: `rowHeight` one of '
+        + '`compact` / `short` / `medium` / `tall` / `extra_tall`; `rowColor` `{ field, colors }`; '
+        + '`navigation` `{ mode?, size?, openNewTab?, preventNavigation? }`; `conditionalFormatting` '
+        + '`[{ condition, style }]` with a CEL `condition` and a CSS `style` map; `bulkActionDefs` the '
+        + 'list view\'s bulk-action defs; `aggregations` `[{ field, type }]` with `type` one of `count`, '
+        + '`sum`, `avg`, `min`, `max`, `count_distinct`; `operations` `{ create?, update?, delete?, '
+        + 'export? }` booleans. Rewrite an objectui-native formatting rule `{ field, operator, value, '
+        + 'backgroundColor }` as `{ condition: "record.FIELD == VALUE", style: { backgroundColor } }`; '
+        + 'delete `operations.read` and `operations.import`, which nothing reads.',
+      reason: 'The grid reads each of these members with one shape, and the page-component row '
+        + 'declared them `z.unknown()`, so any value passed the component-props gate and the grid '
+        + 'answered an off-shape one with a silent default: an off-preset `rowHeight` such as `42` '
+        + 'rendered as `compact`, a `rowColor` of the wrong shape coloured no row, a `navigation` written '
+        + 'as a bare mode string opened the record page whatever it named, an aggregation with an '
+        + 'unknown function drew a zero nothing computed or no number at all, and an `operations` '
+        + 'toggle nothing reads toggled nothing. The row now takes the list view\'s own schemas for the '
+        + 'five members a list view declares, and the measured shape for `aggregations` and '
+        + '`operations`, so one value is judged the same way on both doors. It is read where every page '
+        + 'component\'s props are: the component-props gate reports a refused value as an advisory '
+        + '`component-props-invalid` / `component-props-unknown-key` finding on `objectstack validate`, '
+        + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a '
+        + 'page component\'s `properties` is not parsed on the metadata save or load path. No conversion '
+        + 'is registered: nothing on the load path refuses the shape, and an off-shape value has no '
+        + 'rewrite that both keeps what the grid shows today and honours what the author wrote — which '
+        + 'is the judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-grid` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under the seven members\' '
+        + 'paths. Each grid that set one of them now shows it: the declared row height, the row colours '
+        + 'its `colors` map names, the navigation mode on a row click, the conditional styles, the bulk '
+        + 'actions, the group-header numbers and the affordances `operations` names.',
     },
     // #20928 — the third carrier of the inline grid column. An
     // `object-master-detail-form` page block's `details` was `z.array(z.unknown())`
@@ -20461,6 +20689,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #21320 — ADR-0049 enforce-or-remove, ruled D (retire) on
+    // objectstack-ai/cloud#2569: `agent.lifecycle`, the agent conversation state
+    // machine, was parsed and never read — no runtime in this repository or in
+    // cloud moved an agent through a declared state, and every enforcement design
+    // measured there was a subset statechart interpreter beside Flow (the
+    // two-engine shape ADR-0020 rejected). Tombstoned with `retiredKey()` on the
+    // strict `AgentSchema`; D2 conversion `agent-lifecycle-removed` (lossless
+    // delete, retired from the load path); D3 semantic entry
+    // `agent-lifecycle-retired`. Its value schema, `automation/StateMachine`, left
+    // with it (RETIRED_DEFS_BY_MAJOR). Registered under 18 for the launch-window
+    // reason its neighbours state.
+    'ai/Agent:lifecycle',
     // #20274 — ADR-0049 enforce-or-remove, ruling record 5950198150 (letter A′,
     // maintainer 「同意」): the `agent.memory` contract states exactly what the
     // runtime honours, and the memory store is platform infrastructure, not agent
@@ -24088,6 +24328,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
     // delete when `sort` is present, since the fallback was never read then).
     'ui/ObjectGridProps:defaultSort',
+    // #21445 — ADR-0049 enforce-or-remove (objectui#6152 ruling A: `resizable` is
+    // canonical; the startup rule of immediate retirement — zero writers in either
+    // repository, so no window). `resizableColumns` was the legacy second spelling
+    // of `object-grid`'s `resizable`, read only as
+    // `schema.resizable ?? schema.resizableColumns` (measured at the
+    // `.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`).
+    // One switch, two spellings; a grid authoring both silently ignored this one.
+    //
+    // Registered under 18 for the reason `ui/ObjectGridProps:defaultSort` is: the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. Tombstoned with `retiredKey()` in
+    // `ObjectGridPropsSchema` (the surface baseline line carries `[RETIRED]`);
+    // sources are rewritten by the D2 conversion
+    // `object-grid-resizable-columns-removed` (renamed to `resizable` when that is
+    // absent; a pure lossless delete when it is present, since the legacy key was
+    // never read then).
+    'ui/ObjectGridProps:resizableColumns',
     // #17260 — ADR-0049 enforce-or-remove, executing the objectui#8285
     // director-seat ruling (comment 5583979207, decision batch #91, 2026-09-08,
     // standing maintainer delegation): ruled option B — `quickAdd` is retired from
@@ -24871,6 +25129,18 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ScheduledExport',
+    // #21320 — `automation/ActionRef` (a named side effect, by name or parameterised) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/ActionRef',
+    // #21320 — `automation/GuardRef` (a named transition condition) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/GuardRef',
     // #17158 — `automation/ScheduleState`, retired whole with the export-job API family
     // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
     // retired its side first in objectui#10247). It declared
@@ -24884,6 +25154,32 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'automation/ScheduleState',
+    // #21320 — `automation/state-machine.zod.ts` `StateMachineSchema`, the
+    // XState-style machine (hierarchical and parallel states, guarded transitions,
+    // entry/exit actions), retired whole with its last authorable door, the
+    // tombstoned `agent.lifecycle` (ADR-0049 enforce-or-remove, ruled D on
+    // objectstack-ai/cloud#2569). ADR-0020 had already retired it as a
+    // record-lifecycle declaration — the `workflow` type and `object.stateMachines`
+    // went, and a record's legal transitions are the `state_machine` validation
+    // rule — and kept the file only because the agent door still imported it
+    // (ADR-0020 implementation note 1). The rest of the family — `StateNode`,
+    // `Transition`, `ActionRef`, `GuardRef` — left with it, each registered in its
+    // own entry file beside this one. Upgraders get the D3 semantic entry
+    // `agent-lifecycle-retired`. Registered under 18 for the launch-window reason
+    // its neighbours state.
+    'automation/StateMachine',
+    // #21320 — `automation/StateNode` (one state of a machine, recursive) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/StateNode',
+    // #21320 — `automation/Transition` (a guarded transition between states) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/Transition',
     // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
     // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the

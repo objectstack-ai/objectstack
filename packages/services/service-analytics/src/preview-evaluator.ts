@@ -467,7 +467,11 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  * | `avg`            | the mean of the NON-NULL operands that read as numbers,   |
  * |                  | and `null` when NO ROW CARRIED A VALUE (#16219)           |
  * | `min` / `max`    | the winning operand, IN ITS OWN TYPE ({@link extremumOf}) |
- * | `number` / `string` / `boolean` | a custom-SQL metric the dataset path never mints — left on the historical numeric `default` |
+ *
+ * Those six are the whole vocabulary: its custom-SQL members (`number` /
+ * `string` / `boolean`) were retired from the spec (#21000), and the dataset
+ * path never minted them anyway. A type outside the six cannot come from a
+ * dataset measure; it is left on the historical numeric `default`.
  *
  * ⭐ `min`/`max` are why this function stopped returning `number`. Coercing
  * every operand with `Number()` and dropping the non-finite ones made a
@@ -544,8 +548,9 @@ function aggregate(rows: Row[], metricType: string, field: string): unknown {
     // ⛔ Scoped to this arm rather than folded into `nums`: `sum` is immune to
     // the coercion (`0` is the additive identity, so both spellings answer the
     // same number) and the numeric `default` below is the historical answer for
-    // the custom-SQL metric types, which has no live standard to be moved
-    // towards. Widening either would be an unrequested value change.
+    // a type outside the six — the retired custom-SQL metric types once, a
+    // value no dataset measure can carry now — which has no live standard to
+    // be moved towards. Widening either would be an unrequested value change.
     //
     // ⛔ And the empty answer is not a hard-coded `null`: what an aggregate
     // answers over an empty operand set is the platform's ruling and lives in

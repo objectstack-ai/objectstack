@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { CubeSchema } from '@objectstack/spec/data';
+import { DatasetSchema } from '@objectstack/spec/ui';
 import {
   CARRIER_ROOTS,
   CONSUMER_ROOTS,
@@ -1260,6 +1263,226 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
 
     it.each(rows)('control, beside %s: a child field nothing draws or names stays inert', (_label, s) => {
       expect(verdicts(s)['itm.secret']).toBe('inert');
+    });
+  });
+});
+
+describe('[#21439] validateFieldConsumers — an analytics member credits every field its column path reads', () => {
+  /**
+   * `fx_ledger.account` → `fx_account`, `fx_account.region` → `fx_region`: each
+   * lookup is named apart from its target, so a hop resolves through the
+   * relationship's `reference` and never through an object that happens to
+   * share its name. `name` is each object's title field, so it is exempt.
+   */
+  const OBJECTS = [
+    { name: 'fx_ledger', fields: { name: { type: 'text' }, amount: { type: 'currency' }, account: { type: 'lookup', reference: 'fx_account' } } },
+    { name: 'fx_account', fields: { name: { type: 'text' }, revenue: { type: 'currency' }, region: { type: 'lookup', reference: 'fx_region' } } },
+    { name: 'fx_region', fields: { name: { type: 'text' }, zone: { type: 'number' } } },
+  ];
+  /** Every field the rule judges on {@link OBJECTS}, before anything reads one. */
+  const JUDGED = [
+    'fx_ledger.amount', 'fx_ledger.account', 'fx_account.revenue', 'fx_account.region', 'fx_region.zone',
+  ];
+
+  /** `object.field` → verdict, for every field the rule reports. */
+  const verdicts = (s: AnyRec): Record<string, string> =>
+    Object.fromEntries(validateFieldConsumers(s).map((f) => [`${f.object}.${f.field}`, f.verdict]));
+  const reportedOf = (s: AnyRec): string[] => Object.keys(verdicts(s)).sort();
+  const inertExcept = (read: readonly string[]): string[] => JUDGED.filter((k) => !read.includes(k)).sort();
+
+  /**
+   * The `include` every pin dataset declares: `account.region` declares both
+   * joins (ADR-0021: "a.b" implicitly includes "a"), and as a dotted path it
+   * names no field the general walk credits — the bare-column cell is the
+   * control that shows it credits nothing on its own. (A bare entry,
+   * `include: ['account']`, is a field name the general walk has always
+   * credited, which would hide the member's own credit of the lookup.)
+   */
+  const INCLUDE = ['account.region'];
+
+  /**
+   * One builder per analytics slot that names a column, keyed by where the spec
+   * declares it — the census below holds this key set equal to the spec's.
+   */
+  const SLOTS: Record<string, (column: string) => AnyRec> = {
+    'datasets › dimensions › field': (column) => ({
+      datasets: [{ name: 'ds', object: 'fx_ledger', include: INCLUDE, dimensions: [{ name: 'dim', field: column, type: 'number' }], measures: [] }],
+    }),
+    'datasets › measures › field': (column) => ({
+      datasets: [{ name: 'ds', object: 'fx_ledger', include: INCLUDE, dimensions: [], measures: [{ name: 'mea', aggregate: 'max', field: column }] }],
+    }),
+    'analyticsCubes › dimensions › sql': (column) => ({
+      analyticsCubes: [{ name: 'cube', sql: 'fx_ledger', dimensions: { dim: { label: 'Dim', type: 'number', sql: column } }, measures: {} }],
+    }),
+    'analyticsCubes › measures › sql': (column) => ({
+      analyticsCubes: [{ name: 'cube', sql: 'fx_ledger', dimensions: {}, measures: { mea: { label: 'Mea', type: 'max', sql: column } } }],
+    }),
+  };
+
+  /** Each shape a column takes, with every field the analytics door reads for it. */
+  const SHAPES: [string, string, string[]][] = [
+    ['a bare column', 'amount', ['fx_ledger.amount']],
+    ['a one-hop path', 'account.revenue', ['fx_ledger.account', 'fx_account.revenue']],
+    ['a two-hop path', 'account.region.zone', ['fx_ledger.account', 'fx_account.region', 'fx_region.zone']],
+  ];
+
+  /**
+   * The column slots the spec declares on the two analytics roots, read off its
+   * own schemas: every string whose pattern is the analytics column path (the
+   * `[A-Za-z_]…(?:\.…)*` path half both slot patterns share). A slot the spec
+   * adds there lands in this list and fails the equality below until it has a
+   * builder — and a reader in `creditAnalyticsColumns`.
+   */
+  const specColumnSlots = (): string[] => {
+    const COLUMN_PATH_SOURCE = /\[A-Za-z_\]\[A-Za-z0-9_\]\*\(\?:\\\.\[A-Za-z_\]\[A-Za-z0-9_\]\*\)\*/;
+    const out: string[] = [];
+    const walk = (doc: AnyRec, node: unknown, trail: readonly string[], seen: Set<unknown>): void => {
+      if (!node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      const rec = node as AnyRec;
+      if (typeof rec.pattern === 'string' && COLUMN_PATH_SOURCE.test(rec.pattern)) out.push(trail.join(' › '));
+      // A reused shape is emitted once under `$defs` and pointed at.
+      if (typeof rec.$ref === 'string' && rec.$ref.startsWith('#/$defs/')) {
+        walk(doc, (doc.$defs as AnyRec | undefined)?.[rec.$ref.slice('#/$defs/'.length)], trail, seen);
+      }
+      // Only `properties` names an authored key; every other edge keeps the trail.
+      for (const [key, value] of Object.entries((rec.properties as AnyRec | undefined) ?? {})) {
+        walk(doc, value, [...trail, key], new Set(seen));
+      }
+      for (const edge of ['items', 'additionalProperties']) walk(doc, rec[edge], trail, seen);
+      for (const edge of ['anyOf', 'oneOf', 'allOf']) {
+        if (Array.isArray(rec[edge])) for (const arm of rec[edge] as unknown[]) walk(doc, arm, trail, seen);
+      }
+    };
+    for (const [root, schema] of [['analyticsCubes', CubeSchema], ['datasets', DatasetSchema]] as const) {
+      const doc = z.toJSONSchema(schema as unknown as z.ZodType, { io: 'input', unrepresentable: 'any' }) as AnyRec;
+      walk(doc, doc, [root], new Set());
+    }
+    return [...new Set(out)].sort();
+  };
+
+  it('the pin covers every column slot the spec declares on a dataset and a cube', () => {
+    const slots = specColumnSlots();
+    expect(slots.length).toBeGreaterThanOrEqual(4);
+    expect(slots).toEqual(Object.keys(SLOTS).sort());
+  });
+
+  it('baseline: with no analytics member reading them, every judged field is inert', () => {
+    expect(verdicts({ objects: OBJECTS, views: [{ list: { data: { object: 'fx_ledger' }, columns: [] } }] })).toEqual(
+      Object.fromEntries(JUDGED.map((k) => [k, 'inert'])),
+    );
+  });
+
+  describe('the enumeration pin: every slot × every shape credits each field the path reads', () => {
+    const cells = Object.entries(SLOTS).flatMap(([slot, build]) =>
+      SHAPES.map(([shape, column, read]): [string, string, AnyRec, string[]] => [slot, shape, { objects: OBJECTS, ...build(column) }, read]),
+    );
+
+    it('pins 4 slots × 3 shapes', () => {
+      expect(cells).toHaveLength(12);
+    });
+
+    it.each(cells)('%s × %s: exactly the fields it reads leave the report', (_slot, _shape, s, read) => {
+      expect(reportedOf(s)).toEqual(inertExcept(read));
+    });
+  });
+
+  describe('a cube hop resolves through its declared join first, else the reference', () => {
+    const ALT = { name: 'fx_account_alt', fields: { name: { type: 'text' }, revenue: { type: 'currency' } } };
+    const cube = (joins: AnyRec | undefined): AnyRec => ({
+      objects: [...OBJECTS, ALT],
+      analyticsCubes: [{ name: 'cube', sql: 'fx_ledger', ...(joins ? { joins } : {}), dimensions: {}, measures: { mea: { label: 'M', type: 'sum', sql: 'account.revenue' } } }],
+    });
+
+    it('a declared join reaches its own object, and the reference target stays unread', () => {
+      const v = verdicts(cube({ account: { name: 'fx_account_alt' } }));
+      expect(v['fx_ledger.account']).toBeUndefined();
+      expect(v['fx_account_alt.revenue']).toBeUndefined();
+      expect(v['fx_account.revenue']).toBe('inert');
+    });
+
+    it('with no join for the hop, the reference target is read and the other object is not', () => {
+      const v = verdicts(cube(undefined));
+      expect(v['fx_account.revenue']).toBeUndefined();
+      expect(v['fx_account_alt.revenue']).toBe('inert');
+    });
+  });
+
+  describe('a path the door refuses names its fields as carriers, never as reads', () => {
+    const dataset = (field: string, include: string[]): AnyRec => ({
+      objects: OBJECTS,
+      datasets: [{ name: 'ds', object: 'fx_ledger', include, dimensions: [], measures: [{ name: 'mea', aggregate: 'max', field }] }],
+    });
+
+    it('a dataset path whose join `include` does not declare: every field it names is carrier-only', () => {
+      const findings = byPath(validateFieldConsumers(dataset('account.revenue', [])));
+      for (const declaration of ['objects[0].fields.account', 'objects[1].fields.revenue']) {
+        expect(findings[declaration].verdict).toBe('carrier-only');
+        expect(findings[declaration].carriers).toEqual(['datasets[0].measures[0].field']);
+      }
+    });
+
+    it('declaring the first hop does not declare the second: the two-hop path is still refused', () => {
+      // `account` stays read here, by the bare `include` entry the general walk
+      // credits — not by the refused member path.
+      const v = verdicts(dataset('account.region.zone', ['account']));
+      expect(v).toEqual({ 'fx_ledger.amount': 'inert', 'fx_account.revenue': 'inert', 'fx_account.region': 'carrier-only', 'fx_region.zone': 'carrier-only' });
+    });
+
+    it('declared, the same paths are read', () => {
+      expect(reportedOf(dataset('account.revenue', INCLUDE))).toEqual(inertExcept(['fx_ledger.account', 'fx_account.revenue']));
+      expect(reportedOf(dataset('account.region.zone', INCLUDE))).toEqual(
+        inertExcept(['fx_ledger.account', 'fx_account.region', 'fx_region.zone']),
+      );
+    });
+
+    it.each([
+      ['a column the last hop does not declare', 'account.revnue', { 'fx_ledger.account': 'carrier-only', 'fx_account.revenue': 'inert' }],
+      ['a hop that names no field', 'acount.revenue', { 'fx_ledger.account': 'inert', 'fx_account.revenue': 'inert' }],
+      ['a hop through a field that is not a relationship', 'amount.revenue', { 'fx_ledger.amount': 'carrier-only', 'fx_account.revenue': 'inert' }],
+    ])('a cube member through %s', (_label, sql, expected) => {
+      const v = verdicts({
+        objects: OBJECTS,
+        analyticsCubes: [{ name: 'cube', sql: 'fx_ledger', dimensions: { dim: { label: 'D', type: 'string', sql } }, measures: {} }],
+      });
+      expect(v).toMatchObject(expected);
+    });
+
+    it('a lookup named like its target object gains no read from a refused path (the slot is not text-scanned)', () => {
+      const v = verdicts({
+        objects: [
+          { name: 'fx_ledger', fields: { name: { type: 'text' }, fx_account: { type: 'lookup', reference: 'fx_account' } } },
+          { name: 'fx_account', fields: { name: { type: 'text' }, revenue: { type: 'currency' } } },
+        ],
+        datasets: [{ name: 'ds', object: 'fx_ledger', dimensions: [], measures: [{ name: 'mea', aggregate: 'max', field: 'fx_account.revenue' }] }],
+      });
+      expect(v).toEqual({ 'fx_ledger.fx_account': 'carrier-only', 'fx_account.revenue': 'carrier-only' });
+    });
+  });
+
+  describe('a path the graph cannot judge credits the fields it resolves', () => {
+    it('a hop to an object this stack does not define: the lookup on the base object is read', () => {
+      const v = verdicts({
+        objects: [{ name: 'fx_ledger', fields: { name: { type: 'text' }, manager: { type: 'lookup', reference: 'ext_person' } } }],
+        analyticsCubes: [{ name: 'cube', sql: 'fx_ledger', dimensions: { dim: { label: 'D', type: 'string', sql: 'manager.email' } }, measures: {} }],
+      });
+      expect(v).toEqual({});
+    });
+
+    it('the row wildcard reads no field and credits none', () => {
+      const v = verdicts({
+        objects: OBJECTS,
+        analyticsCubes: [{ name: 'cube', sql: 'fx_ledger', dimensions: {}, measures: { rows: { label: 'Rows', type: 'count', sql: '*' } } }],
+      });
+      expect(Object.keys(v).sort()).toEqual([...JUDGED].sort());
+    });
+
+    it('a base object this stack does not define leaves the slot to the general walk, as before', () => {
+      const v = verdicts({
+        objects: OBJECTS,
+        analyticsCubes: [{ name: 'cube', sql: 'ext_ledger', dimensions: { dim: { label: 'D', type: 'number', sql: 'account.revenue' } }, measures: {} }],
+      });
+      expect(Object.keys(v).sort()).toEqual([...JUDGED].sort());
     });
   });
 });

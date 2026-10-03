@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1522 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1517 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -22,7 +22,7 @@ counts are sums of the rows they head. Regenerate with
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 32 | 430 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 14 | 75 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Automation Protocol](/docs/references/automation) | 13 | 70 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 30 | 178 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 12 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
@@ -34,7 +34,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 34 | 275 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 166 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **197** | **1522** | 14 protocol modules |
+| **Total** | **196** | **1517** | 14 protocol modules |
 
 ---
 
@@ -106,7 +106,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **14 pages, 75 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 70 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
@@ -123,7 +123,6 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 | [`node-executor.zod.ts`](/docs/references/automation/node-executor) | `ActionCategory`, `ActionDescriptor`, `ActionParadigm`, `NodeExecutorDescriptor`, `WaitEventType`, `WaitExecutorConfig`, `WaitResumePayload`, `WaitTimeoutBehavior` |
 | [`schedule-organization.zod.ts`](/docs/references/automation/schedule-organization) | `ScheduleOrganization` |
 | [`schemaless-node-config.zod.ts`](/docs/references/automation/schemaless-node-config) | `DecisionCondition`, `DecisionConfig`, `ScriptConfig`, `SubflowConfig` |
-| [`state-machine.zod.ts`](/docs/references/automation/state-machine) | `ActionRef`, `GuardRef`, `StateMachine`, `StateNode`, `Transition` |
 | [`time-relative-trigger.zod.ts`](/docs/references/automation/time-relative-trigger) | `TimeRelativeTrigger` |
 | [`webhook.zod.ts`](/docs/references/automation/webhook) | `Webhook`, `WebhookTriggerType` |
 

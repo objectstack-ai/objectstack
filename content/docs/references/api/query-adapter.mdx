@@ -46,7 +46,7 @@ const result = ODataQueryAdapterSchema.parse(data);
 | **version** | `Enum<'v2' \| 'v4'>` | optional (default: `"v4"`) | OData version |
 | **usePrefix** | `boolean` | optional (default: `true`) | Use $ prefix for system query options ($filter vs filter) |
 | **stringFunctions** | `Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]` | optional | Supported OData string functions |
-| **expand** | `{ enabled: boolean; maxDepth: integer }` | optional | $expand configuration |
+| **expand** | `{ enabled?: boolean; maxDepth?: integer }` | optional | $expand configuration |
 
 ### Nested Shape: `ODataQueryAdapter.expand`
 
@@ -78,8 +78,8 @@ const result = ODataQueryAdapterSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operatorMappings** | `{ operator: string; rest?: string; odata?: string }[]` | optional | Custom operator mappings |
-| **rest** | `{ filterStyle: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam: string }` | optional | REST query adapter configuration |
-| **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| …>[]; expand?: object }` | optional | OData query adapter configuration |
+| **rest** | `{ filterStyle?: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam?: string }` | optional | REST query adapter configuration |
+| **odata** | `{ version?: Enum<'v2' \| 'v4'>; usePrefix?: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| …>[]; expand?: object }` | optional | OData query adapter configuration |
 
 ### Nested Shape: `QueryAdapterConfig.operatorMappings[number]`
 
@@ -94,8 +94,8 @@ const result = ODataQueryAdapterSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **filterStyle** | `Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>` | optional (default: `"bracket"`) | REST filter parameter encoding style |
-| **pagination** | `{ limitParam: string; offsetParam: string; cursorParam: string; pageParam: string }` | optional | Pagination parameter name mappings |
-| **sorting** | `{ param: string; format: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
+| **pagination** | `{ limitParam?: string; offsetParam?: string; cursorParam?: string; pageParam?: string }` | optional | Pagination parameter name mappings |
+| **sorting** | `{ param?: string; format?: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
 | **fieldsParam** | `string` | optional (default: `"fields"`) | Field selection parameter name |
 
 ### Nested Shape: `QueryAdapterConfig.odata`
@@ -105,7 +105,7 @@ const result = ODataQueryAdapterSchema.parse(data);
 | **version** | `Enum<'v2' \| 'v4'>` | optional (default: `"v4"`) | OData version |
 | **usePrefix** | `boolean` | optional (default: `true`) | Use $ prefix for system query options ($filter vs filter) |
 | **stringFunctions** | `Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| …>[]` | optional | Supported OData string functions |
-| **expand** | `{ enabled: boolean; maxDepth: integer }` | optional | $expand configuration |
+| **expand** | `{ enabled?: boolean; maxDepth?: integer }` | optional | $expand configuration |
 
 
 ---
@@ -127,8 +127,8 @@ const result = ODataQueryAdapterSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **filterStyle** | `Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>` | optional (default: `"bracket"`) | REST filter parameter encoding style |
-| **pagination** | `{ limitParam: string; offsetParam: string; cursorParam: string; pageParam: string }` | optional | Pagination parameter name mappings |
-| **sorting** | `{ param: string; format: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
+| **pagination** | `{ limitParam?: string; offsetParam?: string; cursorParam?: string; pageParam?: string }` | optional | Pagination parameter name mappings |
+| **sorting** | `{ param?: string; format?: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
 | **fieldsParam** | `string` | optional (default: `"fields"`) | Field selection parameter name |
 
 ### Nested Shape: `RestQueryAdapter.pagination`

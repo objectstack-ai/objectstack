@@ -437,19 +437,44 @@ const CLI_AND_RUNTIME: readonly AuthoringSurface[] = ['cli', 'runtime-publish'];
  * collection the sentence above stands.
  */
 const RUNTIME_NEEDS_FULL_SNAPSHOT =
-  'P2 (#4463): reads a stack-wide collection the per-write snapshot does not carry, so running it ' +
+  'P2 of the runtime publish gate (the Studio, REST and MCP door that runs this registry): reads a ' +
+  'stack-wide collection the per-write snapshot does not carry, so running it ' +
   'now would report the rest of the tenant\'s metadata as missing rather than judging this write.';
 
 /**
- * The rule parses authored SOURCE (react/jsx page bodies, L2 JS hook/action
+ * The rule parses authored SOURCE (react page bodies, L2 JS hook/action
  * bodies) through `typescript` / `sucrase`. Those are exactly the dependencies
  * `lazy-deps.test.ts` keeps off the kernel boot path, and `@objectstack/lint`'s
  * runtime entry is guarded to load neither. Studio's page editor has its own
  * save-time compile path; this gate is not where that check belongs.
+ *
+ * The html tier's rule (`validateJsxPages`) is NOT this case — see
+ * {@link RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE}.
  */
 const RUNTIME_HEAVY_SOURCE_PARSE =
   'Not runtime-safe: parses authored source through typescript/sucrase, the two dependencies the ' +
   'kernel boot path must never load (lazy-deps.test.ts). Studio compiles page source on its own path.';
+
+/**
+ * `validateJsxPages` parses an html page's source with `@objectstack/sdui-parser`
+ * — no dependencies, never executes the source — so nothing about it is unsafe
+ * on the kernel boot path. It stays off this registry's runtime surface because
+ * the save door already runs the same compile itself: `findHtmlPageSourceGaps`
+ * in `@objectstack/metadata-protocol`'s `runtime-authoring-gate.ts` imports the
+ * same `compile()` and runs it against the deployment's SDUI component manifest,
+ * reports under the same `jsx-CODE` rule ids, and adds the page's `requires`
+ * check (`page-requires-disagrees-with-source`). Wiring this entry there too
+ * would judge every html page twice.
+ *
+ * The two differ in one case: with no manifest this rule still checks syntax
+ * and structure, while a host that registered no manifest has its save door
+ * judge nothing and says so once at boot.
+ */
+const RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE =
+  'Runtime-safe (the dependency-free @objectstack/sdui-parser, which never executes the source) but ' +
+  'not wired here: the save door already compiles an html page\'s source itself, with the same ' +
+  'compiler against the deployment\'s SDUI component manifest and under the same jsx-* rule ids ' +
+  '(metadata-protocol\'s findHtmlPageSourceGaps), so a second run would judge each page twice.';
 
 /**
  * The rule judges an OBJECT/field declaration at `advisory` tier — it can
@@ -479,8 +504,9 @@ const RUNTIME_HEAVY_SOURCE_PARSE =
  */
 const RUNTIME_OBJECT_ADVISORY_VOLUME =
   'Advisory-tier object rule: it cannot refuse a write, and it is held off the runtime door for ' +
-  'advisory VOLUME (~8 findings per object write measured on unswept metadata, rendered in Studio ' +
-  'since #4717), not refusal risk. Crossing it is a UX decision with its own card (#4716).';
+  'advisory VOLUME (~8 findings per object write measured on unswept metadata, each carried back in ' +
+  'the save response and rendered by Studio\'s designer), not refusal risk. The object door opened to ' +
+  'the gating object rules alone; crossing an advisory one is a separate UX decision.';
 
 /**
  * `ExprIssue` is the one rule finding that carries no rule id of its own — it
@@ -1084,8 +1110,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the only door that tenant has. Crossing is its own rollout decision with
     // that replay as its evidence, not a bare `runtimeTypes` edit.
     surfaceReason:
-      'Gating rule held off the runtime door pending the #4716 crossing discipline: a measured ' +
-      'false-refusal budget over stored tenant page rows (the in-repo 0-finding measurement covers ' +
+      'Gating rule held off the runtime door pending the crossing discipline the gating object rules ' +
+      'went through: a measured false-refusal budget, here over stored tenant page rows (the in-repo ' +
+      '0-finding measurement covers ' +
       'authored config-file metadata only). Crossing is its own rollout card.',
     run: (stack) => validateComponentTypes(stack),
   },
@@ -1111,7 +1138,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-jsx-pages.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_HEAVY_SOURCE_PARSE,
+    surfaceReason: RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE,
     run: (stack, ctx) =>
       validateJsxPages(stack, ctx.sduiManifest ? { manifest: ctx.sduiManifest as never } : {}),
   },
@@ -1150,7 +1177,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-capability-references.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: 'P2 (#4463): the ONE rule the runtime universe makes strictly stronger — the advisory hedge ("another '
+    surfaceReason: 'P2 of the runtime publish gate (the Studio, REST and MCP door that runs this registry): '
+      + 'the ONE rule the runtime universe makes strictly stronger — the advisory hedge ("another '
       + 'installed package may provide it") is decidable against the live capability registry, so it '
       + 'graduates from advisory to gating there rather than merely being ported. That promotion is a '
       + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
@@ -1947,15 +1975,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-sharing-rule-enforceability.ts',
     surfaces: CLI_ONLY,
     surfaceReason:
-      'P2 (#4463): a sharing rule is not a `flow`, and P1 gates `flow` alone. This entry used to add '
+      'P2 of the runtime publish gate (the Studio, REST and MCP door that runs this registry): a sharing '
+      + 'rule is not a `flow`, and P1 gates `flow` alone. This entry used to add '
       + 'that the rule reads ONLY `stack.sharingRules[].condition` and needs no other collection, so '
-      + 'crossing was a lone `runtimeTypes` edit. #9698 FALSIFIED that: the anchor arm resolves '
+      + 'crossing was a lone `runtimeTypes` edit. The anchor arm, which refuses a rule anchored on a '
+      + 'public-OWD object or a master-detail detail (no share row could widen either), FALSIFIED that: '
+      + 'it resolves '
       + '`sharingRules[].object` against `stack.objects` to read the anchor\'s OWD, so the rule is now '
-      + 'cross-collection. `objects` IS carried by the per-write snapshot (`CONTEXT_STACK_KEYS`, #8309), '
+      + 'cross-collection. `objects` IS carried by the per-write snapshot (`CONTEXT_STACK_KEYS`), '
       + 'so the remaining gap is unchanged in SHAPE — the gate must accept a `sharing_rule` type and the '
       + 'snapshot must carry `sharingRules`, which it does not — but it is now TWO collections, not one. '
       + 'Crossing with `sharingRules` uncarried would enforce this id for zero of its inputs while the '
-      + 'entry claimed the door (#7220). Recorded as pending rather than done, because a rule that has '
+      + 'entry claimed the door. Recorded as pending rather than done, because a rule that has '
       + 'never run at a door should not claim it.',
     run: (stack) => validateSharingRuleEnforceability(stack),
   },

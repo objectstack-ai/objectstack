@@ -450,6 +450,11 @@ function requireWritablePackage(
  * asks, so a mirror that exempted anyone would disagree with it. Returns a
  * refusal result to short-circuit on, or `null` to proceed. Callers MUST run
  * it before `uninstallPackage`, and only when `deletePackage` will run.
+ *
+ * [#21276] The ordering above is the one this refusal was written against.
+ * Since then the door withdraws nothing before `deletePackage` answers: the
+ * registry withdrawal and the disable-record clear both follow it, so a
+ * refusal from the store leaves the running process untouched as well.
  */
 function requireUninstallOrganizationScope(
     deps: DomainHandlerDeps,
@@ -2031,35 +2036,25 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // The protocol keeps its own refusal as the second line.
             const protocol = await resolveProtocol(deps, _context);
             const organizationId = await deps.resolveActiveOrganizationId(_context);
-            if (protocol && typeof protocol.deletePackage === 'function') {
+            const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
+            if (persists) {
                 const unscoped = requireUninstallOrganizationScope(deps, id, organizationId); if (unscoped) return unscoped;
             }
-            const registryRemoved = registry.uninstallPackage(id);
 
-            // ⭐ [#18877 ruling item 3] A package that no longer exists has no
-            // lifecycle state — so the DURABLE disable record goes with the row,
-            // and the next install of this id is a FRESH install that lands at
-            // the declared default. The registry half of the same sentence is
-            // inside `uninstallPackage`, which forgets the id from the boot seed
-            // set; this is the half that outlives the process.
+            // [#21276] Existence is READ here, never acted on. This line used to
+            // be `registry.uninstallPackage(id)`, and the disable-record clear
+            // below sat right after it — both BEFORE `deletePackage`. So when the
+            // store then refused the `sys_packages` delete, the door answered the
+            // failure while the running process had already dropped the package
+            // (`GET` 404 until a restart brought it back) and the disable record
+            // was already gone (a disabled package came back enabled). Measured
+            // at this door on SQLite with a trigger refusing the delete.
             //
-            // Without it the record was immortal: `DELETE` removed the row and
-            // left the id listed on disk, the next boot seeded it back, and a
-            // reinstalled package came up disabled with nothing anywhere saying
-            // why — a disable the operator could no longer even see to undo,
-            // since the package it named was gone. Written only when the
-            // registry really removed the row, so a 404 changes no state.
-            //
-            // Same best-effort try/catch as the install and PATCH arms above:
-            // the uninstall itself already happened, so a state-file failure
-            // must not turn it into a 500.
-            if (registryRemoved) {
-                try {
-                    setPackageDisabled(_context?.environmentId, id, false);
-                } catch (err) {
-                    console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
-                }
-            }
+            // Triage's ruling for #21276 — refuse before withdrawing, not undo:
+            // `deletePackage` deletes the stored row FIRST and refuses before it
+            // removes anything else, so the door asks it first and touches the
+            // running registry and the disable record only once it has answered.
+            const existed = registry.getPackage(id) !== undefined;
 
             // Persisted removal (AI/runtime packages live in sys_metadata, not
             // just the in-memory registry — the registry uninstall alone would
@@ -2102,7 +2097,71 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(keepData ? { keepData: true } : {}),
                     });
                 } catch (e: any) {
+                    // [#21276] Nothing was touched on this path: the registry
+                    // still holds the package and its disable record is intact.
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
+                }
+            }
+
+            // [#21276] Only now — the persisted delete has answered, or this host
+            // has none — is the package withdrawn from the running registry.
+            // `deletePackage` withdraws it itself on the same registry (its own
+            // step after the stored rows), so this is usually a no-op and is
+            // skipped when the package is already gone. A host with no
+            // persisted half keeps exactly its old behaviour: the withdrawal is
+            // the uninstall, and its refusal (another package extends an object
+            // this one owns, ADR-0029) is the request's refusal.
+            //
+            // With a persisted half, that refusal does not arrive here:
+            // `deletePackage` asks it (`SchemaRegistry.assertPackageUninstallable`)
+            // before its store delete and throws it with nothing removed, which
+            // the `catch` above answers — `500`, nothing changed. This `try`
+            // stays as a safety net for a registry without that method, or a
+            // throw nothing asked ahead of time. The stored rows are already
+            // gone by then, so it is reported as `registryRemoved: false`
+            // rather than as a failure the store does not bear out, and the
+            // package leaves the running process at the next restart.
+            if (registry.getPackage(id) !== undefined) {
+                if (persists) {
+                    try {
+                        registry.uninstallPackage(id);
+                    } catch (err) {
+                        console.warn(
+                            `[handlePackages] '${id}' was deleted from storage but the running registry refused to `
+                            + `withdraw it, so this process keeps serving it until it restarts: ${(err as Error)?.message}`,
+                        );
+                    }
+                } else {
+                    registry.uninstallPackage(id);
+                }
+            }
+            const registryRemoved = existed && registry.getPackage(id) === undefined;
+
+            // ⭐ [#18877 ruling item 3] A package that no longer exists has no
+            // lifecycle state — so the DURABLE disable record goes with the row,
+            // and the next install of this id is a FRESH install that lands at
+            // the declared default. The registry half of the same sentence is
+            // inside `uninstallPackage`, which forgets the id from the boot seed
+            // set; this is the half that outlives the process.
+            //
+            // Without it the record was immortal: `DELETE` removed the row and
+            // left the id listed on disk, the next boot seeded it back, and a
+            // reinstalled package came up disabled with nothing anywhere saying
+            // why — a disable the operator could no longer even see to undo,
+            // since the package it named was gone. Written only for a package
+            // this request found, so a 404 changes no state; and [#21276] only
+            // once the persisted delete has answered — with a persisted half,
+            // whenever its stored row is gone, even if the running registry
+            // refused the withdrawal above.
+            //
+            // Same best-effort try/catch as the install and PATCH arms above:
+            // the uninstall itself already happened, so a state-file failure
+            // must not turn it into a 500.
+            if (persists ? existed : registryRemoved) {
+                try {
+                    setPackageDisabled(_context?.environmentId, id, false);
+                } catch (err) {
+                    console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
                 }
             }
 
@@ -2149,7 +2208,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     ),
                 };
             }
-            if (!registryRemoved && deletedCount === 0) {
+            // [#21276] `existed`, not `registryRemoved`: a package this request
+            // found whose withdrawal the registry refused after its stored row
+            // was deleted is not "not found".
+            if (!existed && deletedCount === 0) {
                 return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             }
             // [#16781] `packageId` is REQUIRED by

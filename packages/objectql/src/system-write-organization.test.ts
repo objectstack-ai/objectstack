@@ -44,6 +44,17 @@ import {
   SystemWriteOrganizationRequiredError,
   SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
 } from './tenancy/system-write-organization.js';
+// The package barrel is loaded HERE, at module top, and not by a dynamic import
+// inside the barrel case at the foot of this file. That import loads the whole
+// `@objectstack/objectql` index graph, and inside a case the load is charged to
+// vitest's per-case budget (5000ms by default): the case was measured timing
+// out on a loaded box while its assertions held, so its verdict was a function
+// of the machine rather than of the code. At module top the same load is
+// charged to the COLLECT phase, where no per-case budget applies. The case
+// loses nothing: it asserts symbol identity only, and the barrel itself only
+// re-exports. Same reasoning, and the same shape, as the core precedent
+// `packages/core/src/service-resolution-discriminator.contract.test.ts`.
+import * as barrel from './index.js';
 
 const ORG_ID = 'org_msokm9oaz0cal87q';
 const SECOND_ORG_ID = 'org_second';
@@ -499,11 +510,11 @@ describe('#14936 the published recognizer for the org-less system-write refusal'
     expect(pinned).toBe(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE);
   });
 
-  it('publishes both names from the package BARREL, not only from the module', async () => {
+  it('publishes both names from the package BARREL, not only from the module', () => {
     // The card's landing surface is "the module plus that package's index.ts
     // export" - a consumer reaches these by bare specifier, so an export that
     // exists only on the deep module is not the affordance that was asked for.
-    const barrel = await import('./index.js');
+    // `barrel` is the module-top import (see the imports for why it is there).
     expect(barrel.SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE).toBe(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE);
     expect(barrel.isSystemWriteOrganizationRequiredError).toBe(isSystemWriteOrganizationRequiredError);
   });

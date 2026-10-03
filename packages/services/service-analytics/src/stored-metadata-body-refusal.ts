@@ -34,10 +34,34 @@
  * Every OTHER member of these objects — `type`, `name`, `scope`, `state`,
  * timestamps — is grouped, filtered and counted as before, so the Setup grids
  * and "All Metadata" dashboards that chart metadata by type keep working. Only
- * the body column is refused.
+ * the body column, and since #21207 the two stored content-hash columns
+ * ({@link STORED_METADATA_HASH_COLUMNS}), are refused.
  */
 
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_COLUMN } from '@objectstack/spec/kernel';
+
+/**
+ * [#21207] The stored CONTENT-HASH columns of the same two tables: `checksum`
+ * (both) and the history table's `previous_checksum` (the parent's hash).
+ *
+ * Each is the canonical SHA-256 of the WHOLE stored body, withheld credential
+ * material included. Grouped by, it serves the stored values — beside the
+ * projected body every other door serves, an offline verifier for a guess at
+ * the withheld material; filtered on, it is an online one. Per the
+ * maintainer's ruling on #21207 they are refused here in the body column's
+ * envelope, in either role. The same list as
+ * `@objectstack/metadata-protocol`'s `STORED_METADATA_HASH_COLUMNS`, which this
+ * service cannot import; `stored-metadata-body-family.pin.test.ts` pins it to
+ * the object definitions.
+ */
+export const STORED_METADATA_HASH_COLUMNS: readonly string[] = Object.freeze(['checksum', 'previous_checksum']);
+
+/**
+ * [#21207] The history table's change note, which can QUOTE a stored content
+ * hash (`publish draft (hash …)` on rows written before the publish door stated
+ * its own message) — refused as a member for the same reason.
+ */
+export const STORED_METADATA_HASH_NOTE_COLUMN = 'change_note';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { NamedField, NamedRead } from './field-read-admission.js';
 
@@ -57,18 +81,28 @@ export function storedMetadataBodyAnalyticsRefusal(
     // it outright (`field-read-admission.ts`, the expression refusal) — one
     // rule for expressions, never a second one in this module.
     if ('expression' in f) continue;
-    if (!isStoredMetadataBodyObject(f.object) || f.field !== STORED_METADATA_BODY_COLUMN) continue;
+    if (!isStoredMetadataBodyObject(f.object)) continue;
+    const isBody = f.field === STORED_METADATA_BODY_COLUMN;
+    if (!isBody && !STORED_METADATA_HASH_COLUMNS.includes(f.field) && f.field !== STORED_METADATA_HASH_NOTE_COLUMN) continue;
     const param = f.role === 'aggregate' ? 'dimensions' : 'where';
     const err = new Error(
-      `Cannot query '${f.object}' by '${STORED_METADATA_BODY_COLUMN}': the query was not run. The `
-      + `${STORED_METADATA_BODY_COLUMN} column holds a stored metadata body, with stored credential material `
-      + `withheld on every read exit; grouping, aggregating, filtering or sorting by it would evaluate the `
-      + `stored body (a group key that cannot be projected, or a filter oracle that rebuilds a withheld value `
-      + `by probing). Group, filter or sort by 'type', 'name' or another scalar column instead.`,
+      isBody
+        ? `Cannot query '${f.object}' by '${STORED_METADATA_BODY_COLUMN}': the query was not run. The `
+          + `${STORED_METADATA_BODY_COLUMN} column holds a stored metadata body, with stored credential material `
+          + `withheld on every read exit; grouping, aggregating, filtering or sorting by it would evaluate the `
+          + `stored body (a group key that cannot be projected, or a filter oracle that rebuilds a withheld value `
+          + `by probing). Group, filter or sort by 'type', 'name' or another scalar column instead.`
+        // [#21207] A stored content-hash column, in the same envelope.
+        : `Cannot query '${f.object}' by '${f.field}': the query was not run. The ${f.field} column `
+          + `${f.field === STORED_METADATA_HASH_NOTE_COLUMN ? 'can quote' : 'holds'} the `
+          + `stored content hash of a metadata body, computed over withheld credential material too, so every read `
+          + `exit serves it only in keyed form; grouping, aggregating, filtering or sorting by it would evaluate the `
+          + `stored hash (a group key that serves it, or a filter that confirms a guessed hash). Group, filter or `
+          + `sort by 'type', 'name' or another scalar column instead.`,
     ) as Error & { code: string; status: number; field: string; object: string; param: string };
     err.code = INVALID_FIELD;
     err.status = 400;
-    err.field = STORED_METADATA_BODY_COLUMN;
+    err.field = f.field;
     err.object = f.object;
     err.param = param;
     return err;

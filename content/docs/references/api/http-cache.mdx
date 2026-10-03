@@ -163,7 +163,7 @@ const result = CacheControlSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | optional | Metadata payload (omitted for 304 Not Modified) |
-| **etag** | `{ value: string; weak: boolean }` | optional | ETag for this resource version |
+| **etag** | `{ value: string; weak?: boolean }` | optional | ETag for this resource version |
 | **lastModified** | `string` | optional | Last modification timestamp |
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |

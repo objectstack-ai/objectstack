@@ -458,7 +458,10 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
             code: 'metadata_conflict',
             actor: 'admin',
         });
-        expect(String(denial.note)).toContain('sha256:stale');
+        // [#21207] The note names which side was present, never a version
+        // token or a stored hash: a copy carries no hash (fork three, ruling A).
+        expect(String(denial.note)).not.toContain('sha256:stale');
+        expect(String(denial.note)).toContain('(withheld)');
     });
 
     // ── the read door ───────────────────────────────────────────────────────

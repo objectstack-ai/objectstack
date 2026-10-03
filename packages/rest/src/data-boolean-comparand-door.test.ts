@@ -91,7 +91,9 @@ const REFUSED_OVER_REST: ReadonlyArray<readonly [string, unknown]> = [
   ['a $in member 2', { $in: [false, 2] }],
   ['a $nin member -1', { $nin: [-1] }],
   ['a $in member [true] (the card)', { $in: [false, [true]] }],
-  ['$gt [true] (an array at a scalar slot)', { $gt: [true] }],
+  // [#21448] `$gt [true]` left this table: a list at a scalar operator is the
+  // shared comparand-shape face's refusal, one door before this one — pinned
+  // in its own block below. A list as a `$in` MEMBER is still this door's.
 ];
 
 /**
@@ -241,6 +243,40 @@ for (const cell of CELLS) {
             expect({ code: having?.code, status: having?.status }, `having ${path}, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
             expect(having?.message, `having ${path}, ${name}`).toContain('having.done');
           }
+        }
+        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+      });
+
+      it('[#21448] $gt [true]: one 400 at every position, in the shared comparand-shape face\'s words — VALIDATION_FAILED at the wire, INVALID_FILTER in process — no read', async () => {
+        const before = reads.n;
+        const sentence = 'Operator "$gt" on field "done" requires a single comparable value, but received an array ([true])';
+        const where = { done: { $gt: [true] } } as FilterCondition;
+        // Over the wire the route parses its body first, and the schema door
+        // asks the face (#20116): VALIDATION_FAILED, located on the member, in
+        // the face's sentence less its location — before the engine runs.
+        for (const [body, member] of [
+          [{ where }, 'query.where.done.$gt'],
+          [perAggregation(where), 'query.aggregations.1.filter.done.$gt'],
+          [grouped('native', where), 'query.having.done.$gt'],
+        ] as const) {
+          const res = await query(body as Record<string, unknown>);
+          expect(res.status, JSON.stringify(res.body)).toBe(400);
+          expect(res.body.code, member).toBe('VALIDATION_FAILED');
+          const at = (res.body.fields as Array<{ field: string; message: string }>).filter((f) => f.field === member);
+          expect(at, JSON.stringify(res.body.fields)).toHaveLength(1);
+          expect(at[0]!.message.startsWith(`${sentence}. Write ONE value.`), at[0]!.message).toBe(true);
+        }
+        // In process the engine's seam runs the face itself: INVALID_FILTER, located.
+        const err = await refusalOf(engine.find(OBJECT, { where }));
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(err?.message).toContain(`${sentence} at where.done.$gt.`);
+        const filtered = await refusalOf(engine.aggregate(OBJECT, perAggregation(where)));
+        expect({ code: filtered?.code, status: filtered?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(filtered?.message).toContain(`${sentence} at aggregations[1].filter.done.$gt.`);
+        for (const path of ['native', 'rows'] as const) {
+          const having = await refusalOf(engine.aggregate(OBJECT, grouped(path, where)));
+          expect({ code: having?.code, status: having?.status }, `having ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+          expect(having?.message, `having ${path}`).toContain(`${sentence} at having.done.$gt.`);
         }
         expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
       });

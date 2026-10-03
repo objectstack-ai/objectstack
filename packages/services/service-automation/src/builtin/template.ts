@@ -189,7 +189,7 @@ function unknownFunctionError(name: string, expr: string): FlowExpressionFunctio
         `flow value expression: unknown function '${name}' in '${expr}'. ` +
         `Value expressions support round, floor, ceil, abs, min, max (1:1 with the CEL stdlib) ` +
         `and the whole-token date macros NOW() / TODAY().${hint} ` +
-        `(Before #11060 this name was silently rewritten to null and the field was written undefined.)`,
+        `An unknown function is refused here rather than evaluated to null, which would write the field as undefined.`,
     );
 }
 
