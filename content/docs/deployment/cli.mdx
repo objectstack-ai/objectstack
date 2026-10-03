@@ -1082,14 +1082,19 @@ them into the declared fields with your own script, then run
 - **Values as stored.** An unmapped column has no declared type, so each value is
   emitted as the database client returns it, with no field-type decoding: a
   retired `json` field on SQLite reads as its stored text, a retired `boolean`
-  as `0` or `1`.
+  as `0` or `1`, and a retired `datetime` on PostgreSQL arrives as a date and is
+  emitted as its ISO 8601 text. A value JSON cannot carry as stored (binary
+  bytes, a `bigint`, or a non-finite number) is refused with exit 1, naming the
+  column and the record id, and no record is emitted; read that column with
+  the database's own client.
 - **Empty work, exit 0**, for an object with no unmapped column, or with no table
   in this database yet. `--json` prints one document:
   `{ object, table, columns, count, records: [{ id, values }] }`.
 - **Refused, exit 1**: an object name the deployment does not declare
   (`OBJECT_NOT_FOUND`); an object `plan` does not diff (federated, or bound to
-  another datasource), whose empty answer would be unmeasured; and a read that
-  cannot be complete, such as one stopped by `--max-records`. A partial set is
+  another datasource), whose empty answer would be unmeasured; a read that
+  cannot be complete, such as one stopped by `--max-records`; and a value JSON
+  cannot carry as stored, described above. A partial set is
   never emitted, because a conversion over part of a table, followed by the
   drop, loses the rest.
 

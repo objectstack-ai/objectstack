@@ -25,7 +25,11 @@
  *  4. an object name the registry does not hold: `OBJECT_NOT_FOUND`, exit 1,
  *     one document;
  *  5. a row cap the table exceeds: refused, exit 1, and no records emitted;
- *  6. the door writes nothing: the schema and every row are byte-identical
+ *  6. a value JSON cannot carry as stored (bytes in a BLOB column added by
+ *     hand to `um_blob`; the platform creates no binary column for any field
+ *     type): refused in both faces, exit 1, naming the column and the record
+ *     id, no record emitted;
+ *  7. the door writes nothing: the schema and every row are byte-identical
  *     after it ran.
  *
  * The runtime half, that the engine's data door never serves these columns, is
@@ -64,6 +68,7 @@ const RELEASE_ONE = {
       fields: { name: { type: 'text' }, mailing_street: { type: 'text' }, mailing_city: { type: 'text' } },
     },
     { name: 'um_account', fields: { name: { type: 'text' } } },
+    { name: 'um_blob', fields: { name: { type: 'text' } } },
   ],
 };
 
@@ -73,6 +78,7 @@ const RELEASE_TWO = {
   objects: [
     { name: 'um_contact', fields: { name: { type: 'text' } } },
     { name: 'um_account', fields: { name: { type: 'text' } } },
+    { name: 'um_blob', fields: { name: { type: 'text' } } },
   ],
 };
 
@@ -95,7 +101,8 @@ function childEnv(overrides: Record<string, string | undefined>): Record<string,
 
 /**
  * Release one, served: DDL performed, three contacts and an account written
- * while the mailing fields are declared. Then the hash shadow, by hand.
+ * while the mailing fields are declared. Then, by hand, the hash shadow and a
+ * BLOB column on `um_blob` holding three bytes.
  */
 const SEED_CHILD = `
 const rt = await import('@objectstack/runtime');
@@ -115,11 +122,14 @@ await ql.insert('um_contact', { id: 'c1', name: 'Ann', mailing_street: '1 Retire
 await ql.insert('um_contact', { id: 'c2', name: 'Bob', mailing_street: '2 Retired Way', mailing_city: 'Newtown' }, SYSTEM);
 await ql.insert('um_contact', { id: 'c3', name: 'Cy' }, SYSTEM);
 await ql.insert('um_account', { id: 'a1', name: 'Acme' }, SYSTEM);
+await ql.insert('um_blob', { id: 'b1', name: 'Bin' }, SYSTEM);
 await kernel.shutdown();
 const { SqlDriver } = await import('@objectstack/driver-sql');
 const raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: process.env.FIXTURE_DB }, useNullAsDefault: true });
 await raw.knex.raw('ALTER TABLE um_contact ADD COLUMN ${HASH_SHADOW} text');
 await raw.knex('um_contact').update({ ${HASH_SHADOW}: 'shadow' });
+await raw.knex.raw('ALTER TABLE um_blob ADD COLUMN legacy_bytes blob');
+await raw.knex('um_blob').update({ legacy_bytes: Buffer.from([1, 2, 255]) });
 await raw.disconnect();
 process.stderr.write('[fixture] seeded\\n');
 process.exit(0);
@@ -205,6 +215,8 @@ let noneJson: Run;
 let noneHuman: Run;
 let unknownJson: Run;
 let cappedJson: Run;
+let bytesJson: Run;
+let bytesHuman: Run;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-21573-'));
@@ -227,6 +239,8 @@ beforeAll(async () => {
   noneHuman = await runCli(door('um_account'));
   unknownJson = await runCli(door('um_nope', '--json'));
   cappedJson = await runCli(door('um_contact', '--max-records', '2', '--json'));
+  bytesJson = await runCli(door('um_blob', '--json'));
+  bytesHuman = await runCli(door('um_blob'));
   after = readState();
   planJson = await runCli(['migrate', 'plan', '--json']);
 }, HOOK_TIMEOUT_MS);
@@ -301,5 +315,17 @@ describe('os migrate unmapped-columns: the other answers', () => {
     const doc = JSON.parse(cappedJson.stdout);
     expect(doc.error).toMatch(/stopped at 2 row\(s\)[\s\S]*--max-records/);
     expect(doc).not.toHaveProperty('records');
+  });
+
+  it('a value JSON cannot carry as stored: refused in both faces, exit 1, naming the column and the record id', () => {
+    const says = /Record b1 of um_blob holds binary bytes in the column legacy_bytes[\s\S]*database's own client/;
+    expect(bytesJson.code).toBe(1);
+    const doc = JSON.parse(bytesJson.stdout);
+    expect(doc.error).toMatch(says);
+    expect(doc).not.toHaveProperty('records');
+    expect(bytesHuman.code).toBe(1);
+    expect(bytesHuman.stdout).toMatch(says);
+    // Neither face carries the stand-in a JSON serialisation of the bytes would be.
+    for (const out of [bytesJson.stdout, bytesHuman.stdout]) expect(out).not.toContain('"type":"Buffer"');
   });
 });

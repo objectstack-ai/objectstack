@@ -63,6 +63,28 @@ export interface UnmappedColumnReader {
 }
 
 /**
+ * The class of a value JSON cannot carry as the database stored it, or `null`
+ * when it can.
+ *
+ * Each of the three arrives in a JSON document as something else, with nothing
+ * to say so: binary bytes as an object shaped `{ type, data }` (a `Buffer`) or
+ * as an index-keyed object (another typed array), a `bigint` as a thrown
+ * serialisation error, and `NaN` / `±Infinity` as `null`. A conversion script
+ * would write the stand-in into the replacing field and report success, so the
+ * door refuses these instead of emitting them. ⛔ No codec: choosing a
+ * representation would make a representation part of this door's contract.
+ *
+ * A `Date` is not in the set: PostgreSQL hands a `timestamp` column back as
+ * one, and it serialises to its unambiguous ISO 8601 text.
+ */
+export function unrepresentableKind(value: unknown): string | null {
+  if (ArrayBuffer.isView(value)) return 'binary bytes';
+  if (typeof value === 'bigint') return 'a bigint';
+  if (typeof value === 'number' && !Number.isFinite(value)) return `a non-finite number (${String(value)})`;
+  return null;
+}
+
+/**
  * Read every row's unmapped values, keyed by record id.
  *
  * Through the DRIVER, never the engine: the engine's read verbs serve the
@@ -83,6 +105,8 @@ export interface UnmappedColumnReader {
  *  - a row comes back without a column the differ reported: the SQL driver
  *    answers a projection naming a missing column with the whole row instead,
  *    and a record emitted without its value would read as converted;
+ *  - a value is one JSON cannot carry as stored ({@link unrepresentableKind}):
+ *    it would be emitted as a stand-in a conversion would write as the value;
  *  - the driver answers something other than an array of rows.
  */
 export async function readUnmappedColumnValues(
@@ -120,6 +144,14 @@ export async function readUnmappedColumnValues(
             `Reading ${object} returned record ${String(row.id)} without the column ${column}, which ` +
               '"os migrate plan" reports as unmapped. The driver answered a different projection than ' +
               'the one asked for. Refusing rather than emitting the record without that value.',
+          );
+        }
+        const kind = unrepresentableKind(row[column]);
+        if (kind !== null) {
+          throw new Error(
+            `Record ${String(row.id)} of ${object} holds ${kind} in the column ${column}, which JSON cannot ` +
+              'carry as the database stored it. Read that column with the database\'s own client. Refusing ' +
+              'rather than emitting a stand-in a conversion would write as the value; no record was emitted.',
           );
         }
         values[column] = row[column];
@@ -182,8 +214,8 @@ export async function readUnmappedColumnValues(
  *  - an object the plan does not diff (federated, or bound to another
  *    datasource): refused, exit 1, because an empty answer there would be
  *    unmeasured rather than clean;
- *  - a read that cannot be complete: refused, exit 1
- *    ({@link readUnmappedColumnValues}).
+ *  - a read that cannot be complete, or a value JSON cannot carry as stored:
+ *    refused, exit 1, no record emitted ({@link readUnmappedColumnValues}).
  */
 export default class MigrateUnmappedColumns extends Command {
   // No tracker id in this string: a command description reaches operators,
@@ -396,7 +428,7 @@ export default class MigrateUnmappedColumns extends Command {
       // a second document after the first.
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ error: error?.message ?? String(error), ...errorCodeFields(error) }, 0, { compact: true });
+        await emitJson({ error: error?.message ?? String(error), ...errorCodeFields(error) }, 1, { compact: true });
         this.exit(1);
       }
       printError(error?.message ?? String(error));

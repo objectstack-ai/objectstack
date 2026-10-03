@@ -22,6 +22,16 @@
  * reported column (the SQL driver answers a projection naming a missing column
  * with the whole row, measured on SQLite and PostgreSQL) and an answer that is
  * not rows each REFUSE, and none of them returns records.
+ *
+ * ## …and rather than emit a value JSON cannot carry as stored
+ *
+ * Binary bytes, a `bigint` and a non-finite number each reach a JSON document
+ * as a stand-in (an object shaped like the bytes, a thrown serialisation, a
+ * `null`), which a conversion would write as the value. One case per class,
+ * each naming the column and the record id, and a control that a `Date`, a
+ * parsed json object and a string pass unchanged. What the drivers hand back
+ * for the columns the platform itself creates is measured on the pull request:
+ * none of them is in the refused set.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -29,6 +39,7 @@ import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import {
   unmappedColumnsOf,
   readUnmappedColumnValues,
+  unrepresentableKind,
   type UnmappedColumnReader,
 } from './unmapped-columns.js';
 
@@ -124,14 +135,52 @@ describe('readUnmappedColumnValues — every row, keyed by record id, values as 
     expect(Object.keys(records[0]!.values)).not.toContain('name');
   });
 
-  it('decodes nothing: a JSON-looking string, a 0/1 and a Buffer reach the record as the driver handed them', async () => {
-    const blob = Buffer.from([1, 2, 255]);
-    const reader = rowsReader([{ id: 'c1', legacy_flags: '{"a":[1,2]}', legacy_on: 1, legacy_blob: blob }]);
-    const [record] = await readUnmappedColumnValues(reader, 'contact', ['legacy_flags', 'legacy_on', 'legacy_blob']);
+  it('decodes nothing: a JSON-looking string, a 0/1, a Date, a parsed json object and a string pass unchanged', async () => {
+    const at = new Date('2026-01-02T03:04:05.000Z');
+    const parsed = { a: [1, 2], b: 'x' };
+    const reader = rowsReader([
+      { id: 'c1', legacy_flags: '{"a":[1,2]}', legacy_on: 1, legacy_at: at, legacy_json: parsed, legacy_note: 'kept' },
+    ]);
+    const [record] = await readUnmappedColumnValues(reader, 'contact', [
+      'legacy_flags', 'legacy_on', 'legacy_at', 'legacy_json', 'legacy_note',
+    ]);
 
     expect(record!.values.legacy_flags).toBe('{"a":[1,2]}');
     expect(record!.values.legacy_on).toBe(1);
-    expect(record!.values.legacy_blob).toBe(blob);
+    // The same instances: nothing is converted on the way through.
+    expect(record!.values.legacy_at).toBe(at);
+    expect(record!.values.legacy_json).toBe(parsed);
+    expect(record!.values.legacy_note).toBe('kept');
+    // …and each one JSON carries unambiguously: a Date as its ISO 8601 text.
+    expect(JSON.parse(JSON.stringify(record!.values))).toEqual({
+      legacy_flags: '{"a":[1,2]}', legacy_on: 1, legacy_at: '2026-01-02T03:04:05.000Z', legacy_json: parsed, legacy_note: 'kept',
+    });
+  });
+
+  it.each([
+    ['a Buffer (a SQLite blob, a PostgreSQL bytea)', Buffer.from([1, 2, 255]), /holds binary bytes/],
+    ['another ArrayBufferView', new Float64Array([1.5]), /holds binary bytes/],
+    ['a bigint', 9007199254740993n, /holds a bigint/],
+    ['NaN', Number.NaN, /holds a non-finite number \(NaN\)/],
+    ['Infinity', Number.POSITIVE_INFINITY, /holds a non-finite number \(Infinity\)/],
+    ['-Infinity', Number.NEGATIVE_INFINITY, /holds a non-finite number \(-Infinity\)/],
+  ])('REFUSES %s, naming the column and the record id, and emits no record', async (_label, value, says) => {
+    // The bad value sits on the SECOND row: the first is never handed back on its own.
+    const reader = rowsReader([
+      { id: 'c1', legacy: 'fine' },
+      { id: 'c2', legacy: value },
+    ]);
+    const read = readUnmappedColumnValues(reader, 'contact', ['legacy']);
+    await expect(read).rejects.toThrow(says);
+    await expect(readUnmappedColumnValues(reader, 'contact', ['legacy'])).rejects.toThrow(
+      /Record c2 of contact holds [^\n]* in the column legacy, which JSON cannot carry as the database stored it/,
+    );
+  });
+
+  it('the predicate answers null for every value JSON carries as stored', () => {
+    for (const value of [null, 'text', '', 0, -1.5, 42, true, false, new Date(0), { a: 1 }, [1, 'x']]) {
+      expect(unrepresentableKind(value), String(value)).toBeNull();
+    }
   });
 
   it('walks past one page by seeking on id, and reads every row once', async () => {
