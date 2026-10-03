@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { MetadataManager } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
 import { loadExcelJs } from './xlsx-module.js';
@@ -160,6 +161,12 @@ async function boot(services?: Map<string, any>) {
   await engine.insert('user', { id: 'u1', name: '张三', email: 'zhang@x.com' });
   await engine.insert('user', { id: 'u2', name: '李四', email: 'li@x.com' });
 
+  // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+  // name its registry does not hold, so the harness registers the family as a boot
+  // does — after the DDL, so an unprovisioned store still answers "no such table".
+  for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+  }
   const protocol = new ObjectStackProtocolImplementation(
     engine as any,
     services ? () => services : undefined,
