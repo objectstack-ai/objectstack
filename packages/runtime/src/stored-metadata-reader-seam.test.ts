@@ -51,9 +51,9 @@ function scopedApi(seen: { fields: unknown[]; reads: number } = { fields: [], re
     async count() { seen.reads += 1; return 1; },
     async aggregate() { seen.reads += 1; return [{ type: 'datasource', metadata: storedRow().metadata, checksum: STORED_HASH, count: 1 }]; },
     // Write returns: a family row comes back from a write too, and is served.
-    async insert() { return name.startsWith('sys_metadata') ? storedRow() : { id: 'n1' }; },
-    async update() { return name.startsWith('sys_metadata') ? storedRow() : 1; },
-    async delete() { return 1; },
+    async insert(_data?: any) { return name.startsWith('sys_metadata') ? storedRow() : { id: 'n1' }; },
+    async update(_data?: any, _opts?: any) { return name.startsWith('sys_metadata') ? storedRow() : 1; },
+    async delete(_opts?: any) { return 1; },
   });
   return {
     object: repo,
@@ -124,7 +124,7 @@ describe('[#21454] serveStoredMetadataReadsThrough — the reads it serves', () 
   });
 
   it('a projection naming the body alone reads the type beside it and serves exactly the columns named', async () => {
-    const seen = { fields: [] as unknown[] };
+    const seen = { fields: [] as unknown[], reads: 0 };
     const api = serveStoredMetadataReadsThrough(scopedApi(seen), engineWithProvider);
     const [row] = await api.object('sys_metadata').find({ fields: ['metadata'] });
     expect(seen.fields).toEqual([['metadata', 'type']]);
@@ -162,13 +162,8 @@ describe('[#21454] serveStoredMetadataRead — one read, served in the shape it 
 });
 
 describe('[#21454] the EVALUATE shapes are refused, the way the data door refuses them', () => {
-  /** The refusal carries the data door's envelope and does NOT run the read. */
-  function expectRefused(err: any, param: string, field: string): void {
-    expect(err?.code).toBe('INVALID_FIELD');
-    expect(err?.status).toBe(400);
-    expect(err?.param).toBe(param);
-    expect(err?.field).toBe(field);
-  }
+  // Each case asserts the data door's envelope directly (code / status / param /
+  // field): the predicates are the door's own, so the seam carries them verbatim.
 
   it('a filter, sort or grouping on the body column, through the served read', async () => {
     const seen = { fields: [] as unknown[], reads: 0 };
@@ -260,7 +255,7 @@ describe('[#21454] the engine action verb is never on a served body\'s surface',
     // from a served body on #21454, not closed here. This pin asserts the seam
     // adds no execute of its own to a repository that had none.
     const repo = { find: async () => [], count: async () => 0 } as any;
-    const api = serveStoredMetadataReadsThrough({ object: () => repo }, engineWithProvider);
+    const api = serveStoredMetadataReadsThrough({ object: (_name: string) => repo } as any, engineWithProvider);
     expect((api.object('sys_metadata') as any).execute).toBeUndefined();
   });
 });
