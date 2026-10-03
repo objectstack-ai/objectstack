@@ -13,6 +13,7 @@ import { retiredKey } from '../shared/retired-key';
 import { isValueDomainMember } from '../shared/value-domain.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ScriptBodySchema } from '../data/hook-body.zod';
+import { bannedKeys, requiredOneOf } from '../shared/refinement-projection';
 
 /**
  * The cron zone's authoring door — `iana_time_zone` membership, judged by the
@@ -252,7 +253,14 @@ export const JobSchema = lazySchema(() => strictObject({
    * when that function is self-contained and written against the sandbox `ctx`
    * (`packages/cli/src/utils/lower-callables.ts`).
    */
-  body: ScriptBodySchema.optional().describe(
+  //
+  // `ScriptBodySchema` by reference; the one job-specific rule is a refinement
+  // on this slot, declared through the closed projection list so the published
+  // JSON Schema bans the key too (`propertyNames`), not only the parse.
+  body: ScriptBodySchema.refine(bannedKeys(['timeoutMs']), {
+    message: JOB_BODY_TIMEOUT_REFUSED,
+    path: ['timeoutMs'],
+  }).optional().describe(
     'Job body — a sandboxed JS (L2) body, the same shape hooks and actions use; an expression (L1) body is refused, because a job runs for its effects and an expression has none. '
       + 'Preferred over `handler`: when both are present `body` wins. '
       + 'It runs in the QuickJS sandbox with no module scope (no imports, no helpers or constants from the surrounding file): it reaches data only through `ctx.api` under its declared `capabilities` (`api.read` / `api.write` / `api.transaction`) and logs through `ctx.log` (`log`); the in-process handler context (`ql`, `logger`, `bundle`) does not exist there. '
@@ -279,24 +287,10 @@ export const JobSchema = lazySchema(() => strictObject({
   // and a hard 422 waiting for the day this shape is closed (see
   // `metadata-type-schemas.test.ts` for the invariant and how it was hollow).
   ...MetadataProtectionFields,
-}).superRefine(checkJobRunnable));
-
-/**
- * The two cross-key rules `body` brings: a job declares something to run, and
- * a body job states its time limit once. Object-level, so it runs only once
- * every key has parsed — a job that fails elsewhere reports that first.
- */
-function checkJobRunnable(
-  job: { body?: { timeoutMs?: number }; handler?: string },
-  ctx: z.RefinementCtx,
-): void {
-  if (job.body === undefined && job.handler === undefined) {
-    ctx.addIssue({ code: 'custom', path: ['body'], message: JOB_RUNS_NOTHING });
-  }
-  if (job.body?.timeoutMs !== undefined) {
-    ctx.addIssue({ code: 'custom', path: ['body', 'timeoutMs'], message: JOB_BODY_TIMEOUT_REFUSED });
-  }
-}
+// Declared through the closed projection list, so the published JSON Schema
+// states the rule (`anyOf` of one `required` per key) instead of being wider
+// than the parse.
+}).refine(requiredOneOf(['body', 'handler']), { message: JOB_RUNS_NOTHING, path: ['body'] }));
 
 export type Job = z.input<typeof JobSchema>;
 /** Post-parse shape of {@link Job} — defaults applied, transforms run (ADR-0122). */
