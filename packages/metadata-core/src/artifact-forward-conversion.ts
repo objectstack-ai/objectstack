@@ -98,7 +98,7 @@
  * for `field-required-notnull-explicit`, #16693; measured again for
  * `app-hidden-to-unpublished`, #17885). Retirement does not hold those back
  * either: `retiredFromLoadPath`'s jurisdiction is the AUTHORING funnel and
- * nothing else (#16864's determination, and the flag's own docblock now says
+ * nothing else (ADR-0087's recorded determination, and the flag's own docblock now says
  * so) — which is exactly why the window has to name them here.
  *
  * ⇒ {@link DEFAULT_FLIPS_NOT_REPLAYED_HERE} lists them, and the door refuses

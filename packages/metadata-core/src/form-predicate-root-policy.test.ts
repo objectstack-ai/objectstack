@@ -105,7 +105,7 @@ describe('the bound vocabulary is checked against the LIVE contract, not a copy 
    *      metadata forms. No `current_user` at section level — it is unbound
    *      here and the predicate would fault open."
    *
-   * #12914 replaced that sentence — objectui#6110 threads the host scope into
+   * Commit f887e5249 replaced that sentence — objectui#6110 threads the host scope into
    * `isSectionVisible`, objectui#6111 evaluates the section predicate on the
    * `section-divider` pseudo-field with that scope bound — and the copy above
    * went stale HERE in total silence, because no gate reads a comment. It is
@@ -146,7 +146,7 @@ describe('the bound vocabulary is checked against the LIVE contract, not a copy 
     // ⚠️ INVERTED IN PLACE. Was "judges the SAME predicate differently per
     // surface — the whole point of the split", expecting `['current_user']`
     // from the section vocabulary. The section binds the root since
-    // objectui#6110 + #6111 (contract landed by #12914), so the section answer
+    // objectui#6110 + objectui#6111 (contract landed by commit f887e5249), so the section answer
     // is now `[]` too, and a finding there would be a boot notice about a
     // predicate that resolves.
     const source = 'current_user.id == record.owner';
@@ -255,7 +255,7 @@ describe('detectUnboundFormViewPredicateRoots — traversal', () => {
 
   it('stays SILENT on a current_user-family predicate on EITHER surface', () => {
     // Both regressions in one loop. Each of these resolves at FIELD level
-    // (objectui#6010) and at SECTION level (objectui#6110 + #6111), so
+    // (objectui#6010) and at SECTION level (objectui#6110 + objectui#6111), so
     // flagging one is crying wolf on a legitimate, correctly-authored
     // predicate — the failure the module doc forbids, once per surface.
     for (const root of CURRENT_USER_FAMILY_ROOTS) {
@@ -276,7 +276,7 @@ describe('detectUnboundFormViewPredicateRoots — traversal', () => {
   it('says NOTHING about the same root at SECTION level either — it binds there now', () => {
     // ⚠️ INVERTED IN PLACE. This case asserted exactly ONE finding — the
     // section slot — "where the contract says it is unbound", while the
-    // identical field predicate stayed silent. #12914 replaced that contract
+    // identical field predicate stayed silent. Commit f887e5249 replaced that contract
     // sentence, so the two slots now answer alike and the artifact below is
     // healthy on both. A finding here would be a boot notice about a predicate
     // that resolves, which the module doc names as worse than no notice.

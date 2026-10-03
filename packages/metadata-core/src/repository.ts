@@ -60,7 +60,7 @@
  *    moment MAY be dropped, on both paths alike.
  *
  *    **Shutdown MUST NOT be delivered AS an event.** Written as a MUST NOT
- *    because it was tried, and both of its halves were measured (#11021). A
+ *    because it was tried, and both of its halves were measured (commit 7d81c889f). A
  *    synthetic "we are closing" event is subject to the very filters `watch()`
  *    applies to real ones, so the subscriptions that most need draining are
  *    exactly the ones that drop it: any non-empty `filter` rejects a ref
@@ -75,7 +75,7 @@
  *    Stated conditionally because `close()` is not on the interface below;
  *    it is offered by some implementations and not others. Where it is
  *    offered, this is what it owes. Measured across today's three, and there
- *    are **no declared exceptions**: `SysMetadataRepository` conforms (#11021);
+ *    are **no declared exceptions**: `SysMetadataRepository` conforms (commit 7d81c889f);
  *    `FileSystemRepository` conforms (#11127 — its `close()` used to retire
  *    the filesystem watcher and the resync sweep without ever reaching its
  *    event broker, leaving a parked iterator parked for every subscription
