@@ -315,7 +315,7 @@ describe('[#21544] door / seam parity — one collector, one narrowing', () => {
       registry: { getObject: (name: string) => schemas[name] },
       find: record,
       aggregate: record,
-      findOne: async () => null,
+      // `findData` reads through find / count / aggregate only — no `findOne` here.
       count: async () => 0,
       getKeyedDigest: () => provider,
     };

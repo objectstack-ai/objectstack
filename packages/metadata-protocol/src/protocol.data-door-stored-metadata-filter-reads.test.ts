@@ -162,7 +162,9 @@ describe('[#21544] data door — a filter that reads the body or a hash without 
         const find = vi.fn(async () => []);
         const aggregate = vi.fn(async () => []);
         const count = vi.fn(async () => 0);
-        const engine: any = { registry: { getObject: (n: string) => SCHEMAS[n] }, find, findOne: vi.fn(async () => null), count, aggregate };
+        // `findData` reads through find / count / aggregate only — no `findOne`
+        // on this double, so a door that started calling it would fail loudly.
+        const engine: any = { registry: { getObject: (n: string) => SCHEMAS[n] }, find, count, aggregate };
         return { p: new ObjectStackProtocolImplementation(engine), find, aggregate, count };
     }
 
