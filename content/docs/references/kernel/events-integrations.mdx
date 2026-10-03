@@ -53,7 +53,7 @@ const result = EventMessageQueueConfigSchema.parse(data);
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>` | optional (default: `"POST"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | HTTP headers |
 | **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
-| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy |
+| **retryPolicy** | `{ maxRetries?: integer; backoffStrategy?: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs?: integer; maxDelayMs?: integer }` | optional | Retry policy |
 | **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **transform** | `any` | optional | Transform event before sending |
 | **enabled** | `boolean` | optional (default: `true`) | Whether webhook is enabled |
@@ -89,7 +89,7 @@ const result = EventMessageQueueConfigSchema.parse(data);
 | **userFilter** | `boolean` | optional (default: `true`) | Filter events by user |
 | **tenantFilter** | `boolean` | optional (default: `true`) | Filter events by tenant |
 | **channels** | `{ name: string; eventPattern: string; filter?: any }[]` | optional | Named channels for event broadcasting |
-| **rateLimit** | `{ maxEventsPerSecond: integer; windowMs: integer }` | optional | Rate limiting configuration |
+| **rateLimit** | `{ maxEventsPerSecond: integer; windowMs?: integer }` | optional | Rate limiting configuration |
 
 ### Nested Shape: `RealTimeNotificationConfig.channels[number]`
 

@@ -107,7 +107,9 @@
  * at an EQUALITY slot (implicit, `$eq`, `$ne`) is refused one door earlier
  * still, by the comparand-shape door, whose remedy is the one for that slot;
  * the verdict answers `door-refusal` for it too, and the case table places its
- * array rows where the shape door does not speak. An object is the
+ * array rows where the shape door does not speak. [#21448] That door now
+ * refuses a list at every other scalar operator as well, whatever the column
+ * type, so the rows sit at the list members alone. An object is the
  * comparand-type door's refusal, as above: refused before this change, and
  * still refused, in that door's words.
  *
@@ -685,11 +687,12 @@ const VALUE_DATE = new Date(Date.UTC(2026, 0, 1));
 const VALUE_LIST: readonly boolean[] = [true];
 
 /**
- * The equality slots — implicit, `$eq`, `$ne` — where an array is the
- * comparand-SHAPE door's refusal, one door before this one (module header).
+ * The one-value slots — implicit and every scalar operator — where an array is
+ * the comparand-SHAPE door's refusal, one door before this one (module
+ * header). [#21448] It was the equality slots alone until that door refused a
+ * list at every other scalar operator too.
  */
-const isEqualitySlot = (slot: Slot): boolean =>
-  slot.kind === 'implicit' || (slot.kind === 'scalar' && (slot.op === '$eq' || slot.op === '$ne'));
+const isOneValueSlot = (slot: Slot): boolean => slot.kind === 'implicit' || slot.kind === 'scalar';
 
 /**
  * The cases, derived rather than hand-kept:
@@ -707,7 +710,7 @@ const isEqualitySlot = (slot: Slot): boolean =>
  *    `{ $field }` reference on `f_boolean` pass.
  * 5. **The non-string comparands** ([#21382]) — `-1` at `$ne` on every judged
  *    field; `2` and a `Date` at every judged position on `f_boolean`, and an
- *    array at every one but the equality slots (the shape door's); all
+ *    array at every list member (a one-value slot is the shape door's); all
  *    refused. Beside them, what passes: `null` as the null test, and a number
  *    or a `Date` against a field that is not boolean — not this door's subject.
  */
@@ -734,7 +737,7 @@ export const BOOLEAN_COMPARAND_DOOR_CASES: readonly BooleanComparandDoorCase[] =
   ...JUDGED_SLOTS.flatMap((slot) => [
     caseFor('value', fixtureField('f_boolean'), slot, 2),
     caseFor('value', fixtureField('f_boolean'), slot, VALUE_DATE),
-    ...(isEqualitySlot(slot) ? [] : [caseFor('value', fixtureField('f_boolean'), slot, VALUE_LIST)]),
+    ...(isOneValueSlot(slot) ? [] : [caseFor('value', fixtureField('f_boolean'), slot, VALUE_LIST)]),
   ]),
   caseFor('value', fixtureField('f_boolean'), { kind: 'implicit' }, null),
   caseFor('value', fixtureField('f_boolean'), { kind: 'scalar', op: '$ne' }, null),

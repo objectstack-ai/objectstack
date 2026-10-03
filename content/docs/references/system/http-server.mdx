@@ -79,7 +79,7 @@ const result = MiddlewareConfigSchema.parse(data);
 | **path** | `string` | ✅ | URL path pattern |
 | **handler** | `string` | ✅ | Handler identifier or name |
 | **metadata** | `{ summary?: string; description?: string; tags?: string[]; operationId?: string }` | optional |  |
-| **security** | `{ authRequired: boolean; permissions?: string[]; rateLimit?: string }` | optional |  |
+| **security** | `{ authRequired?: boolean; permissions?: string[]; rateLimit?: string }` | optional |  |
 
 ### Nested Shape: `RouteHandlerMetadata.metadata`
 

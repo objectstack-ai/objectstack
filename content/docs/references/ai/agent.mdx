@@ -48,7 +48,7 @@ const result = AIModelConfigSchema.parse(data);
 | **avatar** | `string` | optional |  |
 | **role** | `string` | ✅ | The persona/role (e.g. "Senior Support Engineer") |
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
-| **model** | `{ provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature: number; maxTokens?: number; … }` | optional |  |
+| **model** | `{ provider?: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature?: number; maxTokens?: number; … }` | optional |  |
 | **lifecycle** | `never` | optional | [REMOVED] `agent.lifecycle` was removed in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — no runtime ever read it: no agent moved through a declared state and no transition was ever refused. Delete the key. A phase of a conversation is a skill with its own `instructions` and `tools`, selected by its `triggerConditions` (ADR-0064); multi-step process orchestration is a Flow (ADR-0019); a record's status transitions are a `state_machine` validation rule on the object (ADR-0020). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **surface** | `Enum<'ask' \| 'build'>` | optional (default: `"ask"`) | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
@@ -57,10 +57,10 @@ const result = AIModelConfigSchema.parse(data);
 | **active** | `boolean` | optional (default: `true`) |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
-| **planning** | `{ maxIterations: integer }` | optional | Autonomous reasoning and planning configuration |
+| **planning** | `{ maxIterations?: integer }` | optional | Autonomous reasoning and planning configuration |
 | **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | Agent memory (long-term notes recalled before each conversation and written by periodic reflection), enforced by the cloud AI runtime; the open framework edition does not run agents. |
 | **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents. |
-| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | Structured output contract for the agent's final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents. |
+| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema'>; schema?: Record<string, any>; strict?: boolean; retryOnValidationFailure?: boolean; … }` | optional | Structured output contract for the agent's final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this agent. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -90,7 +90,7 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **longTerm** | `{ enabled: boolean; maxEntries?: integer }` | optional | Long-term memory: distilled notes kept per user and agent and recalled before each conversation |
+| **longTerm** | `{ enabled?: boolean; maxEntries?: integer }` | optional | Long-term memory: distilled notes kept per user and agent and recalled before each conversation |
 | **reflectionInterval** | `integer` | optional | Reflect every N delivered interactions: each reflection writes one distilled note to long-term memory. Required when longTerm.enabled is true, and refused without it |
 
 ### Nested Shape: `Agent.guardrails`

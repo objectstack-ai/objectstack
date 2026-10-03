@@ -48,7 +48,7 @@ const result = AccessControlConfigSchema.parse(data);
 | **maxAgeSeconds** | `number` | optional | CORS preflight cache duration in seconds |
 | **maxAge** | `never` | optional | [REMOVED] `AccessControlConfig.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Every bucket-CORS standard this value is forwarded to already spells the unit (S3 MaxAgeSeconds, GCS maxAgeSeconds, Azure MaxAgeInSeconds), so the bare name was a deviation from them rather than a mirror of them. Rename the key to `maxAgeSeconds`; the value (seconds) is unchanged. The unrelated `CorsConfig.maxAge` on the shared HTTP surface keeps its name — that one mirrors the Access-Control-Max-Age response header, which carries no unit token. |
 | **corsEnabled** | `boolean` | optional (default: `false`) | Enable CORS configuration |
-| **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
+| **publicAccess** | `{ allowPublicRead?: boolean; allowPublicWrite?: boolean; allowPublicList?: boolean }` | optional | Public access control |
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
 | **blockedIps** | `string[]` | optional | Blocked IP addresses/CIDR blocks |
 
@@ -77,10 +77,10 @@ const result = AccessControlConfigSchema.parse(data);
 | **endpoint** | `string` | optional | Custom endpoint URL (for S3-compatible providers) |
 | **pathStyle** | `boolean` | optional (default: `false`) | Use path-style URLs (for S3-compatible providers) |
 | **versioning** | `boolean` | optional (default: `false`) | Enable object versioning |
-| **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
-| **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
-| **lifecyclePolicy** | `{ enabled: boolean; rules: object[] }` | optional | Lifecycle policy configuration |
-| **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
+| **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
+| **accessControl** | `{ acl?: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
+| **lifecyclePolicy** | `{ enabled?: boolean; rules?: object[] }` | optional | Lifecycle policy configuration |
+| **multipartConfig** | `{ enabled?: boolean; partSize?: number; maxParts?: number; threshold?: number; … }` | optional | Multipart upload configuration |
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |
 | **description** | `string` | optional | Bucket description |
 | **enabled** | `boolean` | optional (default: `true`) | Enable this bucket |
@@ -105,7 +105,7 @@ const result = AccessControlConfigSchema.parse(data);
 | **maxAgeSeconds** | `number` | optional | CORS preflight cache duration in seconds |
 | **maxAge** | `never` | optional | [REMOVED] `AccessControlConfig.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Every bucket-CORS standard this value is forwarded to already spells the unit (S3 MaxAgeSeconds, GCS maxAgeSeconds, Azure MaxAgeInSeconds), so the bare name was a deviation from them rather than a mirror of them. Rename the key to `maxAgeSeconds`; the value (seconds) is unchanged. The unrelated `CorsConfig.maxAge` on the shared HTTP surface keeps its name — that one mirrors the Access-Control-Max-Age response header, which carries no unit token. |
 | **corsEnabled** | `boolean` | optional (default: `false`) | Enable CORS configuration |
-| **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
+| **publicAccess** | `{ allowPublicRead?: boolean; allowPublicWrite?: boolean; allowPublicList?: boolean }` | optional | Public access control |
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
 | **blockedIps** | `string[]` | optional | Blocked IP addresses/CIDR blocks |
 
@@ -114,7 +114,7 @@ const result = AccessControlConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable lifecycle policies |
-| **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
+| **rules** | `{ id: string; enabled?: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
 
 ### Nested Shape: `BucketConfig.multipartConfig`
 
@@ -168,7 +168,7 @@ Lifecycle policy action type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable lifecycle policies |
-| **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
+| **rules** | `{ id: string; enabled?: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
 
 ### Nested Shape: `LifecyclePolicyConfig.rules[number]`
 
@@ -298,10 +298,10 @@ Lifecycle policy action type
 | **endpoint** | `string` | optional | Custom endpoint URL (for S3-compatible providers) |
 | **pathStyle** | `boolean` | optional (default: `false`) | Use path-style URLs (for S3-compatible providers) |
 | **versioning** | `boolean` | optional (default: `false`) | Enable object versioning |
-| **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
-| **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
-| **lifecyclePolicy** | `{ enabled: boolean; rules: object[] }` | optional | Lifecycle policy configuration |
-| **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
+| **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
+| **accessControl** | `{ acl?: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
+| **lifecyclePolicy** | `{ enabled?: boolean; rules?: object[] }` | optional | Lifecycle policy configuration |
+| **multipartConfig** | `{ enabled?: boolean; partSize?: number; maxParts?: number; threshold?: number; … }` | optional | Multipart upload configuration |
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |
 | **description** | `string` | optional | Bucket description |
 | **enabled** | `boolean` | optional (default: `true`) | Enable this bucket |

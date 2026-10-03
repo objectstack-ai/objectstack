@@ -14,9 +14,11 @@
 
 import { escapeMdxDescription } from './escape-mdx';
 import {
+  carriesDefault,
   discriminantKeyOf,
   formatPropertyType,
   formatType,
+  isAuthorOmittable,
   nestedShapesOf,
   variantSelector,
   type NestedShape,
@@ -209,9 +211,10 @@ export const INLINE_DEFAULT_WIDTH_LIMIT = 64;
  * @param required Whether the enclosing object lists the property in `required`.
  */
 export function renderRequiredCell(prop: any, required: boolean): string {
-  const hasDefault =
-    prop !== null && typeof prop === 'object' && Object.prototype.hasOwnProperty.call(prop, 'default');
-  if (!hasDefault) return required ? '✅' : 'optional';
+  // The same predicate the `{ … }` summary's `key?:` marker reads, so the two
+  // positions cannot disagree about one member (#21466).
+  if (!isAuthorOmittable(prop, required)) return '✅';
+  if (!carriesDefault(prop)) return 'optional';
 
   // Canonical JSON, no whitespace — the same spelling the #4666 default ratchet
   // fingerprints, so a value printed here and a value recorded there cannot

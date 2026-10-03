@@ -12,8 +12,13 @@
  * is the 2026-09-23 ruling's, recorded in its own section below.
  *
  * [#19886] And the same question for equality's negation: whether a `$ne`
- * comparand received ONE value rather than a list. Ruling A's, recorded in the
- * last "Refused BY RULING" section.
+ * comparand received ONE value rather than a list. Ruling A's, recorded in its
+ * own "Refused BY RULING" section.
+ *
+ * [#21448] And the same question for every other scalar operator — the
+ * ordering, text and flag operators: whether the comparand is ONE value rather
+ * than a list, whatever the column type. The 2026-10-02 ruling's, recorded in
+ * the last "Refused BY RULING" section.
  *
  * `FieldOperatorsSchema` (`./filter.zod.ts`) declares three operators whose
  * comparand is a LIST rather than a scalar:
@@ -74,7 +79,7 @@
  * delegating wrapper that supplies the engine's `find('deal')` context prefix;
  * there is exactly one implementation of "a list operator takes a list".
  *
- * That sentence is true of THREE slots, and each is named because it was once
+ * That sentence is true of FOUR slots, and each is named because it was once
  * true of fewer:
  *
  * - **The list-operator slot** (`$in` / `$nin` / `$between`) — a scalar where a
@@ -87,7 +92,12 @@
  *   array equality. That is the arm's section below.
  * - **The inequality slot** (`$ne`) — a list where one value belongs, since
  *   ruling A on #19886 (2026-09-24). Until then this face passed it and each
- *   backend answered it alone. That is the last "Refused BY RULING" section.
+ *   backend answered it alone. That is the sixth "Refused BY RULING" section.
+ * - **Every other scalar slot** (`$gt` / `$gte` / `$lt` / `$lte`, the text
+ *   operators, the flags) — a list where one value belongs, since the
+ *   2026-10-02 ruling (#21448). Until then this face passed it, and the
+ *   analytics lowering bound the list's FIRST member while the drivers each
+ *   answered it alone. That is the last "Refused BY RULING" section.
  *
  * ## Both engine doors, because only one of them carries an array
  *
@@ -268,9 +278,10 @@
  *   this ruling names implicit and explicit equality. It measured the same
  *   split (refused on the SQL family and `driver-memory`, answered by
  *   `driver-mongodb`), so it went to its own card and got its own ruling —
- *   the last section below, with its own remedy. The other scalar operators
+ *   the sixth section, with its own remedy. The other scalar operators
  *   (`$gt`, `$contains`, …) carrying an array are not this ruling's, and not
- *   that one's either.
+ *   that one's either: they are the 2026-10-02 ruling's (#21448), the last
+ *   section below, with a remedy of their own.
  * - **The list operators keep their lists**, `$in: []` / `$nin: []` included,
  *   and every scalar — `null` above all, since `{ field: null }` and
  *   `$eq: null` ARE the has-no-value predicate (#5332) — keeps passing.
@@ -340,7 +351,10 @@
  *   reconciles the spellings against `FieldOperatorsSchema` and the AST table.
  * - ⛔ **Not the ordering operators, a nested array inside `$in`, or a
  *   `{ $field }` referent to a multi-valued field.** Those are the same class,
- *   are recorded on the card, and are scoped separately.
+ *   are recorded on the card, and are scoped separately. [#21448] The
+ *   ordering operators are now the last section's, with every other scalar
+ *   operator; a nested array inside `$in` and a `{ $field }` referent are still
+ *   not judged here.
  * - **The leading sentence is `driver-memory`'s** `arrayComparandError` for
  *   `$ne`, word for word, so one condition keeps one wording across packages.
  *
@@ -349,6 +363,65 @@
  * sentence without the location. As with the equality slot, the whole sentence
  * is assembled in `./filter-comparand-refusal-text.ts`, which both doors
  * import.
+ *
+ * ## Refused BY RULING, 2026-10-02: a LIST at every other scalar operator (#21448)
+ *
+ * The triage ruling (record 5958292323): "A list at a scalar operator (`$gt`,
+ * `$gte`, `$lt`, `$lte`, `$eq`, `$ne` and the rest of the scalar set) is a shape
+ * error, whatever the column type." `$eq` and `$ne` had their arms already
+ * (the two sections above); this arm is the rest. It does not live in the
+ * number or boolean declared-type verdicts, because the column type does not
+ * decide it.
+ *
+ * The governing declaration is `FieldOperatorsSchema`: of the declared
+ * operators, only `$in`, `$nin` and `$between` accept an array at the schema
+ * door, and every other slot refuses one. This face passed the shape, and each
+ * consumer answered it alone. Measured on `b94a2a727`, SQLite and PostgreSQL
+ * 16.14 alike, through `POST /api/v1/analytics/query` and
+ * `/api/v1/analytics/dataset/query`, and at the engine's own `find`:
+ *
+ * | filter | analytics, engine-aggregate face | analytics, native face | `engine.find` |
+ * |:--|:--|:--|:--|
+ * | `{ amount: { $gt: [10, 99] } }` (number) | 200, the driver received `$gt: 10` | 400 (the number verdict) | 400 (the number verdict) |
+ * | `{ note: { $gt: ['a', 'z'] } }` (text) | 200, the driver received `$gt: 'a'` | 200, bound `'a'` | 400 (`driver-sql`'s own bind refusal) |
+ *
+ * The analytics lowering carried the operator's whole array into one leaf, and
+ * the leaf compilers read its FIRST member: the predicate the caller wrote was
+ * narrowed without a word, and the answer was a 200 with wrong rows. One
+ * position over, `driver-memory` refuses a list at the six comparisons but
+ * ANSWERS one at a text operator, while `driver-sql` refuses both in its own
+ * words. Refusing here makes every one of those cells unreachable through a
+ * platform door, and the analytics `where` door needs no rule of its own: it
+ * already hands every field entry to this face before any leaf exists.
+ *
+ * The scope:
+ *
+ * - **Every operator of the declared scalar half** (`SCALAR_COMPARAND_OPERATORS`,
+ *   `./filter-comparand-operators.ts`, the split the comparand-TYPE face reads)
+ *   other than `$eq` / `$ne`, whose arms answer first with their own remedies:
+ *   the four ordering operators, the text operators (`$contains`,
+ *   `$notContains`, `$startsWith`, `$endsWith`, `$icontains`, `$like`,
+ *   `$ilike`) and the three flags. At every depth, the EMPTY list too: `[]` is a
+ *   list in a one-value slot, and only `$in: []` / `$nin: []` are declared
+ *   predicates.
+ * - **The flags** (`$null`, `$exists`, `$empty`). A list there was already
+ *   refused on every query face by the boolean rule (#5347 / #5369), in that
+ *   rule's words; it is now refused here first, in this arm's, because HOW MANY
+ *   values comes before WHICH value. A non-boolean scalar flag keeps the
+ *   boolean rule's sentence.
+ * - **Not judged:** the list operators keep their lists; every scalar, a `Date`
+ *   and a `{ $field }` reference pass as before (a `null` ordering comparand
+ *   keeps its own arm above); an operator outside the vocabulary (`$wat`,
+ *   retired `$regex`) is not in the set and keeps its own refusal downstream.
+ * - **The remedy** is ONE value, or the two list operators an author holding a
+ *   list may have meant, by their spec and authoring spellings: `$in` for "one
+ *   of these values" and `$between` for a range. The leading sentence is
+ *   `driver-memory`'s `arrayComparandError`, word for word.
+ *
+ * The sentence is assembled in `./filter-comparand-refusal-text.ts`, and the
+ * save door (`./filter-save-door-refusals.ts`) prints it without the location,
+ * so a stored filter carrying the shape is refused on save the day this face
+ * refuses it on query.
  *
  * ## Refusal envelope
  *
@@ -363,15 +436,19 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/9228 (the move)
  * @see https://github.com/objectstack-ai/objectstack/issues/19757 (the equality-slot arm)
  * @see https://github.com/objectstack-ai/objectstack/issues/19886 (the `$ne` arm)
+ * @see https://github.com/objectstack-ai/objectstack/issues/21448 (the other scalar slots' arm)
  */
 
 import {
+  BETWEEN_OPERATOR_SPELLINGS,
   IN_OPERATOR_SPELLINGS,
   NIN_OPERATOR_SPELLINGS,
   arrayEqualityComparandMessage,
   arrayInequalityComparandMessage,
+  arrayScalarComparandMessage,
   shapePreview,
 } from './filter-comparand-refusal-text';
+import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 
 /**
  * The operators whose comparand `FieldOperatorsSchema` declares as a list, with
@@ -392,7 +469,8 @@ const LIST_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map
   ['$in', IN_OPERATOR_SPELLINGS],
   // [#19886] The `$nin` row likewise, for the operator the `$ne` refusal prescribes.
   ['$nin', NIN_OPERATOR_SPELLINGS],
-  ['$between', ['between']],
+  // [#21448] And the `$between` row, for the range the scalar-slot refusal prescribes.
+  ['$between', BETWEEN_OPERATOR_SPELLINGS],
 ]);
 
 /**
@@ -769,20 +847,44 @@ function arrayInequalityComparandError(
 }
 
 /**
+ * A LIST at any other scalar operator — refused BY RULING, 2026-10-02 (#21448);
+ * see the module note's seventh "Refused BY RULING" section.
+ *
+ * The sentence is `arrayScalarComparandMessage`
+ * (`./filter-comparand-refusal-text.ts`), which the save door prints too. Its
+ * leading sentence is `driver-memory`'s `arrayComparandError` for the same
+ * operator, word for word, and its remedy is ONE value, or the two list
+ * operators an author holding a list may have meant (`$in`, `$between`), with
+ * their authoring spellings. As with {@link arrayEqualityComparandError}, this
+ * door adds only its `at <path>` location and its envelope.
+ */
+function arrayScalarComparandError(
+  context: string | undefined,
+  op: string,
+  field: string,
+  value: unknown,
+  path: string,
+): Error {
+  return invalidFilterComparandError(context, arrayScalarComparandMessage(op, value, { field, path }));
+}
+
+/**
  * Walk one `FilterCondition` and refuse every list-shaped operator whose
  * comparand cannot be one — and, since the two null rulings (2026-08-31,
  * 2026-09-01), the null comparand positions those rulings carved out; and,
  * since the 2026-09-23 ruling (#19757), every EQUALITY comparand (implicit or
  * `$eq`) that IS a list; and, since ruling A on #19886, every `$ne` comparand
- * that is a list.
+ * that is a list; and, since the 2026-10-02 ruling (#21448), every other
+ * scalar operator's comparand that is a list.
  *
  * Read-only and allocation-free on the overwhelmingly common path (a filter
  * with no list operator walks its own keys and returns). Runs on every engine
  * read and write and inside every {@link parseFilterAST} call, so it stays a
  * walk rather than a schema parse — that cost is now the whole reason, and this
  * gate deliberately enforces only the three list declarations the drivers
- * genuinely cannot agree on, the equality slot's mirror of them, plus the null
- * carve-outs ruled onto the same door.
+ * genuinely cannot agree on, their mirror in every scalar slot (equality since
+ * #19757, `$ne` since #19886, the rest since #21448), plus the null carve-outs
+ * ruled onto the same door.
  *
  * @param node    the LOWERED `FilterCondition` — never the authoring array.
  * @param context optional caller prefix (`find('deal')`), the engine's #5346
@@ -868,6 +970,14 @@ function assertFieldListComparands(
         throw arrayInequalityComparandError(context, field, spec[op], `${path}.${op}`);
       }
       continue;
+    }
+    // Every other scalar operator (#21448): a list where ONE value belongs,
+    // whatever the column type. The set is the declared vocabulary's scalar
+    // half — the same split the comparand-TYPE face reads — so an operator
+    // outside the vocabulary (`$wat`, retired `$regex`) keeps its own refusal
+    // downstream. Before the null-ordering arm, which a list can never reach.
+    if (SCALAR_COMPARAND_OPERATORS.has(op) && Array.isArray(spec[op])) {
+      throw arrayScalarComparandError(context, op, field, spec[op], `${path}.${op}`);
     }
     // The ordering carve-out (2026-09-01 ruling, #14080). Strictly `null`:
     // `undefined` keeps the TYPE door's own sentence, and every other

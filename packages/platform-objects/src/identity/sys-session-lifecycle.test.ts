@@ -3,13 +3,13 @@
 // [#7826] `sys_session`'s ADR-0057 lifecycle declaration, at the SPEC tier.
 //
 // This is the third control on the card: the declaration parses, and neither
-// of #10165's two `ttl.onlyWhen` conflict refines fires for it.
+// of commit 801296050's two `ttl.onlyWhen` conflict refines fires for it.
 //
 // ⚠️ "Neither refine fires" is worth nothing as a bare absence — `sys_session`
 // declares no `archive` and no rotation `storage`, so of course they do not
 // fire, and the same green would be printed by a build in which both refines
 // had been deleted. So each is measured against its own counterfactual: the
-// exact declaration plus the conflicting block must be REFUSED, with #10165's
+// exact declaration plus the conflicting block must be REFUSED, with commit 801296050's
 // own message. That turns "no refine fired" into a statement about live rules.
 //
 // The sweep behaviour these keys buy — the tombstone-sparing and positive
@@ -55,7 +55,7 @@ describe('[#7826] sys_session lifecycle declaration', () => {
     expect((SysDeviceCode as any).lifecycle.ttl.expireAfter).toBe(lifecycle.ttl.expireAfter);
   });
 
-  // ── #10165's two refines: not fired here, and proved to be live ──────────
+  // ── commit 801296050's two refines: not fired here, and proved to be live ──────────
 
   it('declares neither conflicting block, so neither #10165 refine fires', () => {
     expect(lifecycle.archive).toBeUndefined();

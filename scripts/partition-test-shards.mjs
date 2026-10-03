@@ -178,49 +178,81 @@ export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 // The floor argument at the top of this file is not a caveat, it is a wall: a
 // shard can never finish faster than its single heaviest package, so once ONE
 // package exceeds MAX_SHARD_OVER_MEAN x the mean, no shard count meets the
-// bound and pin 3 says so by name. `@objectstack/cli` crossed that wall.
-// Measured on run 34009395649 attempt 2 (job 101427282674): 1231.52s, against a
-// 458.15s dataset entry. Substituting the measurement into the committed
-// dataset and re-partitioning:
-//
-//   bins 1232/716/714/714/714/714s   mean 800.7s   max/mean 1.54x  (bound 1.30x)
-//
-// -- so the honest refresh this card asks for reds the partitioner's own
-// balancing pins, by their design, and pin 3 names the only remedy: split that
-// suite below package granularity.
-//
-// THIS IS THAT SPLIT, and it is the shape the Dogfood job has run since #4859:
-// vitest's own `--shard=k/n` applied to ONE named package (carried to it in
+// bound and pin 3 says so by name. The remedy is to split that suite below
+// package granularity, the shape the Dogfood job has run since #4859: vitest's
+// own `--shard=k/n` applied to ONE named package (carried to it in
 // `OS_TEST_SHARD` rather than as a passthrough since #19278 -- see SLICE_ENV
-// below; the argument that follows is about vitest's shard, not the carrier). The
-// objection this file records against passthrough is specific and it does not
-// reach here -- `--shard` on a package with fewer test files than the shard
+// below; the argument that follows is about vitest's shard, not the carrier).
+// The objection this file records against passthrough is specific and it does
+// not reach here -- `--shard` on a package with fewer test files than the shard
 // count hard-fails on vitest 4, and `--passWithNoTests` converts that into
 // running NOTHING. That is fatal WORKSPACE-WIDE, where three packages own one
-// test file each. Applied to one package with 268 of them it cannot arise, and
-// `sliceCountFor` below refuses the configuration in which it could.
+// test file each. Applied to one package with hundreds of them it cannot arise,
+// and `sliceCountFor` below refuses the configuration in which it could.
 //
-// WHY n = 2, DERIVED RATHER THAN PICKED. n is the smallest integer for which a
-// slice fits under the acceptance bound against the mean the refresh produces.
-// With the measurement above substituted, the other 70 packages total 3572.66s,
-// so the mean is fixed at (3572.66 + 1231.52) / 6 = 800.70s and the bound is
-// 1.3 x 800.70 = 1040.91s:
+// HOW n IS DERIVED, AND WHAT HOLDS EACH HALF. n is the SMALLEST integer for
+// which the split meets the acceptance bound against the mean the committed
+// dataset produces. Meeting it is pins 2 and 3 below, on the configured split.
+// Smallest is pin 3c: every slice past the first costs the shard that carries
+// it a turbo leg of its own and a build of the package's whole closure (ci.yml,
+// "Build the sliced package's dependency closure"), and buys nothing once the
+// bound is met, so an n that n - 1 could replace is refused -- n = 2 that 1
+// could replace means retire the entry.
 //
-//   n = 1   1231.52s  >  1040.91s   RED -- this is today
-//   n = 2    615.76s  <= 1040.91s   the derived answer
+// THE MAP IS EMPTY, BY THAT DERIVATION. `@objectstack/cli` was sliced at n = 2
+// on a reading of 1231.52s (run 34009395649 attempt 2, job 101427282674)
+// against a 458.15s dataset entry: the mean was then ~800s, the bound ~1041s,
+// and the whole CLI stood at 1.54x of the mean. Until a refresh landed, pin 3c
+// substituted that reading into the stale dataset. The refresh then measured
+// the whole workspace again -- run 36380128221, 72 packages, 7430.00s -- and
+// moved the MEAN, not only the CLI: @objectstack/spec at 1391.38s became the
+// heaviest item, and on that dataset
 //
-// and the split it produces is bins 801/801/801/801/801/800s, max/mean 1.00x.
-// Two is not a floor to sit on quietly either: solving C/2 <= (1.3/6)(3572.66+C)
-// for the CLI's whole cost C says n = 2 holds until that suite reaches ~2732s,
-// a further 2.2x. Past that, pin 3 reds again naming the floor, and the remedy
-// is to raise this number -- never the bound.
+//   CLI sliced at 2                         max/mean 1.124x   heaviest 1391s (spec)
+//   CLI whole, as measured there (733.33s)  max/mean 1.124x   heaviest 1391s (spec)
+//   CLI whole at its worst (1231.52s)       max/mean 1.053x   heaviest 1391s (spec)
+//
+// -- all inside 1.3x, and slicing moves no bin's maximum. Solving
+// C <= (1.3/6)(6696.67 + C) for the CLI's whole cost C, it fits whole until it
+// reaches ~1852s, 1.5x its worst reading. n = 1 is the derived answer, so the
+// entry is retired. The MECHANISM stays, and its pins run on fixtures: the item
+// grammar, expandSlices, the vitest file-count floor, the OS_TEST_SHARD wiring
+// judge and the generator's slice reassembly. The next package pin 3 names is
+// one entry here, plus its own OS_TEST_SHARD wiring, away from being sliced.
 //
 // ⛔ Slicing is a SCHEDULING fact, not a measurement one: the dataset keeps
 // holding each package's WHOLE cost, and the division by n happens here. That
 // is what keeps a refresh comparable across a change to this map, and it is why
 // measure-test-shard-timings.mjs has to reassemble a package's slices before it
-// records one -- see `sliceOfCliArguments` there.
-export const FILE_SHARDED_PACKAGES = Object.freeze({
+// records one -- see `sliceOfCliArguments` there. A change to this map is also
+// a change to what that generator can DECODE, which is why the map it replaced
+// is kept below.
+export const FILE_SHARDED_PACKAGES = Object.freeze({});
+
+// THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
+// slice-digest matcher (measure-test-shard-timings.mjs `sliceOfEnvironment`).
+//
+// A run summary records a slice only as the sha256 of its `OS_TEST_SHARD`
+// value, and the matcher decodes that digest against the slices the
+// partitioner can emit, refusing the whole summary when nothing matches. So a
+// run made BEFORE a change to the map above -- slices the map no longer emits
+// -- is refused, and while every retained run predates the change, the
+// refresh lane can measure nothing at all. That is not hypothetical: on the
+// change that emptied the map, the lane's pull_request rehearsal (run
+// 37074888579) refused all ten eligible hourly runs on main and regenerated
+// nothing.
+//
+// With the outgoing map here, a pre-change slice decodes EXACTLY -- by hash
+// equality, against this closed map, never by guessing a count -- and is then
+// summed within its run like any slice, so a run that cannot assemble the
+// package still contributes nothing (`skippedIncompleteSlices`). A digest
+// matching neither map is refused as before.
+//
+// Set it to the OUTGOING map in the same PR that changes FILE_SHARDED_PACKAGES.
+// Its only readers are run summaries, which ci.yml keeps for one day
+// (`retention-days: 1` on `test-core-run-summary-*`), so a day after that PR
+// lands no retained summary predates the change and this map decodes nothing.
+export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
   '@objectstack/cli': 2,
 });
 
@@ -258,8 +290,11 @@ export function parseShardItem(line) {
 // ⛔ The floor is a REFUSAL, not a clamp. Silently reducing n to the file count
 // would hand back a split that balances a quantity CI cannot run, which is the
 // #16173 failure shape one level up: a number that reads right and is not.
-export function sliceCountFor(name, fileCount = null) {
-  const n = Object.hasOwn(FILE_SHARDED_PACKAGES, name) ? FILE_SHARDED_PACKAGES[name] : 1;
+//
+// `sliced` is the live map everywhere but the self-test, which hands in a
+// fixture so the mechanism stays pinned while the live map slices nothing.
+export function sliceCountFor(name, fileCount = null, sliced = FILE_SHARDED_PACKAGES) {
+  const n = Object.hasOwn(sliced, name) ? sliced[name] : 1;
   if (n > 1 && fileCount !== null && fileCount < n) {
     throw new Error(
       `${name} is configured for ${n} file-level slices but owns ${fileCount} test file(s). ` +
@@ -428,6 +463,77 @@ export function assertSlicesSpread(bins) {
   return bins;
 }
 
+// Whether a split of `items` meets the acceptance bound, in the two halves pins
+// 2 and 3 grade on the committed dataset: the heaviest bin within
+// MAX_SHARD_OVER_MEAN x the mean, and no single item heavier than that, because
+// no split can put a bin below its heaviest item.
+function meetsBound(items, shardCount, bound) {
+  const b = balanceOf(partition(items, shardCount), items);
+  return { ...b, meets: b.ratio <= bound && b.floor <= bound * b.mean };
+}
+
+// THE "SMALLEST" HALF OF THE SLICE-COUNT DERIVATION -- pin 3c. For every
+// package `sliced` names, re-split the dataset with that package at n - 1
+// slices (every other package at its configured count) and report the entry
+// when that split ALSO meets the bound: n is then not the smallest count that
+// works, and the slices past it cost legs and closure builds for nothing. The
+// "meets" half is pins 2 and 3 on the configured split, so this judges
+// minimality only.
+//
+// Two shapes are problems before any arithmetic, because nothing can derive
+// the count they claim: a named package the dataset carries no weight for, and
+// a count below 2 -- 1 is no slicing at all, and 0 would make expandSlices emit
+// NO item for the package, a package no shard runs.
+//
+// `packages` is whole-package `{name, weight}` (the dataset as CI bins it).
+// `judged` is returned beside the problems so a caller can tell "every sliced
+// package is minimal" apart from "no package was looked at".
+export function sliceCountProblems(
+  packages,
+  sliced = FILE_SHARDED_PACKAGES,
+  shardCount = SHARD_COUNT,
+  bound = MAX_SHARD_OVER_MEAN
+) {
+  const weights = new Map(packages.map((p) => [p.name, p.weight]));
+  const problems = [];
+  let judged = 0;
+  for (const [name, n] of Object.entries(sliced)) {
+    if (!Number.isInteger(n) || n < 2) {
+      problems.push(
+        `${name}: FILE_SHARDED_PACKAGES gives it ${JSON.stringify(n)} slices -- an entry slices at least 2 ways. ` +
+          'Remove the entry to run the package whole.'
+      );
+      continue;
+    }
+    if (!weights.has(name)) {
+      problems.push(
+        `${name}: FILE_SHARDED_PACKAGES slices it ${n} ways, but the dataset carries no weight for it, ` +
+          'so nothing derives that count.'
+      );
+      continue;
+    }
+    judged++;
+    const fewer = n - 1;
+    const items = expandSlices(
+      packages.map((p) => ({
+        name: p.name,
+        weight: p.weight,
+        sliceCount: p.name === name ? fewer : Object.hasOwn(sliced, p.name) ? sliced[p.name] : 1,
+      }))
+    );
+    const at = meetsBound(items, shardCount, bound);
+    if (at.meets) {
+      problems.push(
+        `${name}: sliced ${n} ways at ${weights.get(name)}s, but at ${fewer} the split already meets ` +
+          `${bound}x (max/mean ${at.ratio.toFixed(2)}x, heaviest item ${at.floor.toFixed(0)}s against a ` +
+          `${at.mean.toFixed(0)}s mean). ${fewer === 1 ? 'Retire the entry' : `Lower it to ${fewer}`}: ` +
+          'a slice count a smaller one could replace is one no pin can hold.'
+      );
+    }
+  }
+  return { problems, judged };
+}
+
 // What a run was predicted to spend on a package it just ran. A shard runs
 // exactly one slice of a file-sharded package -- the slices are placed in
 // distinct bins, asserted in main() -- so the prediction to compare a measured
@@ -553,7 +659,9 @@ export function weighPackage(name, dir, timings) {
 // that went back to passing test-file counts would satisfy every one of them
 // while re-opening #10472 exactly. The end-to-end pin in selfTest() below
 // calls THIS function, which is why it can tell duration from count.
-export function weighItems(items, excluded, timings, label = 'package list') {
+//
+// `sliced` is the live map everywhere but the self-test (see sliceCountFor).
+export function weighItems(items, excluded, timings, label = 'package list', sliced = FILE_SHARDED_PACKAGES) {
   const weighed = [];
   let estimated = 0;
   for (const it of items) {
@@ -567,8 +675,8 @@ export function weighItems(items, excluded, timings, label = 'package list') {
     // The vitest file-count floor is checked HERE and only here, because this is
     // the one weighing path that knows where the package lives. `sliceCountFor`
     // throws rather than clamping -- see its header.
-    const sliceCount = Object.hasOwn(FILE_SHARDED_PACKAGES, it.name)
-      ? sliceCountFor(it.name, countTestFiles(dir))
+    const sliceCount = Object.hasOwn(sliced, it.name)
+      ? sliceCountFor(it.name, countTestFiles(dir), sliced)
       : 1;
     weighed.push({ name: it.name, weight: seconds, sliceCount });
   }
@@ -628,7 +736,15 @@ export function balanceOf(bins, items = null) {
 // a second reader -- the generator's ~0s-for-a-replayed-suite hazard is the
 // same hazard here, pointing the other way (a cached shard would read as
 // enormously FASTER than predicted and quietly vouch for a rotted dataset).
-export function driftReport(measured, timings, factor = MAX_MEASURED_OVER_PREDICTED, observedSlices = null) {
+// `sliced` is the live map everywhere but the self-test (see sliceCountFor); it
+// only answers for a package the caller observed nothing about.
+export function driftReport(
+  measured,
+  timings,
+  factor = MAX_MEASURED_OVER_PREDICTED,
+  observedSlices = null,
+  sliced = FILE_SHARDED_PACKAGES
+) {
   const rows = [];
   const unpredicted = [];
   let predictedTotal = 0;
@@ -645,7 +761,7 @@ export function driftReport(measured, timings, factor = MAX_MEASURED_OVER_PREDIC
     // means the summaries show it running WHOLE, which is a fact about the run.
     const predicted = observedSlices
       ? predictedSecondsFor(name, timings, observedSlices.get(name)?.count ?? 1)
-      : predictedSecondsFor(name, timings);
+      : predictedSecondsFor(name, timings, sliceCountFor(name, null, sliced));
     predictedTotal += predicted;
     measuredTotal += seconds;
     rows.push({ name, predicted, measured: seconds, overshoot: seconds - predicted });
@@ -745,20 +861,19 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'degenerate inputs': 2,
   'payload assertions: the cross-writer count/items invariant': 9,
   'path resolution: the silent weight-0 cwd defect': 5,
-  // 2 of these 16 are the end-to-end inversion pin, which runs only while the
+  // 3 of these 25 are the end-to-end inversion pin, which runs only while the
   // dataset still carries both packages of its inversion pair. That guard is
   // silent today: drop either package in a timings refresh and the pin stops
-  // testing anything. Flooring at the measured 16 makes that loud, and the
+  // testing anything. Flooring at the measured count makes that loud, and the
   // remedy is the one the pin itself names -- pick a new inversion pair from
   // the dataset -- never lowering this number.
-  // 5 of these 21 arrived with #16173's file-level slicing, and 3 of those run
-  // only while @objectstack/cli is still in the dataset and not excluded by
-  // ci.yml -- the same conditional shape as the inversion pin above, floored at
-  // the measured count for the same reason.
-  'the balancing pins (#10472)': 21,
+  // 8 of these 25 are pins 3b and 3c, the file-level slicing's (#16173), and
+  // every one of them runs unconditionally: 3c's fixtures and 3b's cut of the
+  // heaviest package do not depend on what the live map slices.
+  'the balancing pins (#10472)': 25,
   'predicted-vs-measured drift (#16173)': 9,
   'file-level slice items (#16173)': 20,
-  'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 9,
+  'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1011,76 +1126,92 @@ function selfTest() {
     }
   });
 
-  // 3b. THE SLICING IS LIVE, AND THE SPLIT IT PRODUCES IS SPREAD (#16173).
-  //     Pins 2 and 3 grade whatever item list they are handed, so neither can
-  //     fail because the CLI quietly stopped being sliced: at today's stale
-  //     458.15s entry an unsliced CLI meets both bounds comfortably. These two
-  //     pin the mechanism rather than the arithmetic it feeds.
+  // 3b. THE SLICES A SPLIT CARRIES ARE SPREAD (#16173). main() asserts it on
+  //     every real run; the first case grades the committed dataset as CI
+  //     splits it. While the live map slices nothing that case has no slice to
+  //     look at, so the second cuts the dataset's heaviest package in two and
+  //     grades THAT split -- real weights, a real slice pair, whatever the map
+  //     says -- and first proves the pair is there to grade.
   check(() => {
-    if (sliceCountFor('@objectstack/cli') < 2) {
+    assertSlicesSpread(real);
+  });
+  const heaviest = datasetPackages.reduce((m, p) => (p.weight > m.weight ? p : m));
+  const cutItems = expandSlices(
+    datasetPackages.map((p) => ({ ...p, sliceCount: p === heaviest ? 2 : sliceCountFor(p.name) }))
+  );
+  check(() => {
+    const cut = partition(cutItems, SHARD_COUNT);
+    const halves = [1, 2].map((index) => formatShardItem(heaviest.name, { index, count: 2 }));
+    const bins = halves.map((label) => cut.findIndex((bin) => bin.names.includes(label)));
+    if (bins.includes(-1)) {
+      throw new Error(`slice spread: cutting ${heaviest.name} in two produced no ${halves.join(' + ')} pair to grade`);
+    }
+    assertSlicesSpread(cut);
+  });
+
+  // 3c. THE SLICE COUNT IS DERIVED, NOT REMEMBERED (#16173). Pins 2 and 3
+  //     prove the configured split meets the bound; neither can fail because a
+  //     count is LARGER than the bound needs, and a count nothing can fail on
+  //     is how a slicing outlives its reason. sliceCountProblems() re-splits
+  //     with each sliced package at n - 1 and refuses an n that n - 1 could
+  //     replace -- the counterfactual this pin used to hard-code for the CLI,
+  //     now asked of the committed dataset for every entry.
+  //
+  //     The live map is EMPTY by this pin's own arithmetic (see
+  //     FILE_SHARDED_PACKAGES), so the live case judges zero entries, and that
+  //     zero is the true reading rather than a skipped one: the empty map's
+  //     claim is that every package fits WHOLE, and pin 3 above is the case
+  //     that fails the day one stops fitting, naming slicing as the remedy.
+  //     The fixtures after it hold every refusal sliceCountProblems() makes, in
+  //     both directions, on numbers that do not move with a refresh.
+  const derivation = sliceCountProblems(datasetPackages);
+  check(() => {
+    const expected = Object.keys(FILE_SHARDED_PACKAGES).length;
+    if (derivation.problems.length > 0 || derivation.judged !== expected) {
       throw new Error(
-        'FILE_SHARDED_PACKAGES no longer slices @objectstack/cli. That package measured 1231.52s ' +
-          'against a 800.7s post-refresh mean, which no split at any shard count can bin under ' +
-          `${MAX_SHARD_OVER_MEAN}x -- see pin 3c below for the arithmetic.`
+        `slice derivation, committed dataset (${derivation.judged} of ${expected} sliced package(s) judged):\n` +
+          derivation.problems.map((p) => `  - ${p}`).join('\n')
+      );
+    }
+  });
+  // Six shards, ten 50s fillers and one `big` package; the bound is 1.3x the
+  // mean. big = 300: mean 133.3s, bound 173.3s, so whole it breaches and one
+  // 150s half fits -- 2 is the smallest count. big = 120: mean 103.3s, bound
+  // 134.3s, so whole it already fits -- today's CLI, in miniature.
+  const fixture = (big) => [mk('big', big), ...Array.from({ length: 10 }, (_, i) => mk(`filler${i}`, 50))];
+  check(() => {
+    const r = sliceCountProblems(fixture(300), { big: 2 });
+    if (r.judged !== 1 || r.problems.length > 0) {
+      throw new Error(
+        `slice derivation: a count of 2 that 1 cannot replace was refused (judged ${r.judged}; ` +
+          `${r.problems.join(' | ') || 'no problem named'})`
       );
     }
   });
   check(() => {
-    assertSlicesSpread(real);
+    const r = sliceCountProblems(fixture(120), { big: 2 });
+    if (!r.problems.some((m) => m.includes('Retire the entry'))) {
+      throw new Error('slice derivation: a package that fits whole kept its slicing with no refusal');
+    }
   });
-
-  // 3c. THE DERIVATION OF THE SLICE COUNT, pinned against the measurement it
-  //     was derived from -- and against the counterfactual that makes the pin
-  //     able to fail.
-  //
-  //     The dataset on disk is still the STALE one (that refresh is the other
-  //     half of #16173), so pin 2 above cannot yet see the arithmetic that
-  //     decided the slice count. Substituting the measurement here is what lets
-  //     the refresh land without this file's own pins going red on it: if the
-  //     slice count is ever lowered, or the CLI grows past what it absorbs, the
-  //     failure arrives HERE with the numbers in it rather than three weeks
-  //     later in a queue build.
-  const CLI = '@objectstack/cli';
-  const CLI_MEASURED = 1231.52; // run 34009395649 attempt 2, job 101427282674
-  if (Object.hasOwn(timings.packages, CLI) && !ciExcludes.has(CLI)) {
-    const refreshed = datasetPackages.map((i) => (i.name === CLI ? mk(CLI, CLI_MEASURED) : i));
-    const slicedItems = expandSlices(refreshed);
-    const sliced = balanceOf(partition(slicedItems, SHARD_COUNT), slicedItems);
-    check(() => {
-      if (sliced.ratio > MAX_SHARD_OVER_MEAN) {
-        throw new Error(
-          `slice derivation: with ${CLI} at its measured ${CLI_MEASURED}s the sliced split is ` +
-            `${sliced.ratio.toFixed(2)}x the mean (${sliced.max.toFixed(0)}s vs ${sliced.mean.toFixed(0)}s), ` +
-            `past the ${MAX_SHARD_OVER_MEAN}x bound. Bins: ${sliced.totals.map((t) => t.toFixed(0)).join('/')}s.`
-        );
-      }
-    });
-    check(() => {
-      if (sliced.floor > MAX_SHARD_OVER_MEAN * sliced.mean) {
-        throw new Error(
-          `slice derivation: one slice of ${CLI} is ${sliced.floor.toFixed(0)}s against a ` +
-            `${sliced.mean.toFixed(0)}s mean, so even sliced this way NO split at ${SHARD_COUNT} shards ` +
-            `meets ${MAX_SHARD_OVER_MEAN}x. Raise FILE_SHARDED_PACKAGES['${CLI}'] -- never the bound.`
-        );
-      }
-    });
-    // The counterfactual, and the reason the two cases above are not vacuous:
-    // UNSLICED, that same refresh must still breach the floor. The day it does
-    // not, the CLI has come back under the bound on its own and the slicing is
-    // a candidate for removal -- which is a decision, so this says so loudly
-    // rather than leaving a pin that passes whatever happens.
-    const whole = balanceOf(partition(refreshed, SHARD_COUNT), refreshed);
-    check(() => {
-      if (whole.floor <= MAX_SHARD_OVER_MEAN * whole.mean) {
-        throw new Error(
-          `slice derivation: UNSLICED, ${CLI} at ${CLI_MEASURED}s is ${whole.floor.toFixed(0)}s against a ` +
-            `${whole.mean.toFixed(0)}s mean and now fits under ${MAX_SHARD_OVER_MEAN}x on its own, so the two ` +
-            'cases above no longer prove the slicing is what satisfies the bound. Re-derive the slice ' +
-            'count (or retire it) instead of leaving a pin that cannot fail.'
-        );
-      }
-    });
-  }
+  check(() => {
+    const r = sliceCountProblems(fixture(300), { big: 3 });
+    if (!r.problems.some((m) => m.includes('Lower it to 2'))) {
+      throw new Error('slice derivation: a count of 3 where 2 meets the bound was accepted');
+    }
+  });
+  check(() => {
+    const r = sliceCountProblems(fixture(300), { ghost: 2 });
+    if (r.judged !== 0 || !r.problems.some((m) => m.includes('carries no weight'))) {
+      throw new Error('slice derivation: an entry the dataset never measured was accepted');
+    }
+  });
+  check(() => {
+    const r = sliceCountProblems(fixture(300), { big: 1 });
+    if (!r.problems.some((m) => m.includes('at least 2 ways'))) {
+      throw new Error('slice derivation: an entry of fewer than 2 slices was accepted');
+    }
+  });
 
   // 4. The shard count is spelled in ci.yml too, and drift there is silent:
   //    a partitioner cutting six bins for a five-job matrix simply loses a
@@ -1140,14 +1271,20 @@ function selfTest() {
   //    single path main() weighs by.
   //
   //    The case is an INVERSION measured in this very dataset, which is what
-  //    makes it able to fail: @objectstack/example-todo runs LONGER than
-  //    @objectstack/core (33.77s vs 16.40s) out of FEWER test files (4 vs 36).
+  //    makes it able to fail: @objectstack/plugin-pinyin-search runs LONGER
+  //    than @objectstack/sdui-parser out of FEWER test files (2 vs 13).
   //    Whichever quantity is in force decides the order, and the two answers
-  //    are opposite -- so this assertion cannot be satisfied by both.
-  const invA = '@objectstack/example-todo';
-  const invB = '@objectstack/core';
-  const invAPath = 'examples/app-todo';
-  const invBPath = 'packages/core';
+  //    are opposite -- so this assertion cannot be satisfied by both. The pair
+  //    holds on both datasets this file has been graded against (14.40s vs
+  //    1.62s measured 2026-08-24; 38.77s vs 4.54s in run 36380128221), ~8.5x
+  //    apart each time. The pair before it (example-todo over core) flipped in
+  //    that refresh, 35.30s vs 57.09s, which is why the first guard below reads
+  //    the DATASET's order as well as the file counts: a flipped pair is a
+  //    fixture to replace, not a weighing defect, and must not red as one.
+  const invA = '@objectstack/plugin-pinyin-search';
+  const invB = '@objectstack/sdui-parser';
+  const invAPath = 'packages/plugins/plugin-pinyin-search';
+  const invBPath = 'packages/sdui-parser';
   if (Object.hasOwn(timings.packages, invA) && Object.hasOwn(timings.packages, invB)) {
     const inv = weighItems(
       [
@@ -1168,6 +1305,15 @@ function selfTest() {
         throw new Error(
           `inversion pin: ${invA} no longer has fewer test files than ${invB} (${fA} vs ${fB}), ` +
             'so this case can no longer tell duration from count. Pick a new inversion pair from the dataset.'
+        );
+      }
+    });
+    check(() => {
+      if (!(timings.packages[invA] > timings.packages[invB])) {
+        throw new Error(
+          `inversion pin: the dataset no longer measures ${invA} slower than ${invB} ` +
+            `(${timings.packages[invA]}s vs ${timings.packages[invB]}s), so this case can no longer tell ` +
+            'duration from count. Pick a new inversion pair from the dataset.'
         );
       }
     });
@@ -1279,7 +1425,15 @@ function selfTest() {
   // pins above prove the sliced split BALANCES; these prove a slice is a thing
   // the rest of the pipeline can carry -- printed, parsed back, charged the
   // right prediction, and never doubled onto one shard.
+  //
+  // The cases that need a SLICED package read `sliceFixture`, never the live
+  // map: the live map slices whatever pin 3c derives, which today is nothing,
+  // and a mechanism pin that read it would stop testing anything the day it
+  // went empty. The CLI stands in for the sliced package because it is the one
+  // whose OS_TEST_SHARD wiring is in the tree and whose directory holds real
+  // test files for the vitest floor to count.
   battery('file-level slice items (#16173)');
+  const sliceFixture = Object.freeze({ '@objectstack/cli': 2 });
 
   check(() => {
     const it = parseShardItem('@objectstack/spec');
@@ -1319,12 +1473,12 @@ function selfTest() {
   });
 
   check(() => {
-    if (sliceCountFor('@objectstack/spec') !== 1) {
-      throw new Error('slice count: a package outside FILE_SHARDED_PACKAGES was sliced');
+    if (sliceCountFor('@objectstack/spec', null, sliceFixture) !== 1) {
+      throw new Error('slice count: a package outside the slice map was sliced');
     }
   });
   check(() => {
-    if (sliceCountFor('@objectstack/cli') !== FILE_SHARDED_PACKAGES['@objectstack/cli']) {
+    if (sliceCountFor('@objectstack/cli', null, sliceFixture) !== 2) {
       throw new Error('slice count: the configured package did not read its configured count');
     }
   });
@@ -1335,7 +1489,7 @@ function selfTest() {
     // every slice running nothing.
     let message = '';
     try {
-      sliceCountFor('@objectstack/cli', 1);
+      sliceCountFor('@objectstack/cli', 1, sliceFixture);
     } catch (err) {
       message = err.message;
     }
@@ -1344,7 +1498,7 @@ function selfTest() {
     }
   });
   check(() => {
-    if (sliceCountFor('@objectstack/cli', 500) !== FILE_SHARDED_PACKAGES['@objectstack/cli']) {
+    if (sliceCountFor('@objectstack/cli', 500, sliceFixture) !== 2) {
       throw new Error('slice floor: a package with plenty of test files was refused');
     }
   });
@@ -1394,8 +1548,7 @@ function selfTest() {
 
   const sliceTimings = { packages: { '@objectstack/cli': 1200, other: 100 }, rate: 2 };
   check(() => {
-    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
-    if (predictedSecondsFor('@objectstack/cli', sliceTimings) !== 1200 / n) {
+    if (predictedSecondsFor('@objectstack/cli', sliceTimings, sliceCountFor('@objectstack/cli', null, sliceFixture)) !== 600) {
       throw new Error('prediction: a sliced package was charged its WHOLE dataset entry');
     }
   });
@@ -1411,11 +1564,11 @@ function selfTest() {
     // come back 0.83x, i.e. a real overshoot presented as a comfortable
     // under-run, and any genuine drift elsewhere on that shard diluted with it.
     const measured = measuredMap({ '@objectstack/cli': 1000 });
-    const r = driftReport(measured, sliceTimings);
+    const r = driftReport(measured, sliceTimings, undefined, null, sliceFixture);
     if (!r.drifted) {
       throw new Error(`drift: a sliced overshoot read ${r.ratio.toFixed(2)}x and was not reported as drift`);
     }
-    if (Math.abs(r.predictedTotal - 1200 / FILE_SHARDED_PACKAGES['@objectstack/cli']) > 1e-9) {
+    if (Math.abs(r.predictedTotal - 600) > 1e-9) {
       throw new Error(`drift: the slice was predicted ${r.predictedTotal}s, not its slice share`);
     }
   });
@@ -1426,7 +1579,7 @@ function selfTest() {
     // comfortable under-run rather than the 1.67x above. Without this, anyone
     // running the suite locally (where the CLI runs whole) would get a drift red
     // that is purely predictedSecondsFor's arithmetic.
-    const r = driftReport(measuredMap({ '@objectstack/cli': 1000 }), sliceTimings, undefined, new Map());
+    const r = driftReport(measuredMap({ '@objectstack/cli': 1000 }), sliceTimings, undefined, new Map(), sliceFixture);
     if (r.drifted) {
       throw new Error(`drift: an observed WHOLE run was charged a slice-sized prediction (${r.ratio.toFixed(2)}x)`);
     }
@@ -1438,22 +1591,24 @@ function selfTest() {
     // ...and an observed slice count that differs from the configured one is
     // honoured, because the summary is the record of what actually ran.
     const observed = new Map([['@objectstack/cli', { index: 1, count: 3 }]]);
-    const r = driftReport(measuredMap({ '@objectstack/cli': 400 }), sliceTimings, undefined, observed);
+    const r = driftReport(measuredMap({ '@objectstack/cli': 400 }), sliceTimings, undefined, observed, sliceFixture);
     if (Math.abs(r.predictedTotal - 400) > 1e-9) {
       throw new Error(`drift: an observed 1/3 slice was predicted ${r.predictedTotal}s, not 400s`);
     }
   });
 
   check(() => {
-    // The REAL weighing path, on the REAL package: main() must hand partition()
-    // slices, not one CLI-shaped lump. Pin 6 above proves weighItems reads
-    // durations; this proves it splits the one package that has to be split.
-    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
+    // The REAL weighing path, on a REAL package: main() must hand partition()
+    // slices, not one package-shaped lump. Pin 6 above proves weighItems reads
+    // durations; this proves it splits a package the slice map names, with the
+    // vitest floor counting that package's real test files on the way.
+    const n = sliceFixture['@objectstack/cli'];
     const { weighted, packages } = weighItems(
       [{ name: '@objectstack/cli', path: 'packages/cli' }],
       new Set(),
       loadTimings(),
-      'slice pin'
+      'slice pin',
+      sliceFixture
     );
     if (packages !== 1 || weighted.length !== n) {
       throw new Error(`weighItems: ${packages} package(s) produced ${weighted.length} item(s), expected ${n}`);
@@ -1465,23 +1620,37 @@ function selfTest() {
 
   // -- A SLICE MUST REACH THE SUITE IT SLICES (#19278) --------------------
   //
-  // The live tree first: every package this file can slice declares
+  // The live tree first: every package this file slices declares
   // OS_TEST_SHARD on the `test` task that applies to it AND reads it into
   // vitest's `shard`. Then the judge on synthetic inputs, each half removed in
   // turn, so a judge that stopped looking at a half cannot stay green.
   battery('file-level slices reach vitest through OS_TEST_SHARD (#19278)');
 
+  // Every live entry judged, and judged clean. The live map is empty today
+  // (pin 3c), so this judges zero packages and that zero is exact: no slice
+  // exists to reach vitest. What keeps the TREE-reading half measured either
+  // way is the next case, which points the same reader at the CLI -- the one
+  // package whose wiring is in the tree -- through a fixture map.
   check(() => {
     const { problems, judged } = sliceWiringProblems();
     const expected = Object.keys(FILE_SHARDED_PACKAGES).length;
-    if (expected === 0 || judged !== expected) {
+    if (judged !== expected) {
       throw new Error(
-        `slice wiring: judged ${judged} of ${expected} sliced package(s) -- a check that looked at ` +
-          'nothing cannot vouch that every slice reaches vitest.'
+        `slice wiring: judged ${judged} of ${expected} sliced package(s) -- an entry the reader ` +
+          'skipped is one nothing vouches reaches vitest.'
       );
     }
     if (problems.length > 0) {
       throw new Error(`slice wiring, live tree:\n  - ${problems.join('\n  - ')}`);
+    }
+  });
+  check(() => {
+    const { problems, judged } = sliceWiringProblems(REPO_ROOT, sliceFixture);
+    if (judged !== 1 || problems.length > 0) {
+      throw new Error(
+        `slice wiring, the tree read through a fixture map: judged ${judged} of 1 -- the CLI's ` +
+          `OS_TEST_SHARD wiring is what re-slicing it would rely on:\n  - ${problems.join('\n  - ') || 'no problem named'}`
+      );
     }
   });
 
@@ -1601,7 +1770,8 @@ function selfTest() {
     `partition-test-shards: self-test OK (${datasetPackages.length} measured packages ` +
       `-> ${datasetItems.length} shard items, ${SHARD_COUNT} shards, ` +
       `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
-      `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s)`
+      `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s, file-level slices: ` +
+      `${Object.entries(FILE_SHARDED_PACKAGES).map(([name, n]) => `${name} x${n}`).join(', ') || 'none'})`
   );
 
   return SELF_TEST_VERDICT;

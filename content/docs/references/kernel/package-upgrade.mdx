@@ -194,7 +194,7 @@ Upgrade package response
 | **fromVersion** | `string` | ✅ | Currently installed version |
 | **toVersion** | `string` | ✅ | Target upgrade version |
 | **impactLevel** | `Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Severity assessment from none (seamless) to critical (breaking changes) |
-| **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict: boolean; … }[]` | ✅ | All metadata changes |
+| **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict?: boolean; … }[]` | ✅ | All metadata changes |
 | **affectedCustomizations** | `integer` | optional (default: `0`) | Count of customizations that may be affected |
 | **requiresMigration** | `boolean` | optional (default: `false`) | Whether data migration scripts are needed |
 | **migrationScripts** | `string[]` | optional | Paths to migration scripts |
@@ -238,7 +238,7 @@ Upgrade analysis plan generated before execution
 | **fromVersion** | `string` | ✅ | Currently installed version |
 | **toVersion** | `string` | ✅ | Target upgrade version |
 | **impactLevel** | `Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Severity assessment from none (seamless) to critical (breaking changes) |
-| **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict: boolean; … }[]` | ✅ | All metadata changes |
+| **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict?: boolean; … }[]` | ✅ | All metadata changes |
 | **affectedCustomizations** | `integer` | optional (default: `0`) | Count of customizations that may be affected |
 | **requiresMigration** | `boolean` | optional (default: `false`) | Whether data migration scripts are needed |
 | **migrationScripts** | `string[]` | optional | Paths to migration scripts |

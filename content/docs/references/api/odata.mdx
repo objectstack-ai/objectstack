@@ -180,7 +180,7 @@ const result = ODataConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Entity type name |
 | **key** | `string[]` | ✅ | Key fields |
-| **properties** | `{ name: string; type: string; nullable: boolean }[]` | ✅ |  |
+| **properties** | `{ name: string; type: string; nullable?: boolean }[]` | ✅ |  |
 | **navigationProperties** | `{ name: string; type: string; partner?: string }[]` | optional |  |
 
 ### Nested Shape: `ODataMetadata.entitySets[number]`

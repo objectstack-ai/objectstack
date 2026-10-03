@@ -33,7 +33,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
+import { formatType } from './lib/format-type';
+import { projectPublishedJsonSchema } from './lib/refinement-projection';
 import {
   INLINE_DEFAULT_WIDTH_LIMIT,
   renderRequiredCell,
@@ -269,6 +272,124 @@ describe('renderRequiredCell — a `.default()` member is author-omittable (#870
     expect(md).toContain(
       '| **cacheMaxItems** | `integer` | optional (default: `1000`) | Max items in memory cache |',
     );
+  });
+});
+
+/**
+ * THE DEFECT THIS PINS (#21466) — #8703's rule, in the position #8703 missed.
+ * `renderRequiredCell` read `default`, but the `{ … }` shape summary in the
+ * Type column still marked `key?:` from `required` alone. A published document
+ * is emitted in ONE io mode — output, or input when one `.transform` anywhere
+ * in it makes the output projection throw — so a def shared by two documents
+ * rendered `order:` in one and `order?:` in the other, on the same page. Found
+ * when an object-grid member gained a transform and the grid's grouping and
+ * `data[provider='api']` rows flipped while the kanban / gantt / map / tree
+ * rows sharing those defs did not.
+ *
+ * The fixture is that shape, through the generator's own projection, with two
+ * parent rows: one projectable in output mode, one only in input mode. The
+ * precondition assertions are what keep the pin from passing vacuously — they
+ * prove the two documents DISAGREE about `required` for the shared def, so an
+ * identical rendering is the renderer's doing and not the fixture's.
+ */
+describe('one shared def renders one face, whichever io mode its document took (#21466)', () => {
+  const GroupingField = z.object({
+    field: z.string().describe('Field name to group by'),
+    order: z.enum(['asc', 'desc']).default('asc').describe('Group sort order'),
+    collapsed: z.boolean().default(false).describe('Collapse groups by default'),
+  });
+  const Grouping = z.object({
+    fields: z.array(GroupingField).min(1).describe('Fields to group by, in nesting order'),
+  });
+  const ApiRequest = z.object({
+    url: z.string().describe('Endpoint URL'),
+    method: z.enum(['GET', 'POST']).default('GET').describe('HTTP method'),
+  });
+
+  // Same two shared defs, two parents. The second carries a transform, which is
+  // what sends a document to the input projection in `build-schemas.ts`.
+  const OutputParent = z.object({
+    grouping: Grouping.optional().describe('Row grouping config'),
+    read: ApiRequest.optional().describe('Configuration for fetching data'),
+  });
+  const InputParent = OutputParent.extend({
+    label: z.string().transform((s) => s.trim()).describe('Trimmed label'),
+  });
+
+  // `build-schemas.ts`'s fallback reads exactly this text (KNOWN_UNSUPPORTED_PATTERNS),
+  // so it is the message a consumer parses, not prose.
+  it('the fixture really is one output-mode and one input-mode document', () => {
+    expect(() => projectPublishedJsonSchema(OutputParent)).not.toThrow();
+    expect(() => projectPublishedJsonSchema(InputParent)).toThrow(/cannot be represented in JSON Schema/);
+  });
+
+  const outDoc = projectPublishedJsonSchema(OutputParent) as any;
+  const inDoc = projectPublishedJsonSchema(InputParent, { io: 'input' }) as any;
+
+  it('the two documents disagree about `required` for the shared defs', () => {
+    expect(outDoc.properties.grouping.properties.fields.items.required).toEqual(['field', 'order', 'collapsed']);
+    expect(inDoc.properties.grouping.properties.fields.items.required).toEqual(['field']);
+    expect(outDoc.properties.read.required).toEqual(['url', 'method']);
+    expect(inDoc.properties.read.required).toEqual(['url']);
+  });
+
+  /** The rows of one `### Nested Shape:` table, heading excluded. */
+  const nestedShapeRows = (md: string, path: string): string[] => {
+    const lines = md.split('\n');
+    const start = lines.indexOf(`### Nested Shape: \`${path}\``);
+    expect(start).toBeGreaterThan(-1);
+    const rows: string[] = [];
+    for (const line of lines.slice(start + 1)) {
+      if (line.startsWith('|')) rows.push(line);
+      else if (rows.length > 0) break;
+    }
+    return rows;
+  };
+
+  /** One property's row of the section's own `### Properties` table. */
+  const propertyRow = (md: string, key: string): string | undefined =>
+    md.split('\n').find((line) => line.startsWith(`| **${key}** |`));
+
+  it('renders the shared defs byte-identical through both parent rows — the input face', () => {
+    const outMd = renderSchemaSection('OutputParent', outDoc);
+    const inMd = renderSchemaSection('InputParent', inDoc);
+
+    // The card's row: the nested grouping table's `fields` summary.
+    const outGrouping = nestedShapeRows(outMd, 'OutputParent.grouping');
+    expect(nestedShapeRows(inMd, 'InputParent.grouping')).toEqual(outGrouping);
+    expect(outGrouping).toContain(
+      "| **fields** | `{ field: string; order?: Enum<'asc' \\| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order |",
+    );
+
+    // The card's other row: a `{ url; method }` request def summarized in place.
+    expect(propertyRow(inMd, 'read')).toBe(propertyRow(outMd, 'read'));
+    expect(propertyRow(outMd, 'read')).toBe(
+      "| **read** | `{ url: string; method?: Enum<'GET' \\| 'POST'> }` | optional | Configuration for fetching data |",
+    );
+
+    // And the summary agrees with the Required column about the same members.
+    const outRead = nestedShapeRows(outMd, 'OutputParent.read');
+    expect(nestedShapeRows(inMd, 'InputParent.read')).toEqual(outRead);
+    expect(outRead).toContain('| **method** | `Enum<\'GET\' \\| \'POST\'>` | optional (default: `"GET"`) | HTTP method |');
+  });
+
+  it('marks a defaulted key optional whatever `required` says, and leaves the rest to `required`', () => {
+    const summary = (required: string[]) =>
+      formatType({
+        type: 'object',
+        properties: {
+          a: { type: 'string', default: 'x' },
+          b: { type: 'string' },
+          c: { type: 'boolean', default: false },
+          d: { type: 'integer' },
+        },
+        required,
+      });
+
+    // The output-mode spelling (defaulted members listed) and the input-mode
+    // one (not listed) are one cell.
+    expect(summary(['a', 'b', 'c'])).toBe('{ a?: string; b: string; c?: boolean; d?: integer }');
+    expect(summary(['b'])).toBe(summary(['a', 'b', 'c']));
   });
 });
 

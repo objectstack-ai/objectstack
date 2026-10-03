@@ -27,7 +27,7 @@ const OWNED_OBJECTS = new Set([
   // identity — external SSO provider (admin-facing, better-auth-managed)
   'sys_sso_provider',
   // identity — stable @better-auth/scim 1.7.x model set + the ObjectStack-owned
-  // credential store (#3653; the rc.1-era sys_scim_provider retired under #11757)
+  // credential store (#3653; the rc.1-era sys_scim_provider retired under commit 4d25d22d4)
   'sys_scim_connection_binding', 'sys_scim_connection_credential', 'sys_scim_group',
   'sys_scim_group_member', 'sys_scim_identity_tombstone', 'sys_scim_projection_grant',
   'sys_scim_subject', 'sys_scim_user',

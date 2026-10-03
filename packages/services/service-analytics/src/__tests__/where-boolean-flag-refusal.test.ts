@@ -88,7 +88,9 @@ const NON_BOOLEAN: Array<[string, unknown]> = [
   ['0', 0],
   ['1', 1],
   ['null', null],
-  ['[true]', [true]],
+  // [#21448] `[true]` left this table: a LIST at a flag is the shared
+  // comparand-shape face's refusal now, one face before this gate, in that
+  // face's words (the precedence block below pins it).
   ['{ $field }', { $field: 'id' }],
   ['a Date', new Date('2026-01-01T00:00:00.000Z')],
   ['2n', 2n],
@@ -189,6 +191,17 @@ describe('[#20040] existing refusals keep their order and their sentence', () =>
       const huge = refusalOf(() => tree({ stage: { [op]: 2n ** 60n } }));
       expect(huge.code, op).toBe('INVALID_FILTER');
       expect(huge.message.startsWith(`Filter comparand at where.stage.${op} is the bigint`), op).toBe(true);
+    }
+  });
+
+  it('[#21448] a LIST at a flag is the shared comparand-shape face\'s, in its words — how many values before which', () => {
+    for (const op of FLAGS) {
+      const list = refusalOf(() => tree({ stage: { [op]: [true] } }));
+      expect(list.code, op).toBe('INVALID_FILTER');
+      expect(list.status, op).toBe(400);
+      expect(list.message, op).not.toContain('requires a boolean comparand');
+      expect(list.message.startsWith(`Operator "${op}" on field "stage" requires a single comparable value`), op).toBe(true);
+      expect(list.message, op).toContain(`at where.stage.${op}.`);
     }
   });
 

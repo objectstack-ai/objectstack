@@ -118,7 +118,7 @@ describe('@objectstack/platform-objects', () => {
     it('SysSsoProvider is capability-gated (ADR-0066 D3)', () => {
       // Admin config with an embedded live credential (oidc_client_secret) —
       // the D3 capability gate (not the private posture) is the sso pattern.
-      // This pin lived on SysScimProvider until that object retired (#11757);
+      // This pin lived on SysScimProvider until that object retired (commit 4d25d22d4);
       // it moves to the surviving sibling so the gate cannot be dropped
       // silently.
       expect((SysSsoProvider as any).requiredPermissions).toEqual(['manage_platform_settings']);

@@ -488,7 +488,7 @@ Query options for IDataEngine.find() operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
 | **limit** | `integer` | optional |  |
 | **skip** | `integer` | optional |  |
 | **top** | `integer` | optional |  |
@@ -769,7 +769,7 @@ Type: `Record<string, 1 | -1>`
 
 #### Option 3
 
-Type: `{ field: string; order: Enum<'asc' | 'desc'> }[]`
+Type: `{ field: string; order?: Enum<'asc' | 'desc'> }[]`
 
 ---
 
@@ -902,7 +902,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
 | **searchFields** | `string[]` | optional |  |
 
 ### Nested Shape: `EngineAggregateOptions.context`
@@ -1090,12 +1090,12 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
 | **top** | `number` | optional |  |
 | **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
 | **searchFields** | `string[]` | optional |  |
 | **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
@@ -1157,9 +1157,9 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **object** | `string` | ✅ | Object name (e.g. account) |
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
 | **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
-| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
 | **top** | `number` | optional | Alias for limit (OData compatibility) |
@@ -1241,16 +1241,16 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **filters** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (plural of `filter`) |
 | **$top** | `number \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a number, or the digits a querystring carries it as |
 | **$skip** | `number \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a number, or the digits a querystring carries it as |
-| **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
+| **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
-| **$search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
+| **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
 | **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
 | **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
 | **skip** | `number \| string \| null` | optional | Transport spelling of `offset` |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |
 
@@ -1261,9 +1261,9 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **object** | `string` | ✅ | Object name (e.g. account) |
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
 | **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
-| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
 | **top** | `number` | optional | Alias for limit (OData compatibility) |

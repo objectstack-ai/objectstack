@@ -64,6 +64,53 @@ describe('approval row organization_id declaration (#10331)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// [#21458] `ApprovalActionRow.acted_as` — the slot an action was taken as.
+//
+// Triage ruled the person into `actor_id` and the slot into a field of its own
+// (#21411 ruling B); the action log shows the slot, so the published row type
+// declares it. The pins hold what the card decided: the member is OPTIONAL and
+// a STRING, and a row without it (every producer that does not write it, and
+// every row written before it existed) still conforms.
+//
+// The optionality pin is a type alias, not `expectTypeOf`: `toEqualTypeOf<string
+// | undefined>` cannot tell `acted_as?: string` from a REQUIRED `acted_as: string
+// | undefined`, while `{} extends Pick<…>` can. Exported for the same TS6196
+// reason the aliases below are; `check:test-typecheck` compiles this file.
+// ---------------------------------------------------------------------------
+
+type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+
+/** Optional: a row may omit it. A required member turns this alias red. */
+export type ActedAsIsOptional = Assert<{} extends Pick<ApprovalActionRow, 'acted_as'> ? true : false>;
+
+/** A string slot address — not a boolean flag, not an object, not nullable. */
+export type ActedAsIsAString = Assert<Eq<ApprovalActionRow['acted_as'], string | undefined>>;
+
+describe('[#21458] ApprovalActionRow.acted_as — the slot an approval action was taken as', () => {
+    it('is optional and string-typed: a row without it still conforms, and one with it reads back', () => {
+        const read = (row: ApprovalActionRow): string | undefined => row.acted_as;
+
+        expectTypeOf<ApprovalActionRow['acted_as']>().toEqualTypeOf<string | undefined>();
+
+        // The shape every existing producer returns: no slot member at all.
+        // This literal failing to compile is the regression.
+        const withoutSlot: ApprovalActionRow = {
+            id: 'aact_1',
+            request_id: 'req_1',
+            action: 'approve',
+            actor_id: 'usr_holder',
+        };
+        expect(read(withoutSlot)).toBeUndefined();
+
+        // The person and the slot side by side, each in its own member.
+        const withSlot: ApprovalActionRow = { ...withoutSlot, acted_as: 'position:finance' };
+        expect(read(withSlot)).toBe('position:finance');
+        expect(withSlot.actor_id).toBe('usr_holder');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // [#15389] `continueRestoredRun` — the approvals half of the operator repair
 // pair, declared on the contract.
 //
@@ -82,8 +129,6 @@ describe('approval row organization_id declaration (#10331)', () => {
 // file.
 // ---------------------------------------------------------------------------
 
-type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-type Assert<T extends true> = T;
 type ContinueRestoredRun = NonNullable<IApprovalService['continueRestoredRun']>;
 
 /**

@@ -329,7 +329,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **sessionId** | `string` | ✅ | Session identifier |
 | **documentId** | `string` | ✅ | Document identifier |
-| **config** | `{ mode: Enum<'ot' \| 'crdt' \| 'lock' \| 'hybrid'>; enableCursorSharing: boolean; enablePresence: boolean; enableAwareness: boolean; … }` | ✅ | Session configuration |
+| **config** | `{ mode: Enum<'ot' \| 'crdt' \| 'lock' \| 'hybrid'>; enableCursorSharing?: boolean; enablePresence?: boolean; enableAwareness?: boolean; … }` | ✅ | Session configuration |
 | **users** | `{ userId: string; sessionId: string; userName: string; userAvatar?: string; … }[]` | ✅ | Active users |
 | **cursors** | `{ userId: string; sessionId: string; documentId: string; userName: string; … }[]` | ✅ | Active cursors |
 | **version** | `integer` | ✅ | Current document version |
@@ -379,7 +379,7 @@ This schema accepts one of the following structures:
 | **userName** | `string` | ✅ | Display name of user |
 | **position** | `{ line: integer; column: integer }` | ✅ | Current cursor position |
 | **selection** | `{ anchor: object; focus: object; direction?: Enum<'forward' \| 'backward'> }` | optional | Current text selection |
-| **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity: number; label?: string; showLabel: boolean; … }` | ✅ | Visual style for this cursor |
+| **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity?: number; label?: string; showLabel?: boolean; … }` | ✅ | Visual style for this cursor |
 | **isTyping** | `boolean` | optional (default: `false`) | Whether user is currently typing |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
 | **metadata** | `Record<string, any>` | optional | Additional cursor metadata |
@@ -452,7 +452,7 @@ This schema accepts one of the following structures:
 | **userName** | `string` | ✅ | Display name of user |
 | **position** | `{ line: integer; column: integer }` | ✅ | Current cursor position |
 | **selection** | `{ anchor: object; focus: object; direction?: Enum<'forward' \| 'backward'> }` | optional | Current text selection |
-| **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity: number; label?: string; showLabel: boolean; … }` | ✅ | Visual style for this cursor |
+| **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity?: number; label?: string; showLabel?: boolean; … }` | ✅ | Visual style for this cursor |
 | **isTyping** | `boolean` | optional (default: `false`) | Whether user is currently typing |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
 | **metadata** | `Record<string, any>` | optional | Additional cursor metadata |

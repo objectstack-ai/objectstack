@@ -39,7 +39,7 @@ const result = ApiEndpointSchema.parse(data);
 | **inputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Request Body to Internal Params |
 | **outputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Internal Result to Response Body |
 | **authRequired** | `boolean` | optional (default: `true`) | Require authentication |
-| **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Rate limiting policy |
+| **rateLimit** | `{ enabled?: boolean; windowMs?: integer; maxRequests?: integer }` | optional | Rate limiting policy |
 | **cacheTtlSeconds** | `number` | optional | Response cache TTL in seconds |
 | **cacheTtl** | `never` | optional | [REMOVED] `ApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged, and it stays GET-only. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |

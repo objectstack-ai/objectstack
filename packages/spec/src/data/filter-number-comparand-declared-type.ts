@@ -172,7 +172,9 @@
  * earlier still, by the comparand-shape door, whose remedy (`$in` /
  * `$contains` / `$nin`) is the one for that slot; the verdict still answers
  * `door-refusal` for it, and the case table places its array rows where the
- * shape door does not speak (the ordering operators and the list members).
+ * shape door does not speak. [#21448] That door now refuses a list at every
+ * other scalar operator too, the ordering operators included, whatever the
+ * column type, so the rows sit at the list members alone.
  *
  * ## A `{placeholder}` against a number field is refused, not stepped around
  *
@@ -912,11 +914,12 @@ const JUDGED_SLOTS: readonly Slot[] = [
 const VALUE_DATE = new Date(Date.UTC(2026, 0, 1));
 
 /**
- * The equality slots — implicit, `$eq`, `$ne` — where an array is the
- * comparand-SHAPE door's refusal, one door before this one (module header).
+ * The one-value slots — implicit and every scalar operator — where an array is
+ * the comparand-SHAPE door's refusal, one door before this one (module
+ * header). [#21448] It was the equality slots alone until that door refused a
+ * list at every other scalar operator too.
  */
-const isEqualitySlot = (slot: Slot): boolean =>
-  slot.kind === 'implicit' || (slot.kind === 'scalar' && (slot.op === '$eq' || slot.op === '$ne'));
+const isOneValueSlot = (slot: Slot): boolean => slot.kind === 'implicit' || slot.kind === 'scalar';
 
 /**
  * The cases, derived rather than hand-kept:
@@ -932,8 +935,8 @@ const isEqualitySlot = (slot: Slot): boolean =>
  *    `{ $field }` reference on `f_number` pass.
  * 5. **The non-string comparands** ([#20502]) — `false` at `$gt` on every
  *    judged field; `true` and a `Date` at every judged position on
- *    `f_number`, and an array at every one but the equality slots (the shape
- *    door's); all refused. Beside them, what passes: `null` as the null test,
+ *    `f_number`, and an array at every list member (a one-value slot is the
+ *    shape door's); all refused. Beside them, what passes: `null` as the null test,
  *    and a boolean or a `Date` against the field classes that hold one (a
  *    `boolean` field, a `datetime` field) — not this door's subject.
  */
@@ -964,7 +967,7 @@ export const NUMBER_COMPARAND_DOOR_CASES: readonly NumberComparandDoorCase[] = [
       'The card: SQLite read true as 1, PostgreSQL answered a server error, the in-process evaluator coerced it.'),
     caseFor('value', fixtureField('f_number'), slot, VALUE_DATE,
       'The card: no rows on memory and SQLite, a server error on PostgreSQL.'),
-    ...(isEqualitySlot(slot) ? [] : [caseFor('value', fixtureField('f_number'), slot, [LIST_NEIGHBOUR],
+    ...(isOneValueSlot(slot) ? [] : [caseFor('value', fixtureField('f_number'), slot, [LIST_NEIGHBOUR],
       'A list where one value belongs; the in-process evaluator read [10] as 10.')]),
   ]),
   caseFor('value', fixtureField('f_number'), { kind: 'implicit' }, null,

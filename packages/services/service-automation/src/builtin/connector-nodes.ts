@@ -69,7 +69,7 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                         success: false,
                         error:
                             `connector_action '${node.id}': connector '${cfg.connectorId}' is degraded — ${degraded}. `
-                            + `Dispatch is unavailable until its upstream recovers; the platform retries automatically (#3017).`,
+                            + `Dispatch is unavailable until its upstream recovers; the platform retries automatically.`,
                     };
                 }
                 return {

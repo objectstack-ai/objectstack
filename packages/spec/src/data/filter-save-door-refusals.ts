@@ -25,7 +25,8 @@
  * The comparand-shape face (`assertListComparandShapes`,
  * `./filter-comparand-shape.ts`) is called read-only on a one-slot node, so the
  * save door refuses exactly the cells the query door refuses: an array in the
- * equality or `$ne` slot, a `null` ordering comparand, a non-list `$in` /
+ * equality or `$ne` slot or [#21448] at any other scalar operator, a `null`
+ * ordering comparand, a non-list `$in` /
  * `$nin`, a malformed `$between`, a `null` list member or endpoint, and a blank
  * or `{ $field }` endpoint — and passes what the face passes (the null
  * predicate, a `{ $field }` reference as a whole comparand, `$in: []`, a
@@ -55,8 +56,9 @@
  *
  * ## The words
  *
- * - The equality and `$ne` slots: the face's own sentence, from the builders
- *   both doors import (`./filter-comparand-refusal-text.ts`).
+ * - The equality and `$ne` slots, and [#21448] a list at any other scalar
+ *   operator: the face's own sentence, from the builders both doors import
+ *   (`./filter-comparand-refusal-text.ts`).
  * - A `null` ordering comparand, a `null` list member or endpoint, a blank or
  *   `{ $field }` endpoint: the sentence the enforced operator slot
  *   (`FieldOperatorsSchema`) prints for the same comparand, read off that slot
@@ -87,11 +89,13 @@
 import type { z } from 'zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
+import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 import {
   IN_OPERATOR_SPELLINGS,
   NIN_OPERATOR_SPELLINGS,
   arrayEqualityComparandMessage,
   arrayInequalityComparandMessage,
+  arrayScalarComparandMessage,
   shapePreview,
 } from './filter-comparand-refusal-text';
 
@@ -235,6 +239,10 @@ function comparandShapeRefusalAtSave(
     refusal = { at: [], message: arrayEqualityComparandMessage(comparand, { op, field }) };
   } else if (op === '$ne') {
     refusal = { at: [], message: arrayInequalityComparandMessage(comparand, { field }) };
+  } else if (Array.isArray(comparand) && SCALAR_COMPARAND_OPERATORS.has(op)) {
+    // [#21448] A list at any other scalar operator: the face's own sentence,
+    // from the builder both doors import, less its location.
+    refusal = { at: [], message: arrayScalarComparandMessage(op, comparand, { field }) };
   } else if (comparand === null && ORDERING_OPERATORS.has(op)) {
     refusal = fromSlot([]);
   } else if (op === '$in' || op === '$nin') {

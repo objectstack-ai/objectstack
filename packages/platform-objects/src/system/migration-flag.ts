@@ -232,7 +232,7 @@ export async function recordDataMigrationRun(
 /**
  * Stamp `columns_moved_at` — the record that THIS deployment's file-family
  * columns were retyped and their values rewritten into the bare-id encoding
- * (#15989, the ruling on #15041 step 2).
+ * (#15989, step 2 of ADR-0104's 2026-09-05 addendum).
  *
  * ## Why it is a separate write from {@link recordDataMigrationRun}
  *
