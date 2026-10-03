@@ -222,8 +222,9 @@ Security features including field-level and row-level security.
 - Middleware-based security
 
 ### `@objectstack/driver-memory`
-In-memory (mingo) data driver for development and testing.
-- Opt in explicitly with `OS_DATABASE_DRIVER=memory`, `--database-driver memory`, or a `memory://` URL — when no driver is configured the dev default is SQLite, not this driver
+In-memory (mingo) data driver for testing and embedding.
+- Not a boot store: `OS_DATABASE_DRIVER=memory`, `--database-driver memory` and a `memory://` URL are refused at boot, because the driver refuses every tenant-scoped read. For a throwaway dev database use `os dev --fresh`; for SQLite's own in-memory database use `OS_DATABASE_URL=:memory:`
+- Still built for a declared `driver: 'memory'` datasource and by direct construction (`new InMemoryDriver()`)
 
 ---
 

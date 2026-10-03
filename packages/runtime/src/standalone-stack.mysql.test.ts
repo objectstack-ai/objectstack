@@ -256,8 +256,11 @@ describe('OS_DATABASE_DRIVER — an unknown value is refused loudly, never SQLit
       expect(() => resolveStandaloneDatabase()).not.toThrow(/Unsupported OS_DATABASE_DRIVER value/);
 
       delete process.env.OS_DATABASE_DRIVER;
+      // The config door refuses through zod, so the sentence arrives inside a
+      // ZodError's issue list — the retirement's, not the typo refusal's.
       expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).toThrow(/--fresh/);
-      expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).toThrow(/databaseDriver "/);
+      expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).toThrow(/in-memory \(mingo\) engine/);
+      expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).not.toThrow(/Unsupported databaseDriver value/);
     },
   );
 });
