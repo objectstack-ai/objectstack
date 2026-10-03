@@ -677,9 +677,9 @@ A `groupBy` entry is either a bare field name or a structured node that buckets 
 
 `dateGranularity` accepts `day` | `week` | `month` | `quarter` | `year`. The engine
 pushes bucketing down to the driver only when that driver advertises the granularity
-via `supports.queryDateGranularity` — SQLite reports `week: false`, for instance, so a
-weekly bucket falls back to fetching rows and bucketing in memory. The fallback is
-transparent to the query — you get the same buckets either way.
+via `supports.queryDateGranularity` — the Turso remote transport reports none, for
+instance, so every bucket there falls back to fetching rows and bucketing in memory. The
+fallback is transparent to the query — you get the same buckets either way.
 
 <Callout type="warn">
 Buckets are computed in **UTC**. A non-UTC reference timezone is only reachable through

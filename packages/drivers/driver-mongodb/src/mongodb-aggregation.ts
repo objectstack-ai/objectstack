@@ -57,14 +57,14 @@ export interface AggregationInput {
  * `mongodb-date-bucket-parity.test.ts` pins the identity so a future edit to one
  * cannot silently miss the other.
  *
- * ## Why all five, when `driver-sql` on SQLite advertises four
+ * ## Why `week` too
  *
- * SQLite has no ISO-week format specifier, so `driver-sql` sets `week: false`
- * and lets the engine bucket weeks in memory. MongoDB's `$dateToString` has both
- * halves of the ISO-8601 week date — `%G` (ISO week-YEAR) and `%V` (ISO week
- * number, zero-padded to 2) — which is exactly the label
- * `bucketDateValue` computes by hand. The dialect difference is real, so the
- * records differ.
+ * MongoDB's `$dateToString` has both halves of the ISO-8601 week date — `%G`
+ * (ISO week-YEAR) and `%V` (ISO week number, zero-padded to 2) — which is
+ * exactly the label `bucketDateValue` computes by hand. (`driver-sql` on
+ * SQLite advertises all five too, but cannot use `%V`: the SQLite libSQL
+ * bundles predates it, so its `week` arm computes the ISO week from the
+ * week's Thursday instead.)
  *
  * ⚠️ **Documentation-derived, not observed** (#5517). Every `$dateToString`
  * format specifier and every `$convert`/`$concat`/`$switch` null rule this

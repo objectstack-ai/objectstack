@@ -17553,7 +17553,8 @@ export class ObjectQL implements IObjectQLEngine {
         // `supports.queryDateGranularity[g]`. If every structured item is
         // supported we can push the aggregate down to the driver; otherwise
         // we fall back to driver.find() + in-memory bucketing so the result
-        // remains correct on partial-support dialects (e.g. SQLite + week).
+        // remains correct on a face that buckets fewer (e.g. the Turso remote
+        // transport, which advertises none).
         const groupByItems = Array.isArray(query.groupBy) ? query.groupBy : [];
         const granularityCaps: Record<string, boolean> | undefined =
             drv?.supports?.queryDateGranularity;
@@ -17562,8 +17563,9 @@ export class ObjectQL implements IObjectQLEngine {
             if (!g?.dateGranularity) return true; // plain {field} object is fine
             return granularityCaps?.[g.dateGranularity] === true;
         });
-        // ADR-0053 Phase 2 (D2): native driver date bucketing (`date_trunc`) is
-        // UTC-only — SQLite has no tz database and MySQL needs tz tables loaded,
+        // ADR-0053 Phase 2 (D2): native driver date bucketing (driver-sql's
+        // `to_char` / `date_format` / `strftime`) is UTC-only — SQLite has no
+        // tz database and MySQL needs tz tables loaded,
         // so pushing tz-aware bucketing down splits boundaries per dialect. When
         // a non-UTC reference timezone is in play we therefore force the
         // in-memory path: the date-range `where` still goes to the driver (only
