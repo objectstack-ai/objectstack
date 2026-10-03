@@ -1413,7 +1413,7 @@ export class SecurityPlugin implements Plugin {
     ctx: PluginContext,
     payload?: { appId?: string; overBudget?: boolean },
   ): Promise<void> {
-    let ql: any;
+    let ql: IObjectQLEngine | undefined;
     try {
       ql = ctx.getService<IObjectQLEngine>('objectql');
     } catch {
