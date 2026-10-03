@@ -409,16 +409,22 @@ for (const cell of DB_CELLS) {
         });
       }
 
-      // F9 binds a comparand as written (no storage-form coercion), so its
-      // datetime cells are pinned on SQLite, whose stored form is ISO text.
-      // PostgreSQL reads a bare-day text bound in the session's zone; that is
-      // the read scope's temporal-coercion question, not its lowering.
-      it.skipIf(cell.id !== 'sqlite')('the read scope (F9), typed by its declared value shape, answers the same rows', async () => {
+      // [#21505] F9 binds each comparand through the driver's coercion pair
+      // (ADR-0053 D-A1 / D-A2), as both of its consumers wire it, so its
+      // datetime cells hold on PostgreSQL too, where a bare-day text bound
+      // would otherwise be read in the session's zone.
+      it('the read scope (F9), typed by its declared value shape, answers the same rows', async () => {
         const declaredValueShape = (field: string) => (DECLARED[field] ? { type: DECLARED[field], multiple: false } : undefined);
         for (const [label, query, expected] of CELLS) {
           if (!query.where) continue;
-          const { sql, params } = compileScopedFilterToSql(query.where as FilterCondition, OBJECT, { declaredValueShape, dialect: 'sqlite' });
-          const rows = await (engine as any).execute(`select "id" from "${OBJECT}" where ${sql}`, { args: params, object: OBJECT });
+          const { sql, params } = compileScopedFilterToSql(query.where as FilterCondition, OBJECT, {
+            declaredValueShape,
+            dialect: cell.id === 'pg' ? 'postgres' : 'sqlite',
+            coerceTemporalFilterValue: (field, value) => driver.temporalFilterValue(OBJECT, field, value),
+            coerceTemporalFilterColumn: (field, columnSql) => driver.temporalFilterColumnSql(OBJECT, field, columnSql),
+          });
+          const res = await (engine as any).execute(`select "id" from "${OBJECT}" where ${sql}`, { args: params, object: OBJECT });
+          const rows = Array.isArray(res) ? res : (res as { rows: Array<Record<string, unknown>> }).rows;
           expect(ids(rows as Array<Record<string, unknown>>), label).toBe(expected);
         }
       });

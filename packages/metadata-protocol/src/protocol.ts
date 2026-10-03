@@ -8353,12 +8353,23 @@ export class ObjectStackProtocolImplementation implements
                 // another package's object every name a container expands
                 // derives from the container's own name, never one of that
                 // package's `<object>.<key>` names.
+                //
+                // [#21510] …and it never replaces a STORED ROW of that name.
+                // A row stored under exactly the name is the sanctioned
+                // override for it (ADR-0005 keys an overlay by its own name);
+                // an expansion fills only a name with no row of its own. The
+                // test is {@link namesWithOwnStoredRow} over this caller's
+                // `records`, the one the by-name read asks, so the two doors
+                // answer the same row for the name. An item the registry or a
+                // package supplies under the name is still replaced, as before.
                 if (isView) {
                     const byName = new Map<string, unknown>();
                     for (const it of items as any[]) {
                         if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
                     }
+                    const ownRowNames = this.namesWithOwnStoredRow(records);
                     for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
+                        if (ownRowNames.has(vi.name as string)) continue;
                         byName.set(vi.name as string, vi);
                     }
                     items = Array.from(byName.values());
@@ -8820,6 +8831,30 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21510] The names that have a stored row of their own among `records`,
+     * the active rows {@link readActiveOverlayRows} selected for one caller.
+     *
+     * ADR-0005 keys an overlay by its own name, so a row stored under exactly a
+     * name is the sanctioned override for that name. An expansion is derived
+     * from its container, so it fills only a name that is NOT in this set. This
+     * is the one predicate both doors ask: the list read
+     * ({@link readFlattenedMetaItems}) never lets an expansion displace a
+     * stored row of the same name, and the by-name read
+     * ({@link resolveRowlessExpandedView}) answers an expansion only for a name
+     * outside it. Both doors pass the rows they selected for the same caller,
+     * so a name that has a row in one organization only is row-less for every
+     * other caller. ⛔ Never a second test of "this name has its own row":
+     * two tests are two rules, and the doors would disagree again.
+     */
+    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+        const names = new Set<string>();
+        for (const record of records) {
+            if (typeof record?.name === 'string') names.add(record.name);
+        }
+        return names;
+    }
+
+    /**
      * [#21442] The item the list read serves under `request.name` when that
      * name is ROW-LESS — no stored row of its own — and a stored view
      * container in this caller's scope expands it; `undefined` otherwise.
@@ -8846,7 +8881,8 @@ export class ObjectStackProtocolImplementation implements
      * ⛔ No kernel-specific branch — every kernel answers through this path.
      *
      * A stored row of this very name is the name's own row and is answered
-     * as such by the caller's own read, never an expansion. The `container`
+     * as such by the caller's own read, never an expansion — the same
+     * predicate the list read applies ({@link namesWithOwnStoredRow}). The `container`
      * returned is the stored row the item derives from — its own name, body,
      * package and organization — which the layered read reports as the
      * name's provenance and the history and diff reads resolve to.
@@ -8868,7 +8904,7 @@ export class ObjectStackProtocolImplementation implements
             // this name".
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        if (records.some((record) => record?.name === request.name)) return undefined;
+        if (this.namesWithOwnStoredRow(records).has(request.name)) return undefined;
         let found: RowlessExpandedView | undefined;
         for (const expanded of this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, records))) {
             if (expanded.item.name === request.name) found = expanded;

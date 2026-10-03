@@ -865,14 +865,16 @@ function undefinedComparandError(field: string, path: string): Error {
     `whose value is undefined cannot be told apart from an ABSENT key — yet the two mean OPPOSITE ` +
     `things (a predicate versus no constraint at all), so there is no reading of it that is not a ` +
     `guess. It used to compile, two ways: in a FIELD position the key was dropped outright, so a ` +
-    `single-key where ran with no filter at all and the chart was drawn over every row (#3650's ` +
-    `widening, which this module refuses everywhere else); in an OPERATOR or list position it ` +
-    `became a comparison against null, which is UNKNOWN for every row and charts nothing. ` +
+    `single-key where ran with no filter at all and the chart was drawn over every row (a dropped ` +
+    `predicate WIDENS the query, which this module refuses everywhere else); in an OPERATOR or ` +
+    `list position it became a comparison against null, which is UNKNOWN for every row and charts ` +
+    `nothing. ` +
     `Write null if the null predicate was meant ({ "${field}": null } or { "${field}": { "$null": true } }), ` +
     `or omit the key entirely when the value is genuinely absent — an omitted key is the same "no ` +
     `constraint" without the ambiguity. The producer to fix is whoever BUILT this where: undefined ` +
     `cannot cross JSON, so it is in-process code spreading a possibly-absent value into a filter ` +
-    `object (#6050 ruling B, pushed down to this door by #6386).`,
+    `object. An undefined comparand is refused rather than read as null, on the SQL drivers and on ` +
+    `this door alike.`,
   );
 }
 
@@ -1019,9 +1021,9 @@ function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: stri
     `explicitly: { "$and": [{ "${field}": { "$op": ... } }, { "${field}": { "${example}": ... } }] }. ` +
     `This shape used to compile by silently DROPPING every non-$ sibling, and a dropped conjunct ` +
     `does not narrow the query, it WIDENS it: the chart included rows the author excluded, with ` +
-    `nothing to read (#3650's failure mode, which this module refuses everywhere else). The sibling ` +
-    `door in this package (read-scope-sql.ts) already fails closed on this exact shape — one shape, ` +
-    `one answer (#6444).`,
+    `nothing to read — the failure mode this module refuses everywhere else. The sibling ` +
+    `door in this package (read-scope-sql.ts) already fails closed on this exact shape, so both ` +
+    `doors refuse it: one shape, one answer.`,
   );
 }
 
@@ -1111,8 +1113,9 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     if (Object.keys(wrapper).length === 0) {
       throw invalidFilterError(
         `[analytics] "${key}" carries a field constraint with zero operators ({}). ` +
-        `Refusing rather than reading it as "every row" or "no row" — #5240 ruled this ` +
-        `shape refused on every backend.`,
+        `Refusing rather than reading it as "every row" or "no row": neither reading is the ` +
+        `author's intent (a filter that recorded a field and never its operator), so this shape ` +
+        `is refused on every backend.`,
       );
     }
     // [#6444] A wrapper mixing $-operator keys with non-$ siblings is refused
@@ -1447,7 +1450,8 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
     `A filter array is a comparison [field, operator, value], a logical node ` +
     `["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY sugar (spec ` +
     `'FilterArray'), lowered to a FilterCondition by @objectstack/spec parseFilterAST() at ` +
-    `every door, this one included (#5158/#5334). This value cannot be lowered, and an ` +
+    `every door, this one included, so it means the same rows whichever door it enters. This ` +
+    `value cannot be lowered, and an ` +
     `unapplied filter would have charted the UNFILTERED dataset. Recognised operators: ` +
     `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
     `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
@@ -2062,7 +2066,8 @@ export function lowerAnalyticsWhere(
       throw invalidFilterError(
         `[analytics] filter array ${JSON.stringify(where)} passed isFilterAST() but ` +
         `parseFilterAST() lowered it to ${JSON.stringify(condition)}. Refusing rather than ` +
-        `charting the dataset unfiltered (#5158/#5334).`,
+        `charting the dataset unfiltered: a filter array is lowered at every door or refused, ` +
+        `never dropped.`,
       );
     }
     return condition as Record<string, unknown>;

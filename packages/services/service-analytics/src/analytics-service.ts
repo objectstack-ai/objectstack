@@ -3664,9 +3664,10 @@ export class AnalyticsService implements IAnalyticsService {
       if (!this.warnedNoObjectRegistry) {
         this.warnedNoObjectRegistry = true;
         this.logger.warn(
-          '[Analytics] no object-registry hook configured — the cube-inference existence gate ' +
-            '(#3867) is INACTIVE for this service; an unregistered cube name reaches the driver ' +
-            'as a raw table name.',
+          '[Analytics] no object-registry hook configured — the cube-inference existence gate, ' +
+            'which answers 404 CUBE_NOT_FOUND for a name that is neither a registered cube nor a ' +
+            'registered object, is INACTIVE for this service; an unregistered cube name reaches the ' +
+            'driver as a raw table name.',
         );
       }
       return;
@@ -3864,8 +3865,10 @@ export class AnalyticsService implements IAnalyticsService {
         ? `This query's filter compares against the field reference ` +
           `{ "$field": "${crossField.ref}" } under "${crossField.op}" on "${crossField.field}", and ` +
           `NativeSQLStrategy DECLINES a cross-field comparison so that it routes to the ObjectQL ` +
-          `engine path — whose driver compiles it and enforces the #5222 rulings with metadata it ` +
-          `owns (#7598). No such path is configured here, so the capability is unavailable on this ` +
+          `engine path — whose driver compiles it and enforces the cross-field rules (declared ` +
+          `same-table columns only, never the tenant-isolation column, one comparison class) with ` +
+          `metadata it owns, so those rules are enforced in one place, next to the metadata they ` +
+          `read. No such path is configured here, so the capability is unavailable on this ` +
           `deployment: supply an \`executeAggregate\` bridge (the plugin auto-wires one from the ` +
           `engine), or compare against a literal value. Every other query on this cube is ` +
           `unaffected. `
@@ -3965,7 +3968,7 @@ function mintableMeasureKey(member: string, cubeName: string): string {
   throw invalidMemberError(
     `[Analytics] Measure '${member}' on cube '${cubeName}' is a DOTTED member, and ` +
       `measures do not traverse relationships — only dimensions do — so there is no ` +
-      `related column for this to aggregate. Until #5918 the prefix was silently ` +
+      `related column for this to aggregate. Before this refusal the prefix was silently ` +
       `dropped, so the aggregate ran against '${cubeName}' itself while the result ` +
       `column kept the label '${member}'. Aggregate one of the object's OWN fields ` +
       `instead ('<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct'), or ` +

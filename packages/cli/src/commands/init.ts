@@ -1148,10 +1148,18 @@ export default class Init extends Command {
     const startCwd = process.cwd();
     const template = TEMPLATES[flags.template];
 
+    // Every refusal in this command renders its sentence ONCE: the `✗` line it
+    // prints itself, with the hint under it, and then `this.exit(2)`. It used to
+    // end in `this.error(<the same sentence>)`, which hands oclif's entry point
+    // the sentence to render a second time as an `Error:` block on stderr — one
+    // refusal read twice across two streams. `this.exit(n)` raises the same
+    // signal and renders nothing, and `2` is the status `this.error` raised, so
+    // the exit status is unchanged. That is the split `isReportedError` guards
+    // (`utils/format.ts`): one rendering per refusal.
     if (!template) {
       printError(`Unknown template: ${flags.template}`);
       console.log(chalk.dim(`  Available: ${Object.keys(TEMPLATES).join(', ')}`));
-      this.error(`Unknown template: ${flags.template}`);
+      this.exit(2);
     }
 
     // Resolve target directory + project name.
@@ -1169,7 +1177,7 @@ export default class Init extends Command {
       const nameError = validateProjectName(args.name);
       if (nameError) {
         printError(nameError);
-        this.error(nameError);
+        this.exit(2);
       }
       projectName = args.name;
       targetDir = path.resolve(startCwd, args.name);
@@ -1179,7 +1187,7 @@ export default class Init extends Command {
           const msg = `Target directory ${targetDir} is not empty`;
           printError(msg);
           console.log(chalk.dim('  Choose a different name or remove the existing directory first.'));
-          this.error(msg);
+          this.exit(2);
         }
       } else {
         fs.mkdirSync(targetDir, { recursive: true });
@@ -1191,7 +1199,7 @@ export default class Init extends Command {
       if (nameError) {
         printError(`Current directory name "${projectName}" is not a valid project name. ${nameError}`);
         console.log(chalk.dim('  Re-run with an explicit name: `objectstack init my-app`'));
-        this.error(nameError);
+        this.exit(2);
       }
     }
 
@@ -1199,7 +1207,7 @@ export default class Init extends Command {
     if (fs.existsSync(path.join(targetDir, 'objectstack.config.ts'))) {
       printError(`objectstack.config.ts already exists in ${targetDir}`);
       console.log(chalk.dim('  Use `objectstack generate` to add metadata to an existing project'));
-      this.error('objectstack.config.ts already exists');
+      this.exit(2);
     }
 
     // Convert the npm-name (which allows hyphens, dots, scopes) into a
@@ -1357,7 +1365,7 @@ export default class Init extends Command {
 
         if (scaffoldRejected) {
           console.log(chalk.dim('  This is a CLI bug — please report it at https://github.com/objectstack-ai/objectstack/issues'));
-          this.error('Scaffold validation failed');
+          this.exit(2);
         }
       }
 
@@ -1386,16 +1394,16 @@ export default class Init extends Command {
         }
         console.log(chalk.dim(`    ${chosenPm} install`));
         console.log('');
-        this.error('Dependency installation failed');
+        this.exit(2);
       }
 
     } catch (error: any) {
       // The two refusals above (scaffold self-test, dependency install) already
-      // printed their `✗` line and raised the exit signal with `this.error`.
+      // printed their `✗` line and raised the exit signal with `this.exit(2)`.
       // Re-reporting it here printed the refusal a second time.
       if (isExitSignal(error)) throw error;
       printError(error.message || String(error));
-      this.error(error.message || String(error));
+      this.exit(2);
     }
   }
 }

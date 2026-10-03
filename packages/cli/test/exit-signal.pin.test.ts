@@ -112,7 +112,9 @@
  *   directory a scratch directory. Each case asserts the two things an operator
  *   reads: the refusal is ONE `✗` line with no `EEXIT` anywhere in the output,
  *   and the exit status, unchanged by the repair — 1 for the `this.exit(1)`
- *   refusals, 2 for `os init`'s `this.error` ones.
+ *   refusals, 2 for `os init`'s `this.exit(2)` ones (the status its `this.error`
+ *   refusals raised, until they rendered their sentence once:
+ *   `refusal-renders-once.test.ts` and its `.e2e` twin).
  *
  * ## Tier
  *
@@ -480,7 +482,9 @@ const FLOW = new Map(
  * `bee8d1c62c` over the same 65 commands: the 127 `this.exit` sites, plus
  * four `this.error` sites — `compile.ts`'s bundling refusal, counted for
  * `os compile` and again for `os build` through it, and `os init`'s two
- * refusals inside its outer `try`.
+ * refusals inside its outer `try`. Those four sites now spell `this.exit(2)`
+ * (the status `this.error` raised, with the sentence rendered once): both
+ * spellings are seeds, so the floor is unchanged.
  */
 const POPULATION_FLOOR = 65;
 const SITE_FLOOR = 131;
@@ -648,14 +652,13 @@ describe('every command lets the exit signal through', () => {
     }
   });
 
-  it("the scan reaches the `this.error` seed — `os init`'s two refusals inside its outer try, and `os compile`'s bundling refusal", () => {
-    const errorCalls = (id: string) => FLOW.get(id)?.sites.map((s) => s.call).filter((call) => call.startsWith('this.error(')) ?? [];
-    expect(errorCalls('init')).toEqual(expect.arrayContaining([
-      "this.error('Scaffold validation failed')",
-      "this.error('Dependency installation failed')",
-    ]));
+  it("the scan reaches `os init`'s two refusals inside its outer try, and `os compile`'s bundling refusal — each ends in `this.exit(2)`", () => {
+    const refusalCalls = (id: string) => FLOW.get(id)?.sites.map((s) => s.call).filter((call) => call === 'this.exit(2)') ?? [];
+    // Scaffold self-test and dependency install: both sit inside the outer `try`
+    // whose `catch` must let the signal through, so both are sites.
+    expect(refusalCalls('init'), 'os init').toHaveLength(2);
     // Inherited: `os build` is judged on `compile.ts`'s site as well.
-    for (const id of ['compile', 'build']) expect(errorCalls(id), `os ${id}`).toContain('this.error(err.message)');
+    for (const id of ['compile', 'build']) expect(refusalCalls(id), `os ${id}`).toHaveLength(1);
   });
 
   it.each(POPULATION.map((c) => [c.id, c.faces.join(' | ')]))('os %s (%s)', (id) => {
@@ -961,8 +964,8 @@ async function driveText(cmd: Runnable, argv: string[], cwd?: string): Promise<D
 
 /**
  * The refusal is reported ONCE, the signal is never named, and the status is
- * the one it always was: 1 for a `this.exit(1)` refusal, 2 for a `this.error`
- * one (oclif's default, which `os init` never overrides). `subject` is what
+ * the one it always was: 1 for a `this.exit(1)` refusal, 2 for `os init`'s
+ * `this.exit(2)` ones (what its `this.error` refusals raised). `subject` is what
  * the one line must be about — a path, a URL or an error the case chose, never
  * the refusal's wording.
  */

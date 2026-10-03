@@ -1451,11 +1451,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // text; one it cannot resolve is refused in the read-scope envelope.
     // [#20445] …and so does the declared value shape, so a policy's `$empty`
     // is answered by the field's row of the ruled per-type table.
+    // [#21505] …and so does the driver's temporal coercion pair (ADR-0053
+    // D-A1 / D-A2), bound to the OBJECT (never the alias), so a temporal
+    // comparand binds in the column's storage form and the scope admits the
+    // rows the engine admits.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
       dialect: sqlDialectFor(ctx, objectName),
       context: ctx.context,
       declaredValueShape: declaredValueShapeResolver(ctx, objectName),
+      coerceTemporalFilterValue: ctx.coerceTemporalFilterValue
+        ? (field, value) => ctx.coerceTemporalFilterValue!(objectName, field, value)
+        : undefined,
+      coerceTemporalFilterColumn: ctx.coerceTemporalFilterColumn
+        ? (field, columnSql) => ctx.coerceTemporalFilterColumn!(objectName, field, columnSql)
+        : undefined,
     });
     // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
     // not an echo: `execute()` runs this method's output through

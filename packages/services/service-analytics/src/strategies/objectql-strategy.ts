@@ -643,11 +643,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // to, and refuses one it cannot resolve, as `execute()` does.
       // [#20445] …and the same declared value shape, so the echoed scope
       // prints the `$empty` arm the executed native statement runs.
+      // [#21505] …and the same temporal coercion pair, so the echo prints
+      // the storage-form comparand and column the executed statement binds.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
         dialect: sqlDialectFor(ctx, tableName),
         context: ctx.context,
         declaredValueShape: declaredValueShapeResolver(ctx, tableName),
+        coerceTemporalFilterValue: ctx.coerceTemporalFilterValue
+          ? (field, value) => ctx.coerceTemporalFilterValue!(tableName, field, value)
+          : undefined,
+        coerceTemporalFilterColumn: ctx.coerceTemporalFilterColumn
+          ? (field, columnSql) => ctx.coerceTemporalFilterColumn!(tableName, field, columnSql)
+          : undefined,
       });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict

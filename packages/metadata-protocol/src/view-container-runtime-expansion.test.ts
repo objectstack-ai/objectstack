@@ -940,6 +940,128 @@ describe('#21334 a container on another package\'s object never takes that packa
             }
         });
     });
+
+    /**
+     * #21510 — a stored row named exactly like a name a stored container
+     * expands answers that name on BOTH doors.
+     *
+     * Triage's ruling: the stored row wins on both doors. ADR-0005 overlays are
+     * name-keyed, so a row stored under exactly that name is the sanctioned
+     * override for it; an expansion is derived from its container, so it fills
+     * only names that have no row of their own. That is the rule #21442 gave
+     * the by-name read, and the object door's list read adopts it: ⛔ not a
+     * second rule, both doors ask one predicate over the caller's own row
+     * selection.
+     *
+     * Measured on `origin/main` before this change, with this harness: the
+     * object door listed the container's expansion under the row's name
+     * (`FromContainer`) while the by-name read answered the stored row
+     * (`ByNameRow`), on both kernels, in both scopes and in either write
+     * order. The name the same container expands with no row of its own still
+     * answers the expansion on both doors — the control.
+     */
+    describe('#21510 a stored row named exactly like an expansion answers that name on both doors', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        /** The dev's setup: a stored overlay of the showcase's own `showcase_task` container… */
+        const container = {
+            name: TASK,
+            list: { label: 'FromContainer', type: 'grid', data, columns: [{ field: 'title' }] },
+            listViews: {
+                in_progress: { label: 'FromContainer In Progress', type: 'grid', data, columns: [{ field: 'title' }] },
+            },
+        };
+        /** …plus a stored row named exactly like the name its bare `list` expands to. */
+        const row = {
+            name: DEFAULT, object: TASK, viewKind: 'list', label: 'ByNameRow',
+            config: { type: 'grid', data, columns: [{ field: 'title' }, { field: 'status' }] },
+        };
+        /** The control: a name the container expands that has no row of its own. */
+        const ROWLESS = `${TASK}.in_progress`;
+        const saveView = (protocol: Protocol, name: string, item: unknown, organizationId?: string) =>
+            protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId) } as any);
+        /** The two doors answer `name` with one item, and that item is the one `expectItem` names. */
+        const expectBothDoors = async (
+            protocol: Protocol, name: string, organizationId: string | undefined, expectItem: (v: any) => void,
+        ) => {
+            const listed = named(await objectDoor(protocol, organizationId), name);
+            expect(listed, `exactly one item answers ${name} on the object door`).toHaveLength(1);
+            expectItem(listed[0]);
+            const read = await byNameDoor(protocol, name, organizationId);
+            expectItem(read);
+            expect(withoutDiagnostics(read), `${name}: the by-name read answers the item the object door lists`)
+                .toEqual(withoutDiagnostics(listed[0]));
+        };
+        const expectTheRow = (v: any) => {
+            expect(v?.label).toBe('ByNameRow');
+            expect(v?.config).toEqual(row.config);
+        };
+        const expectTheExpansion = (v: any) => {
+            expect(v?.label).toBe('FromContainer In Progress');
+            expect(v?.config?.columns).toEqual([{ field: 'title' }]);
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const order of ['the container first', 'the row first'] as const) {
+                        it(`${scope}, ${order}: the stored row answers its name on both doors; the row-less expanded name answers the expansion`, async () => {
+                            const { protocol, rows } = showcaseHarness(environmentId);
+                            const writes = [
+                                () => saveView(protocol, TASK, container, organizationId),
+                                // The public input: the save door accepts a write by the expanded name.
+                                () => saveView(protocol, DEFAULT, row, organizationId),
+                            ];
+                            for (const write of order === 'the container first' ? writes : [...writes].reverse()) await write();
+                            expect(
+                                [...rows.values()].filter((r) => r.name === DEFAULT && r.organization_id === (organizationId ?? null)),
+                                'the save door stored the row under the expanded name',
+                            ).toHaveLength(1);
+
+                            await expectBothDoors(protocol, DEFAULT, organizationId, expectTheRow);
+                            // The by-name family asks the same predicate: the
+                            // row's name keeps its own change log and its own
+                            // diff, never the container's.
+                            const events = (await protocol.historyMetaItem({ type: 'view', name: DEFAULT, ...scoped(organizationId) })).events;
+                            expect(events.length, 'the row has a change log of its own').toBeGreaterThan(0);
+                            expect(events.every((e: any) => e.ref.name === DEFAULT), 'every event names the row').toBe(true);
+                            expect((await (protocol as any).diffMetaItem({ type: 'view', name: DEFAULT, ...scoped(organizationId) })).name)
+                                .toBe(DEFAULT);
+                            // CONTROL — a row-less name the same container expands.
+                            await expectBothDoors(protocol, ROWLESS, organizationId, expectTheExpansion);
+                            // The contract the ruling keeps (#21334): every name
+                            // the object door lists answers that same item by name.
+                            for (const listed of await objectDoor(protocol, organizationId)) {
+                                const read = await byNameDoor(protocol, listed.name, organizationId);
+                                expect(withoutDiagnostics(read), `${listed.name} by name`).toEqual(withoutDiagnostics(listed));
+                            }
+                        });
+                    }
+                }
+
+                it('the predicate is read over the caller\'s own rows: an organization\'s row wins for that organization only', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    await saveView(protocol, TASK, container);
+                    await saveView(protocol, DEFAULT, row, ORG);
+
+                    // The organization that holds the row: the row, on both doors.
+                    await expectBothDoors(protocol, DEFAULT, ORG, expectTheRow);
+                    // A caller for whom the name has no row of its own: the
+                    // container's expansion, on both doors.
+                    const expectTheDefaultExpansion = (v: any) => {
+                        expect(v?.label).toBe('FromContainer');
+                        expect(v?.config?.columns).toEqual([{ field: 'title' }]);
+                    };
+                    await expectBothDoors(protocol, DEFAULT, undefined, expectTheDefaultExpansion);
+                    await expectBothDoors(protocol, DEFAULT, 'org_globex', expectTheDefaultExpansion);
+                });
+            });
+        }
+    });
 });
 
 /**

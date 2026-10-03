@@ -416,7 +416,7 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
     const err = await errorFrom(() => run({ amount: { $gt: { $field: 'budget' } } }));
     expect(err.message).toContain('budget');
     expect(err.message).toContain('executeAggregate');
-    expect(err.message).toContain('#7598');
+    expect(err.message).toContain('so those rules are enforced in one place');
 
     // …and the narrowness control, which is the half that makes the sentence
     // trustworthy: a literal filter on the SAME deployment still runs.
