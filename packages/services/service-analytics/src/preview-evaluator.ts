@@ -35,7 +35,10 @@ import {
   resolveAnalyticsDateRangeString,
   utcInstantMs,
   compensatedSum,
+  temporalComparandKind,
+  temporalStorageForm,
   type BucketGranularity,
+  type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -656,6 +659,77 @@ export function declaredPreviewLowering(declaredType?: (field: string) => string
 }
 
 /**
+ * [#21505, ADR-0053 D-A1] The draft preview compares a temporal value in its
+ * STORAGE form, on both sides, as `driver-memory` does. The preview has no
+ * driver, so its counterpart of the engine door is the rule that door
+ * applies, `@objectstack/core`'s `temporalStorageForm`, for the kind
+ * `temporalComparandKind` gives the column's declared type. A drafted row
+ * keeps whatever spelling its author wrote, so the row value is put in that
+ * form too, the way a driver puts it on write.
+ *
+ * Without it a drafted chart compared the two spellings as text. An instant
+ * against a bare day, or a window end written shorter than the stored instant,
+ * then counted rows the published chart does not, or missed rows it counts.
+ *
+ * A column the host names no type for stays as written on both sides.
+ */
+type PreviewTemporalKind = (field: string) => TemporalComparandKind | null;
+
+function previewTemporalKind(declaredType?: (field: string) => string | undefined): PreviewTemporalKind {
+  const kinds = new Map<string, TemporalComparandKind | null>();
+  return (field) => {
+    if (!kinds.has(field)) kinds.set(field, temporalComparandKind(declaredType?.(field)));
+    return kinds.get(field)!;
+  };
+}
+
+/** The value comparisons whose comparand takes the storage form: `driver-memory`'s arm set. */
+const STORAGE_FORM_OPERATORS = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$between']);
+
+/** `value` in the storage form of `kind`; a list maps its members, as the drivers do. */
+function storageForm(value: unknown, kind: TemporalComparandKind): unknown {
+  return Array.isArray(value) ? value.map((v) => temporalStorageForm(v, kind)) : temporalStorageForm(value, kind);
+}
+
+/** The condition with each value comparison's comparand on a temporal column in its storage form. */
+function previewStorageComparands(node: Row | undefined, kindOf: PreviewTemporalKind): Row | undefined {
+  if (!node) return node;
+  const out: Row = {};
+  for (const [key, cond] of Object.entries(node)) {
+    const kind = key.startsWith('$') ? null : kindOf(key);
+    if ((key === '$and' || key === '$or') && Array.isArray(cond)) {
+      out[key] = cond.map((arm) => previewStorageComparands(arm as Row, kindOf));
+    } else if (key === '$not' && cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+      out[key] = previewStorageComparands(cond as Row, kindOf);
+    } else if (!kind || cond == null || Array.isArray(cond)) {
+      out[key] = cond;
+    } else if (typeof cond !== 'object' || cond instanceof Date) {
+      out[key] = temporalStorageForm(cond, kind); // implicit equality
+    } else {
+      out[key] = Object.fromEntries(Object.entries(cond as Row).map(([op, expected]) => [
+        op,
+        STORAGE_FORM_OPERATORS.has(op) && expected != null ? storageForm(expected, kind) : expected,
+      ]));
+    }
+  }
+  return out;
+}
+
+/** The row with every declared temporal field in its storage form; the same row when none moved. */
+function previewStorageRow(row: Row, kindOf: PreviewTemporalKind): Row {
+  let out: Row | undefined;
+  for (const [field, value] of Object.entries(row)) {
+    const kind = kindOf(field);
+    if (!kind) continue;
+    const stored = storageForm(value, kind);
+    if (stored === value) continue;
+    out ??= { ...row };
+    out[field] = stored;
+  }
+  return out ?? row;
+}
+
+/**
  * Evaluate `query` over `rows` using the cube's measure/dimension specs.
  * Mirrors the engine strategies' output contract: rows keyed by bare
  * measure/dimension names, `fields` describing each output column.
@@ -703,9 +777,13 @@ export function evaluateAnalyticsQueryOverRows(
   // handed. Measured when the NULL guards arrived (step 3), they moved only the
   // rows this face read through `String()` — a row with no value against the
   // text `'null'` or `'undefined'` — onto every driver's answer.
-  const where = lowerFilterCondition(normalizeWhereComparands(query.where), lowering);
-  assertPreviewCanEvaluate(where);
-  let filtered = rows.filter((r) => matchesWhere(r, where));
+  const lowered = lowerFilterCondition(normalizeWhereComparands(query.where), lowering);
+  assertPreviewCanEvaluate(lowered);
+  // [#21505] …then each value comparison in the temporal STORAGE form, the
+  // comparand here and the row value at the match (see {@link previewTemporalKind}).
+  const kindOf = previewTemporalKind(declaredType);
+  const where = previewStorageComparands(lowered, kindOf);
+  let filtered = rows.filter((r) => matchesWhere(previewStorageRow(r, kindOf), where));
   const timeDims = query.timeDimensions ?? [];
   for (const td of timeDims) {
     const dim = cube.dimensions?.[td.dimension];
@@ -727,8 +805,8 @@ export function evaluateAnalyticsQueryOverRows(
     // 4, with a `'~'`-suffix reading of a full-timestamp end ("inclusive of
     // that instant's own sub-values") that no other face gives.
     const bounds = endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };
-    const window = lowerFilterCondition({ [field]: bounds }, lowering);
-    filtered = filtered.filter((r) => matchesWhere(r, window));
+    const window = previewStorageComparands(lowerFilterCondition({ [field]: bounds }, lowering), kindOf);
+    filtered = filtered.filter((r) => matchesWhere(previewStorageRow(r, kindOf), window));
   }
 
   // 2. Grouping keys: each selected dimension (time dims bucketed).
