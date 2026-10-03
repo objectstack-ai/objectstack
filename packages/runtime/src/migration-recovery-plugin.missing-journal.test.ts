@@ -135,7 +135,7 @@ describe('[#21529] the boot journal scan on a database with no journal table', (
   it('the deferred journal table really is absent: the scan read it and was refused', async () => {
     // Non-vacuity: the same read the scan makes is refused on this engine.
     await expect(
-      fresh.engine.find(JOURNAL, { where: { kind: 'run_started' } } as any, SYSTEM as any),
+      fresh.engine.find(JOURNAL, { where: { kind: 'run_started' } }, SYSTEM),
     ).rejects.toMatchObject({ code: 'DATABASE_ERROR', status: 500 });
   });
 
