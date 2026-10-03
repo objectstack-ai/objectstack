@@ -1891,6 +1891,13 @@ describe('#21334 a container on another package\'s object never takes that packa
                                 expect(error.message, 'the refusal names the save name').toContain(`'${row.save.name}'`);
                                 expect(error.message, 'the refusal names the colliding name').toContain(`'${refused.collides}'`);
                                 expect(error.message, 'the refusal names the other owner').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
+                                // … the owner and the prescription both inside the first 500 characters,
+                                // the bound a 4xx message crosses the REST boundary under, tail cut
+                                // (`CLIENT_MESSAGE_MAX`): the explanation is the half that may be lost …
+                                const delivered = String(error.message).slice(0, 500);
+                                expect(delivered, 'the owner survives the wire bound').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
+                                expect(delivered, 'the prescription survives the wire bound')
+                                    .toContain(`a view item (name, object, viewKind and config) under '${refused.collides}'`);
                                 // … and never prescribes a save under a name another stored row
                                 // holds: wherever a stored row's name appears, it is named as THE
                                 // CONTAINER (or as the object a view binds to), never as a name.

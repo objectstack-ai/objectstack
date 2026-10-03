@@ -18030,25 +18030,29 @@ export class ObjectStackProtocolImplementation implements
             `Add the view as a member of the container '${container}' (its list, listViews, form or formViews)`;
         const ofItsOwn = 'the container under a name of its own that no package ships and no stored container expands';
 
+        // ⛔ Every message names the owner, then gives the prescription, and
+        // only then explains: a 4xx message crosses the REST boundary bounded
+        // at 500 characters by truncating its TAIL (`CLIENT_MESSAGE_MAX`), so
+        // the explanation is the half an author can lose and still act.
+        //
         // The save name: the row this container would be.
         const rowHides = 'this container would be that row, so';
         const sibling = siblingServing(saveName);
         if (sibling) {
             return refusal(
                 `it is saved under '${saveName}', which is a name the stored container '${sibling.container.name}' `
-                + `expands (its ${kindOn(sibling.item)}). An expanded view fills only a name that has no stored row of `
-                + `its own, and ${rowHides} that view would no longer be served and no read would answer a view under `
-                + `'${saveName}'. ${asMemberOf(sibling.container.name)}, or save ${viewItem(saveName)}.`,
+                + `expands (its ${kindOn(sibling.item)}). ${asMemberOf(sibling.container.name)}, or save `
+                + `${viewItem(saveName)}. An expanded view fills only a name that has no stored row of its own, and `
+                + `${rowHides} that view would no longer be served and no read would answer a view under '${saveName}'.`,
             );
         }
         const shipped = shippedServing(saveName);
         if (shipped) {
             return refusal(
                 `it is saved under '${saveName}', which is the name of the ${kindOn(shipped)} the package `
-                + `'${String(shipped._packageId)}' ships. A stored row under a packaged view's name takes that view's `
-                + `place, and ${rowHides} the packaged view would no longer be served and no read would answer a view `
-                + `under '${saveName}'. Save ${viewItem(saveName)} to override the packaged view, or save `
-                + `${ofItsOwn}.`,
+                + `'${String(shipped._packageId)}' ships. Save ${viewItem(saveName)} to override the packaged view, or `
+                + `save ${ofItsOwn}. A stored row under a packaged view's name takes that view's place, and ${rowHides} `
+                + `the packaged view would no longer be served and no read would answer a view under '${saveName}'.`,
             );
         }
         const own = served.find((expanded) => expanded.name === saveName);
@@ -18061,33 +18065,33 @@ export class ObjectStackProtocolImplementation implements
                     ? asMemberOf(object)
                     : `Save ${ofItsOwn}`;
             return refusal(
-                `it is saved under '${saveName}', which is a name its own expansion produces (its ${kindOn(own)}). An `
-                + `expanded view fills only a name that has no stored row of its own, and ${rowHides} no read would `
-                + `answer a view under '${saveName}'. ${firstArm}, or save ${viewItem(saveName)}.`,
+                `it is saved under '${saveName}', which is a name its own expansion produces (its ${kindOn(own)}). `
+                + `${firstArm}, or save ${viewItem(saveName)}. An expanded view fills only a name that has no stored `
+                + `row of its own, and ${rowHides} no read would answer a view under '${saveName}'.`,
             );
         }
 
         // Every name its expansion produces: the views this container would serve.
         for (const view of served) {
             const name = String(view.name);
-            const taken = `it is saved under '${saveName}', and its ${kindOn(view)} would be served as '${name}'`;
+            const taken = `its ${kindOn(view)} would be served as '${name}'`;
             const other = siblingServing(name);
             if (other) {
                 return refusal(
-                    `${taken}, which is a name the stored container '${other.container.name}' already expands (its `
-                    + `${kindOn(other.item)}). Two containers cannot serve one name: the one read last would replace `
-                    + `the other's view on both doors, and nothing would say why. ${asMemberOf(other.container.name)}, `
-                    + `or save ${viewItem(name)}.`,
+                    `${taken}, a name the stored container '${other.container.name}' already expands. `
+                    + `${asMemberOf(other.container.name)}, or save ${viewItem(name)}. Saved under '${saveName}', this `
+                    + `container and that one would both serve '${name}': the one read last would replace the other's `
+                    + `view on both doors, and nothing would say why.`,
                 );
             }
             const packaged = shippedServing(name);
             if (packaged) {
                 return refusal(
-                    `${taken}, which is the name of the ${kindOn(packaged)} the package `
-                    + `'${String(packaged._packageId)}' ships. A container's view under a packaged view's name `
-                    + `replaces that view on both doors, and nothing would say why. Save ${viewItem(name)} to override `
-                    + `the packaged view, or give the member a key of its own that no package ships and no stored `
-                    + `container expands.`,
+                    `${taken}, the name of the ${String(packaged.viewKind)} view the package `
+                    + `'${String(packaged._packageId)}' ships. Save ${viewItem(name)} to override the packaged view, or `
+                    + `give the member a key of its own that no package ships and no stored container expands. Saved `
+                    + `under '${saveName}', this container's view would replace the packaged view on both doors, and `
+                    + `nothing would say why.`,
                 );
             }
         }
