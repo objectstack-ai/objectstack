@@ -13,6 +13,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
@@ -447,6 +448,10 @@ export default class MigrateApply extends Command {
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {
+      // [#21434] The account-issuer pre-flight refusals above `this.exit(1)`
+      // from inside this `try`; re-reporting the signal printed a second
+      // error line, `EEXIT: 1`, under the refusal.
+      if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);

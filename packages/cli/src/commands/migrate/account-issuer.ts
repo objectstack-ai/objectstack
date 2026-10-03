@@ -12,6 +12,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 
@@ -161,6 +162,10 @@ export default class MigrateAccountIssuer extends Command {
       );
       this.exit(1);
     } catch (error: any) {
+      // [#21434] The `this.exit(1)` calls above throw oclif's exit signal from
+      // inside this `try`; re-reporting it printed a second `--json` document
+      // (`{"error":"EEXIT: 1"}`) after the refusal report.
+      if (isExitSignal(error)) throw error;
       // A refusal from the probe itself (unreadable table, truncated scan)
       // lands here and stays a refusal — it is never softened into a clean run.
       if (flags.json) {

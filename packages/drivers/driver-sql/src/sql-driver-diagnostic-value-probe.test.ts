@@ -6,7 +6,8 @@
  *
  * ## Why this file exists
  *
- * `redactStatementFromMessage` (`@objectstack/objectql`) keeps the database's
+ * `redactStatementFromMessage` (`@objectstack/types` since #21385, in
+ * `driver-fault-redaction.ts`) keeps the database's
  * diagnostic after the statement cut, on the premise that a diagnostic names
  * IDENTIFIERS. Commit 4dfa369a9 found one family where that is false — MySQL's
  * `ER_DUP_ENTRY` inlines the conflicting VALUE — and redacted that one slot.
@@ -41,12 +42,14 @@
  * or a template's phrasing drifted and the entry that matched it no longer does.
  * Both are the notification #9160 asked for.
  *
- * ⛔ This probe deliberately does NOT import the redactor. `driver-sql` does not
- * depend on `@objectstack/objectql`, and widening that package's public surface
- * to reach an internal function is a contract change this card does not carry.
- * The division is: this file establishes WHAT THE SERVER SAYS; the redactor's own
- * suite (`packages/objectql/src/driver-fault-redaction.test.ts`) drives these
- * exact recorded strings through the function. The recorded literals below are
+ * ⛔ This probe deliberately does NOT import the redactor. It was first kept out
+ * because the redactor lived in `@objectstack/objectql`, which `driver-sql` does
+ * not depend on; since #21385 it lives in `@objectstack/types`, which this
+ * package depends on and whose redaction its own refusal lines call, so the
+ * reason that stands now is the division of labour alone: this file establishes
+ * WHAT THE SERVER SAYS; the redactor's own suite
+ * (`packages/objectql/src/driver-fault-redaction.test.ts`) drives these exact
+ * recorded strings through the function. The recorded literals below are
  * duplicated there on purpose, with this file named as their warrant.
  *
  * Runs in `Temporal Conformance (live PG + MySQL)`, the one job that stands up
@@ -114,9 +117,9 @@ interface ProbeCase {
  * What these measure is the PREMISE, not the remedy: that the server really does
  * echo the caller's separator-bearing value into its own words, and that the
  * naive last-separator cut therefore lands inside that value. The redaction half
- * lives in `packages/objectql/src/driver-fault-redaction.test.ts`, for the same
- * reason the rest of this file states — `driver-sql` does not depend on
- * `@objectstack/objectql`, and this file establishes WHAT THE SERVER SAYS.
+ * lives in `packages/objectql/src/driver-fault-redaction.test.ts`, for the
+ * division of labour the rest of this file states: this file establishes WHAT
+ * THE SERVER SAYS.
  */
 interface SeparatorCase {
   /** The server's own error code, as it identifies the family. */

@@ -965,7 +965,7 @@ describe('visibility-predicate-syntax (#6253)', () => {
       expect(findings[0].message).toContain('Unexpected character: =');
       expect(findings[0].message).toContain('country === "USA"');
       // The consequence is stated, because on screen it is invisible.
-      expect(findings[0].message).toContain('#5149');
+      expect(findings[0].message).toContain("failing open is the console's settled behaviour");
     });
 
     it('the CEL spelling of the SAME predicate is clean — paired so it cannot pass vacuously', () => {
@@ -1415,7 +1415,7 @@ describe('visibility-predicate-over-budget (#7217)', () => {
       expect(findings[0].message).toContain('Exceeded maxAstNodes (256)');
       expect(findings[0].message).toContain('`maxAstNodes` budget (platform limit 256)');
       // The consequence is unchanged: it still falls OPEN on screen.
-      expect(findings[0].message).toContain('#5149');
+      expect(findings[0].message).toContain("failing open is the console's settled behaviour");
 
       // ⛔ The defect itself: the dialect prescription must not reach this class.
       expect(findings[0].hint).not.toMatch(/bare CEL/);

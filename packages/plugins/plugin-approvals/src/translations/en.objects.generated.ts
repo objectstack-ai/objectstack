@@ -253,7 +253,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       actor_id: {
-        label: "Actor"
+        label: "Actor",
+        help: "The user who took this action. Empty when no person is recorded: a system-initiated action, or a decision recorded before the deciding user was captured, which still shows the slot it was taken as."
+      },
+      acted_as: {
+        label: "Acted As",
+        help: "The pending-approver slot this action was taken as, in the slot’s stored spelling: a user id, an email, or a position address. Empty when no slot admitted the action, such as the submitter’s own actions, system actions and admin overrides."
       },
       comment: {
         label: "Comment"

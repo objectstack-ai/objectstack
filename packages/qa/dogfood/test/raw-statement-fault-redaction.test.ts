@@ -21,10 +21,13 @@
  *
  * ⛔ Asserted here: every carrier of the error the ENGINE propagates, and every
  * line the ENGINE's logger receives. Not asserted here: `driver-sql`'s own
- * server-log line for a refused raw statement, which writes the statement and
- * the dialect message before the driver composes its envelope. That line is a
- * position of its own in `driver-sql`, outside this card's two positions, and
- * it is captured silently below so the run prints nothing.
+ * server-log line for a refused raw statement, which writes the dialect's
+ * diagnostic before the driver composes its envelope — since #21385 with the
+ * statement and its bound values cut by the same redaction, and no longer the
+ * statement it ran. That line is a position of its own, pinned in `driver-sql`
+ * by `sql-driver-21385-refusal-log-line-redaction.test.ts`, outside this
+ * card's two positions, and it is captured silently below so the run prints
+ * nothing.
  *
  * SQLite always runs. The PostgreSQL and MySQL cells of position 1 run where
  * `OS_TEST_POSTGRES_URL` / `OS_TEST_MYSQL_URL` are set and are a named skip

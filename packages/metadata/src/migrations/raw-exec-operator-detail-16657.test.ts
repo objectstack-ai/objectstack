@@ -39,6 +39,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { inspect } from 'node:util';
+import { redactStatementFromMessage } from '@objectstack/types';
 
 import { migrateEnvIdToProjectId } from './migrate-env-id-to-project-id.js';
 import {
@@ -51,11 +53,20 @@ import { dropProjectionTables } from './drop-projection-tables.js';
 const COMPOSED =
     'The database refused to run a raw statement. The driver could not attribute the failure ' +
     'to any part of the request, so no verdict about the statement is claimed here. The ' +
-    "backend's own diagnostic and the statement were written to the server log for an " +
-    'operator to read.';
+    "backend's own diagnostic was written to the server log for an operator to read, with " +
+    'the statement and its bound values cut.';
 
 /** knex 3.3.0 + better-sqlite3: `<formatted statement> - <engine diagnostic>`. */
 const DIALECT_TEXT = 'alter table "sys_metadata" rename column - no such column: env_id';
+
+/**
+ * [#21418] What each per-table record stores for a raw-path fault: the helper's
+ * answer, which is THE driver-fault cut's, under the rule the driver's own raw
+ * terminal writes its log line by. Spelled as the cutter's answer, so these
+ * cases pin that each site stores the helper's text and never pin the cutter's
+ * marker wording.
+ */
+const recorded = (dialect: string): string => redactStatementFromMessage(dialect, { statementSent: true });
 
 function rawStatementFault(dialect = DIALECT_TEXT): Error {
     const err = new Error(COMPOSED) as Error & { code?: string; status?: number };
@@ -102,7 +113,8 @@ describe('[#16657] migrateEnvIdToProjectId — the per-table error record', () =
         const errors = results.filter((r) => r.status === 'error');
         expect(errors.length).toBeGreaterThan(0);
         for (const row of errors) {
-            expect(row.error).toBe(DIALECT_TEXT);
+            expect(row.error).toBe(recorded(DIALECT_TEXT));
+            expect(row.error).toContain('no such column: env_id');
             expect(row.error).not.toContain('refused to run a raw statement');
         }
     });
@@ -127,7 +139,7 @@ describe('[#16657] migrateProjectIdToEnvironmentId — the per-table error recor
         // assertion is about every one it produced, not about a count.
         expect(errors.length).toBeGreaterThan(0);
         expect(errors.length).toBeLessThanOrEqual(AFFECTED_TABLES.length);
-        for (const row of errors) expect(row.error).toBe(DIALECT_TEXT);
+        for (const row of errors) expect(row.error).toBe(recorded(DIALECT_TEXT));
     });
 
     it('an UNDECLARED refusal is recorded on its own message channel', async () => {
@@ -150,7 +162,8 @@ describe('[#16657] dropProjectionTables — the per-table error record', () => {
         expect(results.length).toBeGreaterThan(0);
         for (const row of results) {
             expect(row.status).toBe('error');
-            expect(row.error).toBe('drop table "sys_object" - table is locked');
+            expect(row.error).toBe(recorded('drop table "sys_object" - table is locked'));
+            expect(row.error).toContain('table is locked');
         }
     });
 
@@ -163,4 +176,62 @@ describe('[#16657] dropProjectionTables — the per-table error record', () => {
 
         expect(results.every((r) => r.error === 'database is locked')).toBe(true);
     });
+});
+
+/**
+ * [#21418] The family's fourth position, pinned at the three sites in this
+ * package that write `operatorFacingErrorText`'s answer into a per-table
+ * result: a synthetic sentinel bound into a raw statement reaches no result
+ * row, while the dialect's diagnostic and each row's `status` survive.
+ *
+ * Every statement these migrations send binds identifiers only (the census on
+ * #21418), so the raw path's `cause` carries the sentinel in a synthetic bound
+ * statement, printed the way knex prints one on SQLite and MySQL. The cut is
+ * the helper's, by construction; these cases pin that each site stores nothing
+ * BUT the helper's answer.
+ */
+describe('[#21418] a bound sentinel reaches no per-table record', () => {
+    const SENTINEL = 'SENTINEL-21418-BOUND-VALUE';
+    const BOUND_DIALECT_TEXT =
+        `update "sys_metadata" set "env_id" = '${SENTINEL}' - no such column: env_id`;
+
+    it('[the fixture] the raw path really carries the sentinel on the cause the helper reads', () => {
+        const thrown = rawStatementFault(BOUND_DIALECT_TEXT);
+        expect((thrown as { cause?: Error }).cause?.message).toContain(SENTINEL);
+        expect(thrown.message).not.toContain(SENTINEL);
+    });
+
+    const SITES: Array<[site: string, run: () => Promise<Array<{ status: string; error?: string }>>]> = [
+        [
+            'migrateEnvIdToProjectId',
+            () => migrateEnvIdToProjectId(refusingDriver(['id', 'env_id'], () => rawStatementFault(BOUND_DIALECT_TEXT))),
+        ],
+        [
+            'migrateProjectIdToEnvironmentId',
+            () =>
+                migrateProjectIdToEnvironmentId(
+                    refusingDriver(['id', 'project_id'], () => rawStatementFault(BOUND_DIALECT_TEXT)),
+                ),
+        ],
+        [
+            'dropProjectionTables',
+            () =>
+                dropProjectionTables({
+                    async execute() {
+                        throw rawStatementFault(BOUND_DIALECT_TEXT);
+                    },
+                } as never),
+        ],
+    ];
+
+    for (const [site, run] of SITES) {
+        it(site, async () => {
+            const results = await run();
+            const errors = results.filter((r) => r.status === 'error');
+
+            expect(errors.length, 'the site was never refused').toBeGreaterThan(0);
+            expect(inspect(results, { depth: 8 })).not.toContain(SENTINEL);
+            for (const row of errors) expect(row.error).toContain('no such column: env_id');
+        });
+    }
 });

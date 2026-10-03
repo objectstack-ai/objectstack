@@ -30,6 +30,7 @@ import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
+import { backfillActionSlots } from './action-slot-backfill.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -417,14 +418,44 @@ export class ApprovalsServicePlugin implements Plugin {
       }
     };
 
+    // Action-slot backfill (#21411): move the slot literals rows written
+    // before `acted_as` existed still hold in `actor_id`, and give the votes a
+    // pending request's tally still counts their `acted_as`. Every slot reader
+    // reads `acted_as` with no fallback to `actor_id`, so this runs at boot
+    // rather than waiting for an operator. Idempotent; see the module.
+    //
+    // `error`, not `warn`: a failed run leaves the system looking normal while
+    // in-flight multi-approver tallies have lost the votes they already
+    // counted and holders have lost sight of position-slot history.
+    const slotEngine = engine as ApprovalEngine;
+    const backfillSlots = async () => {
+      try {
+        const out = await backfillActionSlots(slotEngine);
+        if (out.literalsMoved > 0 || out.votesStamped > 0) {
+          ctx.logger.info('ApprovalsServicePlugin: action slots backfilled', out);
+        }
+      } catch (err: any) {
+        ctx.logger.error(
+          '[approvals] action-slot backfill failed — approvals recorded before the slot column existed are '
+          + 'missing from multi-approver tallies and from the already-acted visibility of the slot\'s holders, '
+          + 'while everything else looks healthy. The repair is idempotent and runs at every boot: fix the '
+          + 'cause below and restart.',
+          err instanceof Error ? err : undefined,
+          { error: err?.message ?? String(err) },
+        );
+      }
+    };
+
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', wireEscalationClock);
       (ctx as any).hook('kernel:ready', mountActionPages);
       (ctx as any).hook('kernel:ready', backfillApproverIndex);
+      (ctx as any).hook('kernel:ready', backfillSlots);
     } else {
       await wireEscalationClock();
       await mountActionPages();
       await backfillApproverIndex();
+      await backfillSlots();
     }
 
     // ADR-0019: contribute the `approval` node to the flow engine when one is
