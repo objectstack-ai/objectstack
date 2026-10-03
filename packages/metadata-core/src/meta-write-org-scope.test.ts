@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #10340 — `declaresOrgOverride` and the boundary fold, pinned as ONE
+// Commit 26f3588fb — `declaresOrgOverride` and the boundary fold, pinned as ONE
 // composed contract.
 //
 // The predicate tolerates the MANIFEST-collection spellings only; the URL
@@ -19,7 +19,7 @@
 //      `metadata-url-spelling.ts` forbids ("nothing here should ever be
 //      consulted by a predicate one layer down"). If a future change widens
 //      the predicate, this pin turns red so the widening is argued against
-//      #10340 / #7894 rather than slipped in as a convenience.
+//      commit 26f3588fb / #7894 rather than slipped in as a convenience.
 
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -38,7 +38,7 @@ const REGISTRY_FLAG = new Map<string, boolean>(
 
 describe('#10340 org scope composed with the boundary fold', () => {
     it('fold → predicate answers the registry flag for EVERY spelling in the URL map', () => {
-        // The contract every REST door relies on after #10340: whatever the
+        // The contract every REST door relies on after commit 26f3588fb: whatever the
         // caller spelled, folding first yields the canonical type's own
         // declaration. Quantified over the whole map so a new spelling limb
         // arrives already covered.

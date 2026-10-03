@@ -3,7 +3,7 @@
 /**
  * "Does a code package ship this name?" — the ADR-0029 D9.6 provenance test.
  *
- * [#10062] Sunk here from `@objectstack/objectql`'s registry by the same
+ * [commit fa5d137ab] Sunk here from `@objectstack/objectql`'s registry by the same
  * criterion as the write-verb dispatch predicates and the audit governance
  * table above it in `index.ts`: a second layer needs the answer, and the
  * reverse import would either close a cycle or make the consumer depend on the

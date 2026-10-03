@@ -9,7 +9,9 @@ import { oneShotSettingsPlugin } from './one-shot-settings.js';
  * Every gated migration needs the `sys_migration` flag ledger (#3617), and
  * that is all most of them need: it is registered by `PlatformObjectsPlugin`
  * — platform infrastructure, present with or without any optional service
- * (#4243). `os migrate value-shapes` boots exactly that.
+ * (#4243). `os migrate value-shapes` boots exactly that, plus the
+ * `MigrationRecoveryPlugin` every data boot carries (#21498). A journal-backed
+ * run started here is resumed by `os migrate resume`, which boots this same set.
  *
  * Only the FILE migration (`os migrate files-to-references`) also needs
  * `sys_file` plus the deployment's REAL storage adapter — it reconciles what
@@ -36,6 +38,21 @@ export async function buildDataMigrationPlugins(
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
   plugins.push(new PlatformObjectsPlugin());
+  // [#21498] The `migration-plans` registry (ADR-0119 D2), once per boot. The
+  // plan's owner hands its plan over at `kernel:ready`
+  // (`@objectstack/metadata-protocol` registers
+  // `metadata.recorded-by-sentinel-to-null`), and `os migrate resume` looks it
+  // up once the boot is done. Two processes never share a registry, so the
+  // resume boot needs its own, filled by the plan's owner rather than by the
+  // run being resumed.
+  //
+  // The plugin's journal scan rides along. Its measured effects here: a data
+  // command booted over an interrupted run warns about that run on stderr
+  // before it does anything else, and a read-only boot of a database that has no
+  // journal table yet warns that it could not check. That database is one these
+  // commands already refuse, because the tables they read are not there either.
+  const { MigrationRecoveryPlugin } = await import('@objectstack/runtime');
+  plugins.push(new MigrationRecoveryPlugin());
   if (opts.audit === true) {
     // [#21120] `os migrate audit-metadata-bodies` reads and rewrites
     // `sys_audit_log` / `sys_activity` rows, so their schema must be

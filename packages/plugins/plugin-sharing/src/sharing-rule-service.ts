@@ -424,7 +424,7 @@ export class SharingRuleService implements ISharingRuleService {
       'PERMISSION_DENIED: sharing-rule administration requires an active organization — this ' +
         'session carries none. manage_sharing is an ORG-scoped capability (ADR-0111 D6), so with ' +
         'no organization resolved there is no tenant whose rules it authorizes, and answering ' +
-        'unscoped would expose every tenant’s rules (#8158). Select an active organization and ' +
+        'unscoped would expose every tenant’s rules. Select an active organization and ' +
         'retry. Platform operators (manage_platform_settings or the platform_admin position) and ' +
         'system contexts are unaffected.',
     );
@@ -529,7 +529,7 @@ export class SharingRuleService implements ISharingRuleService {
       'PERMISSION_DENIED: deleting a platform-global sharing rule requires platform authority — ' +
         'the manage_platform_settings capability or the platform_admin position. Org-scoped ' +
         'manage_sharing does not authorize it, because this rule belongs to no organization and ' +
-        'deleting it revokes every tenant’s grants under it (#7795). It remains listable, ' +
+        'deleting it revokes every tenant’s grants under it. It remains listable, ' +
         'readable and evaluable.',
     );
   }

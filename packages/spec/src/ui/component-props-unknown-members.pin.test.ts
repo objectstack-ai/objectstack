@@ -214,10 +214,6 @@ on(['object-grid'], ['pagination.*'], {
   kind: 'open-bag',
   why: '`z.looseObject` on purpose: `pageSize` and `pageSizeOptions` are typed and are the only members a read point names; the member\'s own docblock records why the bag stays open',
 });
-on(['ai:chat_window'], ['context{}'], {
-  kind: 'no-reader',
-  why: 'objectui registers no `ai:chat_window` renderer (`components/src/renderers/placeholders.tsx:109-113`), so nothing reads this row at all; whether the row retires is its own question',
-});
 
 // Read with a fixed shape at the pin — the later stages.
 on(['object-metric'], ['aggregate'], staged('object-metric', 'plugin-dashboard/src/ObjectMetricWidget.tsx:250, `.field` / `.function` / `.groupBy` at :404-443'));

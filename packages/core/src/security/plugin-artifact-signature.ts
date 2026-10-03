@@ -20,6 +20,13 @@
  * short, deterministic, no padding ambiguity. The `keyId` is an opaque
  * rotation handle used to resolve the verifying public key.
  *
+ * The algorithm is ENFORCED, not just labelled. node's `sign(null, …)` and
+ * `verify(null, …)` follow whatever key they are handed, so an RSA or EC key
+ * would otherwise sign and verify under the `ed25519` label. Both
+ * {@link signPayload} and {@link verifyPayload} therefore refuse, by throwing,
+ * any key whose type is not the signature's algorithm, and the refusal names
+ * the key type found ({@link requireSignatureKeyType} is the one check).
+ *
  * The two trust chains the runtime checks before loading a third-party
  * plugin are combined in {@link verifyPluginArtifact}.
  */
@@ -30,7 +37,7 @@ import {
   createPublicKey,
   createPrivateKey,
   generateKeyPairSync,
-  type KeyObject,
+  KeyObject,
 } from 'node:crypto';
 
 export const SIGNATURE_ALG = 'ed25519';
@@ -38,11 +45,37 @@ const SIG_PREFIX = 'ed25519:';
 
 export type KeyInput = string | KeyObject;
 
+// A KeyObject is used as given; every other input (a PEM string, and the PEM
+// buffer / DER / JWK inputs node also accepts at runtime) is parsed into one,
+// so its key type can be read before anything is signed or verified.
 function toPrivateKey(key: KeyInput): KeyObject {
-  return typeof key === 'string' ? createPrivateKey(key) : key;
+  return key instanceof KeyObject ? key : createPrivateKey(key);
 }
 function toPublicKey(key: KeyInput): KeyObject {
-  return typeof key === 'string' ? createPublicKey(key) : key;
+  return key instanceof KeyObject ? key : createPublicKey(key);
+}
+
+/**
+ * The contract's one key rule: a key signs or verifies only when its type IS
+ * the signature's algorithm. On the signing side that algorithm is
+ * {@link SIGNATURE_ALG}; on the verifying side it is the label the signature
+ * string carries ({@link ParsedSignature.alg}), so the label is checked against
+ * the verifying key's type instead of being trusted. Throws, naming the key
+ * type found (`rsa`, `ec`, `ed448`, … or `secret` for a symmetric key).
+ */
+function requireSignatureKeyType(
+  key: KeyObject,
+  alg: ParsedSignature['alg'],
+  use: 'signPayload' | 'verifyPayload',
+): void {
+  if (key.asymmetricKeyType === alg) return;
+  const found = key.type === 'secret' ? 'secret' : String(key.asymmetricKeyType);
+  const role = use === 'signPayload' ? 'private key' : 'public key';
+  throw new Error(
+    `${use}: the ${role} is of type '${found}', but plugin artifact signatures are '${alg}' only;` +
+      ` a key of that type would sign or verify a non-${alg} signature under the '${alg}' label.` +
+      ` Use an Ed25519 key (generate one with \`openssl genpkey -algorithm ed25519\`).`,
+  );
 }
 function toBytes(payload: string | Uint8Array): Uint8Array {
   return typeof payload === 'string' ? new TextEncoder().encode(payload) : payload;
@@ -60,6 +93,9 @@ export function generateEd25519KeyPair(): { publicKeyPem: string; privateKeyPem:
 /**
  * Sign `payload` with an Ed25519 private key, returning the formatted
  * signature string `ed25519:<keyId>:<base64url(sig)>`.
+ *
+ * Throws when the private key is not Ed25519 (an RSA, EC, Ed448, … key), and
+ * the error names the key type found.
  */
 export function signPayload(
   payload: string | Uint8Array,
@@ -67,7 +103,9 @@ export function signPayload(
   keyId = 'default',
 ): string {
   if (keyId.includes(':')) throw new Error('keyId must not contain ":"');
-  const sig = cryptoSign(null, toBytes(payload), toPrivateKey(privateKey));
+  const key = toPrivateKey(privateKey);
+  requireSignatureKeyType(key, SIGNATURE_ALG, 'signPayload');
+  const sig = cryptoSign(null, toBytes(payload), key);
   return `${SIG_PREFIX}${keyId}:${sig.toString('base64url')}`;
 }
 
@@ -93,7 +131,16 @@ export function parseSignature(s: string | undefined | null): ParsedSignature | 
   }
 }
 
-/** Verify a formatted signature string over `payload` with the given public key. */
+/**
+ * Verify a formatted signature string over `payload` with the given public key.
+ *
+ * Returns `false` for a malformed signature string, an unreadable key, or a
+ * signature that does not verify. Throws when the key's type is not the
+ * algorithm the signature's label names (any key that is not Ed25519), and the
+ * error names the key type found: such a key is the verifier's own trust
+ * configuration being wrong, never a verdict on the signed bytes, so it is not
+ * folded into `false`.
+ */
 export function verifyPayload(
   payload: string | Uint8Array,
   signature: string,
@@ -101,8 +148,15 @@ export function verifyPayload(
 ): boolean {
   const parsed = parseSignature(signature);
   if (!parsed) return false;
+  let key: KeyObject;
   try {
-    return cryptoVerify(null, toBytes(payload), toPublicKey(publicKey), parsed.signature);
+    key = toPublicKey(publicKey);
+  } catch {
+    return false;
+  }
+  requireSignatureKeyType(key, parsed.alg, 'verifyPayload');
+  try {
+    return cryptoVerify(null, toBytes(payload), key, parsed.signature);
   } catch {
     return false;
   }
@@ -144,6 +198,8 @@ export interface PublisherVerifyResult {
  *   - no signature → ok, verified=false (caller decides via trust tier).
  *   - malformed / fails verification → NOT ok.
  *   - unknown keyId → NOT ok (never silently trust).
+ *   - a resolved key that is not Ed25519 → throws (from {@link verifyPayload}):
+ *     the key registry is misconfigured, which is not a verdict on the artifact.
  */
 export async function verifyPublisherSignature(
   args: { artifact: Uint8Array; signature?: string | null },
@@ -167,7 +223,10 @@ export async function verifyPublisherSignature(
     : { ok: false, verified: false, reason: 'publisher signature does not match artifact' };
 }
 
-/** Verify a platform counter-signature against the version identity + platform public key. */
+/**
+ * Verify a platform counter-signature against the version identity + platform
+ * public key. Throws when the platform key is not Ed25519 (see {@link verifyPayload}).
+ */
 export function verifyPlatformSignature(
   version: {
     package_id: string;
@@ -196,6 +255,11 @@ export interface PluginArtifactVerifyResult {
  * marketplace attestation; the publisher signature additionally binds the
  * exact bytes. `requirePlatform` (default true) rejects artifacts that lack
  * a valid platform counter-sign — set false for first-party / local builds.
+ *
+ * Both verifying keys come from `keys` — the caller's platform key and its
+ * publisher key registry; the artifact contributes only the signature strings
+ * and the `keyId` that selects a registry entry. A configured key that is not
+ * Ed25519 makes this reject (see {@link verifyPayload}) rather than resolve.
  */
 export async function verifyPluginArtifact(
   input: {

@@ -3864,6 +3864,32 @@ export default class Serve extends Command {
         }
       }
 
+      // 5c-bis. [#21498] Auto-register MigrationRecoveryPlugin beside the
+      // journal it reads. PlatformObjectsPlugin registers
+      // `sys_migration_journal` on every served kernel because ADR-0119 D2
+      // requires recovery to be discoverable "with zero host wiring"; this is
+      // the half that discovers. Its `kernel:ready` scan reports every run
+      // that started and never concluded, naming `os migrate resume --run …`,
+      // and its `migration-plans` registry is where a plan's owner hands the
+      // plan over so the scan can say the run IS resumable. On a database with
+      // no interrupted run the scan prints nothing.
+      //
+      // Guarded like the block above: a host config that composes its own
+      // instance keeps it, and the kernel never holds two registries.
+      const hasMigrationRecoveryPlugin = plugins.some(
+        (p: any) => p?.name === 'com.objectstack.migration-recovery'
+          || p?.constructor?.name === 'MigrationRecoveryPlugin'
+      );
+      if (!hasMigrationRecoveryPlugin) {
+        try {
+          const { MigrationRecoveryPlugin } = await import('@objectstack/runtime');
+          await kernel.use(new MigrationRecoveryPlugin());
+          trackPlugin('MigrationRecovery');
+        } catch (err: any) {
+          console.warn(chalk.yellow(`  ⚠ MigrationRecoveryPlugin auto-inject failed: ${err?.message ?? err}`));
+        }
+      }
+
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
       // The Console expects /api/v1/auth/* to be served by better-auth via

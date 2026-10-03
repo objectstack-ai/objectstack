@@ -19,7 +19,7 @@
 // is reported `blocked` with a precise reason — the gate stays honest.
 
 
-import { referenceCarrierOf } from '@objectstack/spec/data';
+import { isMultiValueField, referenceCarrierOf } from '@objectstack/spec/data';
 import { declaredCollection } from './artifact-collections.js';
 
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
@@ -65,6 +65,29 @@ function clampNum(f: any, fallback: number): number {
   return v;
 }
 
+/**
+ * [#21509] Is this field's value MULTI-VALUED — the one question, asked of the
+ * one predicate `@objectstack/spec` publishes (`isMultiValueField`), and the
+ * single seam every site in this file goes through: the option arm of
+ * {@link synth} and the relational ref in {@link deriveCrudCases}.
+ *
+ * The engine stores by that predicate (objectql's `declaredMultiValued`, and
+ * `driver-sql` and `os generate migration` ask it too), so a sample shaped by
+ * any other answer is written in a form the engine never stores and reads back
+ * as a fidelity gap the engine does not have. The option arm used to answer
+ * per TYPE: a `select` declared `multiple: true` was written as one scalar code
+ * and compared `equal`, then read back as `[code]`.
+ *
+ * ⛔ The predicate is called, never re-spelled. A raw `f.multiple` read, or
+ * `MULTI_CAPABLE_TYPES` / `MULTI_OPTION_TYPES` membership written out here,
+ * would be a second answer to a question the spec answers once — a raw read
+ * says `true` on types the predicate stores as a scalar (`master_detail`,
+ * `tree`, `text` …), and `false` on the inherently-multi option types.
+ */
+function declaredMultiValued(type: string, f: any): boolean {
+  return isMultiValueField({ type, multiple: f?.multiple === true });
+}
+
 /** Synthesize a valid value for a field type, or null if not synthesizable. */
 function synth(type: string, f: any): { value: unknown; kind: AssertKind } | null {
   switch (type) {
@@ -85,13 +108,14 @@ function synth(type: string, f: any): { value: unknown; kind: AssertKind } | nul
     case 'datetime': return { value: '2024-03-15T08:30:00.000Z', kind: 'equal' };
     case 'time': return { value: '14:30:00', kind: 'equal' };
     case 'json': return { value: { sample: true }, kind: 'equal' };
-    case 'select': case 'radio': {
+    // One declared option code, in the shape the field is STORED in: a list,
+    // compared as a set, exactly when {@link declaredMultiValued} says so —
+    // always for `multiselect` / `checkboxes`, and for a `select` / `radio`
+    // declared `multiple: true`; otherwise the scalar code, compared `equal`.
+    case 'select': case 'radio': case 'multiselect': case 'checkboxes': {
       const opt = f.options?.[0]?.value;
-      return opt != null ? { value: opt, kind: 'equal' } : null;
-    }
-    case 'multiselect': case 'checkboxes': {
-      const opt = f.options?.[0]?.value;
-      return opt != null ? { value: [opt], kind: 'set' } : null;
+      if (opt == null) return null;
+      return declaredMultiValued(type, f) ? { value: [opt], kind: 'set' } : { value: opt, kind: 'equal' };
     }
     case 'tags': return { value: ['alpha', 'beta'], kind: 'set' };
     // Opaque-on-read: write a value but don't assert a round-trip (hashed/encrypted).
@@ -258,7 +282,7 @@ export function deriveCrudCases(config: any): CrudCase[] {
           d.skippedFields.push({ name, type, reason: `relation-target-external:${target}` });
           continue;
         }
-        d.relationalRefs.push({ field: name, target, required: isRequired, multiple: !!(f as any)?.multiple });
+        d.relationalRefs.push({ field: name, target, required: isRequired, multiple: declaredMultiValued(type, f) });
         if (isRequired) d.requiredTargets.push(target);
         continue;
       }

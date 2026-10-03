@@ -11,7 +11,7 @@
  * forms, and `data` — the row under edit, at every depth, repeater rows
  * included — in metadata-editing forms. BOTH predicate surfaces additionally
  * bind `current_user` and its ADR-0068 aliases — a FIELD since objectui#6010,
- * a SECTION since objectui#6110 + #6111. The contract states the failure mode
+ * a SECTION since objectui#6110 + objectui#6111. The contract states the failure mode
  * beside the vocabulary (`packages/spec/src/ui/view.zod.ts`,
  * `FormFieldSchema.visibleWhen` / `FormSectionSchema.visibleWhen`): **a bare
  * identifier is UNBOUND, the predicate faults, and `visibleWhen`'s fault
@@ -111,14 +111,14 @@
  * 1. **FIELD.** The first version omitted `current_user`, quoting
  *    `FormFieldSchema.visibleWhen` faithfully — the root genuinely had been
  *    unbound there (#6146). objectui#6010 had already bound it and the prose
- *    had not caught up; #12930 re-measured the prose, and this module needed a
+ *    had not caught up; commit b5a239815 re-measured the prose, and this module needed a
  *    same-day correction.
  * 2. **SECTION.** That correction then split the vocabulary and justified the
  *    section half by quoting `FormSectionSchema.visibleWhen` — *"`current_user`
  *    is absent here and that is CORRECT for a section: the section docblock
  *    states it is unbound at that level and the predicate faults open."*
- *    Faithful again, and stale again: objectui#6110 + #6111 had bound it, and
- *    #12914 re-measured the prose. This list is that second correction.
+ *    Faithful again, and stale again: objectui#6110 + objectui#6111 had bound it, and
+ *    commit f887e5249 re-measured the prose. This list is that second correction.
  *
  * The prose is a transcription of a renderer, so it can only ever LAG one.
  * Membership here is therefore decided by the mechanism, stated so a reader can
@@ -202,7 +202,7 @@ export const BOUND_FORM_VIEW_PREDICATE_ROOTS: readonly string[] = [
  * that the QUESTION is still per surface: "what does a FIELD predicate bind?"
  * and "what does a SECTION predicate bind?" are two questions with one answer
  * today, and that answer rests on two different renderers (objectui#6010 versus
- * objectui#6110 + #6111). Either can move without the other; when one does,
+ * objectui#6110 + objectui#6111). Either can move without the other; when one does,
  * this is where the divergence goes, and the live-contract assertion in this
  * module's test is what makes the day it happens findable.
  */
