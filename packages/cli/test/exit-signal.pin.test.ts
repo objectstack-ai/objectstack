@@ -114,7 +114,7 @@
  *   and the exit status, unchanged by the repair — 1 for the `this.exit(1)`
  *   refusals, 2 for `os init`'s `this.exit(2)` ones (the status its `this.error`
  *   refusals raised, until they rendered their sentence once:
- *   `refusal-renders-once.test.ts`).
+ *   `refusal-renders-once.test.ts` and its `.e2e` twin).
  *
  * ## Tier
  *
