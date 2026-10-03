@@ -922,7 +922,7 @@ export async function resolveUserAuthzGrants(
   // the flag exists rather than a plain deletion. Under `single` — the DEFAULT, what
   // a deployment that configured no tenancy at all resolves to — `bootstrapPlatformAdmin`
   // MINTS this very row for the first human user, and that promotion is ruled correct
-  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08, recorded in commit 74832b68f, verbatim: "The
+  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08, recorded in ADR-0131's 2026-09-17 amendment, verbatim: "The
   // rest of Choice 4A (#11974, 2026-08-25) stands: retiring the walled write must not
   // retire the `single` one"). A development environment started for a moment cannot be
   // asked to declare an administrator first, so deleting the row route for every posture
