@@ -6,6 +6,13 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+// [#21565] The stored-metadata family's ONE membership predicate — the function
+// object the runtime's bind refusal and every stored-body read exit judge by
+// (`@objectstack/spec/kernel` re-exports it from this leaf). ⛔ Never restate
+// its table list here. Imported from the import-free leaf, not from
+// `metadata-type-redaction.ts`, whose closure (the credential derivation and the
+// conversion chain) has no business in this schema's import graph.
+import { isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { HookBodySchema } from './hook-body.zod';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
 // (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
@@ -63,6 +70,73 @@ const hookTargetError =
   + 'name nothing matches, so it could never fire. Name the object(s) — '
   + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
   + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
+
+/*
+ * ── A hook body is never bound to a table of stored metadata ────────────────
+ *
+ * [#21565] `sys_metadata` and `sys_metadata_history` — the family
+ * `isStoredMetadataBodyObject` answers for — have ONE writer for an
+ * app-authored body: the metadata protocol, where a change is validated and its
+ * provenance recorded (#21520, ruling A). The runtime enforces that at its
+ * binding point: `hookBodyRunnerFactory` (`packages/runtime/src/sandbox/
+ * body-runner.ts`) throws for a hook whose `body` targets a family table, so
+ * the hook is never registered and never runs. Authoring accepted the very same
+ * hook — the metadata save door answered 200 for it — and the author learned
+ * otherwise only from a server log.
+ *
+ * So the parse refuses it as well, with the runtime's own prescription, at
+ * every door that parses a hook: the metadata save door, `defineStack` /
+ * `os validate`, compile, and an artifact's parse (the JSON-stage hook in
+ * `stack.zod.ts` keeps this check through `safeExtend`). The refused set is
+ * EXACTLY the bind's — read from `storedMetadataBodyHookBindingRefusal` in
+ * `packages/runtime/src/stored-metadata-body-boundary.ts`, never widened or
+ * narrowed here:
+ *
+ *  - a hook carrying a `body`, in any form {@link HookBodySchema} admits — the
+ *    runtime refuses before it looks at the body's language;
+ *  - whose `object` NAMES a family table: the string itself, or any member of
+ *    the list, and one family member refuses the whole hook, as at bind;
+ *  - judged by the same predicate, by exact name.
+ *
+ * Outside it, exactly as at bind: a hook with no `body` (a code `handler` — the
+ * platform's own hooks are code, and ruling A leaves platform code out), and the
+ * wildcard `'*'`, which names no family table: it binds, and the runtime never
+ * runs its body for a family table's event.
+ *
+ * The prescription repeats the runtime's sentence word for word: the runtime
+ * keeps it in a module-private constant `packages/spec` cannot import, and no
+ * shared constant exists.
+ */
+const STORED_METADATA_BODY_PRESCRIPTION =
+  'Change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), '
+  + 'where it is validated and its provenance is recorded. Elevation (`runAs`, a system context) does not '
+  + 'change this.';
+
+/**
+ * The object-level check that refuses a hook `body` bound to a stored-metadata
+ * table — one issue per family table the target names, at `object` for a
+ * string target and at `object[i]` for a list member. See the block above for
+ * the refused set and why it is the runtime's.
+ */
+function refuseBodyOnStoredMetadataTarget(
+  hook: { object: string | string[]; body?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (hook.body === undefined) return;
+  const listed = Array.isArray(hook.object);
+  const targets = listed ? (hook.object as string[]) : [hook.object as string];
+  targets.forEach((name, index) => {
+    if (!isStoredMetadataBodyObject(name)) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: listed ? ['object', index] : ['object'],
+      message:
+        `\`object\` names '${name}', a table of stored metadata, and this hook carries a \`body\`: an `
+        + 'app-authored hook body may not be bound to a stored-metadata table, so the runtime refuses to '
+        + `register the hook and it never runs. ${STORED_METADATA_BODY_PRESCRIPTION}`,
+    });
+  });
+}
 
 /**
  * Hook Lifecycle Events
@@ -397,7 +471,11 @@ export const HookSchema = lazySchema(() => strictObject(
   // REJECTED here — the same live 422 that `permission` hit on the ADR-0094
   // overlay path before Tier-A declared them (#4001 findings log, entries 2/8).
   ...MetadataProtectionFields,
-}));
+  // [#21565] The one object-level check: it pairs `object` with `body`, which
+  // no field-level refine can see together. A schema DERIVED from this one by
+  // overriding a key must use `.safeExtend()` (zod refuses `.extend()` over a
+  // refined object), which is what keeps the check on the derived schema too.
+}).superRefine(refuseBodyOnStoredMetadataTarget));
 
 /**
  * Hook Runtime Context
