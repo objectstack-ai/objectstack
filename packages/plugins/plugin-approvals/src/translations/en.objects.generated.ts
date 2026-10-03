@@ -269,11 +269,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reassign_from: {
         label: "Reassigned From",
-        help: "User whose pending-approver slot was handed over (reassign actions only)"
+        help: "The pending-approver slot that was handed over, in the slot’s stored spelling: a user id, an email, or a position address (reassign actions only)."
       },
       reassign_to: {
         label: "Reassigned To",
-        help: "User who received the pending-approver slot (reassign actions only)"
+        help: "The pending-approver address the slot was handed to, in its stored spelling: a user id, an email, or a position address (reassign actions only)."
       },
       attachments: {
         label: "Attachments",

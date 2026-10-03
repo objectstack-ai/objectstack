@@ -268,12 +268,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "为真表示该操作者并不在该请求的待审批人名单中，只是凭特权越权被放行——平台管理员或组织管理员可以处理任何待审批请求，因此名单中无人能决定的请求不会一直卡住。"
       },
       reassign_from: {
-        label: "转出人",
-        help: "被移交待审批槽位的用户（仅转签操作）"
+        label: "转出方",
+        help: "被移交的待审批槽位，按该槽位存储的写法记录：用户 ID、邮箱或岗位地址（仅转签操作）。"
       },
       reassign_to: {
-        label: "转入人",
-        help: "接收待审批槽位的用户（仅转签操作）"
+        label: "转入方",
+        help: "该槽位被移交到的待审批地址，按其存储的写法记录：用户 ID、邮箱或岗位地址（仅转签操作）。"
       },
       attachments: {
         label: "附件",

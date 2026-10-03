@@ -512,7 +512,9 @@ not a pending approver`); a request that isn't pending returns 409
 (`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
 row: `actor_id` is the user who decided, and `acted_as` is the slot the decision
 took, in that slot's stored spelling — the multi-approver tally counts approvals
-by matching `acted_as` against the slate. Always go through
+by matching `acted_as` against the slate. A `reassign` row records the slot it
+moved the same way: `reassign_from` and `reassign_to` hold slot addresses (a
+user id, an email or a position address), not users. Always go through
 these endpoints — never resume the flow run directly, and since #3801 you
 **cannot**: `POST /api/v1/automation/{flow}/runs/{runId}/resume` answers 403 for
 a run parked on an `approval` node (including via a `subflow` pause) and changes
@@ -672,8 +674,9 @@ trace that a slate had been bypassed was the designated approver's later
 reaches a terminal state without a decision — it failed, was cancelled, timed
 out, or the process hosting it crashed — nothing is left to decide the request,
 so a periodic sweep finalizes it as `recalled` and releases the record. The
-audit row records the actor `system:dead-run` and names the run and its status,
-so it reads distinctly from a submitter's own recall.
+audit row records no actor — a sweep is not a user, so `actor_id` is empty,
+never a placeholder value (ADR-0118 D1) — and names the run and its status, so
+it reads distinctly from a submitter's own recall, which records the submitter.
 
 The sweep only ever acts on a run it can positively confirm is terminal: a
 paused run (the normal state of a live approval), an unknown run, or an
@@ -724,7 +727,10 @@ that request's drawer directly instead of a generic list.
 `escalation` is real, not decorative: set `enabled: true` and `timeoutHours`,
 and pick an `action` — `notify` (default), `reassign`, `auto_approve`, or
 `auto_reject`. Auto decisions run through the normal decide path, so the flow
-resumes exactly as if a human had clicked. Every escalation writes an audit row.
+resumes exactly as if a human had clicked. Every escalation writes an audit row
+of kind `escalate` naming the configured action; it, the auto decision that
+follows it, and the escalation's notifications record no actor, because no
+person acted (ADR-0118 D1).
 `timeoutHours` counts **calendar (wall-clock) hours** — nights, weekends and
 holidays included, because the platform ships no business-hours calendar — so a
 request opened at 17:00 on a Friday with `timeoutHours: 4` escalates at 21:00
