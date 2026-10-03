@@ -149,14 +149,7 @@ export default class MigrateAccountIssuer extends Command {
       // read in its legacy shape, `issuer` included, which is the very column
       // the registered schema no longer declares, so the driver (the path the
       // engine leaves to host code) is the reader this inventory needs.
-      const driver = engine?.getDriverForObject?.(SYS_ACCOUNT);
-      if (!driver || typeof driver.find !== 'function') {
-        throw new Error(
-          `No driver serves ${SYS_ACCOUNT} on this stack, so the table cannot be enumerated. ` +
-            'Refusing rather than reporting an unread table as clean.',
-        );
-      }
-
+      //
       // [#21552] A database with no `sys_account` table holds no account, so no
       // two rows collide: the probe reads it as no rows. The read is not
       // avoided, measured: `sys_account` is not a registered object on this
@@ -169,6 +162,12 @@ export default class MigrateAccountIssuer extends Command {
       let noAccountTable = false;
       const readView: Parameters<typeof probeAccountIdentityCollisions>[0] = {
         find: async (object, query) => {
+          // No driver is not an empty table: the probe turns this into its
+          // refusal, never into a clean report.
+          const driver = engine?.getDriverForObject?.(object);
+          if (!driver || typeof driver.find !== 'function') {
+            throw new Error(`no driver serves ${object} on this stack`);
+          }
           try {
             return await driver.find(object, query);
           } catch (error) {
