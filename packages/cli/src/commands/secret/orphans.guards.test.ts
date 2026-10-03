@@ -199,6 +199,9 @@ async function runDelete(
             : name === 'settings' ? { listManifests: () => SETTINGS_MANIFESTS }
               : undefined,
       },
+      // `SchemaStack.tableAbsent`: nothing is deferred on a `--delete` boot, which is
+      // the plain one, so no table is measured absent.
+      tableAbsent: () => false,
       shutdown: async () => { /* nothing was booted */ },
     } as never;
   });
