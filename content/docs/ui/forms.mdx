@@ -100,6 +100,7 @@ export default defineView({
 > - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
 > - A form whose sections declare **no** fields collects nothing, so the submit is **refused** (`400 VALIDATION_ERROR`) rather than accepting whatever the caller sent (#6920). Its `GET /forms/:slug` publishes no schema either (#6601) — declare the fields and both planes come alive together.
 > - Multiple form views per object are fine — only the one(s) with `sharing.enabled === true` and `sharing.allowAnonymous === true` are exposed.
+> - On a **walled** tenancy posture (`group` or `isolated` in force), a form whose object is walled by an organization column is **not offered**. An anonymous submission carries no organization, and an insert without one into a walled object is refused, so both anonymous endpoints answer the form exactly as they answer a withdrawn one (`404 FORM_NOT_FOUND`). The administrator is told why, at the form's `sharing`: the view's read (`GET /api/v1/meta/view/:name`) carries it in `_diagnostics.warnings`, and a save or publish of the view answers success with a `public-form-intake-unavailable` warning in `advisories`. If the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it and the form is offered again.
 
 ## 2. (Optional) Create the `guest_portal` permission set
 

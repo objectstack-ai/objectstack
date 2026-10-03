@@ -215,6 +215,35 @@ describe('buildDateBucketExpr dialect gating (#3773)', () => {
     }
   });
 
+  /**
+   * [#21485] The no-server half of the live pins in
+   * `sql-driver-21485-date-bucket-calendar-day.test.ts`, so a regression is red
+   * in every job, including the ones with no PostgreSQL or MySQL attached. A
+   * `Field.date` is a calendar day: its bucket names no zone and converts none.
+   * Each spelling refused below read the session's zone, and on a session east
+   * of UTC moved the day into the previous bucket.
+   *
+   * On PostgreSQL the day must reach `to_char` as a `timestamp`. A bare `date`
+   * there resolves `to_char(timestamptz, text)` through the implicit cast, so a
+   * `timestamptz` is back without the text naming it.
+   */
+  it('Postgres and MySQL bucket a declared Field.date with no zone conversion (#21485)', () => {
+    for (const client of ['pg', 'mysql2']) {
+      const d = makeDriver(client);
+      d.seedDate('t', 'on');
+      for (const g of [...GRANULARITIES, 'week']) {
+        const sql = expr(d, 'on', g, 't')!.sql.toLowerCase();
+        for (const zoned of ['timestamptz', 'time zone', 'convert_tz', 'time_zone']) {
+          expect(sql, `${client} ${g}`).not.toContain(zoned);
+        }
+        if (client === 'pg') expect(sql, `${client} ${g}`).toContain('::date::timestamp,');
+        // The control: the same column with no declaration keeps the UTC-instant arm.
+        expect(expr(d, 'on', g)!.sql.toLowerCase(), `${client} ${g}, undeclared`)
+          .toContain(client === 'pg' ? `at time zone 'utc'` : 'convert_tz(');
+      }
+    }
+  });
+
   it('every emitted expression binds exactly as many identifiers as it references', () => {
     // The quarter expression references the column twice; an epoch-normalised
     // one references it six times. A mismatch here is knex silently shifting

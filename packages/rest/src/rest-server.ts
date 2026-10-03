@@ -74,9 +74,14 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
-    type AnonymousFormIntakeCandidate,
-    // [#21476] The wall column, and the ADR-0106 fingerprint, for the intake-availability predicate.
-    resolveRecordWallOrganizationField,
+    // [#21476] Whether such a form can take intake on this posture, and why not
+    // — the one predicate the runtime authoring gate's advisory reads too.
+    anonymousFormIntakePosture,
+    anonymousFormIntakeUnavailability,
+    anonymousFormIntakeUnavailableMessage,
+    anonymousFormObjectName,
+    anonymousFormSharingPath,
+    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into.
     objectFieldVisibilityFingerprint,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
@@ -165,12 +170,7 @@ import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 // single-item read path rebuilds its body through, from the spec's own storage
 // predicates — so the signal the grid reads cannot drift from what the runtime
 // doors (#6994/#7095) refuse.
-import {
-    PUBLIC_FORM_SERVER_MANAGED_FIELDS,
-    normalizeTenancyPosture,
-    postureEnforcesWall,
-    type TenancyPosture,
-} from '@objectstack/spec/security';
+import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -1759,90 +1759,17 @@ type MetaReadVerdict =
     | { kind: 'serve'; document: any }
     | { kind: 'refuse'; send: (res: any) => void };
 
-/** [#21476] Why an open public form cannot take an anonymous submission on this deployment. */
-interface AnonymousFormIntakeUnavailable {
-    /** The object the form submits into, the walled posture in force, and the column it is walled by. */
-    object: string;
-    posture: TenancyPosture;
-    tenantField: string;
-}
-
-/**
- * [#21476] THE intake-availability predicate: `null` when an open public form
- * can take an anonymous submission here, otherwise why it cannot.
- *
- * An anonymous submission carries no organization, and on a walled posture the
- * engine refuses an insert without one into an object walled by an organization
- * column (`resolveSystemInsertOrganization`, `@objectstack/objectql`). Such a
- * form used to be served and then answer `500` on every submit; now both doors
- * answer it as a withdrawn form and the admin read says why. Its two facts:
- *
- *  - `posture`: the tenancy service's IN-FORCE posture, the value SecurityPlugin
- *    hands the engine (`setTenancyPostureProvider`), never re-read from env. A
- *    degraded walled request is `single` there, and the engine then derives the
- *    install's organization. `undefined` (no tenancy service) names no wall.
- *  - the wall column: `resolveRecordWallOrganizationField`
- *    (`@objectstack/metadata-core`), over the served object schema, which
- *    carries the injected `organization_id`. `readObjectSchema` runs only once
- *    a wall is in force.
- *
- * ⚠️ It reads declarations. The engine also passes a federated (`external`)
- * object, a platform object its inventory has not admitted, and a row a
- * `beforeInsert` hook stamped; a form bound to one of those with a wall column
- * is withheld here although the engine would accept it (fail closed).
- */
-async function anonymousFormIntakeUnavailability(
-    object: string,
-    posture: TenancyPosture | undefined,
-    readObjectSchema: () => Promise<unknown>,
-): Promise<AnonymousFormIntakeUnavailable | null> {
-    if (posture === undefined || !postureEnforcesWall(posture)) return null;
-    const objectSchema = await readObjectSchema();
-    const fields = (objectSchema as { fields?: unknown } | null | undefined)?.fields;
-    const tenantField = resolveRecordWallOrganizationField(
-        objectSchema,
-        (field) => !!fields && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, field),
-    );
-    return tenantField === null ? null : { object, posture, tenantField };
-}
-
-/** [#21476] The posture in force, as the tenancy service an anonymous form request reads reports it. */
-function anonymousFormTenancyPosture(tenancy: unknown): TenancyPosture | undefined {
-    return normalizeTenancyPosture((tenancy as { posture?: unknown } | undefined)?.posture);
-}
+// [#21476] The intake-availability predicate, its posture reader, the object a
+// form submits into, where its `sharing` sits and the reason it states all live
+// in `@objectstack/metadata-core` (`anonymous-form-intake.ts`): both doors, the
+// admin read below and the runtime authoring gate's save/publish advisory read
+// them from there, so none of the three can disagree with another.
 
 /** [#21331] The organization an anonymous form request reads the form in (`defaultOrgId()`). */
 async function anonymousFormOrganization(tenancy: any): Promise<string | undefined> {
     if (!tenancy || typeof tenancy.defaultOrgId !== 'function') return undefined;
     const organizationId = await tenancy.defaultOrgId();
     return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
-}
-
-/** The object an open form candidate submits into, read the one way the doors and the admin read share. */
-function anonymousFormObjectName(view: any, form: any): string | undefined {
-    return form?.data?.object ?? view?.list?.data?.object ?? view?.form?.data?.object ?? view?.object;
-}
-
-/** [#21476] Where a candidate's `sharing` sits in the served `view` body: the location the admin read names. */
-function anonymousFormSharingPath(view: Record<string, any>, candidate: AnonymousFormIntakeCandidate): string {
-    if (candidate.form === view.form) return 'form.sharing';
-    if (candidate.key !== undefined && view.formViews?.[candidate.key] === candidate.form) {
-        return `formViews.${candidate.key}.sharing`;
-    }
-    return 'config.sharing';
-}
-
-/** [#21476] The reason the admin read states, located at the form's `sharing`. */
-function anonymousFormIntakeUnavailableMessage(slug: string, u: AnonymousFormIntakeUnavailable): string {
-    return (
-        `Public form '/forms/${slug}' is not offered to anonymous visitors on this deployment, so both `
-        + `anonymous form doors answer it as not found. It submits into '${u.object}', which is walled by `
-        + `'${u.tenantField}', and this deployment runs the '${u.posture}' tenancy posture: an anonymous `
-        + `submission carries no organization, and an insert without one into a walled object is refused. `
-        + `If the rows of '${u.object}' belong to no organization, declare that on the object `
-        + `(tenancy: { enabled: false }) and the form is offered again. Otherwise collect this data through `
-        + `a signed-in surface.`
-    );
 }
 
 /**
@@ -10721,7 +10648,7 @@ export class RestServer {
         const candidates = anonymousFormIntakeCandidates(view);
         if (candidates.length === 0) return [];
         const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
-        const posture = anonymousFormTenancyPosture(tenancy);
+        const posture = anonymousFormIntakePosture(tenancy);
         let objects: Promise<any[]> | undefined;
         const readObjects = (): Promise<any[]> => (objects ??= anonymousFormOrganization(tenancy)
             .then((organizationId) => this.readFormObjectDefinitions(p, environmentId, organizationId)));
@@ -10855,7 +10782,7 @@ export class RestServer {
             // doors, so an anonymous caller learns nothing about the tenancy.
             const unavailable = await anonymousFormIntakeUnavailability(
                 match.object,
-                anonymousFormTenancyPosture(tenancy),
+                anonymousFormIntakePosture(tenancy),
                 async () => (await this.readFormObjectDefinitions(p, environmentId, organizationId))
                     .find((o: any) => o?.name === match.object),
             );

@@ -6121,6 +6121,28 @@ export class SqlDriver implements IDataDriver {
    * {@link coercionKey} returns for the builder). It is what makes the SQLite
    * expression storage-aware — see {@link sqliteTemporalArg}. Omitting it yields
    * the plain column form, which is correct for any TEXT-stored column.
+   *
+   * ## A `Field.date` buckets as its calendar day (#21485)
+   *
+   * `table` also decides which value the PostgreSQL and MySQL arms bucket. A
+   * declared `Field.date` ({@link temporalFieldKind} `'date'`) is a calendar
+   * day with no instant (ADR-0053), so it is bucketed as that day and never
+   * converted between zones. Everything else, a `Field.datetime` or an
+   * undeclared column, keeps the UTC-instant conversion, byte for byte.
+   *
+   * The instant form cannot carry a `date`. Casting one to `timestamptz`, or
+   * handing it to `convert_tz`, invents an instant at midnight in the
+   * SESSION's zone, and the UTC conversion then reads the previous day on any
+   * session east of UTC. Measured on PostgreSQL 16.14 at `Asia/Shanghai` and on
+   * MySQL 8.0.46 with the session at `+08:00`: `2026-06-01` bucketed into month
+   * `2026-05`, and `2026-01-01` into year `2025`.
+   *
+   * On PostgreSQL the day goes to `to_char` as a `timestamp` (no zone), not as
+   * a bare `date`. A bare `date` resolves `to_char(timestamptz, text)` through
+   * the implicit cast, which round-trips the session zone. That round trip is
+   * the identity on every day except one the zone skipped: measured over
+   * 1900..2100, `Pacific/Apia` printed `2011-12-30` as `2011-12-31` and
+   * `Pacific/Kiritimati` printed `1994-12-31` as `1995-01-01`.
    */
   protected buildDateBucketExpr(
     field: string,
@@ -6129,23 +6151,27 @@ export class SqlDriver implements IDataDriver {
   ): { sql: string; bindings: any[] } | null {
     if (!this.dateGranularityCapabilities[granularity]) return null;
 
+    const calendarDay = this.temporalFieldKind(table, field) === 'date';
+
     if (this.isPostgres) {
+      const arg = calendarDay ? `(??)::date::timestamp` : `(??)::timestamptz AT TIME ZONE 'UTC'`;
       switch (granularity) {
-        case 'year':    return { sql: `to_char((??)::timestamptz AT TIME ZONE 'UTC', 'YYYY')`, bindings: [field] };
-        case 'month':   return { sql: `to_char((??)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')`, bindings: [field] };
-        case 'day':     return { sql: `to_char((??)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD')`, bindings: [field] };
-        case 'quarter': return { sql: `to_char((??)::timestamptz AT TIME ZONE 'UTC', 'YYYY"-Q"Q')`, bindings: [field] };
-        case 'week':    return { sql: `to_char((??)::timestamptz AT TIME ZONE 'UTC', 'IYYY"-W"IW')`, bindings: [field] };
+        case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings: [field] };
+        case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings: [field] };
+        case 'day':     return { sql: `to_char(${arg}, 'YYYY-MM-DD')`, bindings: [field] };
+        case 'quarter': return { sql: `to_char(${arg}, 'YYYY"-Q"Q')`, bindings: [field] };
+        case 'week':    return { sql: `to_char(${arg}, 'IYYY"-W"IW')`, bindings: [field] };
       }
     }
 
     if (this.isMysql) {
+      const arg = calendarDay ? `??` : `convert_tz(??, @@session.time_zone, '+00:00')`;
       switch (granularity) {
-        case 'year':    return { sql: `date_format(convert_tz(??, @@session.time_zone, '+00:00'), '%Y')`, bindings: [field] };
-        case 'month':   return { sql: `date_format(convert_tz(??, @@session.time_zone, '+00:00'), '%Y-%m')`, bindings: [field] };
-        case 'day':     return { sql: `date_format(convert_tz(??, @@session.time_zone, '+00:00'), '%Y-%m-%d')`, bindings: [field] };
-        case 'quarter': return { sql: `concat(date_format(convert_tz(??, @@session.time_zone, '+00:00'), '%Y'), '-Q', quarter(convert_tz(??, @@session.time_zone, '+00:00')))`, bindings: [field, field] };
-        case 'week':    return { sql: `date_format(convert_tz(??, @@session.time_zone, '+00:00'), '%x-W%v')`, bindings: [field] };
+        case 'year':    return { sql: `date_format(${arg}, '%Y')`, bindings: [field] };
+        case 'month':   return { sql: `date_format(${arg}, '%Y-%m')`, bindings: [field] };
+        case 'day':     return { sql: `date_format(${arg}, '%Y-%m-%d')`, bindings: [field] };
+        case 'quarter': return { sql: `concat(date_format(${arg}, '%Y'), '-Q', quarter(${arg}))`, bindings: [field, field] };
+        case 'week':    return { sql: `date_format(${arg}, '%x-W%v')`, bindings: [field] };
       }
     }
 
@@ -6186,7 +6212,8 @@ export class SqlDriver implements IDataDriver {
    * quoting. The expression binds identifiers only, so the text carries no
    * value placeholder. `objectName` goes in as the coercion key, as
    * `aggregate` passes it, so a SQLite `Field.datetime` column that may still
-   * hold pre-canonical values renders the repair the GROUP BY runs (#3773).
+   * hold pre-canonical values renders the repair the GROUP BY runs (#3773),
+   * and a `Field.date` renders its calendar day on every dialect (#21485).
    *
    * Read structurally by its caller, like {@link dialectName}. It is not a
    * member of the `IDataDriver` contract.
