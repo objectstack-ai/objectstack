@@ -287,7 +287,17 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `89cad75d5`, re-read 2026-10-02: on the hop off
+ *   (`.objectui-sha` = `ab1879721`, re-read 2026-10-03: on the hop off
+ *   `89cad75d5` `ObjectCalendar.tsx` changed in one comment line only, line
+ *   for line (`:1250`, objectui#11438 re-citing the installed spec as
+ *   17.6.0), so `getCalendarConfig` `:294`, the `if (!calendarConfig)` arm
+ *   `:1296` and its `tt(…)` lines `:1303-1304` did not move and are
+ *   byte-identical; `ListView.tsx` changed (objectui#10813's `isempty` /
+ *   `isnotempty` filter operators, objectui#11445's record-count family,
+ *   objectui#11227's resolved empty-state labels), every `case` arm
+ *   byte-identical and moved by 14; and the `en` / `zh` / `de`
+ *   `calendar.configRequired` strings did not change. At `89cad75d5`
+ *   (2026-10-02), on the hop off
  *   `31971ff1e` `ObjectCalendar.tsx` and `ListView.tsx` are byte-identical,
  *   so `getCalendarConfig` `:294`, the `if (!calendarConfig)` arm `:1296` and
  *   its `tt(…)` lines `:1303-1304` did not move, every `case` arm is
@@ -334,8 +344,14 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `89cad75d5`, re-read
- *   2026-10-02; on the hop off `31971ff1e` `ObjectGantt.tsx` changed (47
+ *   this repo builds against (`.objectui-sha` = `ab1879721`, re-read
+ *   2026-10-03; on the hop off `89cad75d5` `ObjectGantt.tsx` changed (8
+ *   insertions, 0 deletions: one import line and objectui#11475's storage
+ *   argument on the tooltip's `percent` row), none of it in `getGanttConfig`
+ *   or the refusal arm, which are byte-identical and moved `:608` → `:609`
+ *   and `:2298` → `:2306`, and `ListView.tsx`'s `case 'gantt'` is
+ *   byte-identical, moved by 14; at `89cad75d5` (2026-10-02), on the hop off
+ *   `31971ff1e` `ObjectGantt.tsx` changed (47
  *   insertions, 10 deletions: objectui#11254's field-scale width on the
  *   number and percent rows, objectui#11355's uncast shadowed-flat-key read,
  *   one import line), none of it in `getGanttConfig` or the refusal arm, which
@@ -382,7 +398,12 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `89cad75d5`; on the hop off `31971ff1e` `ListView.tsx` is byte-identical,
+ *   `ab1879721`; on the hop off `89cad75d5` `ObjectTimeline.tsx` is
+ *   byte-identical, so the start-date chain `:574-576` and the refusal arm
+ *   `:911` did not move, and `ListView.tsx`'s `case 'timeline'` and
+ *   `resolveTimelineDateBinding` are byte-identical, moved by 14 and by 9
+ *   (objectui#10813's filter operators above them). At `89cad75d5`, on the
+ *   hop off `31971ff1e` `ListView.tsx` is byte-identical,
  *   `case 'timeline'` and `resolveTimelineDateBinding` with it, and
  *   `ObjectTimeline.tsx` changed only in two `navigation` comments
  *   (objectui#11293 / objectui#11168 slice 5, 16 insertions, 7 deletions:
@@ -423,8 +444,12 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `89cad75d5`; on the hop off `31971ff1e`
- *   `ListView.tsx` is byte-identical, `case 'map'` and `resolveListMapConfig`
+ *   pin (`.objectui-sha` = `ab1879721`; on the hop off `89cad75d5`
+ *   `ObjectMap.tsx` is byte-identical, so `getMapConfig` `:387`,
+ *   `hasCoordinateBinding` `:493` and the refusal arm `:1291` did not move,
+ *   and `ListView.tsx`'s `case 'map'` is byte-identical, moved by 14, with
+ *   `resolveListMapConfig` unmoved at `:146`. At `89cad75d5`, on the hop off
+ *   `31971ff1e` `ListView.tsx` is byte-identical, `case 'map'` and `resolveListMapConfig`
  *   with it, and `ObjectMap.tsx` changed (11 insertions, 4 deletions) in
  *   `warnOnShadowedFlatMapKeys`' cast (objectui#11355) and in `getMapConfig`'s
  *   `style` precedence — `mapStyle` before `map.style` on the declared-block
