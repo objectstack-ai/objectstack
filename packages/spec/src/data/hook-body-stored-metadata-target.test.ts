@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_OBJECTS } from '../kernel/metadata-type-redaction';
+import * as leaf from '../kernel/stored-metadata-body-objects';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ArtifactStagePackageBodySchema, defineStack } from '../stack.zod';
@@ -111,6 +112,13 @@ describe('HookSchema — what stays accepted, byte for byte (the runtime binds t
       const input = hook(object);
       expectAcceptedUnchanged(input, { ...input, body: { ...JS_BODY, capabilities: [] }, ...DEFAULTS });
     }
+  });
+
+  it('ONE definition: the kernel module re-exports the leaf\'s set and predicate as the very same objects', () => {
+    // `hook.zod.ts` imports the leaf; the runtime imports `@objectstack/spec/kernel`,
+    // which re-exports `metadata-type-redaction.ts`, which re-exports the leaf.
+    expect(isStoredMetadataBodyObject).toBe(leaf.isStoredMetadataBodyObject);
+    expect(STORED_METADATA_BODY_OBJECTS).toBe(leaf.STORED_METADATA_BODY_OBJECTS);
   });
 
   it('the refused set is the predicate\'s, by exact name — never a second list', () => {

@@ -7,10 +7,12 @@ import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // [#21565] The stored-metadata family's ONE membership predicate — the function
-// the runtime's bind refusal and every stored-body read exit judge by. ⛔ Never
-// restate its table list here: a second list is the drift the kernel module's
-// header refuses. No cycle: nothing that module reaches imports this file.
-import { isStoredMetadataBodyObject } from '../kernel/metadata-type-redaction';
+// object the runtime's bind refusal and every stored-body read exit judge by
+// (`@objectstack/spec/kernel` re-exports it from this leaf). ⛔ Never restate
+// its table list here. Imported from the import-free leaf, not from
+// `metadata-type-redaction.ts`, whose closure (the credential derivation and the
+// conversion chain) has no business in this schema's import graph.
+import { isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { HookBodySchema } from './hook-body.zod';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
 // (`contracts/data-engine.ts`), so a VALUE import here would close a runtime

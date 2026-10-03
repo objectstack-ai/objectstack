@@ -48,6 +48,8 @@
 
 import { redactDatasourceConfig } from '../data/datasource-credential-redaction';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
+// [#21565] The family set and its predicate: declared in a leaf, re-exported below.
+import { STORED_METADATA_BODY_OBJECTS, isStoredMetadataBodyObject } from './stored-metadata-body-objects';
 
 /** What a {@link MetadataTypeRedactor} returns: the servable item, and what was withheld. */
 export interface MetadataRedactionResult {
@@ -152,39 +154,23 @@ export function listMetadataTypeRedactorTypes(): string[] {
 // serialized metadata body", and the one redaction of that body (#21120)
 // ---------------------------------------------------------------------------
 
-/**
- * [#21120] The object (table) names whose `metadata` column stores one
- * serialized metadata BODY, of the type the same row's `type` column names —
- * the table every `/meta` read exit rehydrates from (`sys_metadata`) and its
- * version snapshots (`sys_metadata_history`).
- *
- * This is the family boundary for the stored-metadata-body security invariant:
- * every surface that can SERVE, COPY or EVALUATE one of these rows' body is a
- * credential read exit, and either projects the body through the ONE redactor
- * below or refuses. It lives HERE — not in `@objectstack/metadata-protocol` —
- * for the same reason {@link getMetadataTypeRedactor} does: the surfaces that
- * must consult it are service packages (`@objectstack/service-analytics`),
- * plugins (`@objectstack/plugin-audit`) and the engine
- * (`@objectstack/objectql`), and **none of them depends on
- * `@objectstack/metadata-protocol`**, while all of them already import
- * `@objectstack/spec/kernel`. A copy per surface is exactly the
- * two-definitions-drift this module's header refuses for the registry.
+/*
+ * [#21120] The family set — `sys_metadata` / `sys_metadata_history`, the tables
+ * whose `metadata` column stores one serialized metadata BODY — and its
+ * membership predicate are declared in the leaf module
+ * `./stored-metadata-body-objects` and re-exported here unchanged, so every
+ * importer of this module and of `@objectstack/spec/kernel` receives the very
+ * same objects. [#21565] They moved so that `data/hook.zod.ts` can judge a hook
+ * target by the predicate without importing this module's closure; the leaf's
+ * header says why. ⛔ Never restate the list here.
  */
-export const STORED_METADATA_BODY_OBJECTS: ReadonlySet<string> = new Set([
-  'sys_metadata',
-  'sys_metadata_history',
-]);
+export { STORED_METADATA_BODY_OBJECTS, isStoredMetadataBodyObject };
 
 /** The column holding the serialized body, on every {@link STORED_METADATA_BODY_OBJECTS} member. */
 export const STORED_METADATA_BODY_COLUMN = 'metadata';
 
 /** The column naming the body's metadata type — what selects its redactor. */
 export const STORED_METADATA_TYPE_COLUMN = 'type';
-
-/** Whether `object`'s rows carry a stored metadata body a read exit must project. */
-export function isStoredMetadataBodyObject(object: string): boolean {
-  return STORED_METADATA_BODY_OBJECTS.has(object);
-}
 
 /**
  * Redact one stored metadata body VALUE (the `metadata` column), choosing the
