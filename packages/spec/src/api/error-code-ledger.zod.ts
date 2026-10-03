@@ -1615,36 +1615,39 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'CONFLICT',
     shadows: 'RESOURCE_CONFLICT',
-    reason: 'Pre-gate synonym on the wire (respondSharingError 409 arm; registered by #8111). ' +
-      'Wire value kept; consolidation deferred per #8211.',
+    reason: 'Pre-gate synonym on the wire (respondSharingError 409 arm), registered as it stood ' +
+      'when the record-sharing errors moved onto the ADR-0112 envelope, so the wire stayed ' +
+      'byte-identical. Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
     code: 'FORBIDDEN',
     shadows: 'PERMISSION_DENIED',
     reason: 'Pre-gate synonym on the wire from @objectstack/rest, plugin-sharing and ' +
-      'plugin-approvals; #13353 added the cloud-connection provenance row for the same ' +
-      'pre-existing wire value (its marketplace-install plugin-route 403). ' +
-      'Wire value kept; consolidation deferred per #8211.',
+      'plugin-approvals; cloud-connection lists the same pre-existing wire value under its own ' +
+      'provenance row (its marketplace-install plugin-route 403). ' +
+      'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
     code: 'INTERNAL',
     shadows: 'INTERNAL_ERROR',
     reason: 'Pre-gate synonym on the wire from five packages. Wire value kept; ' +
-      'consolidation deferred per #8211.',
+      'consolidation deferred until it has a measured victim.',
   },
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
     reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
-      '#19441 added the plugin-security provenance row for the same pre-existing wire value ' +
-      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred per #8211.',
+      'plugin-security lists the same pre-existing wire value under its own provenance row ' +
+      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred until ' +
+      'it has a measured victim.',
   },
   {
     code: 'UNAUTHORIZED',
     shadows: 'UNAUTHENTICATED',
     reason: 'Pre-gate synonym (401 reason phrase) on the wire from @objectstack/rest — ' +
-      'surfaced by the detector when the #8211 gate landed, beyond the four the card named; ' +
-      'same class, same grandfather rationale. Wire value kept; consolidation deferred per #8211.',
+      'surfaced by the synonym detector when it landed, beyond the four first reported; ' +
+      'same class, same grandfather rationale. Wire value kept; consolidation deferred until ' +
+      'it has a measured victim.',
   },
 ];
 
@@ -1749,52 +1752,57 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
     reason: 'Shared constructor one package over: metadata-core\'s ' +
       '`engineUpdateDispatchRejectError` spells the string, but the throw ships in ' +
       'production from `ObjectQL.update` (engine.ts) — the objectql row\'s own comment ' +
-      'records "hence registered here" (#11142/#11230).',
+      'records "hence registered here".',
   },
   {
     package: '@objectstack/service-automation',
     code: 'FLOW_DISABLED',
     registeredUnder: '@objectstack/runtime',
     reason: 'The trigger door, not the producer, names the wire vocabulary: the engine ' +
-      'returns `AutomationResult.code` and runtime\'s doors read it and answer 409 ' +
-      '(#9415/#9446; the runtime row\'s comment records the decision).',
+      'returns `AutomationResult.code` and runtime\'s doors read it and answer 409 — every ' +
+      'door that dispatches a flow answers from one status table, by ruling (the runtime ' +
+      'row\'s comment records the decision).',
   },
   {
     package: '@objectstack/service-automation',
     code: 'FLOW_NO_START_NODE',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Same decision as FLOW_DISABLED, 422 arm (#9415/#9446): the trigger door ' +
+    reason: 'Same decision as FLOW_DISABLED, its 422 arm: the trigger door ' +
       'names the wire vocabulary; the engine result carries the classification.',
   },
   {
     package: '@objectstack/service-automation',
     code: 'FLOW_INPUT_SCHEMA_INVALID',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Registered ahead of its producer by design (#10025 → #11504, the #10413 → ' +
-      '#10576 split shape): the engine\'s `execute()` catch classifies the refusal, the ' +
-      'trigger door serves it — the runtime row\'s comment records "registered HERE and ' +
-      'not under the engine\'s package" with its three FLOW_* siblings.',
+    reason: 'Registered ahead of its producer by design: the ruling that a definition-level ' +
+      'input-schema refusal is non-retryable and never dispatched split into a contract ' +
+      'half, which minted this code, and a services half that emits it, the contract half ' +
+      'landing first. The engine\'s `execute()` catch classifies the refusal, the trigger ' +
+      'door serves it — the runtime row\'s comment records "registered HERE and not under ' +
+      'the engine\'s package" with its three FLOW_* siblings.',
   },
   {
     package: '@objectstack/service-datasource',
     code: 'EXTERNAL_IMPORT_ERROR',
     registeredUnder: '@objectstack/rest',
-    reason: 'Adjudicated on #13353: the only door for `importObject` is rest\'s ' +
-      '`POST …/tables/:remote/import` (external-datasource-routes.ts), whose catch stamps ' +
-      'this code itself for EVERY importObject throw and never reads the producer\'s ' +
-      'declaration — the door names the wire vocabulary. The producer\'s `err.code` ' +
-      '(`importNameRefusedError`) is the #8016 declaration shape, agreeing with the door ' +
-      'by construction, not a second wire emitter.',
+    reason: 'Adjudicated when the provenance gate landed: the only door for `importObject` ' +
+      'is rest\'s `POST …/tables/:remote/import` (external-datasource-routes.ts), whose ' +
+      'catch stamps this code itself for EVERY importObject throw and never reads the ' +
+      'producer\'s declaration — the door names the wire vocabulary. The producer\'s ' +
+      '`err.code` (`importNameRefusedError`) declares its own `status` and `code`, the ' +
+      'shape the shared thrown-error resolver honours, agreeing with the door by ' +
+      'construction, not a second wire emitter.',
   },
   {
     package: '@objectstack/client',
     code: 'UPLOAD_SESSION_EXPIRED',
     registeredUnder: '@objectstack/service-storage',
-    reason: 'Client-side synthesis (#7870): `resumeUpload` mirrors the server\'s 410 pair ' +
-      'when the progress poll reports `expired`, so caller branches fire identically. The ' +
-      'ledger\'s scope prose covers the SERVING side; whether a client-synthesised code ' +
-      'belongs in the ledger at all is the open scope question #13353 recorded — ' +
-      'deliberately a waiver, not a row, until that question is ruled.',
+    reason: 'Client-side synthesis: `resumeUpload` mirrors the server\'s 410 pair when the ' +
+      'progress poll reports `expired`, so caller branches fire identically. The ledger\'s ' +
+      'scope prose covers the SERVING side; whether a client-synthesised code belongs in ' +
+      'the ledger at all is an open scope question, recorded when the provenance gate ' +
+      'landed and left unruled for want of pull — deliberately a waiver, not a row, until ' +
+      'that question is ruled.',
   },
   {
     package: '@objectstack/spec',
@@ -1809,35 +1817,38 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
     package: '@objectstack/types',
     code: 'VALIDATION_FAILED',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Shared constructor by design (#8016/#3918): `validationFailure()` lives in ' +
-      'the dependency-light package so BOTH doors recognise one shape; the throws are ' +
-      'served under the emitting doors\' own registrations (runtime\'s dispatcher exits, ' +
-      'rest\'s `mapDataError` — both packages list the code).',
+    reason: 'Shared constructor by design: `validationFailure()` lives in the ' +
+      'dependency-light package beside the one thrown-error mapping both doors share, so ' +
+      'BOTH doors recognise one shape and answer it 400 with its `fields[]`, never 500; the ' +
+      'throws are served under the emitting doors\' own registrations (runtime\'s ' +
+      'dispatcher exits, rest\'s `mapDataError` — both packages list the code).',
   },
   {
     package: '@objectstack/core',
     code: 'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
     registeredUnder: '@objectstack/runtime',
-    reason: 'Shared constructor one package over, the #8016 shape (#16322): ' +
-      '`analyticsDateRangeUnrecognizedError` (utils/analytics-date-range.ts) spells the ' +
-      'string ONCE so driver-memory\'s cube face and BOTH service-analytics strategies ' +
-      'refuse identically — which is the property the card\'s shared conformance fixture ' +
-      'exists to hold, and which two independent refusals could not give. Core ships no ' +
-      'HTTP door; the wire emission stays runtime\'s, whose row names this exact second ' +
-      'moment. ⛔ Deliberately ONE waiver rather than a row per driver: with one ' +
-      'constructor there is one stamp site, and rows for packages that stamp nothing ' +
-      'would be the dead weight this file\'s gate refuses.',
+    reason: 'Shared constructor one package over: `analyticsDateRangeUnrecognizedError` ' +
+      '(utils/analytics-date-range.ts) spells the string ONCE so driver-memory\'s cube face ' +
+      'and BOTH service-analytics strategies refuse an unrecognised `dateRange` identically ' +
+      '— which is the property the shared date-range conformance fixture exists to hold, ' +
+      'and which two independent refusals could not give. Core ships no HTTP door; the wire ' +
+      'emission stays runtime\'s, whose row names this exact second moment. ⛔ Deliberately ' +
+      'ONE waiver rather than a row per driver: with one constructor there is one stamp ' +
+      'site, and rows for packages that stamp nothing would be the dead weight this file\'s ' +
+      'gate refuses.',
   },
   {
     package: '@objectstack/runtime',
     code: 'TENANT_SCOPE_REQUIRED',
     registeredUnder: '@objectstack/metadata-protocol',
     reason: 'The door mirrors the producer\'s refusal; it is not a second emitter. ' +
-      '`DELETE /packages/:id` (domains/packages.ts, `requireUninstallOrganizationScope`) asks ' +
-      '`deletePackage`\'s organization-scope question BEFORE `registry.uninstallPackage`, and ' +
-      'answers with the code `deletePackage` refuses with (#7780), so a refused uninstall ' +
-      'changes nothing (#20492). The door never sends `allTenants`, so its condition is exactly ' +
-      'the producer\'s "no organization"; the protocol keeps its own refusal as the second line ' +
-      'and stays the registered emitter.',
+      '`DELETE /packages/:id` (domains/packages.ts, `requireUninstallOrganizationScope`) ' +
+      'asks `deletePackage`\'s organization-scope question BEFORE ' +
+      '`registry.uninstallPackage`, and answers with the code `deletePackage` refuses a ' +
+      'scope-less uninstall with (an uninstall across every organization must be declared, ' +
+      'never inferred from a missing one), so a refused uninstall changes nothing. The door ' +
+      'never sends `allTenants`, so its condition is exactly the producer\'s "no ' +
+      'organization"; the protocol keeps its own refusal as the second line and stays the ' +
+      'registered emitter.',
   },
 ];

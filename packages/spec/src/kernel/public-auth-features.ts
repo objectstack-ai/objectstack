@@ -191,10 +191,10 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'opt-in',
     exempt: {
       reason:
-        'No spec input (sys_device_code declares no actions). Known gap: ' +
-        'objectui DeviceAuthPage hits the device-auth endpoints without ' +
-        'checking this flag (absent from its client type) — tracked in ' +
-        'objectui#2513 (#2874 P2②).',
+        'No spec input (sys_device_code declares no actions). Login ' +
+        'consumption verified: objectui DeviceAuthPage reads this flag and, ' +
+        'when it is off, says device authorization is not enabled instead ' +
+        'of calling the device-auth endpoints.',
     },
   },
   admin: {
@@ -217,7 +217,9 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'opt-in',
     gatedInputs: ['sys_user.actions.create_user.params.phoneNumber'],
     notes:
-      'The original #2871 fix. Also read by objectui LoginForm for the ' +
+      'The fix this registry generalizes: create-user\'s phone field ' +
+      'follows the opt-in phoneNumber plugin instead of offering a field ' +
+      'the backend refuses. Also read by objectui LoginForm for the ' +
       'phone+password sign-in mode.',
   },
   phoneNumberOtp: {
@@ -227,7 +229,8 @@ export const PUBLIC_AUTH_FEATURES = {
       reason:
         'Login-surface only: gates the "sign in with verification code" link ' +
         '(LoginForm) and the phone branch of forgot-password. Only advertised ' +
-        'when SMS is actually deliverable (#2780).',
+        'when an SMS service can actually deliver the code; a log-only ' +
+        'transport in production keeps it off.',
     },
   },
 } as const satisfies Record<string, PublicAuthFeatureEntry>;
