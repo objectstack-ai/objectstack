@@ -9,14 +9,17 @@
  * (`IDataDriver.temporalFilterValue` / `temporalFilterColumnSql`) bound to the
  * object, and applies them after the shared lowering to every value
  * comparison. Both of its consumers pass the context's pair. Absent members are
- * identity.
+ * identity. The draft preview, which has no driver, puts both sides of each
+ * value comparison in the same storage form with `@objectstack/core`'s
+ * `temporalStorageForm`, by the column's declared type.
  *
  * Measured at `d2f452b88`, before this change, with the comparand bound as
  * written: the read scope differed from `engine.find` on 7 of the 12
  * `datetime` cells below on SQLite and 9 of 12 on PostgreSQL 16 under a
  * non-UTC server, and on 0 of the 4 `date` cells. The native face, which runs
  * the read scope, differed on the same cells end to end; the ObjectQL face
- * (the engine) on none.
+ * (the engine) on none. The preview differed on 7 of the 12 `datetime` cells
+ * and on 0 of the 4 `date` cells.
  *
  * The PostgreSQL cells run where `OS_TEST_POSTGRES_URL` is set, and are a
  * named skip otherwise. Each asserts its server is not on UTC, because a UTC
@@ -28,7 +31,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { lowerFilterCondition, type Cube, type FilterCondition } from '@objectstack/spec/data';
-import type { AnalyticsService } from '../analytics-service.js';
+import { DatasetSchema } from '@objectstack/spec/ui';
+import { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { compileScopedFilterToSql, type ReadScopeCompileOptions } from '../read-scope-sql.js';
 
@@ -118,6 +122,14 @@ const ROWS = [
   { id: 'r2', signed_at: '2026-07-28T00:00:00.000Z', due_on: '2026-07-28', note: '2026-07-28' },
   { id: 'r3', signed_at: '2026-07-28T10:00:00.000Z', due_on: '2026-07-28', note: '2026-07-28 late' },
   { id: 'r4', signed_at: '2026-07-29T10:00:00.000Z', due_on: '2026-07-29', note: 'n' },
+  { id: 'r5', signed_at: null, due_on: null, note: null },
+];
+/** The same instants and days as {@link ROWS}, drafted in other spellings an author can write. */
+const RESPELLED = [
+  { id: 'r1', signed_at: new Date(Date.UTC(2026, 6, 27, 10)), due_on: '2026-07-27T23:00:00Z', note: '2026-07-27' },
+  { id: 'r2', signed_at: '2026-07-28T00:00:00Z', due_on: '2026-07-28T00:00:00.000Z', note: '2026-07-28' },
+  { id: 'r3', signed_at: '2026-07-28 10:00:00', due_on: '2026-07-28', note: '2026-07-28 late' },
+  { id: 'r4', signed_at: '2026-07-29T18:00:00+08:00', due_on: '2026-07-29', note: 'n' },
   { id: 'r5', signed_at: null, due_on: null, note: null },
 ];
 const CUBE = {
@@ -256,6 +268,41 @@ for (const cell of DB_CELLS) {
         scope = null;
         expect(echo.params).toContain(driver.temporalFilterValue(OBJECT, 'signed_at', '2026-07-28'));
         expect(echo.params).not.toContain('2026-07-28');
+      });
+
+      it('the draft preview (queryDataset previewDrafts) answers the engine\'s rows over drafted rows in either spelling', async () => {
+        // Window ends written shorter than the stored instant, beside the cells.
+        const windows: Array<[string, [string, string]]> = [
+          ['datetime window to a zone-naive minute', ['2026-07-28', '2026-07-28T10:00']],
+          ['datetime window to a zone-naive second', ['2026-07-28', '2026-07-28T10:00:00']],
+        ];
+        for (const [label, [start, end]] of windows) {
+          expect(ids(await engine.find(OBJECT, { where: { signed_at: { $gte: start, $lte: end } }, fields: ['id'] } as never)), `${label}: engine.find`).toBe('r2,r3');
+        }
+        const dataset = DatasetSchema.parse({
+          name: 'os21505_preview',
+          label: 'Coercion preview',
+          object: OBJECT,
+          dimensions: [{ name: 'id', field: 'id', type: 'string' }, { name: 'signed_at', field: 'signed_at', type: 'date' }],
+          measures: [{ name: 'row_count', aggregate: 'count' }],
+        });
+        for (const [spelling, drafted] of [['canonical', ROWS], ['respelled', RESPELLED]] as const) {
+          // The live path is not wired, so an answer can only come from the preview.
+          const svc = new AnalyticsService({
+            sourceFieldMeta: (object: string, field: string) => (object === OBJECT && DECLARED[field] ? { type: DECLARED[field] } : undefined),
+            queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+            executeAggregate: async () => { throw new Error('the live path ran: the preview did not answer'); },
+            draftRowsResolver: async (object: string) => (object === OBJECT ? drafted.map((r) => ({ ...r })) : null),
+          } as never);
+          const preview = async (selection: Record<string, unknown>) =>
+            ids((await svc.queryDataset(dataset as never, { dimensions: ['id'], measures: ['row_count'], ...selection } as never, { tenantId: 'org_A' } as never, { previewDrafts: true })).rows);
+          for (const [label, where, expected] of CELLS) {
+            expect(await preview({ runtimeFilter: where }), `${spelling} rows, ${label}: the preview`).toBe(expected);
+          }
+          for (const [label, dateRange] of windows) {
+            expect(await preview({ timeDimensions: [{ dimension: 'signed_at', dateRange }] }), `${spelling} rows, ${label}: the preview`).toBe('r2,r3');
+          }
+        }
       });
     },
   );
