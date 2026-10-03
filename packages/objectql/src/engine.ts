@@ -290,42 +290,6 @@ import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
 import { materializeDeclaredFields } from './declared-fields.js';
-
-// ---- [#21571 MEASUREMENT PROBE — temporary, reverted before the fix] ----
-// Records every row a driver hands the engine that carries a key the object's
-// field map (plus id/created_at/updated_at) does not know. OS_PROBE_21571_OUT
-// names the JSONL sink; OS_PROBE_21571_TRIM=1 also deletes those keys.
-import { appendFileSync as __probe21571Append } from 'node:fs';
-function __probe21571(site: string, object: string, schema: any, rows: unknown): void {
-  const out = typeof process !== 'undefined' ? process.env.OS_PROBE_21571_OUT : undefined;
-  if (!out) return;
-  const fields = schema?.fields;
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
-  const known = new Set(Object.keys(fields));
-  if (known.size === 0) return;
-  known.add('id'); known.add('created_at'); known.add('updated_at');
-  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
-  const extra = new Set<string>();
-  for (const r of list) {
-    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
-    for (const k of Object.keys(r as object)) if (!known.has(k)) extra.add(k);
-  }
-  if (extra.size === 0) return;
-  const frames = String(new Error().stack ?? '').split('\n').slice(2)
-    .map((l) => l.trim())
-    .filter((l) => !l.includes('objectql/src/engine.ts') && !l.includes('objectql/dist/') && !l.includes('node_modules') && !l.includes('node:'))
-    .slice(0, 6);
-  try {
-    __probe21571Append(out, JSON.stringify({ site, object, extra: [...extra], frames }) + '\n');
-  } catch { /* probe only */ }
-  if (process.env.OS_PROBE_21571_TRIM === '1') {
-    for (const r of list) {
-      if (!r || typeof r !== 'object') continue;
-      for (const k of extra) delete (r as Record<string, unknown>)[k];
-    }
-  }
-}
-// ---- [/#21571 MEASUREMENT PROBE] ----
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -11974,7 +11938,6 @@ export class ObjectQL implements IObjectQLEngine {
 
       try {
           let result = await driver.find(object, hookContext.input.ast as QueryAST, hookContext.input.options as any);
-          __probe21571('find', object, _findSchema, result);
 
           // Post-process: evaluate formula virtual fields against the raw rows.
           // [#20082] With the caller's permission map when a formula calls
@@ -12251,7 +12214,6 @@ export class ObjectQL implements IObjectQLEngine {
       hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any);
 
       let result = await driver.findOne(objectName, hookContext.input.ast as QueryAST, hookContext.input.options as any);
-      __probe21571('findOne', objectName, _findOneSchema, result);
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).
@@ -14453,7 +14415,6 @@ export class ObjectQL implements IObjectQLEngine {
            const priorAst: QueryAST = { object, where: { id }, limit: 1 };
            const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
            priorRecord = await driver.findOne(object, priorAst, preOpts);
-           __probe21571('update-prior', object, this._registry.getObject(object), priorRecord);
            // ── [#7867] The not-found gate ──────────────────────────────────
            //
            // A by-id update whose id names no row was a SILENT NO-OP that
@@ -14577,7 +14538,6 @@ export class ObjectQL implements IObjectQLEngine {
                if (!priorRowsRead) {
                    priorRowsRead = true;
                    priorRows = (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [];
-                   __probe21571('updateMany-prior', object, this._registry.getObject(object), priorRows);
                }
                return priorRows;
            };
@@ -15100,7 +15060,6 @@ export class ObjectQL implements IObjectQLEngine {
                // call inside a hook to THIS object.
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
-                   __probe21571('update-result', object, this._registry.getObject(object), result);
                } catch (driverError) {
                    throw envelopeUniqueViolation(driverError, object);
                }
@@ -16901,7 +16860,6 @@ export class ObjectQL implements IObjectQLEngine {
         if (perRowBeforeHooks || perRowAfterHooks) {
           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
           const doomed = (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [];
-          __probe21571('deleteMany-prior', object, this._registry.getObject(object), doomed);
           // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
           // and before the driver call.
           this.assertBulkPerRowHookBudget(
