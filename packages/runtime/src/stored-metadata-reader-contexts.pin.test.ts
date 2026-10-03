@@ -588,10 +588,11 @@ describe('[#21454] the engine action verb is unreachable from a served body', ()
   it('a sandboxed body sees no `execute` on ctx.api.object(...)', async () => {
     const res = await as(adminToken, 'POST', '/actions/pin_note/body_calls_execute', { params: {} });
     expect(res.status).toBe(200);
-    const payload = await readJson(res);
+    const text = JSON.stringify(await readJson(res) ?? null);
     // The VM bridge installs only find/findOne/count/aggregate and the writes;
     // `execute` is not a function the body can call, so no raw scoped context
-    // is ever handed to a nested action through a served body.
-    expect(payload?.typeofExecute).toBe('undefined');
+    // is ever handed to a nested action through a served body. (Read from the
+    // response text, envelope-agnostic.)
+    expect(text).toContain('"typeofExecute":"undefined"');
   });
 });
