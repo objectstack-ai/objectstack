@@ -27,7 +27,7 @@
     }
   },
   "include": ["src/**/*"],
-  // [#14613] The TEST layer moved to the `tsconfig.test.json` sibling, which
+  // [commit 81208086a] The TEST layer moved to the `tsconfig.test.json` sibling, which
   // `package.json`'s `typecheck` NAMES via `check:test-typecheck --project`.
   // This stays the BUILD config. Splitting the two is what let a `typecheck`
   // script exist here at all: this package carried a `check:type-check-coverage`

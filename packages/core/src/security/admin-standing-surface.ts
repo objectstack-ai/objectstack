@@ -4,7 +4,7 @@
  * ADMIN_STANDING_SURFACE — what `resolveAuthzContext` READS when it decides
  * who is an administrator, declared beside the resolver that reads it.
  *
- * ## Why this file exists (#8734)
+ * ## Why this file exists (commit f8eb73601)
  *
  * `plugin-auth`'s break-glass guard (`last-admin-guard.ts`, ADR-0135 D5.2)
  * decides whether a pending write can empty the administrator population by

@@ -419,10 +419,11 @@ export class ApprovalsServicePlugin implements Plugin {
     };
 
     // Action-slot backfill (#21411): move the slot literals rows written
-    // before `acted_as` existed still hold in `actor_id`, and give the votes a
-    // pending request's tally still counts their `acted_as`. Every slot reader
-    // reads `acted_as` with no fallback to `actor_id`, so this runs at boot
-    // rather than waiting for an operator. Idempotent; see the module.
+    // before `acted_as` existed still hold in `actor_id`, null the machine
+    // sentinels earlier writers stored there (ADR-0118 D1), and give the votes
+    // a pending request's tally still counts their `acted_as`. Every slot
+    // reader reads `acted_as` with no fallback to `actor_id`, so this runs at
+    // boot rather than waiting for an operator. Idempotent; see the module.
     //
     // `error`, not `warn`: a failed run leaves the system looking normal while
     // in-flight multi-approver tallies have lost the votes they already
@@ -431,15 +432,16 @@ export class ApprovalsServicePlugin implements Plugin {
     const backfillSlots = async () => {
       try {
         const out = await backfillActionSlots(slotEngine);
-        if (out.literalsMoved > 0 || out.votesStamped > 0) {
+        if (out.literalsMoved > 0 || out.sentinelsCleared > 0 || out.votesStamped > 0) {
           ctx.logger.info('ApprovalsServicePlugin: action slots backfilled', out);
         }
       } catch (err: any) {
         ctx.logger.error(
           '[approvals] action-slot backfill failed — approvals recorded before the slot column existed are '
           + 'missing from multi-approver tallies and from the already-acted visibility of the slot\'s holders, '
-          + 'while everything else looks healthy. The repair is idempotent and runs at every boot: fix the '
-          + 'cause below and restart.',
+          + 'and stored machine actors still sit in the actor lookup where every join drops them, while '
+          + 'everything else looks healthy. The repair is idempotent and runs at every boot: fix the cause '
+          + 'below and restart.',
           err instanceof Error ? err : undefined,
           { error: err?.message ?? String(err) },
         );

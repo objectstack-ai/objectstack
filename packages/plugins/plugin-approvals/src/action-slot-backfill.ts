@@ -2,7 +2,8 @@
 
 /**
  * action-slot-backfill — the boot-time repair that moves stored SLOT
- * addresses out of `sys_approval_action.actor_id` and into `acted_as`.
+ * addresses out of `sys_approval_action.actor_id` and into `acted_as`, and
+ * clears the machine sentinels earlier writers stored there.
  *
  * ## Why rows need moving
  *
@@ -21,16 +22,23 @@
  * `actor_id`. So rows written before that have to be moved, or those readers
  * would not see them.
  *
+ * The same writers used to record the two machine sweeps under reserved
+ * sentinels — {@link LEGACY_MACHINE_SENTINELS} — in the same column. A
+ * machine has no `sys_user` id, so they now record `null`, and what the sweep
+ * did is the row's own kind (`escalate`; a `recall` that names the dead run).
+ * Stored sentinels drop out of every join exactly as slot literals do.
+ *
  * ## The two passes
  *
- * 1. **Slot literals, the whole history.** A row whose `actor_id` holds an
- *    address — it contains `:` (a `type:value` literal) or `@` (an email) — gets
- *    `acted_as := actor_id` and `actor_id := null`. `null` is ADR-0118's own
- *    value for "no person recorded", and it is the honest one: no stored record
- *    names the decider of such a row, and an email maps to a person only
- *    through whichever account carries it TODAY, which is a guess. The
- *    reserved machine actors ({@link RESERVED_MACHINE_ACTORS}) also contain
- *    `:` and are left alone; they are a separate ADR-0118 D1 debt.
+ * 1. **Non-ids in `actor_id`, the whole history.** One scan for a value that
+ *    contains `:` or `@`, which no user id does, and one write per row:
+ *    - a **slot address** — a `type:value` literal or an email — gets
+ *      `acted_as := actor_id` and `actor_id := null`. `null` is ADR-0118's own
+ *      value for "no person recorded", and it is the honest one: no stored
+ *      record names the decider of such a row, and an email maps to a person
+ *      only through whichever account carries it TODAY, which is a guess;
+ *    - a **machine sentinel** gets `actor_id := null` and nothing else. It was
+ *      never a slot — the sweep took none — so `acted_as` stays empty.
  *
  * 2. **Votes still being counted.** An `approve` row at `step_index` 0 of a
  *    request that is still `pending`, with no `acted_as`, gets
@@ -53,7 +61,7 @@
  * Wired on `kernel:ready` beside the approver-index rebuild, for the same
  * reason that one is: the readers move off `actor_id` in the same release, so
  * a repair that waited for an operator would leave a window in which tallies
- * and visibility are wrong. Pass 1 writes the column its own predicate reads,
+ * and visibility are wrong. Pass 1 nulls the column its own predicate reads,
  * and pass 2 fills the column it requires empty, so a second run over an
  * unchanged database writes nothing — `action-slot-backfill.integration.test.ts`
  * asserts exactly that. Pass 1 costs one substring scan of the action table
@@ -73,17 +81,19 @@ export interface ActionSlotBackfillEngine {
 }
 
 /**
- * Machine actors that live in `actor_id` by name and are not slots: the SLA
- * sweep's and the dead-run sweep's sentinels. Spelled here rather than imported
- * from the service so this module stays importable on its own; the pin holds
- * them equal to the service's exports.
+ * The machine sentinels earlier writers stored in `actor_id` for the SLA sweep
+ * and the dead-run sweep. Neither is written any more — a machine records
+ * `null` (ADR-0118 D1) — so these are spelled ONLY here, as the stored values
+ * pass 1 clears. They contain `:` like a slot literal, and are not slots.
  */
-export const RESERVED_MACHINE_ACTORS: readonly string[] = ['system:sla', 'system:dead-run'];
+export const LEGACY_MACHINE_SENTINELS: readonly string[] = ['system:sla', 'system:dead-run'];
 
 /** What one run wrote. */
 export interface ActionSlotBackfillResult {
   /** Pass 1: rows whose slot literal moved from `actor_id` to `acted_as`. */
   literalsMoved: number;
+  /** Pass 1: rows whose machine sentinel in `actor_id` was nulled. */
+  sentinelsCleared: number;
   /** Pass 2: still-counted approve votes that got their `acted_as`. */
   votesStamped: number;
 }
@@ -95,9 +105,14 @@ function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/** Is this stored `actor_id` one of the {@link LEGACY_MACHINE_SENTINELS}? */
+export function isMachineSentinel(actorId: string): boolean {
+  return LEGACY_MACHINE_SENTINELS.includes(actorId);
+}
+
 /** Does this stored `actor_id` hold a slot ADDRESS rather than a user id? */
 export function isSlotLiteral(actorId: string): boolean {
-  if (RESERVED_MACHINE_ACTORS.includes(actorId)) return false;
+  if (isMachineSentinel(actorId)) return false;
   return actorId.includes(':') || actorId.includes('@');
 }
 
@@ -112,35 +127,38 @@ export async function backfillActionSlots(
 ): Promise<ActionSlotBackfillResult> {
   const pageSize = options.pageSize ?? PAGE;
   let literalsMoved = 0;
+  let sentinelsCleared = 0;
   let votesStamped = 0;
 
-  // Pass 1 — slot literals in `actor_id`, the whole history. A seek walk, not
-  // an offset walk: every page moves rows OUT of the predicate it pages over.
-  const literals = keysetWalk<Record<string, unknown>>(
+  // Pass 1 — every non-id in `actor_id`, the whole history: slot literals and
+  // machine sentinels alike contain `:` or `@`, which no user id does. A seek
+  // walk, not an offset walk: every page moves rows OUT of the predicate it
+  // pages over.
+  const nonIds = keysetWalk<Record<string, unknown>>(
     (q) => engine.find('sys_approval_action', {
       ...q,
       fields: ['id', 'actor_id', 'acted_as'],
       context: SYSTEM_CONTEXT,
     }) as Promise<Record<string, unknown>[]>,
     {
-      where: {
-        $and: [
-          { $or: [{ actor_id: { $contains: ':' } }, { actor_id: { $contains: '@' } }] },
-          { actor_id: { $nin: [...RESERVED_MACHINE_ACTORS] } },
-        ],
-      },
+      where: { $or: [{ actor_id: { $contains: ':' } }, { actor_id: { $contains: '@' } }] },
       pageSize,
     },
   );
-  for await (const rows of literals.pages()) {
+  for await (const rows of nonIds.pages()) {
     for (const row of rows) {
       const id = nonEmpty(row.id);
       const actorId = nonEmpty(row.actor_id);
-      if (!id || !actorId || !isSlotLiteral(actorId)) continue;
+      if (!id || !actorId) continue;
+      const sentinel = isMachineSentinel(actorId);
+      if (!sentinel && !isSlotLiteral(actorId)) continue;
+      // Either way the column ends up empty. A slot also moves to `acted_as`;
+      // a sentinel does not — the sweep took no slot.
       const patch: Record<string, unknown> = { id, actor_id: null };
-      if (!nonEmpty(row.acted_as)) patch.acted_as = actorId;
+      if (!sentinel && !nonEmpty(row.acted_as)) patch.acted_as = actorId;
       await engine.update('sys_approval_action', patch, { context: SYSTEM_CONTEXT });
-      literalsMoved++;
+      if (sentinel) sentinelsCleared++;
+      else literalsMoved++;
     }
   }
 
@@ -169,12 +187,14 @@ export async function backfillActionSlots(
         const id = nonEmpty(row.id);
         const actorId = nonEmpty(row.actor_id);
         if (!id || !actorId || nonEmpty(row.acted_as)) continue;
-        if (RESERVED_MACHINE_ACTORS.includes(actorId)) continue;
+        // Pass 1 has already emptied every sentinel; a machine took no slot,
+        // so one is never stamped as a vote even if a write raced the scan.
+        if (isMachineSentinel(actorId)) continue;
         await engine.update('sys_approval_action', { id, acted_as: actorId }, { context: SYSTEM_CONTEXT });
         votesStamped++;
       }
     }
   }
 
-  return { literalsMoved, votesStamped };
+  return { literalsMoved, sentinelsCleared, votesStamped };
 }

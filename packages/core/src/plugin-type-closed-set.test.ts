@@ -22,7 +22,7 @@
 // ⚠️ This used to read as though the split were forced — that
 // `@objectstack/core` "has no `typecheck` script (type-check DEBT ledger
 // entry)", making a `@ts-expect-error` here a phantom pin
-// `check:type-check-coverage` refuses. False on this tree: #14613 split a
+// `check:type-check-coverage` refuses. False on this tree: commit 81208086a split a
 // `tsconfig.test.json` out of the build config, `package.json`'s `typecheck`
 // NAMES it (via `check:test-typecheck --project`), and this package holds no
 // DEBT entry. A directive here WOULD be evaluated — against `./types.ts`,

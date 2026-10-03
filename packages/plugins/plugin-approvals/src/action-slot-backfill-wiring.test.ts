@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const backfill = vi.hoisted(() => ({
-  fn: vi.fn(async (_engine: unknown) => ({ literalsMoved: 0, votesStamped: 0 })),
+  fn: vi.fn(async (_engine: unknown) => ({ literalsMoved: 0, sentinelsCleared: 0, votesStamped: 0 })),
 }));
 
 vi.mock('./action-slot-backfill.js', async (importOriginal) => ({
@@ -69,6 +69,14 @@ describe('the action-slot backfill is wired on kernel:ready (#21411)', () => {
     await fire('kernel:ready');
     expect(backfill.fn).toHaveBeenCalledTimes(1);
     expect(backfill.fn.mock.calls[0][0]).toBe(engine);
+  });
+
+  it('a run that only cleared machine sentinels still reports what it wrote', async () => {
+    backfill.fn.mockResolvedValueOnce({ literalsMoved: 0, sentinelsCleared: 2, votesStamped: 0 });
+    const { ctx, fire, logged } = fakeContext(fakeEngine());
+    await new ApprovalsServicePlugin({ disableAutoHooks: true }).start(ctx);
+    await fire('kernel:ready');
+    expect(logged.info.some((m) => m.includes('action slots backfilled'))).toBe(true);
   });
 
   it('a failed run is logged at error, naming what stays wrong and the fix', async () => {

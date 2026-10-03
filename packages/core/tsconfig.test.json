@@ -1,4 +1,4 @@
-// The TEST-layer type-check program (#14613), adopting the mechanism #5286 set
+// The TEST-layer type-check program (commit 81208086a), adopting the mechanism #5286 set
 // for `packages/spec`, #5449 generalised, and `packages/rest` / `packages/objectql`
 // already run. `tsconfig.json` beside it stays the BUILD config; this sibling
 // puts the layer that config excludes back in front of tsc, and `package.json`'s
