@@ -57,7 +57,13 @@ import {
   resolveRecordTitle,
   resolveRelatedTitleTarget,
 } from '@objectstack/objectql';
-import { serveStoredMetadataReadsThrough } from '../stored-metadata-reader-seam.js';
+import { refuseStoredMetadataBodyWrites, serveStoredMetadataReadsThrough } from '../stored-metadata-reader-seam.js';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import {
+  isWildcardHookTarget,
+  storedMetadataBodyHookBindingRefusal,
+  storedMetadataFamilyTableList,
+} from '../stored-metadata-body-boundary.js';
 
 interface FactoryOptions {
   ql: any;
@@ -290,6 +296,20 @@ export function hookBodyRunnerFactory(
     const raw = (hook as any).body;
     if (!raw) return undefined;
 
+    // [#21520] An app-authored hook BODY may not be bound to a table of the
+    // stored-metadata family: the metadata protocol is the family's only writer
+    // for a body. This is the ONE point every body hook passes through to become
+    // a handler, whichever door bound it — the boot artifact and an installed
+    // artifact (`bindAppArtifactHandlers`), and runtime-authored hooks
+    // (ObjectQLPlugin's metadata-service bind, through the engine's default
+    // runner) — so the refusal is made here, at registration, and never per
+    // door. Thrown rather than answered `undefined`: the binder records the
+    // throw against the hook and logs it at `error` (rethrows under `strict`),
+    // whereas `undefined` would be reported as a missing runner. Platform hooks
+    // are code, not bodies, and never reach this factory.
+    const bindingRefusal = storedMetadataBodyHookBindingRefusal(hook as any);
+    if (bindingRefusal) throw bindingRefusal;
+
     const parsed = HookBodySchema.safeParse(raw);
     if (!parsed.success) {
       opts.logger?.warn?.('[BodyRunner] invalid hook.body shape', {
@@ -301,7 +321,24 @@ export function hookBodyRunnerFactory(
     }
     const body = parsed.data;
 
+    // [#21520] A wildcard target names no family table, so it binds — but it
+    // admits every object, the family's among them, and the boundary is that a
+    // body never touches those tables. So the body is not run for a family
+    // table's event (below), and the author is told once, at bind.
+    if (isWildcardHookTarget((hook as any).object)) {
+      opts.logger?.info?.(
+        `[BodyRunner] hook '${hook.name}' targets every object ('*'); its body is never run for the stored-metadata `
+          + `tables (${storedMetadataFamilyTableList()}). Change metadata through the metadata API.`,
+        { appId: opts.appId, hook: hook.name },
+      );
+    }
+
     return async function boundBodyHandler(engineCtx: any): Promise<void> {
+      // [#21520] The dispatch-side half of the binding refusal above: whatever
+      // admitted this event (a wildcard, a global registration), a body does not
+      // run on a stored-metadata table's event, so it never receives that row
+      // as its input or writes it back.
+      if (typeof engineCtx?.object === 'string' && isStoredMetadataBodyObject(engineCtx.object)) return;
       const sandboxCtx = buildSandboxContext(
         engineCtx,
         opts.ql,
@@ -795,9 +832,17 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
  * place both body faces get their API, so the hook face, the action face and
  * every fallback below are served alike, and a body can copy only what it was
  * served.
+ *
+ * [#21520] And, layered over that, a body may not WRITE a stored-metadata table
+ * at all: every write of one is refused before it runs, whatever the body's
+ * elevation. Applied HERE and nowhere else because this is the one place a
+ * body gets its API — a host code handler's `ctx.api` is served by the read
+ * seam but keeps its writes (deployer code, outside the boundary).
  */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
-  return serveStoredMetadataReadsThrough(buildSandboxApiSource(engineCtx, ql, errLabel), ql);
+  return refuseStoredMetadataBodyWrites(
+    serveStoredMetadataReadsThrough(buildSandboxApiSource(engineCtx, ql, errLabel), ql),
+  );
 }
 
 function buildSandboxApiSource(engineCtx: any, ql: any, errLabel: string) {

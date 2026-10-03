@@ -38,7 +38,6 @@ import {
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
-import { anonymousFormIntakeSlugs } from './anonymous-form-intake.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -90,6 +89,9 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
+    // The one rule for which forms a `view` body opens to anonymous intake —
+    // the same rule the anonymous form doors in `@objectstack/rest` serve by.
+    anonymousFormIntakeSlugs,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -5241,6 +5243,73 @@ export class ObjectStackProtocolImplementation implements
      */
     registerUninstallCleanup(name: string, cleanup: UninstallCleanup): void {
         this.uninstallCleanups.set(name, cleanup);
+    }
+
+    /**
+     * Run every registered uninstall cleanup for one package and report each
+     * outcome (ADR-0086 D3, #2747) — THE one runner of the registry above.
+     *
+     * [#21490] Extracted from {@link deletePackage}, which calls it as its last
+     * step, so that a door uninstalling a package the protocol never stored —
+     * install-local's `DELETE /api/v1/marketplace/install-local/:manifestId`,
+     * whose package has no `sys_packages` row and no `sys_metadata` rows —
+     * runs the SAME cleanups after its own removal instead of none. Measured on
+     * that door before this existed: the package's object answered 404 after a
+     * restart while its `managed_by: package` `sys_permission_set` row and its
+     * user grant survived. `deletePackage` itself does not fit that door: it
+     * refuses without a tenant scope, answers `success: false` when it deletes
+     * no `sys_metadata` row, and withdraws the package from the running
+     * registry, which that door never did.
+     *
+     * Best-effort per cleanup and never throws: a cleanup's failure is an
+     * outcome (`success: false`), its text quoted only when the cleanup
+     * declared a refusal. Ghost grants are a security condition, so every
+     * caller surfaces a failed outcome — on its response, as `deletePackage`
+     * does — and never swallows it.
+     */
+    async runUninstallCleanups(
+        request: Pick<DeletePackageRequest, 'packageId' | 'organizationId' | 'actor'>,
+    ): Promise<UninstallCleanupOutcome[]> {
+        const cleanups: UninstallCleanupOutcome[] = [];
+        for (const [name, cleanup] of this.uninstallCleanups) {
+            try {
+                const r = await cleanup({
+                    packageId: request.packageId,
+                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                    ...(request.actor ? { actor: request.actor } : {}),
+                });
+                cleanups.push({
+                    name,
+                    success: r?.success !== false,
+                    removed: typeof r?.removed === 'number' ? r.removed : 0,
+                    ...(r?.error ? { error: r.error } : {}),
+                });
+            } catch (e: any) {
+                // [#8136] A cleanup is arbitrary plugin code that goes straight
+                // at the engine (plugin-security deletes `sys_permission_set`
+                // rows and their bindings), so a driver failure lands here
+                // verbatim — and this outcome rides on the RESPONSE by design,
+                // inside `details`, where no boundary's message withhold can
+                // reach it. Quoted only when the cleanup declared a refusal.
+                // [#12536] The mark travels beside the withheld sentence, not
+                // instead of it: `error` stays whatever #8136's rule licenses,
+                // and a cleanup that refused in the author's own words is still
+                // reported as a refusal rather than as one that merely
+                // "failed".
+                const cleanupUserMessage = declaredUserMessage(e);
+                cleanups.push({
+                    name,
+                    success: false,
+                    removed: 0,
+                    error: clientFacingFailureText(e, 'cleanup failed'),
+                    ...(cleanupUserMessage !== undefined ? { userMessage: cleanupUserMessage } : {}),
+                });
+                console.warn(
+                    `[protocol.runUninstallCleanups] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
+                );
+            }
+        }
+        return cleanups;
     }
 
     /**
@@ -21702,45 +21771,9 @@ export class ObjectStackProtocolImplementation implements
         // sys_permission_set rows and their bindings. Best-effort per cleanup;
         // outcomes ride on the response so a failed revocation (ghost grants —
         // a security condition) is visible to the caller, never silent.
-        const cleanups: UninstallCleanupOutcome[] = [];
-        for (const [name, cleanup] of this.uninstallCleanups) {
-            try {
-                const r = await cleanup({
-                    packageId: request.packageId,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-                    ...(request.actor ? { actor: request.actor } : {}),
-                });
-                cleanups.push({
-                    name,
-                    success: r?.success !== false,
-                    removed: typeof r?.removed === 'number' ? r.removed : 0,
-                    ...(r?.error ? { error: r.error } : {}),
-                });
-            } catch (e: any) {
-                // [#8136] A cleanup is arbitrary plugin code that goes straight
-                // at the engine (plugin-security deletes `sys_permission_set`
-                // rows and their bindings), so a driver failure lands here
-                // verbatim — and this outcome rides on the RESPONSE by design,
-                // inside `details`, where no boundary's message withhold can
-                // reach it. Quoted only when the cleanup declared a refusal.
-                // [#12536] The mark travels beside the withheld sentence, not
-                // instead of it: `error` stays whatever #8136's rule licenses,
-                // and a cleanup that refused in the author's own words is still
-                // reported as a refusal rather than as one that merely
-                // "failed".
-                const cleanupUserMessage = declaredUserMessage(e);
-                cleanups.push({
-                    name,
-                    success: false,
-                    removed: 0,
-                    error: clientFacingFailureText(e, 'cleanup failed'),
-                    ...(cleanupUserMessage !== undefined ? { userMessage: cleanupUserMessage } : {}),
-                });
-                console.warn(
-                    `[protocol.deletePackage] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
-                );
-            }
-        }
+        // [#21490] Through the registry's one runner, which install-local's
+        // uninstall door calls too.
+        const cleanups = await this.runUninstallCleanups(request);
 
         return {
             success: failed.length === 0 && deleted.length > 0,

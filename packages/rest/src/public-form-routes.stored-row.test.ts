@@ -112,7 +112,7 @@ async function persistedBody(name: string, item: unknown): Promise<any> {
 
 // ─── the fixtures an author writes in Studio ────────────────────────────────
 
-const SHARING = { allowAnonymous: true, publicLink: '/forms/contact' };
+const SHARING = { enabled: true, allowAnonymous: true, publicLink: '/forms/contact' };
 const DATA = { provider: 'object', object: 'lead' };
 
 /** The section every case declares. */

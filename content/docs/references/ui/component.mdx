@@ -458,7 +458,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead |
-| **calendar** | `any` | optional | Calendar field config: `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar field config `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` — the same block a list view's `calendar` declares; `startDateField` is required |
 | **defaultView** | `Enum<'month' \| 'week' \| 'day'>` | optional | Initial view mode |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
@@ -467,6 +467,16 @@ Sort field and direction pair
 | **locale** | `string` | optional | Locale override for the calendar chrome |
 | **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
+
+### Nested Shape: `ObjectCalendarProps.calendar`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field providing the event start date/time |
+| **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
+| **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 
 ### Nested Shape: `ObjectCalendarProps.filter[number]`
 
@@ -683,7 +693,7 @@ Sort field and direction pair
 | **description** | `string \| Record<string, string>` | optional | One line of help text drawn above the grid's rows — a string, or an inline locale map resolved against the display locale |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | What the grid draws instead of an empty table: `{ title, message, icon }` — the list view's own empty-state shape |
 | **columns** | `any[]` | optional | Columns: field names or column definition objects |
-| **fields** | `any[]` | optional | Field list fallback used when `columns` is absent |
+| **fields** | `string[]` | optional | Field-name fallback the grid reads when `columns` is absent — bare field names (`['name', 'amount']`); write column decoration such as `label` or `width` on `columns` |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **defaultFilters** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Legacy base-filter fallback, read only when `filter` is absent — the SAME ViewFilterRule array form `[{ field, operator, value }, ...]` as `filter`, lowered through the same sink. Prefer `filter`. The MongoDB-style record form, a bare string and an ObjectQL AST tuple array are refused — see migration `object-grid-default-filters-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
@@ -698,11 +708,11 @@ Sort field and direction pair
 | **aggregations** | `{ field: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'> }[]` | optional | Per-group aggregations drawn in a grouped grid's group headers — `[{ field, type }]`, `type` one of `count`, `sum`, `avg`, `min`, `max`, `count_distinct` (`count` is the group's row count, whatever `field` names) |
 | **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to the row |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Row colour by field value — `{ field, colors }`, the same block a list view's `rowColor` declares |
-| **selection** | `any` | optional | Selection config (`{ type: none \| single \| multiple }`) |
-| **selectable** | `any` | optional | Legacy selection shorthand, read only when `selection` is absent. Prefer `selection` |
-| **rowActions** | `any[]` | optional | Per-row action names |
-| **bulkActions** | `any[]` | optional | Bulk action names shown on selection |
-| **batchActions** | `any[]` | optional | Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`) |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Selection config `{ type }` — `none`, `single` or `multiple`, the same block a list view's `selection` declares |
+| **selectable** | `boolean \| Enum<'single' \| 'multiple'>` | optional | Legacy selection shorthand, read only when `selection` is absent — `true` (multiple), `false` (off), `'single'` or `'multiple'`. Prefer `selection` |
+| **rowActions** | `string[]` | optional | Per-row action names — `edit` / `delete` select the generic entries, any other name resolves against the object's actions; the same list a list view's `rowActions` declares |
+| **bulkActions** | `string[]` | optional | Bulk action names shown on selection — the same list a list view's `bulkActions` declares; a full def goes on `bulkActionDefs` |
+| **batchActions** | `string[]` | optional | Alternate spelling of `bulkActions` that the renderer reads FIRST (`batchActions ?? bulkActions`) — the same action-name list. Prefer `bulkActions` |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Inline bulk-action definitions (full defs, not names) — the same `BulkActionDef` entries a list view's `bulkActionDefs` declares |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 | **editable** | `boolean` | optional | Enable inline cell editing |
@@ -781,6 +791,12 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
 | **colors** | `Record<string, string>` | optional | Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve. |
+
+### Nested Shape: `ObjectGridProps.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'single' \| 'multiple'>` | optional (default: `"none"`) | Selection mode |
 
 ### Nested Shape: `ObjectGridProps.bulkActionDefs[number]`
 
@@ -872,7 +888,7 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **groupBy** | `string` | optional | Field whose values become the board columns |
-| **columns** | `any[]` | optional | Swimlane definitions (`{ id, title }` per `groupBy` value, or bare value strings) — NOT a field projection |
+| **columns** | `string[] \| { id: string; title: string; cards?: object[]; limit?: integer; … }[]` | optional | Swimlane definitions — all lane objects `{ id, title, cards?, limit?, className?, collapsed? }` (one per `groupBy` value), or all bare value strings (drawn only on a board with no `groupBy`). NOT a field projection; one spelling per list |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **limit** | `integer` | optional | Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills this key only when it is unset — and on this face unset is the whole rule, because every cap this key accepts is one the binding gate already treats as authored |
 | **data** | `any[]` | optional | Static inline cards — bypasses the object query |
@@ -885,6 +901,17 @@ Sort field and direction pair
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
+
+### Nested Shape: `ObjectKanbanProps.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Lane id — the `groupBy` value whose records land in this lane (matched as a string) |
+| **title** | `string` | ✅ | Lane heading, localized against the `groupBy` picklist's option labels |
+| **cards** | `({ id: string; title: string } & Record<string, any>)[]` | optional | A static board's own cards, drawn ahead of the records bucketed into this lane — each `{ id, title, … }`, the rest of the card being the record row's own values |
+| **limit** | `integer` | optional | WIP limit — the card count at which the lane warns; never reaches the query |
+| **className** | `string` | optional | CSS class names applied to the lane |
+| **collapsed** | `boolean` | optional | Whether the lane first renders collapsed — a title spine with its cards withheld, which the viewer can reopen |
 
 ### Nested Shape: `ObjectKanbanProps.filter[number]`
 
