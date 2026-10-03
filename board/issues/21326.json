@@ -2,8 +2,8 @@
   "number": 21326,
   "kind": "issue",
   "title": "spec+service-settings: build ADR-0128 D1–D3, a producer-discriminated, delimiter-safe AAD on CryptoContext, with a versioned handle and an at-rest rewrap",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,22 +14,23 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3",
     "security"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T04:36:27Z",
-  "updated_at": "2026-10-02T20:00:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T01:55:44Z",
+  "closed_at": "2026-10-03T01:53:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21326",
-  "body": "Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) as an execution parameter of the maintainer's ruling **A** on #21263 (`5945612493`, batch #267 item 1, 「其他同意」). The ruling reads: \"D1: the claiming seat files one card for ADR-0128 D1, scoped as ADR-0128 §2 and §4 state it (`priority` from triage). It is not this PR.\" ⛔ Not a claim. ⛔ Not graded here: priority and lane are triage's.\n\n⚠️ Security family: this card names classes and positions only.\n\n## Why now\n\nADR-0128 (Accepted 2026-09-07) recorded D1–D3 as a direction and deferred the work (§4), naming four triggers that fund it. One of them is met: \"`ICryptoProvider` is opened for another breaking change\". PR #21292 (#21263) adds the required `keyedDigest` member. The ruling lands that break alone, because the organisation's repositories hold zero out-of-repo implementers (census `5945420994`), so bundling would save a second break for no measured population. The deferral is therefore over, and this card schedules the work. A separate Tier H card carries ADR-0128's dated note.\n\n## Scope (ADR-0128 §2 and §4, as written)\n\n- **D1:** `CryptoContext` (`packages/spec/src/contracts/crypto-provider.ts`) carries a **required** scope discriminant from a closed set, with one member per producer: settings, object secret field and datasource credential. Every provider that binds AAD folds it in.\n- **D2:** the AAD encoding is delimiter-safe: length-prefixed, escaped or canonical structured. ⛔ No unescaped join.\n- **D3:** the fix is at the producer of the AAD (`ICryptoProvider` and `LocalCryptoProvider` in `packages/services/service-settings`). ⛔ No consumer-side fallback that tries another vocabulary's AAD.\n- **§4.2, the expensive half:** an at-rest rewrap of every existing ciphertext. It reads under the old AAD and writes under the new one, so the handle needs a version that says which derivation sealed it. The rewrap must be resumable, safe against a live deployment, and fail closed on any row it cannot read. `rotateKey` is the seam §4 names.\n- **The producers to thread the discriminant through** (ADR-0128's Consumers line): the settings service, the engine's secret-field path (`@objectstack/objectql`) and the datasource secret binder (`@objectstack/service-datasource`). Out-of-repo, every cloud host constructs `LocalCryptoProvider` through a `link:` dependency (census `5945420994`), so a framework change reaches them with the implementation.\n\n## What triage decides\n\n- Priority, and whether this splits into stages, for example contract + provider + versioned handle first and the rewrap second. ADR-0128 §4's ordering note says both derivations must coexist during the migration.\n- Lanes: the work spans `domain:spec` (the contract) and `domain:services` (the provider and the producers).\n- ⛔ This card does not reopen the direction (ADR-0128 D1–D4 stand). It only schedules them.\n\n## Dedupe\n\nThe 100 most recently updated open issues and PRs were listed over REST (repo-scoped) and grepped for `ADR-0128`, `producer-discriminated` and `rewrap`. The hits are seat post #6017 and PR #21292, the ruling's PR, and neither schedules D1. #12599 is the closed source card. #21263 is the ruling's anchor.\n\nDedupe words: ADR-0128 D1 producer-discriminated AAD · CryptoContext scope discriminant · sys_secret rewrap versioned handle"
+  "body": "Ruled: 5964319930 · letter B · 2026-10-03T01:55Z\n\nFiled by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) as an execution parameter of the maintainer's ruling **A** on #21263 (`5945612493`, batch #267 item 1, 「其他同意」). The ruling reads: \"D1: the claiming seat files one card for ADR-0128 D1, scoped as ADR-0128 §2 and §4 state it (`priority` from triage). It is not this PR.\" ⛔ Not a claim. ⛔ Not graded here: priority and lane are triage's.\n\n⚠️ Security family: this card names classes and positions only.\n\n## Why now\n\nADR-0128 (Accepted 2026-09-07) recorded D1–D3 as a direction and deferred the work (§4), naming four triggers that fund it. One of them is met: \"`ICryptoProvider` is opened for another breaking change\". PR #21292 (#21263) adds the required `keyedDigest` member. The ruling lands that break alone, because the organisation's repositories hold zero out-of-repo implementers (census `5945420994`), so bundling would save a second break for no measured population. The deferral is therefore over, and this card schedules the work. A separate Tier H card carries ADR-0128's dated note.\n\n## Scope (ADR-0128 §2 and §4, as written)\n\n- **D1:** `CryptoContext` (`packages/spec/src/contracts/crypto-provider.ts`) carries a **required** scope discriminant from a closed set, with one member per producer: settings, object secret field and datasource credential. Every provider that binds AAD folds it in.\n- **D2:** the AAD encoding is delimiter-safe: length-prefixed, escaped or canonical structured. ⛔ No unescaped join.\n- **D3:** the fix is at the producer of the AAD (`ICryptoProvider` and `LocalCryptoProvider` in `packages/services/service-settings`). ⛔ No consumer-side fallback that tries another vocabulary's AAD.\n- **§4.2, the expensive half:** an at-rest rewrap of every existing ciphertext. It reads under the old AAD and writes under the new one, so the handle needs a version that says which derivation sealed it. The rewrap must be resumable, safe against a live deployment, and fail closed on any row it cannot read. `rotateKey` is the seam §4 names.\n- **The producers to thread the discriminant through** (ADR-0128's Consumers line): the settings service, the engine's secret-field path (`@objectstack/objectql`) and the datasource secret binder (`@objectstack/service-datasource`). Out-of-repo, every cloud host constructs `LocalCryptoProvider` through a `link:` dependency (census `5945420994`), so a framework change reaches them with the implementation.\n\n## What triage decides\n\n- Priority, and whether this splits into stages, for example contract + provider + versioned handle first and the rewrap second. ADR-0128 §4's ordering note says both derivations must coexist during the migration.\n- Lanes: the work spans `domain:spec` (the contract) and `domain:services` (the provider and the producers).\n- ⛔ This card does not reopen the direction (ADR-0128 D1–D4 stand). It only schedules them.\n\n## Dedupe\n\nThe 100 most recently updated open issues and PRs were listed over REST (repo-scoped) and grepped for `ADR-0128`, `producer-discriminated` and `rewrap`. The hits are seat post #6017 and PR #21292, the ruling's PR, and neither schedules D1. #12599 is the closed source card. #21263 is the ruling's anchor.\n\nDedupe words: ADR-0128 D1 producer-discriminated AAD · CryptoContext scope discriminant · sys_secret rewrap versioned handle\n"
 }

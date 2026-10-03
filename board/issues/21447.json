@@ -2,9 +2,9 @@
   "number": 21447,
   "kind": "pull_request",
   "title": "fix(plugin-sharing): the record owner and an explicit Modify-All holder may mint a share link without visibility (ADR-0111 D8 rule 1, ruling A′)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/xl",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T17:52:28Z",
-  "updated_at": "2026-10-02T19:45:59Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-02T21:12:39Z",
+  "closed_at": "2026-10-02T21:12:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-02T21:12:37Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21447",

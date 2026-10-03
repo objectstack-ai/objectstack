@@ -1,0 +1,33 @@
+{
+  "number": 21465,
+  "kind": "issue",
+  "title": "finding(pm): `check-widening-tells` T2 reads identifiers in a multi-line import list as \"a new member of a closed set\" — a by-reference narrowing that only adds imports is forced to declare `Clause-②: yes`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T20:36:54Z",
+  "updated_at": "2026-10-02T20:54:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21465",
+  "body": "Filing gate: **① a defect with a measured `reach:`**, in the PM tooling. A gate reading forces a false declaration. This card records the family's newest T2 position, with an enumeration pin.\n\n`reach:` reproduced on PR #21463's diff (head `52c4c42d72`) with `node scripts/pm/check-widening-tells.mjs --declaration no --diff`. It reports **T2 \"a new member of a closed set (z.enum / union / an as const array)\"** on three lines of `packages/spec/src/ui/component.zod.ts`, about `:34-36`:\n- `+ RowHeightSchema,`\n- `+ RowColorConfigSchema,`\n- `+ ListViewSchema,`\n\nThese are specifiers added to a multi-line `import { … } from './view.zod'` list, not members of any closed set. It did not change that PR's verdict, because a true T1 forced `yes (narrowing)` anyway. A pure by-reference narrowing whose only other change is an import would meet exit 4 under a truthful `no (narrowing)`. Measured by the #21445 dev (`5960961904`, `out_of_scope_findings[0]`).\n\nFiled by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The family (T2's closed-set reading)\n\n- **Closed:**\n  - #16822: the first fragment of a multi-line string argument;\n  - #16943: a replaced string property value;\n  - #17300: the retirement ledger's generated rows;\n  - #19541: any bare string element, with no measured enclosing set.\n- **Noted, not filed:** PR #21425's ACCEPT (`5955887463`) recorded T2 firing on the members of a module-private `as const` set that NARROWS the accept set (`SINGLE_SERIES_CHART_TYPES`).\n- **This card:** a bare identifier element inside an `import { … }` (or `export { … }`) specifier list.\n\n## Direction (for triage, not a ruling)\n\n- T2 classifies an added element by the construct that encloses it, read from the diff's context, as #19541 began.\n- An import or export specifier list is never a closed set.\n- An `as const` array whose only reader is a refusal predicate is reported as a narrowing tell, not a widening.\n- **Enumeration pin:** one fixture per enclosing construct (`z.enum([...])`, `z.union([...])`, `as const` array, import list, export list, function argument list, object literal), each with the expected T2 verdict. A new false-positive shape is then a red fixture, not a new card.\n- This fixes a gate's precision; it is not a new gate (`domain:skills` scope, per SKILL.md's ownership table for non-gate `scripts/pm/**`).\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, 「check-widening-tells T2 false positive closed set import specifier as const private narrowing」: 13 hits, all closed (the family above, plus T1 and T4 cards: #20969, #17926, #19156, #19490, #19608, #18721, #17955, #17848, #15270). None covers an import specifier list.\n\nDedupe words: `check-widening-tells T2 import specifier` · `widening tells multi-line import closed set` · `T2 as const narrowing set`"
+}

@@ -2,8 +2,8 @@
   "number": 21418,
   "kind": "issue",
   "title": "[security] operatorFacingErrorText hands a raw statement fault's cause message, statement and inlined values included, to its operator-facing callers: the fourth position of the #21274 / #21345 / #21385 family",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:access",
     "bug",
     "domain:cli",
-    "pm:queue",
-    "priority:p2",
+    "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T13:55:35Z",
-  "updated_at": "2026-10-02T17:03:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T00:45:48Z",
+  "closed_at": "2026-10-03T00:44:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21418",
   "body": "Filing gate: **① a defect with named positions**, filed under the reach exception for **possible data disclosure**: an operator-facing text can carry a raw statement's bound values. ⚠️ Classes and positions only: no statement, value or reproduction here. This is the **fourth position** of the driver-fault redaction family, after #21274, #21345 and #21385 (PR #21414, open).\n\n`reach:` measured at the helper, with the security exception for the callers. #21385's dev (os-dev-report on #21385, `out_of_scope_findings[0]`) measured this at PR #21414's head `7445ed5cd` on SQLite, with a synthetic sentinel bound into a raw statement:\n- the declared `DATABASE_ERROR` envelope's message carries no sentinel;\n- `operatorFacingErrorText` returns the raw path's `cause` message whole, sentinel included, equal to the `cause` message.\n\nThe callers listed below were read from source. The three migration-probe sites the dev read bind identifiers only, so **no caller-value reach was measured** at a caller.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`). **Reader who acts:** triage grades and routes. The helper is `packages/types` (`domain:cli`), and its callers span `domain:cli` and `domain:engine` packages. ⛔ Not a claim.\n\n## Positions (at `origin/main`)\n\n- **The helper:** `packages/types/src/driver-error-classification.ts:785`, `operatorFacingErrorText`. It hands an operator the most useful text of a driver fault, preferring the `cause` the envelope withholds from a client. On the raw-statement path that `cause` is the dialect's message, which opens with the statement and, on SQLite and MySQL, inlines the bound values.\n- **Its non-test callers**, which write that text to a logger's meta or to a result's detail or error:\n  - `packages/cli/src/commands/db/clean.ts`;\n  - `packages/metadata-protocol/src/migrations/`: `partial-index-probe.ts`, `read-probe.ts`, `runtime-index-preflight.ts` and `seed-tenancy-backfill.ts`;\n  - `packages/metadata/src/migrations/`: `drop-projection-tables.ts`, `migrate-env-id-to-project-id.ts` and `migrate-project-id-to-environment-id.ts`.\n\n## Governing text\n\n- **The maintainer's ruling A on #21385** (5950942037): \"one cutter for every log face … the platform's logs never carry a caller's bound values\", which retires the \"kept server-side\" premise for caller-supplied values at every layer.\n- **#21274's ruling** (5943536760): logs leave the data's trust boundary.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- `operatorFacingErrorText` passes the text it returns through the shared redaction core. After PR #21414 lands that core is in `@objectstack/core` (`redactStatementFromMessage`); `@objectstack/types` sits below core, so the claim measures where the call belongs. Alternatively, each caller passes the helper's answer through that core before it logs or reports. Either way there is ⛔ no copy of the cut, and ⛔ no row added to the #16019 frozen list.\n- **Pins:** a synthetic sentinel bound into a raw statement reaches no carrier through the helper, nor through each caller's log or result. The diagnostic, code and class survive.\n- `Clause-②: no`.\n- **Serial after PR #21414**, which moves the cut into `@objectstack/core`.\n\n## Dedupe\n\nThrough `mcp__github__search_issues`, repo-scoped, open and closed: 「operatorFacingErrorText returns raw statement cause message bound value migration probe detail」 gave 16 hits.\n- #21385 (open) is this family's third position.\n- #21345 and #21274 are closed and are its earlier positions.\n- The rest are closed and on other subjects: #13219, #20805, #20513, #9275, #15437, #8931, #12915 and #8441.\n\nNone names `operatorFacingErrorText`.\n\nDedupe words: `operatorFacingErrorText cause statement` · `raw statement fault operator detail bound value` · `migration probe detail statement` · `driver fault redaction types helper`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

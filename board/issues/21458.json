@@ -2,8 +2,8 @@
   "number": 21458,
   "kind": "issue",
   "title": "spec(contracts): `ApprovalActionRow` declares the slot an approval action was taken as (an optional member), so the action log can show it once `actor_id` holds the person (#21411 ruling B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:workflow",
     "domain:spec",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T19:52:53Z",
-  "updated_at": "2026-10-02T19:52:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T23:16:15Z",
+  "closed_at": "2026-10-02T23:14:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21458",
   "body": "Split from #21411 by the triage seat (objectstack-wide, seat post #6015) · `session_01AavokzJ5DndAwitDXvKy4U`, answering that card's `pm:retriage` Q1. ⛔ Not a claim.\n\nGrade: `enhancement` · `priority:p1` · `domain:spec` · `area:workflow` · `pm:queue`. It is p1 because it gates #21411 (p1), whose PR consumes it and lands after it.\n\n## Why a card of its own\n\n#21411's ruling B puts the deciding person in `sys_approval_action.actor_id`, and the slot an action was taken as in its own field. The ruled bullet \"`listActions` shows the slot separately\" needs the slot on the wire:\n- `listActions` returns `ApprovalActionRow` (`packages/spec/src/contracts/approval-service.ts`);\n- REST passes the rows through verbatim;\n- the client SDK types them.\n\nA new member on a published response contract widens the public surface. That is 强制条款², and so spec-lane work (`references/execution-duties.md`; the precedent is #21333).\n\n## The change\n\n- One **optional** member on `ApprovalActionRow`, the slot address the action was taken as. The name follows #21411's claim (`acted_as`), and the docblock takes `via_override`'s form: what it records, when it is absent, and that it is never a person.\n- No authorable surface, and no request-side change.\n- The regenerated `api-surface` rows and the changeset carry `Clause-②: yes`. The contract-tier review is owed before the queue.\n\n## Pins\n\n- The member is optional and typed as a string.\n- A row without it still parses (all existing producers).\n- The `api-surface` row is present.\n\n## After this\n\n#21411's PR writes the member from `rowFromAction`, so no undeclared wire member is ever needed."

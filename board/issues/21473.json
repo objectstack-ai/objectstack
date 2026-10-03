@@ -1,0 +1,33 @@
+{
+  "number": 21473,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): refuse an org-scoped public form withdrawal a walled posture cannot honour",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T22:09:43Z",
+  "updated_at": "2026-10-02T22:22:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21473",
+  "body": "Fixes #21468\n\nClause-②: no\n\nWithdrawing or publishing a public form on a walled tenancy posture (degraded or not) is now refused loudly at authoring when the save is organization-scoped and the anonymous form doors cannot honour it; pinned both sides. Env-wide saves still withdraw and republish the form on every anonymous door, and single-posture deployments are unchanged.\n\n**Base:** this branch was cut from the #21331 fix branch while #21420 was queued; #21420 has since merged and `origin/main` is merged into this branch (`296d7342`), so the diff against `main` is exactly the five files below.\n\n## What changed\n\n- `packages/metadata-protocol/src/protocol.ts`: a new refusal on the metadata save door, `anonymousFormIntakeOrgScopeRefusal`. It runs in `saveMetaItem` (active and draft saves) and in the draft-to-active promotion. It applies to an organization-scoped `view` write on a posture where the anonymous doors cannot honour it (read from the `tenancy` service), and only when the write changes which slugs the form opens to anonymous intake, compared with the env-wide definition. It answers `403 NOT_OVERRIDABLE` with `organizationId` and `docs` set. The message says why and gives the remedy: save it env-wide. This reuses the code and status of the sibling org-scope refusal (`orgScopedWriteRefusal`). There is no new error code and no spec change.\n- `packages/metadata-protocol/src/anonymous-form-intake.ts`: `anonymousFormIntakeSlugs`, which projects a view body to the slugs it opens to anonymous intake. It reads the same three candidate shapes and the same `allowAnonymous` + `publicLink` predicate as the anonymous doors.\n- Edits to a form that is organization-scoped but leaves its anonymous slug set alone still save. So do env-wide saves, and every save on a single posture, where `defaultOrgId()` is the admin's organization.\n\n## Tests\n\nRun at `b5e4b515` (this branch's head when this was written).\n\n- `packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts`: a new describe block of 7 cases on the existing stub engine. The walled posture is modelled with `defaultOrgId` answering null. Four refusal cases: org-scoped withdrawal (envelope, and no org row written), org-scoped draft, org-scoped publish of an env-wide-private form, and promotion of a legacy org-scoped draft. Three controls: an org-scoped edit that leaves the sharing alone, the env-wide withdrawal, and the single posture (`defaultOrgId` equal to the org). Result: 22/22 pass.\n- `packages/qa/dogfood/test/public-form-withdrawal-walled.dogfood.test.ts`: a real boot with `multiTenant: 'posture-only'` (`isolated`, `defaultOrgId()` answers null) of a fixture form bound to an object declared `tenancy: { enabled: false }`. Precondition: the published form serves and accepts (200 / 201, the row lands). In an organization, the withdrawal answers 403 `NOT_OVERRIDABLE` and names the env-wide save and nothing is saved. An org-scoped label edit saves (200, `org=`). An env-wide withdrawal makes both doors answer `404 FORM_NOT_FOUND`, and no row lands. An env-wide republish restores both doors. Result: 5/5 pass.\n- The single-posture pins of #21420 (`showcase-public-form-withdrawal.dogfood.test.ts`) and `showcase-public-form.dogfood.test.ts` / `public-form-read-back-masking.dogfood.test.ts` are still green.\n- `pnpm --filter @objectstack/metadata-protocol test`: 201 files passed, 3 skipped; 2990 tests passed, 19 skipped.\n- `typecheck` passes for `@objectstack/metadata-protocol` and `@objectstack/dogfood`.\n- Ablation, run on the committed head: the guard's first line was mutated so that it always returns null, using `scripts/ablation-replace.mjs` with a restore trap. Then a rebuild, and `ablation-dist-preflight` confirmed the marker in 2 dist files. Unit: 4 red / 18 green (the four refusal cases). Dogfood: 1 red / 4 green (the organization-scoped refusal case). Restore: blob equals HEAD, `git diff HEAD` is empty, rebuilt, marker absent from all 24 dist files.\n- Derived gate families (`dispatch-gates.mjs`, 70): 68 exit 0. `check-plugin-teardown-shape --self-test` first exited 3 (shallow clone, pinned fixture unreachable); after fetching that commit it exited 0. `check:dual-build-cjs-loads` is NOT MEASURED (exit 3, `PREREQUISITE NOT MET`: unrelated packages have no `dist/`), declared to CI. `pnpm lint` was not run locally and is declared to CI.\n\n## Acceptance notes\n\n- With no `tenancy` service registered, the refusal does not apply. Such a composition has no posture to judge and no session to carry an organization over HTTP.\n- On a walled posture, an anonymous submit into a form bound to a **tenant-scoped** object answers 500 (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` from the engine). That is why the walled pin uses a tenancy-disabled fixture object instead of the showcase contact form. This PR does not change it; it is reported to the dispatching seat.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018zT8d8NpiQ1ExhuNd5TxY6)_\n\n"
+}

@@ -2,9 +2,9 @@
   "number": 21420,
   "kind": "pull_request",
   "title": "fix(rest): withdrawing a public form takes effect on every anonymous intake door",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -16,14 +16,20 @@
     "tests",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T13:58:32Z",
-  "updated_at": "2026-10-02T13:59:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-02T21:29:46Z",
+  "closed_at": "2026-10-02T21:29:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-02T21:29:44Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21420",

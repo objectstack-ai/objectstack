@@ -1,0 +1,33 @@
+{
+  "number": 21520,
+  "kind": "issue",
+  "title": "[Decision] security(runtime): may an app-authored body touch the stored-metadata family's tables at all — a hook bound to them, or an elevated body writing them directly (#21454 items 3 and 4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "needs-user-decision",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T02:06:38Z",
+  "updated_at": "2026-10-03T02:06:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21520",
+  "body": "Filing gate: **② a decision only the maintainer can make.** It is a security boundary, and the existing rules do not decide it. Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It answers the `pm:retriage` on #21454 (`5964337187`), items 3 and 4. ⛔ Not a claim, ⛔ not a dispatch. ⛔ Classes, doors and roles only.\n\n**Reader who acts:** the maintainer, or the director seat. The `domain:cli` seat then dispatches the ruled letter.\n\n## 维护者速读\n\n- **问题：** 存放元数据的那组系统表（平台内部存放各类元数据定义的表）里有敏感内容。平台已经规定：任何读出这些内容的通道都必须先做遮蔽。#21454 的修复把应用代码体读取的通道补上了，但开发实测还剩两个口子：\n  1. 应用包可以把一个「钩子」绑到这些表上。平台自己保存元数据时会触发它，钩子拿到的上下文里就是未遮蔽的原始内容，钩子还能把内容抄进普通记录。难点在于：钩子的输入同时也是它写回的通道，所以不能简单遮蔽。\n  2. 一个被授予提权的动作代码体，可以绕过元数据协议直接写这些表，写完返回的那一行也是未遮蔽的原样。\n- **选项：**\n  - **A：** 应用代码体完全不能碰这组表。绑定钩子时直接拒绝；提权代码体直接写也拒绝。改元数据只能走元数据接口，那里有校验和来源记录。\n  - **B：** 允许绑钩子，但上下文先遮蔽，并拒绝写回敏感列；提权代码体的直接写改为转交元数据协议处理。\n  - **C：** 维持现状（提权就是信任），只把返回给调用方的内容遮蔽掉。\n- **分诊推荐：** A。理由：这组表只该有一个写入方；在编写和注册时就拒绝，比在运行时打补丁可靠（Prime Directive 12）。\n- **你要做的：** 回一个字母。\n\n## Measured (the #21454 fix dev, os-dev report `5964258278`, out-of-scope findings 3 and 4, after PR #21513's seam)\n\n- **Item 3:** a hook bound to a family table, in a bundle authored by an administrator, is fired by the metadata door's own save. Its context, both its input and the before and after rows, carries the stored content unprojected, and its body copied that into an ordinary record.\n  - Position: `packages/runtime/src/sandbox/body-runner.ts`, `buildSandboxContext`.\n  - Not mechanical: a hook's input is also its write-back channel, so projecting it would write the projection back.\n- **Item 4:** an elevated action body can write the family tables through the in-process write verbs, which bypasses the metadata protocol. The written row comes back in its stored form.\n  - Position: PR #21513's reader seam passes the write verbs through by design.\n\n## Governing text\n\n- **The family's rule** (#21120, and #21207 ruling B, as applied by triage `5963299937` on #21454): every door that serves, copies or evaluates the family's stored content projects it and serves it keyed. That rule covers what a body is served. It does not say whether a body may bind to, or write, the family's tables.\n- **AGENTS.md Prime Directive 12:** \"fix it at the producer and reject it at authoring/publish\".\n- **No ADR names the metadata protocol as the family's only writer.** Searched in `docs/adr` for sole-writer / only-writer / bypassing-the-protocol wording: no hit on this family.\n- **Triage does not proxy-rule a security boundary.** Hence this card.\n\n## Premises (each with its re-check)\n\n1. No shipped app or example binds a body hook to a family table, and no shipped body writes one. NOT MEASURED. Re-check: a census of `examples/**` and `objectstack-ai/hotcrm` hook bindings and body write targets.\n2. Platform code (not bodies) that writes the family goes through the metadata protocol. NOT MEASURED. Re-check: the claim's census before any refusal lands.\n\n## Independent of the ruling (already routed on #21454)\n\n- Projecting what a write verb returns at the seam is the family's rule under every option, so it rides #21454's next claim.\n- The evaluate-shape refusals at the seams also ride #21454's next claim.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, for 「hook bound to sys_metadata elevated body writes metadata table directly bypass protocol」 → 8 hits, none this question: #21470 (open, the save door's name check), #15206 (open, tenancy of the family), and six closed cards on other subjects."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 21507,
+  "kind": "pull_request",
+  "title": "fix(verify): os verify never creates key material in the key home; the harness seals under an in-process data key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T01:22:24Z",
+  "updated_at": "2026-10-03T02:14:46Z",
+  "closed_at": "2026-10-03T02:14:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-03T02:14:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21507",
+  "body": "Fixes #21499\n\nClause-②: no\n\n## What changed\n\n`bootStack` (`packages/verify/src/harness.ts`) composed the settings service with no crypto provider and bound the engine to a bare `LocalCryptoProvider`. `bootStack` forces a development posture, where both providers resolve a data key the way a server does: an env key, then the key file in the key home, and with neither they mint the key file. So `os verify`, a one-shot command over an in-memory database, left key material in the key home. On a host that already had a key, the harness sealed its throwaway fixtures under that real key.\n\nThe harness now holds ONE `LocalCryptoProvider` over an explicit random key (`harnessCryptoProvider`, module-private):\n\n- no env read, no key-file read, no write anywhere: the key never leaves the process's memory;\n- the settings service (`new SettingsServicePlugin({ cryptoProvider })`) and the engine (`setCryptoProvider`) get the same instance, so `secret` fields and encrypted settings still seal AND open on a keyless host. That is why the CLI's one-shot shape from PR #21497 (\"read an existing key, or refuse every call\") does not fit here;\n- one key per PROCESS, not per boot: two boots over one `databaseFile` (the harness's restart) open each other's secrets, as a real host's stable key would let them.\n\n## Shape choices, measured (dispatch zone 2)\n\n- **A1, confirmed at base `6f17d1d364`.** `harness.ts:498` was `new SettingsServicePlugin()` with no provider, and `:694` was `engine.setCryptoProvider(new LocalCryptoProvider())`. `packages/cli/src/commands/verify.ts:195` and `:219` call `bootStack(config, { multiTenant })` and `bootStack(config, { multiTenant, security })`. `BootOptions` has no crypto option.\n- **A2: no public option is needed.** No caller of `bootStack` in this repository passes or needs a key: every boot is an in-memory database or a caller-owned temp file. So the harness owns its provider internally. `BootOptions` and every export are unchanged, `Clause-②: no` holds, and `packages/cli/src/commands/verify.ts` is untouched.\n- **Per process, not per boot.** Measured by ablation (below): a per-boot key breaks the restart case with an AES-GCM authentication failure.\n\n## Evidence\n\n**Public door.** Built CLI, `examples/app-todo`, `os verify --json`, development posture, no env key, a fresh empty key home (`OS_HOME`):\n\n| `@objectstack/verify` built from | exit | stdout | key home after | stderr line announcing a minted key |\n|---|---|---|---|---|\n| the base harness (`6f17d1d364`, rebuilt; dist preflight: marker absent) | 1 | 764 B | `dev-crypto-key` | 1 |\n| this PR (rebuilt; dist preflight: marker present) | 1 | 764 B, byte-identical | empty | 0 |\n\nBoth runs exit 1 on the same pre-existing fidelity gap on `todo_task.tags` (see Acceptance notes). It is unrelated to this change.\n\n**Pin** `packages/verify/src/harness.key-custody.test.ts`. Every boot runs in a hook, and the cases only assert.\n\n- Committed red first (`465c22036a`), against the unfixed harness: 4 failed, 3 passed.\n  - The empty key home gained `dev-crypto-key`.\n  - Both sealed rows opened under a pre-existing key file's key: `[true, true]`.\n  - Both sealed rows opened under `OS_SECRET_KEY`: `[true, true]`.\n  - The restart case's key home gained `dev-crypto-key`.\n  - The control stayed green: the default provider reports `generated-file` in this posture and home.\n- With the change (`7c3a1843ce`): 7 passed.\n- Ablation, a per-boot key in place of the per-process one, through `scripts/ablation-replace.mjs`:\n  - the anchor went 1 to 0 and the blob changed;\n  - after the restore, the blob equals HEAD and `git diff HEAD` is empty;\n  - the restart describe's hook fails with `Unsupported state or unable to authenticate data` (6 passed, 1 skipped, file red).\n  - The pin imports `./harness.js` from source, so no `dist/` leg applies to it.\n\n**Local runs at HEAD `e8a091457c`:**\n\n- `pnpm --filter @objectstack/verify exec vitest run`: 17 files, 127 tests passed.\n- `pnpm --filter @objectstack/verify typecheck`: exit 0, tsc plus the test layer. `--listFiles` on the test config holds the new test (17 of 17 test files).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 62 families derived and all 62 run. The `--ran` reconciliation reads 0 NOT-MEASURED and 0 UNRUN.\n  - `check:dual-build-cjs-loads` first exited 3 (PREREQUISITE NOT MET: 9 packages had no `dist/`). After a cache-replay build of those 9 it exited 0.\n- `pnpm lint` over the whole repository, unnarrowed: exit 0.\n\nNot run locally: CI's full suites, and the CLI integration tier (no `packages/cli` file is touched).\n\n## Serial note\n\nPR #21497 adds an enumeration pin over `packages/cli/src`. It had not landed when this PR was opened, and this branch sits on `6f17d1d364`. This diff touches no `packages/cli` file, so that pin's population is unchanged. The seat merges `main` and re-runs that pin at landing.\n\n## Acceptance notes\n\n- `os verify --json` on `examples/app-todo` exits 1 on `main` with one fidelity gap. The derived write puts the scalar `important` into `todo_task.tags`, a `select` with `multiple: true`, and reads back the array `[\"important\"]`. It is reported to the seat as a finding and is not touched here.\n- Every `bootStack` under vitest also stops minting into the runner's key home. The harness forces a development posture, so the old default minted there too.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016GiHYRmLSNWTfbX9gVQkpz)_\n"
+}
