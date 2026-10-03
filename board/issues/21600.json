@@ -1,0 +1,36 @@
+{
+  "number": 21600,
+  "kind": "pull_request",
+  "title": "docs(design): predicate convergence — T2's measurement under B, and the S5 face table re-read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T15:12:28Z",
+  "updated_at": "2026-10-03T15:43:49Z",
+  "closed_at": "2026-10-03T15:43:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-03T15:43:47Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21600",
+  "body": "Part of #5930\nClause-②: no\n\nThe card stays open: this PR delivers the measurement that ruling `5902355785` gates T2 on, and a recommendation. The T2 decision is the seat's to take to the director, so it is not made here.\n\nOne file changes, `docs/design/predicate-compilation-convergence.md` (+167 / -11). No code, ADR, test or gate file is touched, and nothing publishes (`skip-changeset`).\n\n## What changes\n\n### 1. New §2.6, T2's measurement: the rulings implemented under B\n\nEvery count was taken at `origin/main` `a7ab047cf6`, with §2.1's own definitions: a round is one `os-dev-report` comment on a card, and face files are §1.1's census files edited in source, tests not counted.\n\n| Ruling implemented after `cfa931535` | Cards | Rounds | Face files (distinct) |\n|---|---|---|---|\n| `$empty` (§2.1 baseline, before B) | 4 | 13 | 13 |\n| last supported day (§2.1 baseline, before B) | 2 | 3 | 10 |\n| temporal comparand door (§2.1 baseline, at a seam) | 2 | 1 | 0 |\n| **the nested-relation filter is served**, ruling `5907789183` | 2 (+2 text cards) | 6 (+2) | 4, all in service-analytics; 0 engine-fed |\n| **the RLS write check judges the stored form**, ruling `5933322270`; marked: it arose inside this program | 4 | 6 | 2 |\n\n- Face files fell. Rounds did not fall: they went to test plumbing, a serial wait, a measure-first stop and its prerequisite, and a fold a claim had set aside, not to per-face copies of the meaning.\n- None of the six face-file edits is of a class T2 removes. The shared lowering (`filter-lowering.ts`) has had no commit since `cfa931535`.\n- 23 more candidates are counted as fix-class cards, each in its own row, because each applies or extends a rule that already existed. One of them, `#20280`, is also marked partly before the window.\n- Of those 23, the JSON-stored column family is the window's largest per-face cost: 9 cards, 17 rounds, 9 distinct face files. It is the dialect class §3.3 and §3.7 leave per face, which T2 would not remove either.\n- One card, `#20918`, is the T1 limit §3.5 names: a face re-spelled a lowered null test.\n- The section carries the search: the scans, their hit counts, positive controls and reproduction commands. It also carries the window's face-file churn by class, and a four-axis recommendation: **T2 not yet**, with a machine-checkable restart condition.\n\n### 2. §4.1's face table: the S5 column records what each deletion removed and what stayed\n\nEach correction below was re-read at `a7ab047cf6`:\n\n- **Header:** \"Deleted later (S5)\" becomes \"Deleted (S5), with the record\".\n- **F9, F10, F11 → deleted** (`#21417`, commit `81e69cab3`), as F4 and F7 already read. F9 and F10 keep `assertDefinedComparands` as a refusal door. F10 keeps `fieldLeaves`' `$between` arm as a structural split on the columns the lowering does not rewrite.\n- **F1 → deleted** (`#20822` group 2, `ceee88f46`): the polarity quartet and the `calendarDay*Rewrite` calls. The row said `assertDefinedComparands` would go too. The tree still holds it, kept on a measured stop (seat answer `5922273550`).\n- **F2 → deleted** (`ceee88f46`): `toRemoteFilter`'s whole-day arms and the transport's polarity copy. The row said `toRemoteFilter`'s `$between` arm would go too. The tree keeps it as a structural split, along with the transport's `assertDefinedComparands` (ACCEPT `5923842206`).\n- **F3 → deleted** (group 1b, `8460592f0`): the whole-day calls (8 sites).\n- **F5 → deleted** (group 1, `8fec76a2b`): the `where` path's `lteUpperBound` (2 call sites). The row said all 5 whole-day calls would go. The tree keeps 3 in the `dateRange` window (`memory-analytics.ts:1236`), which is not a `FilterCondition` (ADR-0053 D-D1 as amended, item 8).\n- **F6 → deleted** (group 3a, `53ed3d109`) and **F8 → deleted** (group 3b, `e18fea6dc`): the whole-day calls (4 sites each).\n- **One note under the table:** no face file holds a polarity copy, and the only whole-day call left in a face file is F5's window.\n\n### 3. §4.4 item 5 points to §2.6.\n\n## Validation\n\nAll gates ran at head `9a2748aa`. They were derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` with no paths, which gave the same 12 families as the dispatch:\n\n- `node scripts/check-ci-filter-parity.mjs`: exit 0\n- `node scripts/check-closing-keyword-parity.mjs`: exit 0, and `--self-test`: exit 0\n- `node scripts/check-comment-mask-corpus.mjs`: exit 0 (8084 files, 0 disagree)\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions`: exit 0. The first run exited 3 (PREREQUISITE NOT MET, formula and lint unbuilt). It passed after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under `os-verify-lock` (`VERDICT command-exit 0`).\n- `pnpm check:cross-package-test-inputs`, `check:doc-authoring`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes` (9949 files, no control bytes), `check:refd-timer-probe`, `check:watch-hint-literal`: each exit 0\n- `node scripts/pm/dispatch-gates.mjs --ran`: \"12 derived, 12 run, 0 NOT-MEASURED, 0 UNRUN\"\n\nChanged lines: 178, under the 5000 human-merge threshold. The diff is not governed.\n\n## Acceptance notes\n\n- **Ref.** The counts are at `a7ab047cf6`. The dispatch read `cc645f2385`, and the one commit between the two edits no face file. Card threads were read over REST between 2026-10-03T12:40Z and 13:00Z.\n- **The `git-history.mjs` bare-date trap.** `node scripts/pm/git-history.mjs log --since=2026-09-30` answered 410 commits where `--since=2026-09-30T00:00:00Z` answers 474, both under the receipt \"since 2026-09-30\". git reads a bare date at the current time of day, and the tool's usage line recommends that spelling. This PR used complete instants. The finding goes to the seat in the report, and is not filed here.\n- **Classification.** \"Filter semantics\" and the fix-class split are readings of each card's thread and triage grade, each named in its row. The face-file and round counts are mechanical.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ErfyP2Rx7XWHJA27QjyUi)_\n"
+}

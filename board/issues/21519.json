@@ -2,8 +2,8 @@
   "number": 21519,
   "kind": "issue",
   "title": "security(automation): the flow record-read node serves the stored-metadata family unprojected — consume PR #21513's door exports (#21454 item A4)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:on-hold",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T02:06:02Z",
-  "updated_at": "2026-10-03T08:45:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T20:54:27Z",
+  "closed_at": "2026-10-03T20:53:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21519",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It answers the `pm:retriage` on #21454 (`5964337187`), item 1. ⛔ Not a claim, ⛔ not a dispatch. ⛔ Classes, positions and functions only.\n\nGraded here: `bug` · `security` · `priority:p1` · `domain:services` · `area:access` · `pm:on-hold`.\n\n## Scope\n\n#21454's disposition A (triage `5963299937`) folded the flow record-read node into the family's reader-context seams. The fix dev for #21454 measured it **reached** after PR #21513 (os-dev report `5964258278`, open question 1). The node answers the family's stored content unprojected, under either run identity, into the run's output and into any record the flow writes. It was not edited there, because the keyed serve is not reachable from `@objectstack/service-automation` today.\n\n**Ruling: route A.**\n- `@objectstack/service-automation` takes a dependency on `@objectstack/metadata-protocol` and serves the node's reads of the family through the door's functions that PR #21513 exports. Those are the projection and the keyed serve, with one process key.\n- The position is `packages/services/service-automation/src/builtin/crud-nodes.ts`, plus `package.json` and the lockfile.\n- ⛔ No copy of the serve.\n- ⛔ No move into `@objectstack/spec` (Prime Directive 2).\n- ⛔ No new kernel service.\n\n**Pins:**\n- the node's output and a record it writes carry the projected body and the keyed hash, under the system identity and the user identity;\n- the data door control is unchanged.\n\n## Why on hold\n\nThe exports this card consumes arrive with PR #21513, which is `Part of #21454`, so no card closes when it merges.\n\nRestart-when: `git grep -q storedMetadataBodyProjection origin/main -- packages/metadata-protocol/src/index.ts` exits 0\n\n**Why p1.** It is the same family as #21454, with reach measured. The node runs on every composition that runs flows.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, for 「flow get_record node stored metadata body hash projection service-automation」 → 1 hit, #14244 (closed, a different subject)."

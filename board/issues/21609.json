@@ -1,0 +1,34 @@
+{
+  "number": 21609,
+  "kind": "pull_request",
+  "title": "qa(checklist): a hook-refused script action shows exactly one error toast carrying its sentence — item, showcase fixture, and one run",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T16:35:11Z",
+  "updated_at": "2026-10-03T17:23:43Z",
+  "closed_at": "2026-10-03T17:23:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-03T17:23:41Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21609",
+  "body": "Fixes #21596\n\nClause-②: no\n\n## What this does\n\nGives objectui#9151's re-observation a home: one platform-checklist item, the smallest showcase fixture it needs, and one recorded run of it against a console built at this repo's `.objectui-sha`.\n\n**Run verdict: PASS** (1/1 item, 4/4 clauses, reproduced on two finished tasks on fresh page loads). The console showed exactly one `error` toast carrying the hook's sentence, tied to a `400` from the action route, and the record was left unchanged.\n\n## The fixture (measured absent, so added)\n\n`examples/app-showcase` had no hook that refuses a write. `src/data/hooks/index.ts` held four hooks: trim, stamp, and two log-only after-hooks, none of which throw. Added:\n\n- `showcase_guard_task_reopen` (`src/data/hooks/index.ts`, `GuardTaskReopenHook`): a `beforeUpdate` hook on `showcase_task`. Its condition is `previous.done == true && record.done != true` and its sandboxed body throws `TASK_REOPEN_REFUSAL` = \"A finished task cannot be reopened. Create a follow-up task instead.\" with `onError: 'abort'`.\n- `showcase_reopen_task` (`src/ui/actions/index.ts`, `ReopenTaskAction`): a `script` action, `perRecord`, offered only on finished tasks. It appears in the task list's row menu only (`list_item`). The Task Detail page is `kind: 'full'` and draws no `record_header` bar, so declaring that location would have been inert. Its body writes `{ id, done: false }` through `ctx.api`.\n- zh-CN label for the action (`check:i18n-coverage` ratchet).\n- `test/task-reopen-hook-refusal.test.ts` (5 tests). It uses the production harness: real `ObjectQL`, `SqlDriver` and `QuickJSScriptRunner`, with the app's real objects and hooks. The tests check four things. The reopening write is refused with the sentence and the row is unchanged. An edit of a finished task that leaves `done` alone still lands. With the hooks unbound, the same write lands (reverse check). The action body writes exactly the refused shape.\n\n## The checklist item\n\n`docs/qa/platform-checklist/areas/records-forms.json`, id `records-forms.script-action-hook-refusal-toast` (revision 1, P2, browser). It sits in records-forms, beside the area's action-surface items (`action-location-matrix`, `action-param-widgets`, `object-hook-lifecycle`). It has four clauses:\n\n- **network:** the action route answers 4xx carrying the sentence.\n- **dom:** exactly one new toast, `data-type=error`, containing the sentence. It is counted inside sonner's 4s auto-dismiss window, excluding `data-removed` nodes.\n- **network:** the toast is tied to its request. That request is the only non-GET request in the window, and its message matches the toast.\n- **api:** the record is unchanged.\n\nIt is mapped under `action` and `hook` in `coverage.json`.\n\n`records-forms.object-hook-lifecycle` was bumped from revision 2 to 3, roster only, with no clause moved. Two of its knownGaps became false once the fifth hook landed: \"no two showcase hooks share an object+event\" and \"the fixtures never throw\". Both now name the new hook and say why it does not close that item's ordering clause or its beforeInsert abort-rollback clause.\n\n`pnpm check:platform-checklist` passes with exit 0: 15 areas, 270 items, coverage 39 kinds mapped and 2 waived, symbol anchors 650/660.\n\n## The run\n\n- **Durable run record: #21610** (the `qa-run` issue, RUNNER's record of this run).\n- Record: `docs/qa/platform-checklist/runs/2026-10-03-script-action-hook-refusal-toast.json`. RUNNER's location; git-ignored, so it is not in this diff. The `qa-run` issue body is in the report comment on #21596.\n- Environment: framework `4a428c11a0` (the tree served), objectui pin `89cad75d55702cc4f267bead5bf267de575d5842`. The console was built by `pnpm objectui:build` (exit 0, stamped objectui@89cad75d5570). The server was an isolated `objectstack dev --ui --seed-admin` on its own port with its own file DB. Driven by Playwright through `/opt/pw-browsers/chromium`, signed in through the form as the seeded admin.\n- Both attempts returned `POST /api/v1/actions/showcase_task/showcase_reopen_task` with status `400 VALIDATION_ERROR`, message \"hook 'showcase_guard_task_reopen' threw: Error: A finished task cannot be reopened. Create a follow-up task instead.\"\n- Live toasts went from 0 before the click to 1 after (`data-type=error`, same text). A MutationObserver installed before the click saw exactly one toast node added in the following 6s.\n- The only non-GET request in the window was that POST.\n- `done`, `progress` and `updated_at` were identical before and after.\n\n## Acceptance notes\n\n- **Not scored against the item:** the action route hands the user the sandbox debug wrapper. The toast reads \"hook 'showcase_guard_task_reopen' threw: Error: \" followed by the sentence. The same refusal through `PATCH /api/v1/data/showcase_task/ID` answers `400` with the bare sentence. The wrapper is what `packages/qa/dogfood/test/hook-error-format.dogfood.test.ts` says belongs in server logs, not in the toast. This is reported to the PM in the report and is not fixed here: no runtime change is in scope.\n- **Changeset:** none. The only package this touches is `@objectstack/example-showcase`, which is `\"private\": true`. Its earlier showcase-only fixes (`393ae878d3`, `99398542b3`) also carried none. `docs/qa/**` does not publish. `skip-changeset` applies.\n\n## Verification (head `ff3d71c7cf`)\n\n- `pnpm --filter @objectstack/example-showcase run typecheck` passed (exit 0); `--listFiles` includes the new test.\n- `pnpm --filter @objectstack/example-showcase exec vitest run --maxWorkers=2`: 32 files and 399 tests passed.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 45 commands; all 45 exited 0. `--ran` reconciliation: 45 derived, 45 run, 0 unrun.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv)_\n"
+}

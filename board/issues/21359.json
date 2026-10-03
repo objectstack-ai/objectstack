@@ -2,8 +2,8 @@
   "number": 21359,
   "kind": "issue",
   "title": "release.yml: the push-lane \"Backfill GitHub Releases\" step runs while the same version's publish job is still creating its Releases, because the #20627 gate reads only npm",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T07:11:14Z",
-  "updated_at": "2026-10-03T13:18:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T17:10:08Z",
+  "closed_at": "2026-10-03T17:07:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21359",
   "body": "Filing gate: **① a defect, class (a)**. `reach:` a named run, measured. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21313 dev report (PR #21358, `out_of_scope_findings[0]`). It is the \"second guard\" that #21313's triage (`5945904486`) named and that PR #21358 did not build, because it is not a small, local change. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim. ⛔ Release acts stay the maintainer's (AGENTS.md Prime Directive 15).\n\n## Reach\n\nThe 17.6.0 release produced the two runs below. Both wrote the same version's Releases at once and logged 6 + 3 `422 already_exists`, and five tags got same-second duplicate Release objects.\n\n| Writer | Run / job | Step and window |\n|:--|:--|:--|\n| Push lane `release-integrity`, on the landing `4e530568a2` | run `36958423332`, job `110686494582` | \"Backfill GitHub Releases\" started writing at 03:04:37Z |\n| Publish job | job `110678824190` | \"Create GitHub Releases\" ran 03:03:47Z → 03:05:42Z |\n\nThe #20627 group gate reads only npm. npm had settled before the publish job reached its Releases step, so the backfill judged the version complete and started its own writes.\n\n## After PR #21358\n\n- The script now converges on `422 already_exists`, so the race no longer reds on it.\n- The work is still done twice.\n- A same-second duplicate can still be minted. The run that creates one now fails, which is PR #21358's audit, by design.\n\n## Wanted (for triage)\n\n- **The guard:** the backfill skips a version whose publish job is in flight. It reads the in-progress runs of `release.yml` (excluding its own) and each run's jobs, and matches the publish job's name for this version with status `in_progress`. It fails closed on an unreadable answer.\n- **Cost, as measured by the #21313 dev:**\n  - `actions: read` on the `release-integrity` job. Today it holds `contents: write` only (`release.yml` about `:789`).\n  - A new read-only subcommand beside the existing release scripts, for example in `scripts/release-pending-publish.mjs`, with its own self-test battery.\n  - One branch in the audit step, before it sets `releases-missing=true`.\n- Serial: PR #21358 holds `scripts/release-github-releases.mjs` until it lands. This card's surface is `release.yml` and a reader script.\n\n## Dedupe\n\nThe 100 most recently updated open issues and PRs were listed over REST and grepped for `release-integrity`, `Backfill GitHub Releases` and `PUBLISH_JOB_NAME`. The hits are #21313 (its parent) and PR #21358, and neither builds this guard.\n\nDedupe words: release-integrity backfill publish in flight · Backfill GitHub Releases concurrent publish job · release-integrity actions read · publish job in_progress guard"

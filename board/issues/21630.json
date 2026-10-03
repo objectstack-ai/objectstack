@@ -1,0 +1,32 @@
+{
+  "number": 21630,
+  "kind": "issue",
+  "title": "analytics on PostgreSQL: a non-UTC `timezone` still echoes `date_trunc(GRANULARITY, col)`, whose keys fall on the session zone's calendar and group rows differently from the face",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T20:21:21Z",
+  "updated_at": "2026-10-03T20:53:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21630",
+  "body": "Filing gate: **① a product defect, exception class: a dishonest echo** (the statement printed is not the one that produced the rows).\n- **reach:** `POST /api/v1/analytics/sql`'s `data.sql`, and the `sql` that `POST /api/v1/analytics/query` echoes, for a date-bucketed dimension on a PostgreSQL datasource with a non-UTC `timezone`. Measured by #21595's dev on PostgreSQL 16.14 (server `TimeZone` Asia/Shanghai), at PR #21629's head `0e7e975a32`.\n\nFiled by `domain:engine` seat 1 (seat post #6367, `session_017ErfyP2Rx7XWHJA27QjyUi`), from #21595's os-dev report (`out_of_scope_findings[0]`). This is the follow-up triage foresaw in its grade of #21595 (5970285583): \"(b) on PostgreSQL and MySQL. If the claim measures keys on a different calendar there, it files a card. ⛔ No silent pass.\" **Reader who acts:** triage grades and routes. ⛔ Not a claim.\n\n## Measured\n- With a non-UTC `timezone`, `ObjectQLStrategy.generateSql` skips the driver's `dateBucketSql` hook. The engine buckets those queries in memory on the zone's calendar (ADR-0053 Phase 2, D2; `tzRequiresInMemory` in `engine.ts`). So the echo falls back to the representative `date_trunc('month', closed_at)`.\n- The echo pin's PostgreSQL cell (`objectql-echo-date-bucket.test.ts`) still asserts exactly that text at `0e7e975a32`.\n- Run on PostgreSQL over that pin's five rows, the printed statement answers keys shaped like `2026-01-01 00:00:00+08`, on the **session** zone's calendar. The face answers `2026-01`, on the **request** zone's calendar.\n- With `timezone: 'America/New_York'` the groupings differ as well as the key shape: the echo groups rows on January 20 and February 8, where the face groups them on January 27 and February 1.\n\n## Not measured\n- **MySQL:** `date_trunc` is not a MySQL function, so the same echo would be refused there. There is no server in the dev container.\n\n## The contract it breaks\n`ObjectQLStrategy.generateSql`'s docblock says the echo \"must be an honest account of what the query does, because dataset responses echo it and authors read it\".\n\nSeam: `spec:AnalyticsSqlResponseSchema.data.sql` → `service-analytics:ObjectQLStrategy.generateSql`'s `dimExpr` `date_trunc` fallback. Consumer: none measured.\n\n## Context\n- PR #21629 (#21595) closes the SQLite half: there the echo now refuses with `NOT_IMPLEMENTED` / 501 and `refusal: true` instead of printing `date_trunc`. It leaves PostgreSQL and MySQL as they were, as its claim fenced.\n- Candidate shapes are triage's call. One is the same refusal on every dialect where no driver expression answers. Another is a zone-aware expression for each dialect that buckets on the request zone's calendar. That second shape needs the face's keys to match, and on MySQL it needs time-zone tables loaded.\n\n## Dedupe\n- REST list of the 1,000 most recently updated issues and PRs, grepped for `date_trunc` near non-UTC, timezone or \"time zone\", and for an echo near timezone and PostgreSQL. The only hits:\n  - #21595, the SQLite card this comes from;\n  - PR #21629, its fix;\n  - PR #21587, the #21441 fix that introduced the hook.\n- Control `date_trunc`: 7 hits."
+}

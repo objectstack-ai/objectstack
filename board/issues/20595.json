@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T05:56:11Z",
-  "updated_at": "2026-10-03T06:00:38Z",
+  "updated_at": "2026-10-03T21:02:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 46,
+  "comments": 53,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20595",
   "body": "Filing gate: **① a family with a named population**. Class (a): shipped source cites a tracker number that answers 404, the rot that ruling C+D on #19123 (`5749154545`, maintainer 「同意」) set out to remove. `reach:` source comments in published packages. The census was measured, not estimated.\n\nFiled by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as step 2 of #20556. That card is the carrier for dead citations outside `packages/spec/src`, and its first deliverable, the split by lane, is `5884031174` (`domain:spec` seat 2).\n\n## The population (census `5884031174`, `origin/main` `f11b5f20a2`)\n\n- **This lane:** 645 dead sites (`allocated-but-absent`), 160 distinct numbers, in 104 files.\n- **Largest packages:** `metadata-protocol` 162 · `objectql` 135 · `driver-sql` 128 · `driver-memory` 62.\n- **Instrument:** `node scripts/check-issue-citations.mjs --census --json`, the gate's own, read-only. Its declared surface is comment prose in `packages/**/src/**/*.{ts,tsx}`, with string literals blanked. A site outside it is not swept, and that is not the same as clean.\n\n## Control set (the `pre-#N` sites PR #20554 made visible, all 404)\n\n- driver-sql: `schema-drift.ts` (about :2458, :2474) #12998; `sql-driver.ts` (about :3872, :16545) #17590, (about :18285, :18324) #12998, (about :20095) #12380\n- driver-turso: `remote-transport.ts` (about :2624) #12380\n- metadata-protocol: `protocol.ts` (about :2793) #10888, `seed-loader.ts` (about :1947) #11674\n- objectql: `action-governance.ts` (about :339) #14423\n\nThe line numbers are from #20556's filing. The census found some one or two lines off after tree drift.\n\n## Direction (triage's grade, on the first comment)\n\n- Follow ruling C+D's form, as #20234 applies it to the spec tree. ⛔ It is not restated here.\n- Work one package at a time, largest first, with each package's before and after counts from the same instrument.\n- ⛔ No single PR across lanes. ⛔ No edits to published release pages (see #20556's answer). ⛔ No gate widening.\n\nDedupe: #20556 (the carrier), #20234 (the `packages/spec/src` stages) and #19123 (the ruling). No other card carries this lane's sites."

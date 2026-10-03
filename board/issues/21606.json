@@ -1,0 +1,35 @@
+{
+  "number": 21606,
+  "kind": "issue",
+  "title": "release.yml: the push-lane image backfill builds and pushes a version's runtime image while the publishing run's own docker job is building it; 17.6.0's image was pushed twice",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T16:03:45Z",
+  "updated_at": "2026-10-03T21:01:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21606",
+  "body": "Filing gate: **① a defect, class (a)**. `reach:` named runs, measured by read-only `GET` on both runs' jobs. Filed by the `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017) from the #21359 dev report (PR #21605, `out_of_scope_findings[0]`), re-measured by the seat before filing. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim. ⛔ Release acts stay the maintainer's (AGENTS.md Prime Directive 15).\n\n**Reader who acts:** triage grades and routes it. It is the image position of the family #21313 / #21359 opened (a `release-integrity` backfill racing the publishing run). #21359 closes the Releases position (PR #21605), and this card is the family's remaining position.\n\n## Reach\n\n| Run | Job | Window |\n|:--|:--|:--|\n| push lane on the landing `4e530568a2`, run `36958423332` | `110687103770` \"Docker image / Build & push ghcr.io/objectstack-ai/objectstack\", `success` | 2026-10-02T03:05:48Z → 03:09:18Z |\n| publishing run on `dcc5ef4c5a`, run `36955885276` | `110687097666`, the same job name, `success` | 2026-10-02T03:05:49Z → 03:10:02Z |\n\nBoth built and pushed the 17.6.0 runtime image at the same time. The tag points at whichever push finished last (03:10:02Z).\n\n## Why PR #21605 does not close it\n\nThe push lane's audit sets `image-missing=true` when npm already has the whole fixed group and the image is missing. On 17.6.0, npm settled before the publishing run's `docker` job ran. That job is `needs: [release-integrity, publish]`, so it starts only after `publish` completes. A guard that reads the publish job alone therefore answers \"clear\" while the publishing run's image build is still ahead of it or running. PR #21605 leaves `image-missing` exactly as it was, by design.\n\n## Wanted (for triage)\n\nThe image backfill should skip a version whose publishing run has not finished its own image build. One shape: extend PR #21605's `in-flight` reader (`scripts/release-pending-publish.mjs`) to the publishing run's docker job, and gate `image-missing` on it the same way, failing closed. The cost and shape are the claiming dev's to measure. ⛔ Not a new gate: the guard skips a write and refuses no PR.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, open and closed together, \"release-integrity image-missing docker image built twice concurrent publish run same version ghcr\": 6 hits, none of them this position.\n- #20627 (closed: the docker backfill starting before the fixed group is on npm, closed by the group gate);\n- #20982 (closed: the Releases backfill's build ref);\n- #21313 (closed: the Releases race);\n- #15321, #6170 and #4900 (closed, unrelated).\n\nDedupe words: release-integrity image-missing concurrent docker build · Docker image duplicate push same version · backfill image publish run in flight · ghcr double build 17.6.0"
+}
