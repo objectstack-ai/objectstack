@@ -1023,6 +1023,14 @@ describe('#21334 a container on another package\'s object never takes that packa
                             ).toHaveLength(1);
 
                             await expectBothDoors(protocol, DEFAULT, organizationId, expectTheRow);
+                            // The by-name family asks the same predicate: the
+                            // row's name keeps its own change log and its own
+                            // diff, never the container's.
+                            const events = (await protocol.historyMetaItem({ type: 'view', name: DEFAULT, ...scoped(organizationId) })).events;
+                            expect(events.length, 'the row has a change log of its own').toBeGreaterThan(0);
+                            expect(events.every((e: any) => e.ref.name === DEFAULT), 'every event names the row').toBe(true);
+                            expect((await (protocol as any).diffMetaItem({ type: 'view', name: DEFAULT, ...scoped(organizationId) })).name)
+                                .toBe(DEFAULT);
                             // CONTROL — a row-less name the same container expands.
                             await expectBothDoors(protocol, ROWLESS, organizationId, expectTheExpansion);
                             // The contract the ruling keeps (#21334): every name
