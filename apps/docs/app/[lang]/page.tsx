@@ -33,7 +33,7 @@ const mono = IBM_Plex_Mono({
 
 const HOME_TITLE = 'Metadata framework for AI-written apps';
 const HOME_DESCRIPTION =
-  'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata that fits in a single context window.';
+  'One executable business ontology. AI writes it, the runtime runs it, agents operate it, you own it. The whole app — data model, UI, workflows, permissions — is typed metadata small enough for AI to hold whole.';
 
 /**
  * The homepage's metadata. Its social card is the shared hero cover,
@@ -212,15 +212,16 @@ export default function HomePage() {
             className="mx-auto mt-5 max-w-3xl text-[2.6rem]/[1.06] font-bold tracking-tight text-balance md:text-6xl/[1.04]"
             style={{ fontFamily: 'var(--l-display)' }}
           >
-            Apps small enough{' '}
+            The ontology{' '}
             <span className="block bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent dark:from-indigo-400 dark:to-purple-400">
-              for AI to hold whole.
+              is the software.
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-fd-muted-foreground text-pretty">
-            ObjectStack turns the whole app — data model, UI, workflows, permissions — into
-            typed metadata that fits in a single context window. Agents read it whole, reason
-            it whole, refactor it whole.
+            One executable business ontology. AI writes it, the runtime runs it, agents operate
+            it, you own it. The whole app — data model, UI, workflows, permissions — is typed
+            metadata small enough for AI to hold whole: agents read it whole, reason it whole,
+            refactor it whole.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
@@ -294,10 +295,12 @@ export default function HomePage() {
         {/* ── what that metadata is, in prose ──────────────────── */}
         <section className="relative mx-auto w-full max-w-5xl px-6 pt-12 md:pt-14">
           <p className="text-base text-fd-muted-foreground text-pretty">
-            That metadata is your business ontology — an open, versioned definition you own.
-            Strict TypeScript, Zod schemas, and a validation gate catch the agent&apos;s mistakes
-            at authoring time, and the runtime derives the database, REST API, UI, and MCP
-            server — permissions and audit enforced on every call.
+            That metadata is your business ontology — an open, versioned definition of your
+            objects, relations, actions, permissions, flows, and agent and tool definitions that
+            you own. It is executable, not a knowledge-representation ontology: no inheritance,
+            no axioms, no reasoner. Strict TypeScript, Zod schemas, and a validation gate catch
+            the agent&apos;s mistakes at authoring time, and the runtime derives the database,
+            REST API, UI, and MCP server — permissions and audit enforced on every call.
           </p>
         </section>
 
@@ -447,8 +450,10 @@ export default function HomePage() {
         <section className="relative mx-auto w-full max-w-6xl px-6 pt-8 pb-20 md:pb-28">
           <div className="rounded-xl border border-fd-border bg-fd-card/60 px-6 py-8 text-center md:px-10">
             <p className="mx-auto max-w-2xl text-sm text-fd-muted-foreground text-pretty">
-              Your objects, permissions, and flows are your business ontology — the definition
-              layer of the AI era should be an open protocol you own.{' '}
+              The ontology is the software. Your objects, relations, actions, permissions, and
+              flows are your business ontology — views, dashboards, apps, and translations are
+              projections of it, and the definition layer of the AI era should be an open
+              protocol you own.{' '}
               <a
                 href="https://www.objectos.ai/en/blog/ai-ontology-open-protocol/"
                 className="inline-flex items-center gap-1 font-medium text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"

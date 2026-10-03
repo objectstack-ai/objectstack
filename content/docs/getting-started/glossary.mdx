@@ -91,8 +91,20 @@ arrived from that vocabulary, this is the term's referent here: the **Source** y
 which the runtime derives the database schema, REST API, UI, and MCP server. See
 [Metadata-Driven Development](/docs/concepts/metadata-driven).
 
-The word is worth stating explicitly because ObjectStack's differs from the hosted
-ontologies the category otherwise means by it, on two points:
+The slogan this reduces to is **the ontology is the software**, and the word is worth
+stating explicitly because ObjectStack's differs from what the term otherwise means, in
+two directions.
+
+**Against a knowledge ontology** (OWL, RDF, a knowledge graph): a knowledge ontology
+*describes* a domain, is read-only to the systems that consult it, and is *reasoned over*
+by an inference engine. An executable ontology *defines* the app, is *run* by the
+runtime, and is *validated* rather than reasoned. ObjectStack has no object inheritance,
+no axioms and no reasoner (the `abstract` key was removed from the spec for exactly that
+reason, ADR-0049), and it is not a semantic layer over your existing systems —
+federating an external datasource is read-only by default and early (see
+[External Datasources](/docs/data-modeling/external-datasources)).
+
+**Against a hosted ontology** (a graph held inside a vendor's system), on two points:
 
 * **You own the definition.** It lives in your repository as ordinary TypeScript,
   versioned in your VCS and reviewable as a diff, in a format specified and licensed
@@ -103,6 +115,12 @@ ontologies the category otherwise means by it, on two points:
   and audit included (see **Agent-Ready Boundaries** below). It is not a descriptive map
   of behaviour implemented somewhere else, so it cannot drift from the system it
   describes.
+
+**Core and projections.** The ontology core is objects, relations, actions,
+permissions, flows, and agent and tool definitions. Views, dashboards, apps, and
+translations are *projections* of that core — authored in metadata too, but not
+ontology. And code does not disappear: it moves into the runtime, as hooks, action
+bodies, CEL expressions, and constrained JSX.
 
 Distinct from **semantic layer**, which in these docs means the narrower analytics
 `dataset` layer (ADR-0021) that reports and dashboards bind to — see
