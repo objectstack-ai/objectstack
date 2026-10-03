@@ -3951,12 +3951,20 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `description` (:5677, `resolveInlineI18nLabel(schema.description,
  * displayLocale)`, drawn above the rows at :5784 / :6303 / :6342) and
  * `emptyState` (:6225, drawn through `DataEmptyState` at :6233). The third,
- * `keyboardNavigation`, has NO read point at that pin — zero hits under
+ * `keyboardNavigation`, had NO read point at that pin — zero hits under
  * objectui `packages/` and `apps/` outside tests, CHANGELOGs, READMEs and
  * `packages/types` (its type declaration and zod twin), against 3 hits for the
- * control `schema.editable` in `ObjectGrid.tsx`. It is declared ahead of its
- * reader on purpose (the BUILD objectui#11068 chose), and its describe carries
- * the `[EXPERIMENTAL — not enforced]` marker that says so; see the member.
+ * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
+ * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
+ * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at the
+ * pin this repo builds against (`.objectui-sha` = `ab1879721`, 2026-10-03):
+ * the BUILD landed — objectui `154075ab1` (objectui#11068), inside
+ * `89cad75d5570..ab1879721595` — and the grid reads the key. The same method
+ * finds 0 hit lines at `89cad75d5570` and 15 at this pin, against 3 for the
+ * control `schema.editable` in `ObjectGrid.tsx` at both: `ObjectGrid.tsx:5458`
+ * hands `schema.keyboardNavigation ?? inlineEditable` to the `data-table` it
+ * renders, and `components/src/renderers/complex/data-table.tsx` acts on it.
+ * So the marker is gone, as the member's record prescribed; see the member.
  *
  * [#21445] Seven members re-measured at the `.objectui-sha` pin `89cad75d55`,
  * same file, and typed with the shape each read point takes — they were
@@ -4029,6 +4037,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * "Objects are not valid as a React child"). That is a renderer gap on the
    * objectui side, not a second shape here: the list view door declares the
    * same members, and objectui's grid follows this declaration.
+   *
+   * ⚠️ That gap is closed at the pin this repo builds against (`.objectui-sha`
+   * = `ab1879721`, re-measured 2026-10-03): objectui#11227 (carried by objectui
+   * `6158e4c93`) resolves both members against the display locale before they
+   * reach `DataEmptyState` —
+   * `resolveInlineI18nLabel(authoredEmptyState?.title, displayLocale)` and the
+   * same for `message` (`ObjectGrid.tsx:6468-6469`, drawn at `:6485-6486`) — so
+   * both `I18nLabel` forms draw, and a locale map with no usable entry keeps
+   * that member's default. At `89cad75d5570` the two still reached
+   * `DataEmptyState` raw.
    */
   emptyState: EmptyStateSchema.optional()
     .describe('What the grid draws instead of an empty table: `{ title, message, icon }` — the list view\'s own empty-state shape'),
@@ -4376,17 +4394,33 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#20694] Declared AHEAD of its reader, deliberately: objectui#11068 chose
    * to BUILD arrow-key cell navigation for the grid, and this row is the spec
-   * half triage folded in. At the pin `db11afd4967c` nothing reads it (see the
-   * block docblock above for the measurement), so an authored value changes
-   * nothing yet. The `[EXPERIMENTAL — not enforced]` marker in the describe is
-   * the liveness ledger's own spelling for a declared-but-not-enforced key;
-   * the `page/regions` container that holds page components is undrilled in
-   * the ledger (`undrilled-containers.baseline.json`), so no ledger row exists
-   * for any `ComponentPropsMap` key and the marker is the record. When the
-   * BUILD lands and the grid reads it, drop the marker in the same change.
+   * half triage folded in. At the pin `db11afd4967c` nothing read it (see the
+   * block docblock above for the measurement), so an authored value changed
+   * nothing then, and the describe carried the `[EXPERIMENTAL — not enforced]`
+   * marker — the liveness ledger's own spelling for a declared-but-not-enforced
+   * key, and the record here because the `page/regions` container that holds
+   * page components is undrilled in the ledger
+   * (`undrilled-containers.baseline.json`), so no ledger row exists for any
+   * `ComponentPropsMap` key. This record said to drop the marker in the change
+   * that lands the BUILD at the pin, and it is dropped here.
+   *
+   * Read at the pin this repo builds against (`.objectui-sha` = `ab1879721`,
+   * re-measured 2026-10-03; the BUILD is objectui `154075ab1`, objectui#11068):
+   * `plugin-grid/src/ObjectGrid.tsx:5458` hands the data table
+   * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
+   * `inlineEditable` (`:1812`) is the authored `editable` AND the viewer's
+   * write verdict — so an absent key follows whether the grid RENDERS
+   * editable, `true` turns the navigation on for a read-only grid, and `false`
+   * turns it off on an editable one. `components/src/renderers/complex/data-table.tsx`
+   * (`keyboardNavigation = false` by default, `:787`) then gives the table
+   * `role="grid"` (`:2235`) and makes the data cells one roving Tab stop
+   * (`tabIndex` 0 on one cell and -1 on the rest, `:2700`) that the arrow
+   * keys, Home / End and Ctrl+Home / Ctrl+End move (`navigationTarget`,
+   * `:1964`; `handleCellKeyDown`, `:1990`). A widget a cell renders keeps its
+   * own Tab stop. Off, every data cell is its own Tab stop, as before.
    */
   keyboardNavigation: z.boolean().optional()
-    .describe('[EXPERIMENTAL — not enforced] Arrow-key cell navigation on the WAI-ARIA grid pattern. Defaults to on when `editable` is set; a read-only grid keeps its Tab behaviour unless this is `true`. No renderer reads it yet: it is declared ahead of the grid\'s keyboard-navigation build, so authoring it changes nothing today'),
+    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Defaults to on when the grid renders editable — `editable` set and the viewer allowed to edit; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid'),
   resizable: z.boolean().optional().describe('Allow column resize (the renderer default is on)'),
   /**
    * REMOVED (#21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A,
