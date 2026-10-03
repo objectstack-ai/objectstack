@@ -158,7 +158,7 @@ export interface DriverVocabularyEntry {
  * order the tuple used before commit e2798fab7, plus `turso` appended.
  */
 const DRIVER_VOCABULARY = [
-  { id: 'memory', aliases: ['memory', 'mingo', 'in-memory'], contractOnlyAliases: ['inmemory'], hasLocalDefault: true },
+  { id: 'memory', aliases: [], contractOnlyAliases: ['memory', 'mingo', 'in-memory', 'inmemory'], hasLocalDefault: true },
   { id: 'sqlite', aliases: ['sqlite', 'sql'], contractOnlyAliases: ['sqlite3', 'better-sqlite3'], hasLocalDefault: true },
   { id: 'sqlite-wasm', aliases: ['sqlite-wasm', 'wasm-sqlite', 'wasm'], hasLocalDefault: true },
   { id: 'postgres', aliases: ['postgres', 'postgresql', 'pg'], hasLocalDefault: false },
