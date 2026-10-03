@@ -10,6 +10,9 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath } from '../utils/internal-artifact-channel.js';
+// The precedence's last rung — whether the cwd config takes part — decided by
+// the SAME predicate the supervisors print their `Config:` row by (#21501).
+import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
 import {
   resolveDriverType,
   resolveStorageDefinition,
@@ -2369,7 +2372,6 @@ export default class Serve extends Command {
     // the separate `objectstack-ai/cloud` repo, NOT a path in this one — and
     // lifted into the framework so any project can `objectstack start`
     // against just a `dist/objectstack.json`.
-    const configMissing = !configExists;
     let useArtifactFallback = false;
     let useEmptyBoot = false;
 
@@ -2378,21 +2380,20 @@ export default class Serve extends Command {
     // fetched at boot, or a file:// URL read directly (the volume-mount
     // workflow) — with an optional SRI-style `#sha256=` integrity pin in the
     // fragment. It is resolved here, before anything else looks for an
-    // artifact, and it wins over every local lookup:
+    // artifact, and it wins over every local lookup.
     //
-    //   --artifact  >  OS_ARTIFACT_URL  >  OS_INTERNAL_ARTIFACT_PATH
-    //               >  OS_ARTIFACT_PATH  >  <cwd>/dist/…
-    //
-    // `OS_INTERNAL_ARTIFACT_PATH` is the CLI's private parent-to-child channel:
-    // an `os start` / `os dev` supervisor resolved an artifact through its own
-    // ladder and is handing the answer down. It sits BELOW the reference (a
-    // supervisor that saw OS_ARTIFACT_URL resolves nothing and sends nothing,
-    // and `os dev` sends its answer unconditionally, so the reference has to
-    // keep outranking it) and ABOVE the operator's OS_ARTIFACT_PATH (which the
-    // supervisor no longer overwrites on the way down, so only a higher rung
-    // keeps `--artifact` beating an exported OS_ARTIFACT_PATH the way it does
-    // today). See `utils/internal-artifact-channel.ts` for why the CLI stopped
-    // writing the operator's knob at all.
+    // THE precedence is written once, in `utils/artifact-precedence.ts`; the
+    // supervisors (`os start`, `os dev`) resolve through it and hand their
+    // answer down on `OS_INTERNAL_ARTIFACT_PATH`, the CLI's private
+    // parent-to-child channel. This process reads the channels in this order:
+    // the reference, then the supervisor's answer, then the operator's
+    // OS_ARTIFACT_PATH. The answer sits BELOW the reference only because a
+    // supervisor never sends both (one holding `--artifact`, which outranks the
+    // reference, removes OS_ARTIFACT_URL from this env), and ABOVE the
+    // operator's OS_ARTIFACT_PATH (which the supervisor no longer overwrites on
+    // the way down, so only a higher rung keeps `--artifact` beating an
+    // exported OS_ARTIFACT_PATH). See `utils/internal-artifact-channel.ts` for
+    // why the CLI stopped writing the operator's knob at all.
     //
     // Beating OS_ARTIFACT_PATH is not a nicety, it is the acceptance
     // criterion: the official runtime image sets
@@ -2452,13 +2453,37 @@ export default class Serve extends Command {
       }
     }
 
-    if (configMissing && !pinnedArtifact) {
+    // ── The supervisor's answer outranks a cwd config (#21501) ───────────
+    // Read ONCE; every use below is this value. A cwd `objectstack.config.ts`
+    // is the LOWEST source, so it takes part in this boot only when the
+    // supervisor's answer IS that config's own compiled output (the path
+    // `os dev`, a bare `os start` in a project, and the documented
+    // `os start --artifact ./dist/objectstack.json` all take). Any other answer
+    // boots ALONE, exactly as it boots from a directory with no config.
+    //
+    // MEASURED before this read existed, both legs from a project directory
+    // whose config's `dist/objectstack.json` held a DIFFERENT stack:
+    // `os dev -a X` and `os start --artifact X` printed `Artifact: X` and served
+    // that `dist/objectstack.json` (the config boot's standalone stack read the
+    // conventional path, never the channel), and `os start --artifact X` beside
+    // a config with no `dist/` served the config itself. The same commands
+    // from a directory with no config served X.
+    const supervisorArtifact = readInternalArtifactPath();
+    const configJoins = cwdConfigJoinsBoot({
+      configExists,
+      configPath: absolutePath,
+      artifact: pinnedArtifact ? { kind: 'reference' }
+        : supervisorArtifact ? { kind: 'path', path: supervisorArtifact }
+          : { kind: 'none' },
+    });
+
+    if (!configJoins && !pinnedArtifact) {
       const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
       // A supervising `os start` / `os dev` passes its already-resolved answer
       // as the explicit override — the same position `OS_ARTIFACT_PATH` used to
       // occupy when the supervisor wrote it, so a named-but-missing artifact is
       // still a loud refusal rather than a silent empty boot.
-      const artifactSource = resolveDefaultArtifactPath(readInternalArtifactPath());
+      const artifactSource = resolveDefaultArtifactPath(supervisorArtifact);
       if (!artifactSource) {
         // Quick-start mode: `objectstack start` lets the user boot an
         // empty kernel with no config and no artifact, then install apps
@@ -2510,6 +2535,12 @@ export default class Serve extends Command {
       printDiagnostic(chalk.dim('  No objectstack.config.ts or artifact found — booting empty kernel...'));
     } else if (pinnedArtifact) {
       printDiagnostic(chalk.dim('  Booting from the artifact named by OS_ARTIFACT_URL (default host)...'));
+    } else if (useArtifactFallback && configExists) {
+      // Never "No objectstack.config.ts found" when one is sitting right there:
+      // say it is deliberately not loaded, and why.
+      printDiagnostic(chalk.dim(
+        `  ${relativeConfig} is not loaded — the artifact resolved for this boot outranks it; booting from that artifact (default host)...`,
+      ));
     } else if (useArtifactFallback) {
       printDiagnostic(chalk.dim('  No objectstack.config.ts found — booting from artifact (default host)...'));
     } else {
@@ -2711,10 +2742,7 @@ export default class Serve extends Command {
             // being re-derived from the environment.
             ...(pinnedArtifact
               ? { artifactPath: pinnedArtifact.localPath }
-              : (() => {
-                const internal = readInternalArtifactPath();
-                return internal ? { artifactPath: internal } : {};
-              })()),
+              : supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
           });
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
@@ -2731,6 +2759,12 @@ export default class Serve extends Command {
             // #2229: dev enables the native-better-sqlite3 → wasm → in-memory
             // step-down in the shared datasource factory; prod fails loudly.
             dev: isDev,
+            // #21501: a supervised config boot serves the supervisor's answer
+            // (here always the config's own compiled output — `configJoins`),
+            // handed over explicitly. Left to the standalone stack's own
+            // fallback, an exported OS_ARTIFACT_PATH would outrank
+            // `os start --artifact ./dist/objectstack.json` in this process.
+            ...(supervisorArtifact ? { artifactPath: supervisorArtifact } : {}),
           };
           const bootResult = await createStandaloneStack(standaloneInput);
           // [#4002] Per-key `api` merge — see mergeBootConfig.
