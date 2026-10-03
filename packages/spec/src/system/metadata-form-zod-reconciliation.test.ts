@@ -328,7 +328,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'page',
     path: ROOT_PATH,
     key: 'requires',
-    why: "platform-written, never authored — the schema's own words: `derived from the source at save — omit it`. On an `html` / `jsx` page, on a server with the deployment's SDUI manifest, the save door stamps the compiled list and refuses a written list that disagrees (`page-requires-disagrees-with-source`); on `react`, `full` and `slotted` pages nothing derives it, and its one reader is the load report (a warning; the page is still served); and the Studio page editor drops the key on every save. A control would invite the list the describe tells every author to omit",
+    why: "platform-written, never authored — the schema's own words: `derived from the source at save — omit it`. The key exists only on an `html` / `jsx` page, where, on a server with the deployment's SDUI manifest, the save door stamps the compiled list and refuses a written list that disagrees (`page-requires-disagrees-with-source`); on every other kind the parse refuses it; and the Studio page editor drops the key on every save. A control would invite the list the describe tells every author to omit",
   },
   {
     kind: 'omit',
