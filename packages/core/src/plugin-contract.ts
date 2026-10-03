@@ -7,7 +7,7 @@ import type { Plugin } from './types.js';
  * The DECLARED plugin contract, enforced at `use()` on BOTH kernels — one
  * statement, shared by `LiteKernel.use()` and by
  * `PluginLoader.validatePluginContract` on the `ObjectKernel.use()` path
- * (#16721, maintainer ruling 2026-09-08, option A).
+ * (maintainer ruling 2026-09-08, option A, landed as commit 51ae73123).
  *
  * ## Why it is written down here rather than in each kernel
  *
@@ -113,7 +113,7 @@ import type { Plugin } from './types.js';
  * line, and the first violated key is the one to fix.
  *
  * The code is spelled the ADR-0112 way and is REGISTERED in
- * `ERROR_CODE_LEDGER` under `@objectstack/core` (#16649, under the #16404
+ * `ERROR_CODE_LEDGER` under `@objectstack/core` (commit 613bfbd3d, under the #16404
  * door-or-no-door rule), exactly like `SERVICE_NOT_REGISTERED_CODE` one module
  * over. `door: 'none'` on this tree — it is raised while the kernel is still
  * assembling itself, before any HTTP boundary exists. If a transport ever
@@ -152,7 +152,7 @@ import type { Plugin } from './types.js';
  * version` message, not `PLUGIN_CONTRACT_VIOLATION`; that ordering is
  * unchanged and is pinned. `LiteKernel` has never run `validatePluginStructure`
  * and still does not — so on that kernel a malformed `version` is refused for
- * the first time here, by the schema, which is exactly the convergence #16721
+ * the first time here, by the schema, which is exactly the convergence landed in commit 51ae73123 as
  * ruled for the other eight keys.
  */
 const PLUGIN_CONTRACT_VIOLATION_CODE = 'PLUGIN_CONTRACT_VIOLATION';

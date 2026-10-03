@@ -14,7 +14,7 @@
  *    enforcement judgment reading it (explain's guest⇒EXTERNAL floor, the
  *    security plugin's agent baseline, the perf-disclosure gate) was silently
  *    never-true on that face.
- *  - **#6206 / #6551 — dropped fields.** The share-link copies omitted
+ *  - **commit 8e13ca876 / #6551 — dropped fields.** The share-link copies omitted
  *    `accessible_org_ids`, and the `group` posture's Layer 0 wall reads it
  *    directly: real 403s for callers who should have been let through. Both
  *    surfaces were since converted to pass the WHOLE envelope through.
@@ -27,9 +27,9 @@
  * fails to compile until it is either assembled or listed as
  * non-entry-resolved.
  *
- * ## Two named entries — the anonymous face is genuinely divergent (#6216)
+ * ## Two named entries — the anonymous face is genuinely divergent (commit f586f1a89)
  *
- * The maintainer ruling of 2026-08-08 on #6216 (Option A) settled the one
+ * The maintainer ruling of 2026-08-08 (Option A, landed as commit f586f1a89) settled the one
  * question that blocked convergence: what an anonymous request yields.
  *
  *  - {@link assembleExecutionContext} — the DEFAULT, fail-closed entry. No
@@ -230,7 +230,7 @@ export interface ExecutionContextAssemblyInput {
    * `session.accessToken` (`objectql/engine.ts` `buildSession`,
    * `spec/data/hook.zod.ts`).
    *
-   * A NAMED per-face divergence, preserved deliberately (#6216): the runtime /
+   * A NAMED per-face divergence, preserved deliberately (commit f586f1a89): the runtime /
    * MCP dispatcher passes `authz.accessToken`; the REST face has never carried
    * it and passes `undefined`, because widening a published hook surface to
    * expose the session token on a second transport is a product decision, not a
@@ -353,7 +353,7 @@ function entryFields(
     /** Fellow-org user IDs for RLS scoping of identity tables. */
     org_user_ids: authz.org_user_ids,
     // [ADR-0105 D2] The caller's org access set — the `group` posture's Layer 0
-    // wall reads it directly, so every transport must carry it (#6206).
+    // wall reads it directly, so every transport must carry it (commit 8e13ca876).
     accessible_org_ids: authz.accessible_org_ids,
     // OAuth provenance: surface the token's granted scopes so the MCP
     // dispatcher can narrow the exposed tool families (undefined for every
@@ -370,7 +370,7 @@ function entryFields(
 }
 
 /**
- * The DEFAULT, fail-closed entry (#6216 Option A). An unauthenticated request
+ * The DEFAULT, fail-closed entry (commit f586f1a89, the ruled Option A). An unauthenticated request
  * yields NO context — the surface answers 401. Every surface uses this one
  * unless serving anonymous principals is part of its product semantics.
  */
@@ -382,7 +382,7 @@ export function assembleExecutionContext(
 }
 
 /**
- * The EXPLICIT guest entry (#6216 Option A). An unauthenticated request becomes
+ * The EXPLICIT guest entry (commit f586f1a89, the ruled Option A). An unauthenticated request becomes
  * a first-class guest principal — `principalKind: 'guest'`, `positions:
  * ['guest']` — which enforcement consumers read today
  * (`plugin-security/explain-engine.ts`: guest ⇒ `EXTERNAL` posture).

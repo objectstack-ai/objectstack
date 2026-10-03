@@ -1,5 +1,5 @@
-// The EXAMPLES-layer type-check program (#14613), the sibling-config pattern
-// `packages/plugins/plugin-auth/tsconfig.examples.json` (#10869 / #14386) and
+// The EXAMPLES-layer type-check program (commit 81208086a), the sibling-config pattern
+// `packages/plugins/plugin-auth/tsconfig.examples.json` (#10869 / commit 7cbe705b0) and
 // `packages/spec/tsconfig.scripts.json` (#5475) already run.
 //
 // WHY IT ARRIVED WITH THE `typecheck` SCRIPT AND NOT BEFORE. Until that script
@@ -19,7 +19,7 @@
 // self-referencing by a name it declares in no dependency block. An unresolved
 // import makes every symbol it names `any`, which is where 3 of the 12 TS7006
 // came from; the pile was one third module resolution and two thirds its
-// cascade. That is the same shape #14386 found in plugin-auth's example (a
+// cascade. That is the same shape commit c49007a7c found in plugin-auth's example (a
 // published example that could not resolve, compile or run for anyone who
 // copied it) and the reason the repo's answer to an examples directory is a
 // sibling program rather than a debt row — there is no ledger here, on purpose.
