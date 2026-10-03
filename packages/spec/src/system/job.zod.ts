@@ -249,9 +249,11 @@ export const JobSchema = lazySchema(() => strictObject({
    * {@link timeoutMs}; the body's own `timeoutMs` is refused on a job
    * ({@link JOB_BODY_TIMEOUT_REFUSED}).
    *
-   * `objectstack build` lowers the function a `handler` names into this slot
-   * when that function is self-contained and written against the sandbox `ctx`
-   * (`packages/cli/src/utils/lower-callables.ts`).
+   * Authored as data. `objectstack build` does not mint it from the function a
+   * `handler` names: `defineStack` parses `functions` through `z.function()`,
+   * which replaces each callable with a wrapper whose source is not the
+   * author's, and the documented handler form reads `ql` / `logger` off a
+   * destructured `JobHandlerContext` that no sandbox `ctx` carries.
    */
   //
   // `ScriptBodySchema` by reference; the one job-specific rule is a refinement

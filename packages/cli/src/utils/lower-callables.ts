@@ -3,8 +3,7 @@
 /**
  * Walk a normalized stack definition and replace every inline `function`
  * value (Hook handlers, Action handlers, top-level `functions` map / array
- * entries) with **two** payloads (a job, which names a `functions` entry
- * rather than holding a function, gains only the first — see step 1c):
+ * entries) with **two** payloads:
  *
  *   1. A metadata-only `body: { language: 'js', source, capabilities }`
  *      carved out of the function source via `extractHookBody`. This is
@@ -23,7 +22,6 @@
  */
 
 import { extractHookBody, HookBodyExtractionError, type HookBodyRefusalKind } from './extract-hook-body.js';
-import { assertJobBodyContext } from './job-body-context.js';
 
 /**
  * One recorded extraction refusal.
@@ -57,13 +55,9 @@ export interface LoweringResult {
   functions: Record<string, (...args: unknown[]) => unknown>;
   /** Number of inline function handlers replaced. */
   count: number;
-  /**
-   * Number of registered callables that successfully emitted a metadata-only
-   * `body`. A job body minted from a `functions` entry is NOT counted: it does
-   * not take that function out of the runtime bundle (see step 1c).
-   */
+  /** Number of handlers that successfully emitted a metadata-only `body`. */
   bodyExtracted: number;
-  /** Per-extraction failures, jobs' included (still emit handler ref + bundle, but warn). */
+  /** Per-extraction failures (still emit handler ref + bundle, but warn). */
   bodyExtractionWarnings: BodyExtractionWarning[];
   /**
    * [#16546] The `hooks[*].handler` ref strings whose `body` was minted HERE
@@ -92,13 +86,6 @@ export interface LoweringResult {
 
 type AnyFn = (...args: unknown[]) => unknown;
 
-/** The L2 body this pass mints — `ScriptBodySchema`'s author shape. */
-interface ExtractedJsBody {
-  language: 'js';
-  source: string;
-  capabilities: string[];
-}
-
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -124,24 +111,14 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 
   // Try to extract a metadata-only body from a callable. Returns null if the
   // body source contains a forbidden token — the caller still bundles the fn.
-  function tryExtractBody(fn: AnyFn, originLabel: string): ExtractedJsBody | null {
-    const body = extractOrRecord(fn, originLabel);
-    if (body) bodyExtracted += 1;
-    return body;
-  }
-
-  // The extraction and the refusal record, without the `bodyExtracted` count —
-  // shared by the callable slots (via `tryExtractBody`) and the job slot, which
-  // must NOT count (see step 1c). `check` runs after `extractHookBody` succeeds
-  // and refuses by throwing, exactly as the extractor does.
-  function extractOrRecord(
-    fn: AnyFn,
-    originLabel: string,
-    check?: (fn: AnyFn, originLabel: string) => void,
-  ): ExtractedJsBody | null {
+  function tryExtractBody(fn: AnyFn, originLabel: string): {
+    language: 'js';
+    source: string;
+    capabilities: string[];
+  } | null {
     try {
       const ext = extractHookBody(fn, originLabel);
-      check?.(fn, originLabel);
+      bodyExtracted += 1;
       return { language: 'js', source: ext.source, capabilities: ext.capabilities };
     } catch (err: any) {
       // ⛔ The catch STAYS. Deleting it would make every refusal fatal and take
@@ -251,48 +228,6 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       );
     }
 
-    // 1c. Mint `jobs[*].body` from the function a job's `handler` names.
-    //
-    //     A job has no inline form — `JobSchema.handler` is a NAME, the key of
-    //     a `functions` entry — so the callable to lower is that entry's, read
-    //     from `input` (step 2 below replaces it with a ref string). The job
-    //     keeps its `handler` unchanged beside the minted body, the back-compat
-    //     ref hooks keep too: the function itself is still registered and
-    //     bundled by step 2, because today's runtime resolves a job only
-    //     through the function table.
-    //
-    //     The body is minted only when the function is a body as written —
-    //     `extractHookBody`'s refusals, plus `assertJobBodyContext`, which
-    //     refuses a function written against the in-process job context
-    //     (`ql` / `logger` / `bundle`, a destructured or renamed parameter): a
-    //     body peeled from one of those would throw on its first run in the
-    //     sandbox, and `body` wins over `handler`. A refusal is recorded like a
-    //     hook's, so the default build's warn-and-bundle line and
-    //     `--strict-body` both see it.
-    //
-    //     ⛔ NOT counted in `bodyExtracted`. `count - bodyExtracted` is how many
-    //     registered callables still need the runtime bundle (`os build` skips
-    //     emitting it at zero); a job body does not take the function it was
-    //     peeled from out of the bundle — the runtime still schedules the job
-    //     through that function, and flows may name it too. Counting it would
-    //     let a stack whose only callable is a job's function ship without the
-    //     module its job runs from.
-    //
-    //     An author-written `body` is never replaced, and a name that resolves
-    //     to no callable here (already lowered, or missing — the parse and the
-    //     runtime report that) mints nothing.
-    if (Array.isArray(lowered.jobs)) {
-      lowered.jobs = (lowered.jobs as unknown[]).map((raw) => {
-        if (!isPlainObject(raw)) return raw;
-        if (raw.body !== undefined || typeof raw.handler !== 'string') return raw;
-        const fn = namedFunction(input.functions, raw.handler);
-        if (!fn) return raw;
-        const name = typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'anon_job';
-        const body = extractOrRecord(fn, `job '${name}'`, assertJobBodyContext);
-        return body ? { ...raw, body } : raw;
-      });
-    }
-
     // 2. Lower top-level `functions` (map or array of records).
     //    The runtime already merges this map into the engine's resolver, so
     //    we keep the same shape after lowering — just replace fn refs with
@@ -392,31 +327,6 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     bodyExtractionWarnings: warnings,
     loweredHookRefs,
   };
-}
-
-/**
- * The callable a `functions` entry named `name` holds, in either shape the
- * field takes — a map (`{ name: fn }` or a declared `{ name: { handler: fn } }`)
- * or an array of `{ name, handler }` records — or `null` when there is none.
- *
- * Own keys only: `functions.constructor` on a plain map is `Object`, and a job
- * whose `handler` happens to spell an `Object.prototype` member must not have
- * the built-in peeled into its body.
- */
-function namedFunction(fnsField: unknown, name: string): AnyFn | null {
-  if (Array.isArray(fnsField)) {
-    for (const entry of fnsField) {
-      if (isPlainObject(entry) && entry.name === name && typeof entry.handler === 'function') {
-        return entry.handler as AnyFn;
-      }
-    }
-    return null;
-  }
-  if (!isPlainObject(fnsField) || !Object.prototype.hasOwnProperty.call(fnsField, name)) return null;
-  const value = fnsField[name];
-  if (typeof value === 'function') return value as AnyFn;
-  if (isPlainObject(value) && typeof value.handler === 'function') return value.handler as AnyFn;
-  return null;
 }
 
 /**

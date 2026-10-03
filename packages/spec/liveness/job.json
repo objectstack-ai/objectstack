@@ -43,7 +43,6 @@
           "verifiedAt": "2026-10-03",
           "evidenceScope": "in-repo",
           "evidence": "packages/spec/src/data/hook-body.zod.ts#ScriptBodySchema (`language: z.literal('js')`, whose error names why an L1 `\"expression\"` body is refused on this slot); packages/spec/src/system/job.zod.ts#JobSchema (`body` is `ScriptBodySchema` alone, not the `HookBodySchema` union)",
-          "producer": "packages/cli/src/utils/lower-callables.ts#lowerCallables (step 1c mints `language: 'js'`)",
           "note": "Validated, not run: the L2 discriminator the runtime binder will hand to the sandbox runner. Same carrier as `source`."
         },
         "source": {
@@ -53,15 +52,13 @@
           "authorWarn": true,
           "authorHint": "The runtime does not run a job `body` yet: a job is still scheduled through its `handler`, and a job with a `body` and no `handler` is skipped at boot with a warning. Keep the `body` (it is validated today and travels with the metadata) and keep a `handler` beside it until the runtime binder lands.",
           "evidence": "packages/spec/src/data/hook-body.zod.ts#ScriptBodySchema (`source: z.string().min(1)`); packages/spec/src/system/job.zod.ts#JobSchema (the job slot that admits it)",
-          "producer": "packages/cli/src/utils/lower-callables.ts#lowerCallables (step 1c: `os build` mints `jobs[*].body` from the function a job's `handler` names, when packages/cli/src/utils/job-body-context.ts#assertJobBodyContext finds it written against the sandbox `ctx`)",
-          "note": "PLANNED, carrier #21489 (the runtime half of the E ruling, `Blocked-by:` this key's landing): the one binder, `bindAppArtifactHandlers`, schedules a job's `body` in the sandbox on every door that brings an artifact in. Measured at the commit that added the key: packages/runtime/src/app-plugin.ts#start resolves each job through `fnMap[job.handler]` only and never reads `job.body`, so a body-only job is skipped with the existing `job handler not found in bundle.functions` warn. The in-repo pieces cited in `evidence` validate the body and the build mints it; none of them RUNS it, which is what a `live` verdict would claim. `authorWarn` because a body-only job is declared-but-not-run until then. Not drilled: `body` is `ScriptBodySchema` behind a refinement, the same reused shape `hook.body` and `action.body` carry undrilled. Flip to `live` on the commit that cites the binder reading `job.body`, and drop `authorWarn` / `authorHint` in that same edit (a warned `live` row reds this gate)."
+          "note": "PLANNED, carrier #21489 (the runtime half of the E ruling, `Blocked-by:` this key's landing): the one binder, `bindAppArtifactHandlers`, schedules a job's `body` in the sandbox on every door that brings an artifact in. Measured at the commit that added the key: packages/runtime/src/app-plugin.ts#start resolves each job through `fnMap[job.handler]` only and never reads `job.body`, so a body-only job is skipped with the existing `job handler not found in bundle.functions` warn. The in-repo pieces cited in `evidence` validate the body; none of them RUNS it, which is what a `live` verdict would claim. No producer in this repo: a job body is authored as data (`os build` does not mint one from a `handler`'s function, see `JobSchema.body`'s TSDoc). `authorWarn` because a body-only job is declared-but-not-run until the binder lands. Flip every child to `live` on the commit that cites the binder reading `job.body`, and drop `authorWarn` / `authorHint` in that same edit (a warned `live` row reds this gate)."
         },
         "capabilities": {
           "status": "planned",
           "verifiedAt": "2026-10-03",
           "evidenceScope": "in-repo",
           "evidence": "packages/spec/src/data/hook-body.zod.ts#ScriptBodySchema (`capabilities: z.array(HookBodyCapability).default([])`); packages/spec/src/system/job.zod.ts#JobSchema (the job slot that admits it)",
-          "producer": "packages/cli/src/utils/lower-callables.ts#lowerCallables (step 1c mints the capabilities `extractHookBody` infers)",
           "note": "Validated, not enforced yet: the sandbox gates `ctx.api` / `ctx.log` on these tokens per invocation, and no job body is invoked until the binder lands. Same carrier as `source`."
         },
         "timeoutMs": {
