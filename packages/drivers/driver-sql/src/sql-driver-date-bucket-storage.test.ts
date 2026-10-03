@@ -26,10 +26,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
-type Granularity = 'day' | 'month' | 'quarter' | 'year';
+type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
-/** Every granularity SQLite advertises natively (week is bucketed in-memory). */
-const GRANULARITIES: Granularity[] = ['day', 'month', 'quarter', 'year'];
+/** Every granularity SQLite advertises natively: all five, `week` included since #21595. */
+const GRANULARITIES: Granularity[] = ['day', 'week', 'month', 'quarter', 'year'];
 
 /**
  * ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue`.
@@ -54,6 +54,17 @@ function bucketDateValue(value: unknown, g: Granularity): string | null {
     case 'quarter': return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
     case 'month': return `${y}-${String(m).padStart(2, '0')}`;
     case 'day': return `${y}-${String(m).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    case 'week': {
+      // The same ISO-week arm as `sql-driver-date-bucket.test.ts`'s copy.
+      const target = new Date(Date.UTC(y, d.getUTCMonth(), d.getUTCDate()));
+      const dayNum = (target.getUTCDay() + 6) % 7;
+      target.setUTCDate(target.getUTCDate() - dayNum + 3);
+      const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+      const weekNo = 1 + Math.round(
+        ((target.getTime() - firstThursday.getTime()) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7,
+      );
+      return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+    }
   }
 }
 
@@ -241,6 +252,18 @@ describe('SqlDriver date bucketing over a MIXED-form datetime column (#3773)', (
     expect(byMonth['2026-01']).toBe(1);  // INTEGER epoch ms
     expect(byMonth['2026-02']).toBe(6);  // ISO TEXT (2) + zone-naive TEXT (4)
     expect(byMonth['1970-01']).toBeUndefined(); // TEXT never divided by 1000
+  });
+
+  it('[#21595] buckets each row by its own stored form at `week` too, where the repair is read twice', async () => {
+    // The `week` arm references the column twice, so the legacy repair is
+    // expanded twice and binds twice as many identifiers. A binding shifted
+    // between the two copies would put a row in another week, or in 1970.
+    expect(await bucketSums(driver, 'closed_at', 'week')).toEqual({
+      '2026-W02': 1, // INTEGER epoch ms, Saturday 2026-01-10
+      '2026-W07': 2, // ISO TEXT, Saturday 2026-02-14
+      '2026-W08': 4, // zone-naive TEXT, Friday 2026-02-20
+      [EMPTY]: 8,
+    });
   });
 
   it('leaves a NULL instant in its own bucket', async () => {

@@ -88,10 +88,11 @@ const GRANULARITIES: readonly Granularity[] = ['day', 'week', 'month', 'quarter'
 /**
  * The granularities each dialect buckets in SQL. Declared rather than read off
  * the driver, and checked against it below, so the set the tests iterate cannot
- * shrink without a red. SQLite buckets `week` in memory (#21595 owns that).
+ * shrink without a red. Every dialect buckets all five: SQLite's `week` arm
+ * landed with #21595.
  */
 const BUCKETED_IN_SQL: Record<DialectId, readonly Granularity[]> = {
-  sqlite: ['day', 'month', 'quarter', 'year'],
+  sqlite: GRANULARITIES,
   pg: GRANULARITIES,
   mysql: GRANULARITIES,
 };
