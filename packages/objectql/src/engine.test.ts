@@ -2062,8 +2062,14 @@ describe('ObjectQL Engine', () => {
             expect(mockDriver.find).toHaveBeenCalledTimes(1); // No expand query
         });
 
-        it('should skip expand if schema is not registered', async () => {
-            vi.mocked(SchemaRegistry.getObject).mockReturnValue(undefined);
+        it('should skip expand if the referenced schema is not registered', async () => {
+            // [#21516] The read's own object must resolve through the registry
+            // (an in-process verb refuses a name it does not hold), so `task` is
+            // registered; the REFERENCED object is not, and expand leaves the
+            // raw id without a second driver read.
+            vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => (name === 'task'
+                ? { name: 'task', fields: { assignee: { type: 'lookup', reference: 'user' } } } as any
+                : undefined));
 
             vi.mocked(mockDriver.find).mockResolvedValueOnce([
                 { id: 't1', assignee: 'u1' },

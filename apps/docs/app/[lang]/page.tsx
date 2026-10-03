@@ -31,7 +31,7 @@ const mono = IBM_Plex_Mono({
   variable: '--font-l-mono',
 });
 
-const HOME_TITLE = 'Metadata framework for AI-written apps';
+const HOME_TITLE = 'The ontology is the software';
 const HOME_DESCRIPTION =
   'One executable business ontology. AI writes it, the runtime runs it, agents operate it, you own it. The whole app — data model, UI, workflows, permissions — is typed metadata small enough for AI to hold whole.';
 
@@ -258,11 +258,13 @@ export default function HomePage() {
             className="mt-8 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[13px] text-fd-muted-foreground"
             style={{ fontFamily: 'var(--l-mono)' }}
           >
-            <span>Fits in an agent&apos;s context</span>
+            <span>Executable</span>
             <span aria-hidden className="text-fd-border">|</span>
-            <span>Typed, validated, governed</span>
+            <span>AI-writable</span>
             <span aria-hidden className="text-fd-border">|</span>
-            <span>Self-host anywhere</span>
+            <span>Agent-operable</span>
+            <span aria-hidden className="text-fd-border">|</span>
+            <span>You own it</span>
           </div>
         </section>
 

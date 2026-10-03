@@ -56,6 +56,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { mapDataError, RestServer } from './rest-server';
 
 // [#17865] This file observes the REST fault log, so it declares the level it
@@ -134,6 +135,12 @@ async function bootRealProtocol(dbError: string) {
     const engine = new ObjectQL();
     engine.registerDriver(failingDriver(dbError), true);
     await engine.init();
+    // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+    // name its registry does not hold, so the harness registers the family as a boot
+    // does — after the DDL, so an unprovisioned store still answers "no such table".
+    for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+      if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+    }
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     return mountRest(protocol as any);
 }
@@ -250,6 +257,12 @@ describe('[#5462] sys_metadata unavailable is a fault, not a missing object', ()
         const engine = new ObjectQL();
         engine.registerDriver(failingDriver(SQLITE_NO_TABLE), true);
         await engine.init();
+        // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+        // name its registry does not hold, so the harness registers the family as a boot
+        // does — after the DDL, so an unprovisioned store still answers "no such table".
+        for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+          if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+        }
         const protocol: any = new ObjectStackProtocolImplementation(engine as any);
 
         let seen: any;

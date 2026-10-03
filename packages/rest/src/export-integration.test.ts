@@ -36,6 +36,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { maskFieldValue } from '@objectstack/plugin-security';
 import { RestServer } from './rest-server';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
@@ -140,6 +141,12 @@ async function boot() {
   await engine.insert('task', { id: '1', title: '写代码', done: true, priority: 'high', due: '2026-06-30T00:00:00.000Z', owner: 'u1' });
   await engine.insert('task', { id: '2', title: '写文档', done: false, priority: 'low', due: '2026-07-01T00:00:00.000Z', owner: 'u2' });
 
+  // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+  // name its registry does not hold, so the harness registers the family as a boot
+  // does — after the DDL, so an unprovisioned store still answers "no such table".
+  for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+  }
   const protocol = new ObjectStackProtocolImplementation(engine as any);
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
@@ -374,6 +381,12 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
       { id: '2', title: '写文档', done: false, priority: 'low', due: '2026-07-01T00:00:00.000Z', owner: 'u1' },
     ];
     for (const t of tasks) await engine.insert('task', t);
+    // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+    // name its registry does not hold, so the harness registers the family as a boot
+    // does — after the DDL, so an unprovisioned store still answers "no such table".
+    for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+      if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+    }
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     // 16th positional ctor arg is `securityServiceProvider`.
     const securityServiceProvider = async () => ({ getReadableFields: opts.getReadableFields });

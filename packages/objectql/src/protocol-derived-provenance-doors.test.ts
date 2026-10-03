@@ -47,6 +47,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // that would otherwise read as the subject refusing the write.
 import { hashSpec } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
+// [#21516] The rest of the stored-metadata family the repository writes through: the
+// engine refuses a name the registry does not resolve, so the harness registers it as a boot does.
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 
 const PKG = 'app.sdbh';
 const ENV = 'env_test';
@@ -166,6 +169,7 @@ async function boot(driver: unknown) {
     engine.registerDriver(driver as any, true);
     await engine.init();
     engine.registry.registerObject(sysMetadataObject as any);
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
     const protocol = new ObjectStackProtocolImplementation(engine as any, undefined, ENV);
     return { engine, protocol };
 }
@@ -308,6 +312,7 @@ describe('#16702 door 2 — hydration restates the fact for EVERY type, not only
         engine.registerDriver(driver as any, true);
         await engine.init();
         engine.registry.registerObject(sysMetadataObject as any);
+        for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
         // environmentId omitted — the unscoped (control-plane) kernel is the
         // only one whose list read hydrates the process-wide registry.
         const protocol = new ObjectStackProtocolImplementation(engine as any);

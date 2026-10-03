@@ -108,8 +108,6 @@ const live: Array<{
     driver?: SqlDriver;
     dir?: string;
     noise?: ExpectedReadRefusalCapture;
-    /** The channels this test's path MUST have provoked — see `harness()`. */
-    requiredChannels?: readonly string[];
 }> = [];
 
 /**
@@ -119,6 +117,8 @@ const live: Array<{
  * construction, but the driver and the engine each log the fault on the way out.
  * Withheld and ASSERTED rather than muted — see `expected-read-refusal-noise.ts`.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 afterEach(async () => {
@@ -127,13 +127,14 @@ afterEach(async () => {
         try { await entry.engine?.destroy(); } catch { /* noop */ }
         try { await entry.driver?.disconnect(); } catch { /* noop */ }
         if (entry.dir) rmSync(entry.dir, { recursive: true, force: true });
-        // A capture nobody asserts is a mute. The probe is memoised behind the
-        // FIRST data operation, so only the paths that actually touch the store
-        // provoke it — `silentChannels(required)` is the API's own answer to a
-        // table read on some of a file's paths and not others. The withholding
-        // is unconditional either way; only the must-have-fired set narrows.
+        // A capture nobody asserts is a mute. [#21516] Quiet by construction
+        // now, on every path: the engine refuses a name its registry does not
+        // hold before any driver, so the probe asks the registry and never reads
+        // the unregistered organization object. The capture stays declared (a
+        // returning read is still withheld and counted) and this asserts that
+        // nothing was.
         if (entry.noise) {
-            expect(entry.noise.silentChannels(entry.requiredChannels ?? [ABSENT_TENANCY_TABLE])).toEqual([]);
+            expect(entry.noise.tablesSeen()).toEqual([]);
         }
     }
 });
@@ -161,19 +162,10 @@ async function bootEngine(): Promise<{ engine: ObjectQL; driver: SqlDriver; nois
     return { engine, driver, noise };
 }
 
-/**
- * @param opts.touchesStore whether this test's path performs a data operation.
- *   `true` (the default) requires the tenancy probe to have fired and been
- *   withheld; a context-shape test that never reads or writes passes `false`,
- *   which keeps the withholding and drops only the must-have-fired requirement.
- */
-async function harness(opts: { touchesStore?: boolean } = {}): Promise<Harness> {
+async function harness(): Promise<Harness> {
     const { engine, driver, noise } = await bootEngine();
     const adapter = new CronJobAdapter();
-    live.push({
-        engine, adapter, driver, noise,
-        requiredChannels: opts.touchesStore === false ? [] : [ABSENT_TENANCY_TABLE],
-    });
+    live.push({ engine, adapter, driver, noise });
 
     const readyHooks: Array<() => Promise<void>> = [];
     const ctx = {
@@ -254,7 +246,7 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
 
     it('the context is the pre-#14094 set PLUS exactly `ql` and `logger`', async () => {
         // Reads nothing and writes nothing — this one is about the shape.
-        const h = await harness({ touchesStore: false });
+        const h = await harness();
         const seen: Array<Record<string, unknown>> = [];
 
         const plugin = new AppPlugin({
@@ -282,7 +274,7 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
     });
 
     it('`data` from a manual trigger still reaches the handler beside the new members', async () => {
-        const h = await harness({ touchesStore: false });
+        const h = await harness();
         const seen: Array<Record<string, unknown>> = [];
         const plugin = new AppPlugin({
             id: 'com.test.job-reach',
@@ -391,7 +383,7 @@ export const meta = { builtAt: '2026-09-01T00:00:00.000Z' };
 
 describe('#14094 — additivity (Zone 1.1)', () => {
     it('a handler written against the PRE-#14094 context runs unchanged, byte for byte', async () => {
-        const h = await harness({ touchesStore: false });
+        const h = await harness();
         const calls: Array<{ jobId: string; data?: unknown }> = [];
 
         // Verbatim the shape `IJobService`'s `JobHandler` declares — the type an

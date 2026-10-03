@@ -517,14 +517,17 @@ describe('[#21299] the positions are enumerated, not remembered', () => {
 describe('[#21299] a side with no declaration is not judged, at every engine-side position (recorded, as #21255 pins)', () => {
   const PAIR = { f_text: { $ne: { $field: 'f_image' } } };
 
-  it('a registry-less host: the per-aggregation filter, having and applyInMemoryAggregation answer, as written', async () => {
+  it('a registry-less host: [#21516] the engine refuses the object; applyInMemoryAggregation, which reads no registry, answers as written', async () => {
     const { engine } = await makeEngine(null);
-    expect(await engine.aggregate(OBJECT, perAggregation(PAIR))).toEqual([{ n: 0, m: 0 }]);
-    expect(await engine.aggregate(OBJECT, {
-      groupBy: ['f_text', 'f_image'],
-      aggregations: [{ function: 'count', alias: 'n' }],
-      having: PAIR,
-    } as unknown as EngineAggregateOptions)).toEqual([]);
+    // [#21516] An in-process verb refuses a name the registry does not resolve
+    // with the data door's own `OBJECT_NOT_FOUND`, before the per-aggregation
+    // filter or `having` is judged — no verdict is invented about the pair.
+    for (const query of [
+      perAggregation(PAIR),
+      { groupBy: ['f_text', 'f_image'], aggregations: [{ function: 'count', alias: 'n' }], having: PAIR } as unknown as EngineAggregateOptions,
+    ]) {
+      await expect(engine.aggregate(OBJECT, query)).rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+    }
     expect(applyInMemoryAggregation([{ f_text: 'a', f_image: 'b' }], perAggregation(PAIR) as never)).toEqual([{ n: 1, m: 1 }]);
   });
 

@@ -730,7 +730,7 @@
       "source": [
         "packages/spec/src/system/job.zod.ts#ScheduleSchema (ScheduleSchema discriminated union; JOB_ID_RETIRED; retryPolicy/timeoutMs docs incl. the 17.0.0 maxRetries default flip #4661; JobExecutionStatus)",
         "packages/spec/liveness/job.json (per-prop verdicts + the #4509 closed-door rationale)",
-        "packages/runtime/src/app-plugin.ts#handler (registration, enabled/handler skip lines)",
+        "packages/runtime/src/app-artifact-handlers.ts#scheduleAppArtifactJobs (registration, enabled/handler skip lines — the binder's job half, which every door that brings an artifact in calls)",
         "packages/services/service-job/src/cron-job-adapter.ts + db-job-adapter.ts (all three schedule shapes; sys_job/sys_job_run persistence) + run-with-policy.ts (retry/timeout enforcement, #3494)",
         "examples/app-showcase/src/automation/jobs/index.ts#showcase_health_sweep (showcase_health_sweep fixture + its #4774/#4888 history)"
       ],

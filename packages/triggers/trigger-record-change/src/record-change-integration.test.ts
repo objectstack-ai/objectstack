@@ -104,6 +104,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * real console, and COUNTS what it withheld so `afterAll` can assert the
  * expected reads still happen. A capture nobody asserts is a mute.
  */
+// [#21516] The engine now refuses a name its registry does not hold before any driver,
+// so the org probe asks the registry and never reads an unregistered organization
+// object: this read no longer happens, and the pin below asserts exactly that.
 const EXPECTED_ABSENT_PROBE_TABLES = ['sys_organization'] as const;
 
 /**
@@ -206,7 +209,10 @@ const noise = captureExpectedReadRefusals([...EXPECTED_ABSENT_PROBE_TABLES]);
  * assertion exists to make loud.
  */
 afterAll(() => {
-  expect(noise.silentChannels()).toEqual([]);
+  // [#21516] Quiet by construction now: the declared refusal no longer occurs. The
+  // capture stays declared (a returning read is still withheld and counted) and
+  // this asserts nothing was — so a read that starts happening again turns red.
+  expect(noise.tablesSeen()).toEqual([]);
 });
 
 /**

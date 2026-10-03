@@ -103,6 +103,8 @@ const PROBE_SOURCE = `
   ctx.log.info('probe', o);
 `;
 
+// [#21516] The engine now refuses a name its registry does not hold before any driver, so
+// this read no longer reaches the driver and nothing above is logged; the pin asserts that.
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 describe('#11552 — a shipped body observes the per-row dispatch signal and the D2 options projection', () => {
@@ -214,6 +216,9 @@ describe('#11552 — a shipped body observes the per-row dispatch signal and the
     expect(single[0].optionsMulti).not.toBe(true);
 
     // [commit 13a6cb4ad] Withheld-noise pin, same as the sibling real-SQLite harness.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    // [#21516] Quiet by construction now: the engine refuses a name its registry does not
+    // hold before any driver, so the declared refusal no longer occurs. The capture stays
+    // declared (a returning read is still withheld and counted) and this asserts nothing was.
+    expect(noise?.tablesSeen() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

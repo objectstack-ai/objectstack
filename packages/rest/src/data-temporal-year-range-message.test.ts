@@ -35,6 +35,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 
 const OBJECT = 'rest_year_message_20846';
@@ -106,6 +107,12 @@ describe('[#20846] a date / datetime refused for its year names the years — PO
     await engine.init();
     engine.registry.registerObject(LEDGER as any);
     await engine.syncSchemas();
+    // [#21516] The protocol reads the stored-metadata family; the engine refuses a
+    // name its registry does not hold, so the harness registers the family as a boot
+    // does — after the DDL, so an unprovisioned store still answers "no such table".
+    for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+      if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+    }
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });

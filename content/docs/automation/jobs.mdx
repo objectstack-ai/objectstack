@@ -159,18 +159,21 @@ export const CloseStaleTasksJob = defineJob({
     `,
     capabilities: ['api.read', 'api.write', 'log'],
   },
-  handler: 'closeStaleTasks', // deprecated — kept until the runtime runs job bodies (see below)
+  handler: 'closeStaleTasks', // deprecated and optional — `body` wins when both are present
   timeoutMs: 120000,
 });
 ```
 
-<Callout type="warn">
-  **The runtime does not run a job `body` yet.** Scheduling a job's body is a
-  separate change that has not landed: until it does, a job is scheduled through
-  its `handler`, and a job with a `body` and no `handler` is skipped at boot with
-  a `warn`. `os validate` and `os build` say so wherever a `body` is set. Keep
-  `handler` beside `body` for now; the `body` is validated today, so it is ready
-  the day the runtime starts honouring it.
+<Callout>
+  **Every door runs a job `body`.** The boot (a config, or `os start --artifact`)
+  and `os package install` (on install, and again on every restart) schedule a
+  job's `body` through the same binder. A `handler` is code: it travels only in the
+  artifact's runtime module, so it runs only on a boot that loads that module (a
+  config, or `os start --artifact`). `os package install` therefore refuses a
+  package whose enabled job has no `body`, with `422 VALIDATION_ERROR` and the
+  remedy: give the job a `body`, or boot it with `os start --artifact`.
+  Uninstalling a package stops its scheduled jobs at once, and a reinstall whose
+  new version drops a job stops that job.
 </Callout>
 
 What running in the sandbox means for the code in `source`:

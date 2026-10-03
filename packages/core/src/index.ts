@@ -155,6 +155,11 @@ export * from './utils/metadata-activation-store.js';
 // with. `@objectstack/metadata-protocol` re-exports it from its original home.
 export * from './utils/record-not-found.js';
 
+// The one `OBJECT_NOT_FOUND` envelope: the data door's object-existence gate
+// and the engine's in-process verbs refuse a name the registry does not
+// resolve with it (one name space for both doors).
+export * from './utils/object-not-found.js';
+
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 

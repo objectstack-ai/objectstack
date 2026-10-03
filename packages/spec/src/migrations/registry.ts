@@ -6139,6 +6139,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-object-form-members-typed',
+    order: 67,
+    text:
+      'It also types four members of the `object-form` page block (#21464, the third stage of the '
+      + '`ComponentPropsMap` `z.unknown()` close-out): `contentLayout`, `submitBehavior`, '
+      + '`navigateOnSuccess` and `mobile` were `z.unknown()`, although the form reads each with one shape, '
+      + 'so a `submitBehavior` `kind` the form does not know passed every door and fell through to the '
+      + 'thank-you panel. `submitBehavior` takes the form view\'s own block by reference; the other three '
+      + 'take the measured shape. The form\'s `fields` and `sections` and the master-detail form\'s two '
+      + 'stay open — the form draws a `{ name }` field entry and an inline runtime field inside a section, '
+      + 'which the typed shapes would refuse — and `customFields` stays open until the spec declares the '
+      + 'runtime form field its entries are. Read by the component-props gate (advisory); a stored page '
+      + 'still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-form-members-typed`.',
+  },
+  {
     id: 'ui-object-grid-export-options-closed',
     order: 59,
     text:
@@ -19478,6 +19494,55 @@ const step18: MigrationStep = {
         + 'grid already read it. After the rewrite, a grid that showed one `(empty)` group shows one '
         + 'group per value of that field, and a board that showed one swimlane shows one swimlane per value — '
         + 'check that this is the grouping you meant.',
+    },
+    // #21464 — four members of the `object-form` page block were `z.unknown()`
+    // although the form reads each with a fixed shape, so an off-shape value passed
+    // the component-props gate and the form fell back or ignored it in silence. The
+    // row now takes the form view's own `submitBehavior` by reference and the
+    // measured shape for `contentLayout`, `navigateOnSuccess` and `mobile`. The
+    // form's `fields` and `sections` and the master-detail form's two are held at
+    // `z.unknown()` (the form draws a `{ name }` field entry and an inline runtime
+    // field inside a section, which the typed shapes would refuse), and
+    // `customFields` waits for the spec to declare objectui's runtime form field.
+    // D3 only: page-component `properties` is not parsed on the metadata save or
+    // load path, so a stored page is never refused; an off-shape value has no
+    // rewrite that says what the author meant; and the authored census found no
+    // authored value to respell — the refused values are fixtures probing that the
+    // form refuses them.
+    {
+      id: 'ui-object-form-members-typed',
+      surface: 'page `object-form` components — `properties.contentLayout`, `.submitBehavior`, '
+        + '`.navigateOnSuccess` and `.mobile` (which used to accept any value)',
+      replacement: 'the shape the form reads: `contentLayout` `\'simple\'` or `\'tabbed\'`; `submitBehavior` the '
+        + 'form view\'s own block — `{ kind: \'thank-you\', title?, message? }`, `{ kind: \'redirect\', url, '
+        + 'delayMs? }` with a relative `url`, `{ kind: \'continue\' }` or `{ kind: \'next-record\' }`; '
+        + '`navigateOnSuccess` a relative path string; `mobile` `{ stickyActions?, stepper?, stepperMinFields?, '
+        + 'stepperFieldsPerStep?, fullscreenLongText? }`, with `stepper` `true`, `false` or `\'auto\'` and the two '
+        + 'counts positive integers. Write a `submitBehavior` `kind` as one of the four; move a `redirect` '
+        + 'destination to a relative path; write `heading` as `title`.',
+      reason: 'The form reads these members with one shape, and the page-component row declared them '
+        + '`z.unknown()`, so any value passed the component-props gate and the form answered an off-shape one '
+        + 'with a silent default: a `submitBehavior` `kind` it does not know fell through to the thank-you panel; '
+        + 'a misspelled `contentLayout` such as `\'tabs\'` stacked the sections; a `navigateOnSuccess` that is not a '
+        + 'string threw after the record was written, so the submit reported a failure; and a `mobile` member it '
+        + 'does not read, or a `stepper` outside `true` / `false` / `\'auto\'`, was ignored. The row now takes '
+        + 'the form view\'s own `submitBehavior` by reference — the block the renderers already judge a redirect '
+        + '`url` through — so one value is judged the same way on the form view and the block, and the measured '
+        + 'shape for the other three. The form\'s `fields` and `sections` and the master-detail form\'s two stay '
+        + 'open, because the form draws a `{ name }` field entry and an inline runtime field inside a section, '
+        + 'which the typed shapes would refuse; and `customFields` stays open until the spec declares the '
+        + 'runtime form field its entries are. It is read where every page component\'s props are: the '
+        + 'component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and '
+        + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s '
+        + '`properties` is not parsed on the metadata save or load path. No conversion is registered: nothing '
+        + 'on the load path refuses the shape, and an off-shape value has no rewrite that both keeps what the '
+        + 'form shows today and honours what the author wrote — which is the judgment this entry leaves to the '
+        + 'upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-form` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under the four members\' paths. '
+        + 'Each form that set one of them now shows it: the post-submit behaviour it names, the modal\'s tabbed '
+        + 'sections, the navigation after a save, and the phone presentation.',
     },
     // #21229 — an `object-grid` page block's `exportOptions` was `z.unknown()`, so a
     // bare format array (the list view's legacy spelling, which the list view lifts
