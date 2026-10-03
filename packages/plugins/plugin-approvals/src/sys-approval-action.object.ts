@@ -138,10 +138,13 @@ export const SysApprovalAction = ObjectSchema.create({
     // holder of a position acts for it, one person can hold several slots, and
     // a slot recorded HERE (as it once was) left the decider on no column at
     // all, and dropped the row from every join on this lookup. Empty means no
-    // person is recorded: a system-initiated action, or — with `acted_as` set —
-    // a decision recorded before the person was captured, whose decider no
-    // stored record names (the boot-time `backfillActionSlots` moved its slot
-    // out of this column rather than guess one).
+    // person is recorded: a system-initiated action — the SLA sweep's
+    // `escalate` and the auto-decision after it, the dead-run sweep's `recall`;
+    // a machine has no `sys_user` id, and what it did is the row's kind — or,
+    // with `acted_as` set, a decision recorded before the person was captured,
+    // whose decider no stored record names. The boot-time `backfillActionSlots`
+    // moved such a slot out of this column rather than guess a person, and
+    // nulls the machine sentinels earlier writers stored here.
     actor_id: Field.lookup('sys_user', {
       label: 'Actor',
       required: false,
@@ -211,18 +214,32 @@ export const SysApprovalAction = ObjectSchema.create({
     // ("<from_id> → <to_id>"), which no client could parse or render readably.
     // `comment` is pure user input again; timelines render "from A to B" from
     // these fields.
-    reassign_from: Field.lookup('sys_user', {
+    //
+    // [ADR-0118 D1] A reassignment moves a pending-approver SLOT, not
+    // necessarily a person, so both hold the slot's ADDRESS in its stored
+    // spelling — a user id, an email, or a `type:value` literal such as
+    // `position:<name>` — the same kind of column as `acted_as`, and for the
+    // same reason. As `sys_user` lookups they held addresses no join could
+    // resolve, and dropped those rows from every report on them. The person who
+    // made the move is `actor_id`.
+    reassign_from: Field.text({
       label: 'Reassigned From',
       required: false,
+      maxLength: 255,
       group: 'Action',
-      description: 'User whose pending-approver slot was handed over (reassign actions only)',
+      description:
+        'The pending-approver slot that was handed over, in the slot’s stored spelling: a user id, an email, '
+        + 'or a position address (reassign actions only).',
     }),
 
-    reassign_to: Field.lookup('sys_user', {
+    reassign_to: Field.text({
       label: 'Reassigned To',
       required: false,
+      maxLength: 255,
       group: 'Action',
-      description: 'User who received the pending-approver slot (reassign actions only)',
+      description:
+        'The pending-approver address the slot was handed to, in its stored spelling: a user id, an email, '
+        + 'or a position address (reassign actions only).',
     }),
 
     attachments: Field.file({

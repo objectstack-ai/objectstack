@@ -774,6 +774,172 @@ describe('#21334 a container on another package\'s object never takes that packa
         expect(served.filter((v) => v._packageId === REPAIR)).toEqual([]);
         await expectEveryPackagedNameIntact(protocol);
     });
+
+    /**
+     * #21442 — every name the object door lists answers the same row by name,
+     * on both kernels, for every member kind and every container scope.
+     *
+     * The list read expands each stored container it reads into its own answer;
+     * nothing else stores or registers those views on every kernel. Measured on
+     * `origin/main` before this change, with this harness: the by-name read
+     * answered an expanded name only on an unscoped kernel and only for an
+     * environment-wide container (registry hydration), and answered nothing on
+     * `env_local` or for an organization-scoped container. Triage's ruling A:
+     * the by-name read expands the in-scope containers through the function the
+     * list read uses, ⛔ no second expansion rule and ⛔ no kernel-specific
+     * branch. The container's own name stays its stored row — the control.
+     */
+    describe('#21442 a name a stored container expands answers by name what the object door lists', () => {
+        const withoutDiagnostics = (item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { _diagnostics: _drop, ...rest } = item;
+            return rest;
+        };
+        const ownNames = (served: any[]) => served.filter((v) => String(v.name).startsWith(`${TASK}.${OWN}`));
+        const layers = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (await protocol.getMetaItemLayered({ type: 'view', name, ...scoped(organizationId) })) as any;
+        const history = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (await protocol.historyMetaItem({ type: 'view', name, ...scoped(organizationId) })).events;
+        const diff = async (protocol: Protocol, name: string, organizationId?: string) =>
+            (protocol as any).diffMetaItem({ type: 'view', name, ...scoped(organizationId) });
+        /** What the registry holds for `view`, by key — reads must leave it as they found it. */
+        const registrySnapshot = (registry: ReturnType<typeof faithfulRegistry>) =>
+            JSON.stringify(registry.listItems('view').map((it) => [it.name, it._packageId ?? null]).sort());
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const c of CONTAINERS) {
+                    for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                        it(`${c.arm}, member ${kind}: every name the object door lists answers that same item by name`, async () => {
+                            const { protocol } = showcaseHarness(environmentId);
+                            await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+
+                            const served = await objectDoor(protocol, c.organizationId);
+                            expect(ownNames(served).map((v) => v.name), 'the expanded name is listed').toEqual([m.servedAs]);
+                            for (const listed of served) {
+                                const read = await byNameDoor(protocol, listed.name, c.organizationId);
+                                expect(withoutDiagnostics(read), `${listed.name} by name`).toEqual(withoutDiagnostics(listed));
+                            }
+                            // CONTROL — the container's own name is still its stored row.
+                            const row = await byNameDoor(protocol, OWN, c.organizationId);
+                            expect(row?.name).toBe(OWN);
+                            expect(row?.object).toBe(TASK);
+                            for (const key of Object.keys(m.member)) expect(row?.[key], `the stored container carries ${key}`).toEqual(m.member[key]);
+                        });
+                    }
+
+                    it(`${c.arm}: the layers name the container and its scope; history and diff resolve to the container's own row`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const member = MEMBER_CASES['listViews.*'];
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...member.member }, c);
+                        const expanded = member.servedAs;
+
+                        const layered = await layers(protocol, expanded, c.organizationId);
+                        // `overlay` is the container's own stored row, as the
+                        // layers read reports a stored row; `overlayScope` the
+                        // scope it was read from.
+                        expect(layered.overlay?.name).toBe(OWN);
+                        expect(layered.overlay?.listViews).toEqual(member.member.listViews);
+                        expect(layered.overlay?._packageId).toBe(c.ownPackage);
+                        expect(layered.overlayScope).toBe(c.organizationId ? 'org' : 'env');
+                        // `effective` is what the by-name read answers.
+                        expect(withoutDiagnostics(layered.effective))
+                            .toEqual(withoutDiagnostics(await byNameDoor(protocol, expanded, c.organizationId)));
+                        // CONTROL — the container's own name reports its own row, unchanged.
+                        const ownLayers = await layers(protocol, OWN, c.organizationId);
+                        expect(ownLayers.overlay?.name).toBe(OWN);
+                        expect(ownLayers.effective?.listViews).toEqual(member.member.listViews);
+
+                        const ownHistory = await history(protocol, OWN, c.organizationId);
+                        expect(ownHistory.length, 'the container has a change log of its own').toBeGreaterThan(0);
+                        const expandedHistory = await history(protocol, expanded, c.organizationId);
+                        expect(expandedHistory, 'the container\'s own log, nothing synthesized').toEqual(ownHistory);
+                        expect(expandedHistory.every((e: any) => e.ref.name === OWN), 'every event names the container').toBe(true);
+
+                        const ownDiff = await diff(protocol, OWN, c.organizationId);
+                        const expandedDiff = await diff(protocol, expanded, c.organizationId);
+                        expect(expandedDiff).toEqual(ownDiff);
+                        expect(expandedDiff.name, 'the answer names the item actually diffed').toBe(OWN);
+                    });
+
+                    it(`${c.arm}: the reads persist and register nothing, and a name nothing expands still answers nothing`, async () => {
+                        const { protocol, rows, registry } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, c);
+                        const rowsBefore = JSON.stringify([...rows.keys()].sort());
+                        const registryBefore = registrySnapshot(registry);
+
+                        const expanded = MEMBER_CASES['listViews.*'].servedAs;
+                        await byNameDoor(protocol, expanded, c.organizationId);
+                        await layers(protocol, expanded, c.organizationId);
+                        await history(protocol, expanded, c.organizationId);
+                        await diff(protocol, expanded, c.organizationId);
+                        expect(JSON.stringify([...rows.keys()].sort()), 'no derived row is stored').toBe(rowsBefore);
+                        expect(registrySnapshot(registry), 'no derived item is registered by a read').toBe(registryBefore);
+
+                        const nothing = `${TASK}.${OWN}.not_a_member`;
+                        expect(await byNameDoor(protocol, nothing, c.organizationId)).toBeUndefined();
+                        expect(await history(protocol, nothing, c.organizationId), 'no history for a name never stored').toEqual([]);
+                        const layeredNothing = await layers(protocol, nothing, c.organizationId);
+                        expect([layeredNothing.overlay, layeredNothing.overlayScope, layeredNothing.effective]).toEqual([null, null, null]);
+                    });
+                }
+
+                it('ISOLATION — an organization-scoped container\'s names answer nothing by name for another organization', async () => {
+                    const { protocol } = showcaseHarness(environmentId);
+                    const org = CONTAINERS.find((c) => c.organizationId !== undefined)!;
+                    await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, org);
+                    const expanded = MEMBER_CASES['listViews.*'].servedAs;
+
+                    expect(await byNameDoor(protocol, expanded, ORG)).toBeTruthy();
+                    expect(ownNames(await objectDoor(protocol, 'org_globex'))).toEqual([]);
+                    expect(await byNameDoor(protocol, expanded, 'org_globex')).toBeUndefined();
+                    expect(await byNameDoor(protocol, expanded)).toBeUndefined();
+                });
+
+                for (const organizationId of [undefined, ORG]) {
+                    it(`a tenant overlay of the package's own container (${organizationId ? 'organization-scoped' : 'environment-wide'}): each name it expands answers the overlay's view by name, not the packaged one`, async () => {
+                        const { protocol } = showcaseHarness(environmentId);
+                        const overlay = {
+                            name: TASK,
+                            list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
+                            listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
+                        };
+                        await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay, ...scoped(organizationId) } as any);
+
+                        const served = await objectDoor(protocol, organizationId);
+                        for (const name of [DEFAULT, `${TASK}.in_progress`]) {
+                            const listed = named(served, name);
+                            expect(listed, `${name} is listed once`).toHaveLength(1);
+                            expect(String(listed[0].label)).toMatch(/^Customized/);
+                            const read = await byNameDoor(protocol, name, organizationId);
+                            expect(withoutDiagnostics(read), `${name} by name`).toEqual(withoutDiagnostics(listed[0]));
+                        }
+                        // The layers: the packaged item, the overlay that customizes it, and the result.
+                        const layered = await layers(protocol, DEFAULT, organizationId);
+                        expect(layered.code?.label).toBe('All Tasks');
+                        expect(layered.overlay?.name).toBe(TASK);
+                        expect(layered.overlayScope).toBe(organizationId ? 'org' : 'env');
+                        expect(layered.effective?.label).toBe('Customized');
+                    });
+                }
+            });
+        }
+
+        it('both kernels answer every listed name with the same item', async () => {
+            for (const c of CONTAINERS) {
+                for (const [kind, m] of Object.entries(MEMBER_CASES)) {
+                    const answers = [];
+                    for (const [, environmentId] of KERNELS) {
+                        const { protocol } = showcaseHarness(environmentId);
+                        await save(protocol, OWN, { name: OWN, object: TASK, ...m.member }, c);
+                        answers.push(withoutDiagnostics(await byNameDoor(protocol, m.servedAs, c.organizationId)));
+                    }
+                    expect(answers[0], `${c.arm}, member ${kind}`).toBeTruthy();
+                    expect(answers[1], `${c.arm}, member ${kind}`).toEqual(answers[0]);
+                }
+            }
+        });
+    });
 });
 
 /**

@@ -269,11 +269,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reassign_from: {
         label: "Reasignado de",
-        help: "Usuario cuyo turno de aprobación pendiente fue traspasado (solo acciones de reasignación)"
+        help: "El turno de aprobación pendiente que se traspasó, con la grafía almacenada del turno: un ID de usuario, un correo electrónico o una dirección de puesto (solo acciones de reasignación)."
       },
       reassign_to: {
         label: "Reasignado a",
-        help: "Usuario que recibió el turno de aprobación pendiente (solo acciones de reasignación)"
+        help: "La dirección de aprobación pendiente a la que se traspasó el turno, con su grafía almacenada: un ID de usuario, un correo electrónico o una dirección de puesto (solo acciones de reasignación)."
       },
       attachments: {
         label: "Adjuntos",
