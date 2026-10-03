@@ -539,7 +539,7 @@ Sort field and direction pair
 | **drawerWidth** | `string \| number` | optional | Drawer width (drawer) |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal) |
 | **modalCloseButton** | `boolean` | optional | Show the modal close button (modal) |
-| **contentLayout** | `any` | optional | Modal content layout config (modal) |
+| **contentLayout** | `Enum<'simple' \| 'tabbed'>` | optional | How the modal presentation lays out its sections (modal) — 'simple' stacks them (the default); 'tabbed' puts each section on its own tab once more than one section has a field to show |
 | **confirmOnDiscard** | `boolean` | optional | Confirm before discarding edits (drawer/modal) |
 | **submitText** | `string \| Record<string, string>` | optional | Submit button label |
 | **cancelText** | `string \| Record<string, string>` | optional | Cancel button label |
@@ -548,14 +548,32 @@ Sort field and direction pair
 | **showSubmit** | `boolean` | optional | Show the submit button |
 | **showCancel** | `boolean` | optional | Show the cancel button |
 | **showReset** | `boolean` | optional | Show the reset button |
-| **submitBehavior** | `any` | optional | What happens after a successful submit (`{ kind: 'thank-you' \| …, title?, message? }`) |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | What happens after a successful submit — the same block a form view's `submitBehavior` declares: `{ kind: 'thank-you', title?, message? }`, `{ kind: 'redirect', url, delayMs? }` (a relative `url`, interpolating declared record fields as `{{record.field_name}}`), `{ kind: 'continue' }` or `{ kind: 'next-record' }`. Takes precedence over `navigateOnSuccess` and `resetOnSuccess` |
 | **successMessage** | `string \| Record<string, string>` | optional | Toast message on successful submit |
 | **resetOnSuccess** | `boolean` | optional | Reset the form after a successful submit |
-| **navigateOnSuccess** | `any` | optional | Navigate after a successful submit |
+| **navigateOnSuccess** | `string` | optional | Relative path to navigate to after a successful create/update — `{id}` / `{recordId}` are replaced with the saved record's id, URL-escaped; an absolute URL is refused at submit and reported on the success toast. Ignored when `submitBehavior` is set — prefer `submitBehavior` |
 | **readOnly** | `boolean` | optional | Render every field read-only |
 | **initialValues** | `Record<string, any>` | optional | Prefill values (create mode) |
 | **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
-| **mobile** | `any` | optional | Mobile presentation overrides |
+| **mobile** | `{ stickyActions?: boolean; stepper?: boolean \| 'auto'; stepperMinFields?: integer; stepperFieldsPerStep?: integer; … }` | optional | Phone presentation options, each opt-in — `{ stickyActions?, stepper?, stepperMinFields?, stepperFieldsPerStep?, fullscreenLongText? }`. Read by the flat (simple, sectionless) form |
+
+### Nested Shape: `ObjectFormProps.submitBehavior[kind='redirect']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'redirect'` | ✅ |  |
+| **url** | `string` | ✅ | Where the browser goes after a successful submit. Ruled 2026-08-11: (1) RELATIVE paths only — it must start with `/`, and absolute or protocol-relative URLs are refused, which is what closes the open-redirect face; (2) interpolation ONLY from declared record fields, spelled `{{record.field_name}}`, and every interpolated value is URL-escaped when the redirect is built; (3) a verbatim redirect on the resolved relative path is the intended consumption. To send the browser OUT of the app, use an app navigation item (`{ type: 'url', url }`) instead. |
+| **delayMs** | `integer` | optional |  |
+
+### Nested Shape: `ObjectFormProps.mobile`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **stickyActions** | `boolean` | optional | Pin the submit / cancel bar to the bottom of a phone-width viewport |
+| **stepper** | `boolean \| 'auto'` | optional | One-step-at-a-time wizard for a flat form — `true` always, `'auto'` only on a phone-width viewport once the form has `stepperMinFields` fields, `false` (the default) never |
+| **stepperMinFields** | `integer` | optional | The field count at which `stepper: 'auto'` steps up (default 8) |
+| **stepperFieldsPerStep** | `integer` | optional | Fields shown per stepper step (default 1) |
+| **fullscreenLongText** | `boolean` | optional | Offer a fullscreen editor on textarea and rich-text fields |
 
 
 ---
