@@ -147,7 +147,8 @@ function harness(ql: ObjectQL, automation: AutomationEngine) {
   }
 
   async function snapshot(object: string): Promise<string> {
-    return JSON.stringify(await ql.find(object, { context: SYS, orderBy: [{ field: 'id', order: 'asc' }] } as any));
+    const rows = (await ql.find(object, { context: SYS })) as Array<{ id: string }>;
+    return JSON.stringify([...rows].sort((a, b) => a.id.localeCompare(b.id)));
   }
 
   /** The node config for `nodeType` aimed at `object`, naming the row `id`. */
@@ -171,16 +172,19 @@ function harness(ql: ObjectQL, automation: AutomationEngine) {
   /** Run `def` with the engine's write verbs watched; count the calls aimed at the family. */
   async function runWatched(def: { name: string }, trigger: Record<string, unknown>) {
     automation.registerFlow(def.name, def as any);
-    const spies = [vi.spyOn(ql, 'insert'), vi.spyOn(ql, 'update'), vi.spyOn(ql, 'delete')];
+    const insert = vi.spyOn(ql, 'insert');
+    const update = vi.spyOn(ql, 'update');
+    const remove = vi.spyOn(ql, 'delete');
     let res: any;
     let familyWrites = 0;
     try {
       res = await automation.execute(def.name, { ...trigger, params: { flow: def.name } } as any);
-      familyWrites = spies
-        .flatMap((spy) => spy.mock.calls)
-        .filter(([object]) => (FAMILY as readonly string[]).includes(object as string)).length;
+      const calls = [...insert.mock.calls, ...update.mock.calls, ...remove.mock.calls] as unknown[][];
+      familyWrites = calls.filter((call) => (FAMILY as readonly string[]).includes(call[0] as string)).length;
     } finally {
-      for (const spy of spies) spy.mockRestore();
+      insert.mockRestore();
+      update.mockRestore();
+      remove.mockRestore();
     }
     return { res, familyWrites, downstreamRan: marked.has(def.name) };
   }
