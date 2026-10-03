@@ -2067,7 +2067,7 @@ describe('ObjectQL Engine', () => {
             // (an in-process verb refuses a name it does not hold), so `task` is
             // registered; the REFERENCED object is not, and expand leaves the
             // raw id without a second driver read.
-            vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => (name === 'task'
+            vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => (name === 'task'
                 ? { name: 'task', fields: { assignee: { type: 'lookup', reference: 'user' } } } as any
                 : undefined));
 
