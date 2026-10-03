@@ -28,6 +28,14 @@
           "description": "Grid label, used as the table caption, as the export file title and in the record-detail overlay heading. The canonical spelling — the deprecated `title` is only read when this is absent. Accepts either a plain string or an inline per-locale map (`{ en: \"Accounts\", \"zh-CN\": \"客户\" }`) — the `I18nLabel` union the contract admits on this key — and the grid resolves the map against the display locale (the workspace's regional default when one is configured, otherwise the active UI language), falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
+          "name": "description",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "One line of help text drawn above the grid's rows, in muted type. Accepts either a plain string or an inline per-locale map (`{ en: \"Everyone you work with\", \"zh-CN\": \"你的所有联系人\" }`) — the `I18nLabel` union the contract admits on this key — resolved against the display locale the way `label` is. A map with no usable entry draws no line."
+        },
+        {
           "name": "sort",
           "type": "array",
           "description": "Initial sort order, `[{ field, order }]`. The only sort spelling this block reads — the retired single-sort `defaultSort` is refused by the protocol and ignored by the renderer."
@@ -88,7 +96,12 @@
         {
           "name": "conditionalFormatting",
           "type": "array",
-          "description": "Row/cell styling rules. Accepts both the ObjectUI `{ field, operator, value }` form and the spec expression form `{ condition, style }`."
+          "description": "Row style rules, each `{ condition, style }` — a CEL `condition` over the row’s own `record.*` and a CSS `style` map, the rule a list view declares. The first matching rule styles that row. The native `{ field, operator, value }` rule, its `expression`, and a colour written beside `condition` instead of inside `style` are retired (objectui#11533)."
+        },
+        {
+          "name": "emptyState",
+          "type": "object",
+          "description": "What the grid draws in place of an empty table, `{ title, message, icon }`: a Lucide `icon` name, a `title` (default: the table's own \"No results found\") and a `message` (default: none). `title` and `message` each accept a plain string or an inline per-locale map, resolved against the display locale. Not drawn when a term typed into the grid's own server-side search box is what emptied it — the table and its search box stay, so the term can be cleared. Leave it out and an empty grid draws the table's own empty row."
         },
         {
           "name": "grouping",
@@ -134,6 +147,11 @@
           "name": "singleClickEdit",
           "type": "boolean",
           "description": "With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid."
+        },
+        {
+          "name": "keyboardNavigation",
+          "type": "boolean",
+          "description": "Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Defaults to on when the grid renders editable; a read-only grid keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid."
         },
         {
           "name": "navigation",
@@ -245,7 +263,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Bare field names to show, in order (each looked up in the object schema; `{ name }` is tolerated). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations)."
+          "description": "Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations)."
         },
         {
           "name": "mode",
@@ -513,7 +531,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Bare field names to show, in order (each looked up in the object schema; `{ name }` is tolerated). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (`EmbeddableForm` passes this array straight through to `<ObjectForm>` with no `sections`, so it renders through the same `SimpleObjectForm` as `object-form` above — see its `fields` description)."
+          "description": "Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (`EmbeddableForm` passes this array straight through to `<ObjectForm>` with no `sections`, so it renders through the same `SimpleObjectForm` as `object-form` above — see its `fields` description)."
         },
         {
           "name": "allowMultiple",
@@ -570,7 +588,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names (`{ name }` tolerated); NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
+          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names; NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
         },
         {
           "name": "title",
@@ -689,7 +707,7 @@
         {
           "name": "conditionalFormatting",
           "type": "array",
-          "description": "Per-card style rules, each evaluated against that card’s own record. Two member dialects are accepted: the native `{ field, operator, value, backgroundColor?, borderColor? }` and the spec CEL `{ condition, backgroundColor?, borderColor? }`. A matching rule colours that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record."
+          "description": "Per-card style rules, each `{ condition, style }` — a CEL `condition` over the card’s own `record.*` and a CSS `style` map, the rule a list view declares. The first matching rule styles that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record. The native `{ field, operator, value }` rule and a colour written beside `condition` instead of inside `style` are retired and refused by name (objectui#11522)."
         },
         {
           "name": "navigation",
@@ -1351,6 +1369,11 @@
           "type": "string"
         },
         {
+          "name": "drillDown",
+          "type": "object",
+          "description": "Click-through config that opens the records behind a clicked cell, header or total — in a drawer, a dialog, the object’s list page (`target: \"navigate\"`), or an analytical report (`report`). The drilled list is this block’s `filter` narrowed by the clicked value. `drillDown.mode` does not apply: every click point on a pivot is an aggregated bucket, so it always drills through; `mode` belongs on `object-data-table`."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -1593,6 +1616,58 @@
         {
           "name": "amountField",
           "type": "string"
+        },
+        {
+          "name": "parentObject",
+          "type": "string",
+          "description": "The PARENT object the line total is written to on Save, together with `totalField`. Defaults to the object of the record the page shows, and outranks it when set. With neither, Save writes the lines alone and no parent field."
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "The parent record whose lines the panel lists and saves: it loads `childObject` rows whose `relationshipField` equals this id, and a line added in the grid is saved with this id in `relationshipField`. Outranks `recordId` and the record the page shows; leave it unset on a record page, where the record shown is the parent. With no parent id at all the panel asks the user to save the record first and loads nothing."
+        },
+        {
+          "name": "recordId",
+          "type": "string",
+          "description": "The parent record id, read only when `parentId` is unset. It outranks the record the page shows."
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "Heading of the panel. Defaults to \"Line Items\" in the active UI language. A plain string, drawn as authored."
+        },
+        {
+          "name": "readonly",
+          "type": "boolean",
+          "description": "Shows the lines without editing: no Save button, no Add line / Duplicate row / Remove row actions, and the grid draws a read-only table."
+        },
+        {
+          "name": "minRows",
+          "type": "number",
+          "description": "Fewest lines the user can leave: every line's Remove row action is disabled while the grid holds this many lines or fewer. It adds no blank lines to reach the number."
+        },
+        {
+          "name": "maxRows",
+          "type": "number",
+          "description": "Most lines the user can hold: at this many lines Add line and Duplicate row are disabled and the trailing blank entry row is not drawn."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "of": "object",
+          "description": "Additional criteria for the lines, as spec `ViewFilterRule` entries (`[{ field, operator, value }]`). AND-combined with the parent relationship condition, never a replacement for it: it can only narrow this record's lines. Also the key a per-element `dataSource` binding's composed filter lands on."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "of": "object",
+          "description": "Load order for the lines, as `[{ field, order }]` entries applied in list order; `order` is `asc` or `desc`. Without it the lines arrive in storage order."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Most lines loaded (default 500). The grid has no pagination: every loaded line is editable and saved as one batch, and lines past the cap are not loaded. Must be a positive integer: any other value is ignored, with a console warning."
         },
         {
           "name": "dataSource",
@@ -2348,7 +2423,7 @@
         {
           "name": "successMessage",
           "type": "string",
-          "description": "Toast text when the action succeeds (a message the server returns takes precedence)"
+          "description": "Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`)"
         },
         {
           "name": "errorMessage",
@@ -2647,7 +2722,7 @@
         {
           "name": "successMessage",
           "type": "string",
-          "description": "Toast text when the action succeeds (a message the server returns takes precedence)"
+          "description": "Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`)"
         },
         {
           "name": "errorMessage",
@@ -2727,8 +2802,46 @@
         },
         {
           "name": "gap",
-          "type": "number",
-          "description": "Gap between items (0-8)"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "7",
+              "value": 7
+            },
+            {
+              "label": "8",
+              "value": 8
+            }
+          ],
+          "description": "Gap step between items; 0 is none. Default 2."
         },
         {
           "name": "wrap",
@@ -2752,33 +2865,109 @@
       "inputs": [
         {
           "name": "columns",
-          "type": "number",
-          "description": "Number of columns on mobile devices"
-        },
-        {
-          "name": "smColumns",
-          "type": "number",
-          "description": "Columns at sm breakpoint (>640px)"
-        },
-        {
-          "name": "mdColumns",
-          "type": "number",
-          "description": "Columns at md breakpoint (>768px)"
-        },
-        {
-          "name": "lgColumns",
-          "type": "number",
-          "description": "Columns at lg breakpoint (>1024px)"
-        },
-        {
-          "name": "xlColumns",
-          "type": "number",
-          "description": "Columns at xl breakpoint (>1280px)"
+          "type": [
+            "enum",
+            "object"
+          ],
+          "of": "enum",
+          "enum": [
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "7",
+              "value": 7
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "9",
+              "value": 9
+            },
+            {
+              "label": "10",
+              "value": 10
+            },
+            {
+              "label": "11",
+              "value": 11
+            },
+            {
+              "label": "12",
+              "value": 12
+            }
+          ],
+          "description": "Column count, 1 to 12, or an object of such counts keyed by breakpoint (xs, sm, md, lg, xl, 2xl). Default 2."
         },
         {
           "name": "gap",
-          "type": "number",
-          "description": "Gap between items (0-12)"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "10",
+              "value": 10
+            },
+            {
+              "label": "12",
+              "value": 12
+            }
+          ],
+          "description": "Gap step between items; 0 is none. Default 4."
         },
         {
           "name": "className",
@@ -2807,7 +2996,46 @@
         },
         {
           "name": "gap",
-          "type": "number"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "10",
+              "value": 10
+            }
+          ],
+          "description": "Gap step between items; 0 is none. Default 2."
         },
         {
           "name": "align",
@@ -2976,8 +3204,58 @@
         },
         {
           "name": "padding",
-          "type": "number",
-          "description": "Padding value (0, 1-8, 10, 12, 16)"
+          "type": "enum",
+          "enum": [
+            {
+              "label": "0 (none)",
+              "value": 0
+            },
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            },
+            {
+              "label": "3",
+              "value": 3
+            },
+            {
+              "label": "4",
+              "value": 4
+            },
+            {
+              "label": "5",
+              "value": 5
+            },
+            {
+              "label": "6",
+              "value": 6
+            },
+            {
+              "label": "7",
+              "value": 7
+            },
+            {
+              "label": "8",
+              "value": 8
+            },
+            {
+              "label": "10",
+              "value": 10
+            },
+            {
+              "label": "12",
+              "value": 12
+            },
+            {
+              "label": "16",
+              "value": 16
+            }
+          ],
+          "description": "Padding step on the container spacing scale; 0 is none. Default 4."
         },
         {
           "name": "centered",
@@ -3033,11 +3311,6 @@
           "type": "array",
           "of": "string",
           "description": "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere."
-        },
-        {
-          "name": "breadcrumb",
-          "type": "boolean",
-          "description": "Ignored: the header draws no breadcrumb, and the key is being retired from the contract. Leave it out."
         },
         {
           "name": "recordChrome",

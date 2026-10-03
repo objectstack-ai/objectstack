@@ -4467,7 +4467,21 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `89cad75d5`; re-derived at that pin 2026-10-02 —
+   * (`.objectui-sha` = `ab1879721`; re-derived at that pin 2026-10-03 —
+   * `MetricCard.tsx` and `lazy-icon.tsx` are byte-identical to `89cad75d5`,
+   * so their anchors hold unmoved and were re-read in place; the other three
+   * files changed and every one of their anchors MOVED with its cited text
+   * byte-identical, no hunk naming `icon`. `plugin-dashboard/src/index.tsx`
+   * (+55/-22) marked the `metric` / `metric-card` registrations above the
+   * `object-metric` one `skipFallback` (objectui#10859 batch 8 phase 2b,
+   * the bare keys retired), so that registration's start MOVED `227` ->
+   * `244` and the icon input `252` -> `269`, still `{ name: 'icon', type:
+   * 'string' }`; `ObjectMetricWidget.tsx` (+108/-14: objectui#11526's
+   * structured `groupBy` with a rule-list `filter`, objectui#11444's currency
+   * and objectui#11475's percent faces) MOVED the destructure `255` -> `304`
+   * and the forward `659` -> `753`; `MetricWidget.tsx` (+30/-10, the same
+   * currency and percent faces) MOVED the resolve `351-360` -> `371-380` and
+   * the draw `412-421` -> `432-441`. At `89cad75d5` (2026-10-02)
    * `plugin-dashboard/src/index.tsx`, `MetricWidget.tsx`, `MetricCard.tsx`
    * and `lazy-icon.tsx` are byte-identical to `31971ff1e`, so their anchors
    * hold unmoved and were re-read in place; `ObjectMetricWidget.tsx` changed
@@ -4513,12 +4527,12 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * `{ name: 'icon', type: 'string' }`. The four render-path anchors moved
    * with their cited text byte-identical), and the chain
    * runs three files:
-   * `plugin-dashboard/src/index.tsx:252` publishes it as a designer input
+   * `plugin-dashboard/src/index.tsx:269` publishes it as a designer input
    * on the registered `object-metric` block;
-   * `ObjectMetricWidget.tsx:255` destructures it and forwards it at `:659` to
-   * `MetricWidget`; `MetricWidget.tsx:351-360` resolves it via
+   * `ObjectMetricWidget.tsx:304` destructures it and forwards it at `:753` to
+   * `MetricWidget`; `MetricWidget.tsx:371-380` resolves it via
    * `getLazyIcon(icon)` — guarded on `typeof icon === 'string'`, because the
-   * React prop also accepts a ready-made node — and `:412-421` draws it in the
+   * React prop also accepts a ready-made node — and `:432-441` draws it in the
    * tinted square whose colour comes from `colorVariant`.
    *
    * ⚠️ Do not re-anchor this to `MetricCard.tsx`. That sibling calls
@@ -4649,10 +4663,12 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `89cad75d5`; re-measured there 2026-10-02 —
- * `ObjectKanban.tsx` is byte-identical across the hop from `31971ff1e`
+ * (`.objectui-sha` = `ab1879721`; re-measured there 2026-10-03 —
+ * `ObjectKanban.tsx` is byte-identical across the hop from `89cad75d5`
  * (`git diff --quiet`), so the anchor did not move and was re-read in place.
- * At `31971ff1e` (2026-10-01)
+ * At `89cad75d5` (2026-10-02) `ObjectKanban.tsx` was byte-identical across
+ * the hop from `31971ff1e` (`git diff --quiet`), so the anchor did not move
+ * and was re-read in place. At `31971ff1e` (2026-10-01)
  * `ObjectKanban.tsx` changed on that hop only in the comment above its
  * `navigation` read (+12/-14, objectui#8652: the key is now declared on
  * `ObjectKanbanSchema`), far below the anchor, which did not move and was
@@ -4736,8 +4752,20 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `89cad75d5`; re-measured there
-   * 2026-10-02 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
+   * repo builds against (`.objectui-sha` = `ab1879721`; re-measured there
+   * 2026-10-03 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
+   * row-cap member), `ElementDataSourceGate.tsx`, `element-data-source.ts`
+   * and `plugin-kanban.mdx` are byte-identical to `89cad75d5`, so the query
+   * `715-725`, the default `:97`, the `queryFilter` resolution `:584-585`,
+   * the import `:10`, `:218-220`, `:437-456` and `:268-272` did not move and
+   * were re-read in place, and the `limit` row and the `limit: 250` snippet
+   * did not change; `plugin-kanban/src/index.tsx` changed only below the
+   * mapping (+3/-2: objectui#11438's 17.6.0 re-citation in the
+   * `ObjectKanbanRenderer` docblock and objectui#11522's `{ condition, style }`
+   * description on the `conditionalFormatting` input), which did not move
+   * from `487-491`; and `objectql.ts` MOVED the member `4661` -> `4720`
+   * byte-identical, still inside `ObjectKanbanSchema`. At `89cad75d5`,
+   * re-measured there 2026-10-02 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
    * row-cap member), `ElementDataSourceGate.tsx` and `element-data-source.ts`
    * are byte-identical to `31971ff1e`, so the query `715-725`, the default
    * `:97`, the `queryFilter` resolution `:584-585`, the import `:10`,
@@ -4839,7 +4867,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
    * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
    * declares the member at all — imported at `ObjectKanban.tsx:10` and
-   * declaring `limit?: number` at `packages/types/src/objectql.ts:4661`,
+   * declaring `limit?: number` at `packages/types/src/objectql.ts:4720`,
    * and `content/docs/plugins/plugin-kanban.mdx`
    * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
    * an author following the published docs wrote a node the save gate
@@ -4934,7 +4962,17 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * quick-add control and no block a document can name offers one either).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `89cad75d5`; re-measured there 2026-10-02 —
+   * (`.objectui-sha` = `ab1879721`; re-measured there 2026-10-03 —
+   * `KanbanBoardCore.tsx` and `ObjectKanban.tsx` are byte-identical to
+   * `89cad75d5`, so `:78` and `:1639` did not move and were re-read in place;
+   * `KanbanImpl.tsx` changed only in two comments above the gate
+   * (objectui#11522: card formatting is the spec `{ condition, style }` rule
+   * alone, +8/-5), so both gate lines MOVED by 3 byte-identical, `621` ->
+   * `624` and `634` -> `637`; `plugin-kanban/src/index.tsx` changed only at
+   * `:532` and below (+3/-2, objectui#11438's 17.6.0 re-citation and
+   * objectui#11522's `conditionalFormatting` input description), so the
+   * pass-through did not move from `345-346` and was re-read in place. At
+   * `89cad75d5` (2026-10-02) —
    * `KanbanImpl.tsx`, `KanbanBoardCore.tsx` and `ObjectKanban.tsx` are
    * byte-identical to `31971ff1e`, so `:621`, `:634`, `:78` and `:1639` did
    * not move and were re-read in place; `plugin-kanban/src/index.tsx` changed
@@ -4988,12 +5026,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * which passes
    * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
    * (`plugin-kanban/src/index.tsx:357-358` there, `:345-346` at this pin) — but the affordance is gated on
-   * BOTH (`KanbanImpl.tsx:621` and `:634`), and `onQuickAdd` is a
+   * BOTH (`KanbanImpl.tsx:624` and `:637`), and `onQuickAdd` is a
    * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
    * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
    * in code (0 occurrences each, against 11 for the sibling `onCardClick` in the same
    * file — re-counted at `db11afd49`, at `f8a9d0fb0` and at `62597c588`; at
-   * `e420df310`, at `31971ff1e` and again at this pin 2 each, all four inside the two
+   * `e420df310`, at `31971ff1e`, at `89cad75d5` and again at this pin 2 each, all four inside the two
    * objectui#11234 comments that record the cut, and still 11 for
    * `onCardClick`; this record said 6, which the identical
    * file at `87af769e9` does not reproduce either, so the control was
@@ -5013,7 +5051,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * renders directly and can hand the runtime function to. ⚠️ Re-read at
    * `e420df310`: objectui retired the schema-only `kanban-ui` registration
    * long before this pin (objectui#8257; 0 registrations at `dd3f7e1be`,
-   * `db11afd49`, `e420df310`, `31971ff1e` and this pin), and the pair now lives on the
+   * `db11afd49`, `e420df310`, `31971ff1e`, `89cad75d5` and this pin), and the pair now lives on the
    * exported `KanbanRenderer` React component a host mounts directly
    * (`plugin-kanban/src/index.tsx:345-346`), not on any block a document can
    * name. ⛔ So the tombstone below prescribes "delete the key" and names no
@@ -5040,7 +5078,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `89cad75d5`; re-measured there 2026-10-02 — `ObjectKanban.tsx` is
+   * `ab1879721`; re-measured there 2026-10-03 — `ObjectKanban.tsx` and
+   * `useNavigationOverlay.ts` are byte-identical to `89cad75d5`
+   * (`git diff --quiet`), so every anchor held unmoved and was re-read in
+   * place: the read `1280`, the hand-off `1288-1289`, the overlay render
+   * `1538` and its `NavigationOverlay` `1554-1567`, and the card click
+   * `1663`. At `89cad75d5` (2026-10-02) `ObjectKanban.tsx` was
    * byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor held
    * unmoved and was re-read in place: the read `1280`, the hand-off
    * `1288-1289`, the overlay render `1538` and its `NavigationOverlay`
@@ -5220,7 +5263,13 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `89cad75d5`; re-measured there 2026-10-02 — `ObjectCalendar.tsx` is
+   * `ab1879721`; re-measured there 2026-10-03 — `ObjectCalendar.tsx` changed
+   * across the hop from `89cad75d5` in one comment line only, line for line
+   * (`:1250`, objectui#11438 re-citing the installed spec as 17.6.0), and
+   * `useNavigationOverlay.ts` is byte-identical, so every anchor held unmoved
+   * and was re-read in place: the read `1018`, the hand-off `1020-1021`, the
+   * event click `1413`, the overlay render `1333` and its `NavigationOverlay`
+   * `1346-1359`. At `89cad75d5` (2026-10-02) `ObjectCalendar.tsx` was
    * byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor held
    * unmoved and was re-read in place: the read `1018`, the hand-off
    * `1020-1021`, the event click `1413`, the overlay render `1333` and its
@@ -5732,7 +5781,10 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `89cad75d5`, re-measured there 2026-10-02: all three
+ * `.objectui-sha` = `ab1879721`, re-measured there 2026-10-03: `ObjectMap.tsx`,
+ * `index.tsx` and `core/src/utils/record-source.ts` are byte-identical across
+ * the hop from `89cad75d5` (`git diff --quiet`), so every anchor held unmoved
+ * and was re-read in place. At `89cad75d5` (2026-10-02) all three
  * files changed across the hop from `31971ff1e`, so every anchor was
  * re-mapped through the diff and re-READ. `ObjectMap.tsx` (+11/-4) changed
  * in two places: objectui#11355 typed the flat-key read in
@@ -5895,8 +5947,11 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `89cad75d5`, re-READ there
-   * 2026-10-02: `ObjectMap.tsx` changed above all three anchors
+   * pin this repo builds against (`.objectui-sha` = `ab1879721`, re-READ there
+   * 2026-10-03: `ObjectMap.tsx` and `plugin-map/src/index.tsx` are
+   * byte-identical to `89cad75d5` (`git diff --quiet`), so all three anchors
+   * and the `filter` input held unmoved and were re-read in place. At
+   * `89cad75d5`, re-READ there 2026-10-02: `ObjectMap.tsx` changed above all three anchors
    * (objectui#11168 slice 3's seven-line `mapStyle` precedence comment;
    * objectui#11355's in-place typing of the flat-key read is line-neutral), so
    * each MOVED down 7 with its text byte-identical, `:857` -> `:864`, `:951`
@@ -5940,8 +5995,11 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `89cad75d5`, re-READ there 2026-10-02 — `ObjectMap.tsx`
-   * changed above both anchors (objectui#11168 slice 3's seven-line `mapStyle`
+   * (`.objectui-sha` = `ab1879721`, re-READ there 2026-10-03 — `ObjectMap.tsx`
+   * and `plugin-map/src/index.tsx` are byte-identical to `89cad75d5`
+   * (`git diff --quiet`), so both anchors and the `sort` input held unmoved
+   * and were re-read in place. At `89cad75d5`, re-READ there 2026-10-02 —
+   * `ObjectMap.tsx` changed above both anchors (objectui#11168 slice 3's seven-line `mapStyle`
    * precedence comment; objectui#11355's in-place typing of the flat-key read
    * is line-neutral), so both MOVED down 7 with their text byte-identical,
    * `:952` -> `:959` and `:1031` -> `:1038`; and `plugin-map/src/index.tsx`
@@ -6060,7 +6118,20 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `89cad75d5`, re-measured there 2026-10-02: all three
+ * — `.objectui-sha` = `ab1879721`, re-measured there 2026-10-03:
+ * `plugin-gantt/src/index.tsx` and `record-source.ts` are byte-identical to
+ * `89cad75d5` (`git diff --quiet`), so their anchors held unmoved; and
+ * `ObjectGantt.tsx` +8/-0 gained one import line above `getGanttConfig` and,
+ * in the tooltip's `percent` row, objectui#11475's `percentCellScale(def)`
+ * argument with its comment (+7) — so every anchor through the tooltip MOVED
+ * by 1 (`:611-613` -> `:612-614`, `:723` -> `:724`, `:919` -> `:920`,
+ * `:1064`/`:1065` -> `:1065`/`:1066`, `:1073`/`:1075` -> `:1074`/`:1076`,
+ * `:886-889` -> `:887-890`, `:1079-1084` -> `:1080-1085`) and every anchor
+ * after it by 8 (`:1670`/`:1671` -> `:1678`/`:1679`, `:1822`/`:1824` ->
+ * `:1830`/`:1832`, `:1960` -> `:1968`, `:2027` -> `:2035`, `:2339` ->
+ * `:2347`, `:2497`-`:2505` -> `:2505`-`:2513`, `:2540-2546` -> `:2548-2554`),
+ * each with its cited text byte-identical; NONE changed content. At
+ * `89cad75d5` (2026-10-02) all three
  * files changed across the hop from `31971ff1e`, so every anchor was
  * re-mapped through the diff and re-READ; NONE changed content.
  * `ObjectGantt.tsx` +47/-10: one import added above `getGanttConfig` and one
@@ -6131,46 +6202,46 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * every number was re-derived from that tree, and the `label` one moved far
  * enough that the retired reading now lands in an unrelated callback.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:723` — rung 1, `core/src/utils/record-source.ts:307`), `staticData` (rung 2,
- * `record-source.ts:311`), `objectName` (rung 3; also `:1824` and `:2027` here),
- * `filter` (`:919`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and `:1064` sends the held result to
- * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1065`, through
- * `convertSortToQueryParams` to `$orderby`), `gantt` (`:611-613` —
+ * `:724` — rung 1, `core/src/utils/record-source.ts:307`), `staticData` (rung 2,
+ * `record-source.ts:311`), `objectName` (rung 3; also `:1832` and `:2035` here),
+ * `filter` (`:920`, read once through `useResolvedFilter`, which resolves its
+ * context tokens — objectui#10666 — and `:1065` sends the held result to
+ * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1066`, through
+ * `convertSortToQueryParams` to `$orderby`), `gantt` (`:612-614` —
  * `getGanttConfig` branch 1, the author face and the registration's declared
  * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:179`),
  * validated there against this
- * repo's own {@link GanttConfigSchema}), `navigation` (`:1960`), `label`
- * (`:2542`, resolved through `resolveInlineI18nLabel` for the export file
+ * repo's own {@link GanttConfigSchema}), `navigation` (`:1968`), `label`
+ * (`:2550`, resolved through `resolveInlineI18nLabel` for the export file
  * name — this record said `resolveI18nLabel`, which the line did not read at
  * `f8a9d0fb0` either —
  * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and at this
  * pin `87af769e9` was a BLANK line (nothing cites `:1849` now), two above a dependency-delete callback's own comment,
  * so it is re-READ here, not re-pointed),
- * `skipWeekends` (`:1670`), `holidays` (`:1671`), `persistLayout` (`:1822`),
- * `viewName` (`:1824`), `markers` (`:2497`), `criticalPath` (`:2500`),
- * `showBaselines` (`:2503`), `readOnly` (`:2339` and `:2504`) and
- * `mobileReadOnly` (`:2505`).
+ * `skipWeekends` (`:1678`), `holidays` (`:1679`), `persistLayout` (`:1830`),
+ * `viewName` (`:1832`), `markers` (`:2505`), `criticalPath` (`:2508`),
+ * `showBaselines` (`:2511`), `readOnly` (`:2347` and `:2512`) and
+ * `mobileReadOnly` (`:2513`).
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
  * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
- * `label` → the OBJECT's label → `objectName`, `:2540-2546`); a row cap — the
+ * `label` → the OBJECT's label → `objectName`, `:2548-2554`); a row cap — the
  * reload's `$top` is the platform ceiling, spread in as core's
- * `nonGridRowCeilingQuery()` (`:1075`: one probe row past the ceiling, which
+ * `nonGridRowCeilingQuery()` (`:1076`: one probe row past the ceiling, which
  * `applyNonGridRowCeiling` slices back off; at `f8a9d0fb0` a bare
  * `$top: NON_GRID_ROW_CEILING_TOP`, until objectui#7508 homed the ceiling in
- * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1073`); and
+ * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1074`); and
  * the `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are
  * host props. ⚠️ New at `f8a9d0fb0` and recorded, not ruled: objectui#10250
  * gave the renderer two more reads, `search` and `searchableFields`
- * (`:886-889`, sent as `$search` / `$searchFields` at `:1079-1084`), which
+ * (`:887-890`, sent as `$search` / `$searchFields` at `:1080-1085`), which
  * `ListView.tsx` writes onto the node it generates from its toolbar Search
  * box — a host-generated key pair in the same position as the flatten
  * product, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
- * contract is already the SPEC's — `ObjectGantt.tsx:613` validates it against
+ * contract is already the SPEC's — `ObjectGantt.tsx:614` validates it against
  * `GanttConfigSchema` imported from `@objectstack/spec/ui` — so the read point
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
@@ -6258,10 +6329,19 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:281-294`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:3756-3775`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:3770-3789`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `89cad75d5`) on 2026-10-02 —
+ * pin this repo builds against (`.objectui-sha` = `ab1879721`) on 2026-10-03 —
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `89cad75d5`, so `281-294` and `233-254` did not move and were re-read in
+ * place; `ListView.tsx` changed around its `case 'tree'` arm (+36/-18:
+ * above it objectui#10813's `isempty` / `isnotempty` filter operators and
+ * objectui#11445's record-count translation keys, below it objectui#11227's
+ * resolved empty-state labels and objectui#11445's count line), so the arm
+ * MOVED byte-identical `3756-3775` -> `3770-3789`, `:3770` -> `:3784` with
+ * it, and the flat key set each reads or emits did not move. At
+ * `89cad75d5`, 2026-10-02 —
  * `ListView.tsx` is byte-identical to `31971ff1e`, so `3756-3775` and `:3770`
  * did not move; `ObjectTree.tsx` changed (+8/-17, objectui#11168 slice 3
  * replacing the cast comment on its `navigation` read with a typed read),
@@ -6301,7 +6381,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  *
  * `titleField` is in the set although no `tree` block key is spelled that way:
  * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3770`, `labelField: treeCfg.labelField ||
+ * emitting (`ListView.tsx:3784`, `labelField: treeCfg.labelField ||
  * treeCfg.titleField || 'name'`), so the author's intent is always the block's
  * `labelField`, and the prescription below says so.
  *
@@ -6330,7 +6410,11 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `89cad75d5`, re-measured there 2026-10-02: all three
+ * — `.objectui-sha` = `ab1879721`, re-measured there 2026-10-03:
+ * `plugin-tree/src/index.tsx`, `ObjectTree.tsx` and
+ * `core/src/utils/record-source.ts` are byte-identical to `89cad75d5`
+ * (`git diff --quiet`), so every anchor held unmoved and was re-read in
+ * place. At `89cad75d5` (2026-10-02) all three
  * cited files changed on the hop off `31971ff1e`, so every anchor was
  * re-mapped through the diff and re-READ.
  * `core/src/utils/record-source.ts` changed (+4/-5, objectui#10859 batch 8:
