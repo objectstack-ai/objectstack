@@ -112,6 +112,7 @@ describe('validateComponentProps — undeclared keys', () => {
     expect(findings).toHaveLength(1);
     const [f] = findings;
     expect(f.severity).toBe('warning');
+    expect(f.rule).toBe(COMPONENT_PROPS_INVALID);
     expect(f.path).toBe('pages[0].regions[0].components[0].properties.details.1.sortField');
     expect(f.message).toContain('`object-master-detail-form` property `details[].sortField` was removed in @objectstack/spec 17');
   });
