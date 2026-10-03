@@ -68,7 +68,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SqlDriver } from '../src/index.js';
+import { SqlDriver, type SqlDriverConfig } from '../src/index.js';
 import {
   DIALECT_CELLS,
   assertThreeWayZoneSkew,
@@ -186,7 +186,7 @@ function sessionRuns(cell: DialectCell): SessionRun[] {
   ];
 }
 
-function configFor(cell: DialectCell, run: SessionRun) {
+function configFor(cell: DialectCell, run: SessionRun): SqlDriverConfig {
   const base = cell.config();
   const sql = run.hostSessionSql;
   if (!sql) return base;
@@ -206,11 +206,9 @@ function measure(cell: DialectCell): void {
       let driver: SqlDriver;
 
       beforeAll(async () => {
-        driver = new SqlDriver(configFor(cell, run) as any);
+        driver = new SqlDriver(configFor(cell, run));
         await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
-        await driver.initObjects([
-          { name: TABLE, fields: { on: { type: 'date' }, at: { type: 'datetime' } } } as any,
-        ]);
+        await driver.initObjects([{ name: TABLE, fields: { on: { type: 'date' }, at: { type: 'datetime' } } }]);
         for (const row of ROWS) {
           await driver.create(
             TABLE,
@@ -254,7 +252,7 @@ function measure(cell: DialectCell): void {
           const grouped = await driver.aggregate(TABLE, {
             groupBy: [{ field: axis, dateGranularity: g }],
             aggregations: [{ function: 'count', alias: 'n' }],
-          } as any);
+          });
           expect(bucketsOf(grouped as Record<string, unknown>[], axis), 'aggregate()').toEqual(want);
 
           const expr = driver.dateBucketSql(TABLE, axis, g);
