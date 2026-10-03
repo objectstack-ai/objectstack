@@ -743,7 +743,7 @@ function claimJobKey(svc: IJobService, appId: string, jobName: string, key: stri
     record.set(appId, mine);
 }
 
-/** `'name'`, or `'name' (scheduled as 'key')` when the job service knows it by its package-scoped key. */
+/** `name`, or `name (scheduled as key)` when the job service knows the job by its package-scoped key. */
 function describeScheduledJob(name: string, key: string): string {
     return key === name ? name : `${name} (scheduled as ${key})`;
 }
