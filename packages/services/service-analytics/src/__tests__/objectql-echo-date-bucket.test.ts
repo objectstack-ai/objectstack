@@ -30,9 +30,11 @@
  *   - **sqlite** (better-sqlite3), every run. Month, quarter and week are
  *     grouped by the driver (SQLite's `week` arm landed with #21595).
  *   - **postgres** where `OS_TEST_POSTGRES_URL` is set, a named skip otherwise.
- *     Month, quarter and week are grouped by the driver. No CI step provisions
- *     that variable for this package, so the live cell is red-capable and
- *     un-run in CI.
+ *     Month, quarter and week are grouped by the driver. CI provisions that
+ *     variable for this package in the Temporal Conformance job's step
+ *     "Run the non-SQL temporal backends under the skewed process zone"
+ *     (`.github/workflows/ci.yml`), so the live cell is red-capable and runs in
+ *     CI.
  *
  * Where the hook answers nothing, the bucket keeps `date_trunc`: a non-UTC
  * `timezone` (the engine buckets in memory on that zone's calendar), and a host
