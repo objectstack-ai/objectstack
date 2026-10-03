@@ -462,11 +462,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         `{ "$field": "${crossField.ref}" } under "${crossField.op}" on "${crossField.field}". ` +
         `The query itself is SERVED — \`NativeSQLStrategy.canHandle\` declines a cross-field ` +
         `comparison so it routes to the ObjectQL engine path, where driver-sql compiles it into a ` +
-        `column-to-column predicate written TOTAL across NULLs and enforces the #5222 rulings ` +
-        `(#7598, maintainer ruling 2026-08-12). This renderer has no faithful rendering of that ` +
+        `column-to-column predicate written TOTAL across NULLs and enforces the cross-field rules ` +
+        `(declared same-table columns only, never the tenant-isolation column, one comparison class) ` +
+        `with metadata it owns, so those rules are enforced in one place, next to the metadata they ` +
+        `read. This renderer has no faithful rendering of that ` +
         `predicate: what it can emit is a comparison against the reference object as a bound VALUE, ` +
         `which reproduces none of the rows the query returns. Refusing rather than half-rendering — ` +
-        `an echo that contradicts execution is worse than no echo (#3601 / #3602 / #3650). Run the ` +
+        `an echo that contradicts execution is worse than no echo, so the echo renders every ` +
+        `predicate the query runs with, or refuses. Run the ` +
         `query itself (/analytics/query) to get its rows.`,
       );
     }
@@ -1478,7 +1481,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         `filter-normalizer.ts refuses anything it cannot map — so this means a new ` +
         `operator reached the normalizer without an arm here. Add one rather than ` +
         `dropping the predicate: an echo without it describes a WIDER query than the ` +
-        `one that ran (#5333).`,
+        `one that ran, and the echo renders every predicate the query runs with, or refuses.`,
       );
     }
     params.push(values[0]);
