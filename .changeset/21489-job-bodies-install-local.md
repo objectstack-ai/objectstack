@@ -2,6 +2,7 @@
 '@objectstack/runtime': minor
 '@objectstack/cloud-connection': minor
 '@objectstack/cli': minor
+'@objectstack/spec': minor
 ---
 
 fix(runtime,cloud-connection)!: a job's sandboxed `body` is scheduled on every door that brings an artifact in, and install-local refuses an enabled job with no `body` (#21489)
@@ -15,6 +16,7 @@ Clause-②: yes (narrowing)
 - **Job bodies run.** A job's sandboxed `body` (`JobSchema.body`, the hook body shape) is now scheduled on every door that brings an artifact in: the boot (`os start --artifact`, a `defineStack` config) and install-local, on install and on every rehydrate after a restart. One binder does it for all of them. With both `body` and `handler` declared, the `body` wins. The body runs in the QuickJS sandbox with `ctx.api` (as system: a job has no caller), `ctx.log` and `ctx.crypto` behind its declared `capabilities`. The job's `timeoutMs` is its one time limit; with none, a job body gets a 5000 ms CPU budget. A body may return `{ outcome: 'degraded', reason }` to report a run that did not do its work.
 - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, names each refused job and the function its `handler` declares, and installs nothing: nothing is registered, persisted or scheduled. A disabled job (`enabled: false`) is not judged. A package installed by an earlier version keeps rehydrating; its handler-only job is reported at `warn` and does not run.
 - **CLI.** `os package install` prints a refusal's code beside its status (`Install failed (422 VALIDATION_ERROR): …`), for every refusal alike.
+- **Spec.** The shipped liveness ledger records `job.body` (`language`, `source`, `capabilities`, `memoryMb`) as live, so `os validate` / `os build` no longer warn that a job's `body` is planned and not read yet. `body.timeoutMs` stays refused on a job.
 - **Unchanged:** a `handler` job on a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) still runs its `functions` entry; a package without jobs installs exactly as before.
 
 The route for a refused package: give each enabled job a `body` (sandboxed JS that reaches data through `ctx.api`), or boot the artifact with `os start --artifact`, which loads its runtime module. It ships as `minor` under the launch-window convention for accept-set narrowings.
