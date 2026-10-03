@@ -758,6 +758,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../metadata-protocol
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime
