@@ -2,7 +2,7 @@
   "number": 21518,
   "kind": "pull_request",
   "title": "fix(security): runtime strings state each decision in words instead of a tracker number (stage 5)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T02:04:03Z",
-  "updated_at": "2026-10-03T02:36:51Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-03T03:04:40Z",
+  "closed_at": "2026-10-03T03:04:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-03T03:04:38Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21518",

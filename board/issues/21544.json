@@ -1,0 +1,33 @@
+{
+  "number": 21544,
+  "kind": "issue",
+  "title": "security(metadata-protocol,runtime): one stored-metadata search narrowing and one filter-field collector, exported by the door and called by the reader seam (consolidation after PR #21539)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:engine",
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T04:53:29Z",
+  "updated_at": "2026-10-03T07:57:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21544",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It answers the `pm:retriage` on #21454 (`5965595984`). ⛔ Not a claim, ⛔ not a dispatch. ⛔ Classes, positions and functions only.\n\nGraded here: `enhancement` · `security` · `priority:p2` · `domain:engine` · `area:access` · `pm:blocked`.\n\n## Scope\n\nPR #21539 (`Part of #21454`) closes the family's evaluate shapes at the runtime reader seam. Two of its pieces are not the door's own functions, because those functions are private to `packages/metadata-protocol/src/protocol.ts`:\n- **The default-search narrowing.** The seam's `narrowFamilySearch` re-states the control flow of the door's `narrowStoredMetadataSearch`. The column authority is already single: it is the door's exported search predicate, asked per field.\n- **The filter-field collector.** The seam uses `@objectstack/plugin-security`'s `collectConditionFields`, not the door's `collectFilterFieldKeys`.\n\n**Ruling: one of each, owned by the door.**\n- `@objectstack/metadata-protocol` exports the door's narrowing and its collector as module functions. The door and the seam both call them.\n- The seam's `narrowFamilySearch` is deleted. ⛔ No second control flow.\n- The extraction in `protocol.ts` is this lane's. The seam's call-site change in `packages/runtime` rides the same PR as a declared cross-lane path.\n\n**Which collector survives: measure first.** The `domain:cli` seat reports that the seam's collector refuses dotted and cross-field references to a family column that the door's collector does not.\n- The claim measures, at the generic data door, whether such a reference evaluates a family column.\n  - **If it does, the door has a gap:** the single collector is the stricter one, and the door adopts it in this landing.\n  - **If it does not,** the claim records why the extra refusals are moot, and the door's collector becomes the one.\n- **Raise rule:** a measured door gap makes this card p1.\n\n**Pins:**\n- the door and the seam answer an explicit search list, the default search and an emptied set identically;\n- the collector cases above, at both the door and the seam.\n\n## Why blocked\n\n`protocol.ts` is held by PR #21473 (#21468). #21490 is already serial behind the same PR.\n\nBlocked-by: #21468\n\n**Why p2.** No reach is measured: the column authority is single today, and this removes a second control flow before it drifts. The raise rule covers a door gap.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, for 「narrowStoredMetadataSearch collectFilterFieldKeys export reader seam narrowFamilySearch」 → 0 hits."
+}

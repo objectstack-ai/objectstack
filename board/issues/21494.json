@@ -2,8 +2,8 @@
   "number": 21494,
   "kind": "issue",
   "title": "mcp distribution: a `server.json` for the official MCP registry, in this repo, from the shipped surface (the dev half of #20791)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:cli",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T00:07:24Z",
-  "updated_at": "2026-10-03T00:07:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T04:20:51Z",
+  "closed_at": "2026-10-03T04:19:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21494",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It answers the `pm:retriage` on #20791 (`5963315242`), which asked to split that card. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:cli` · `pm:queue`.\n\n## Scope\n\nThe official MCP registry reads a `server.json` that describes a server. Ours is `@objectstack/mcp` (`packages/mcp`). It runs over stdio locally and over Streamable HTTP at `/api/v1/mcp` on each deployment. This card writes that file in this repository. The content is metadata only, written from what ships.\n\n**Measure first.** Decide which entry the registry can truthfully carry for us: an npm package entry run over stdio, a remote entry, or both. The remote URL is per deployment, so there is no single hosted URL. The measure includes any ownership marker the registry checks on the published package.\n- ⛔ Never invent a hosted URL.\n- If no entry can be stated truthfully, the PR stops and reports that.\n\n## Acceptance\n\n- The file validates against the registry's published schema, and the PR shows the validation.\n  - ⛔ No new CI gate.\n- Every entry names a surface that ships today.\n\n## Not here\n\n- **The submission itself.** It needs the project's account, so it sits on #20791's `Maintainer-action:` line, as do the mcp.so, Smithery and PulseMCP listings.\n- **The Codex `config.toml` snippet.** It already ships on the Connect page, with the API-key header fallback (objectstack-ai/objectui `packages/app-shell/src/console/connect/ConnectAgentWidget.tsx`).\n\n**Why p3.** No named user is measured waiting on the listing.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, for 「server.json official MCP registry listing metadata」 → 1 hit, #20791 (the parent)."

@@ -1,0 +1,37 @@
+{
+  "number": 21539,
+  "kind": "pull_request",
+  "title": "fix(runtime)!: refuse the stored-metadata family evaluate shapes and serve write returns at the reader-context seams",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T04:31:33Z",
+  "updated_at": "2026-10-03T07:22:26Z",
+  "closed_at": "2026-10-03T07:22:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-03T07:22:24Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21539",
+  "body": "Part of #21454\n\nClause-②: yes (narrowing)\n\nThe follow-on to PR #21513, on the same reader-context seam. #21513 served the stored-metadata-body family's reads (body projected, content hash keyed) at the in-process reader contexts. This PR closes the two positions triage routed to the card's next claim, through the generic data door's own code — no copy:\n\n- **Evaluate-shape refusals** (triage `5964426684` item 2, with `5963299937`). A filter, sort, grouping or search that would EVALUATE the stored body or a content-hash column of the family, arriving through a reader context (`ctx.api.object(...)` for action and hook bodies, a handler's `ctx.api`, and `ctx.engine.find`), is now refused with the door's own `INVALID_FIELD` / 400 before the query runs. A `count` carrying such a predicate — the oracle verb — is refused too (it serves no row). A default search is NARROWED to the door's served field set (the body and content-hash columns removed, judged field by field by the door's own search predicate) rather than refused, so a reader context may still search a family table by its scalar columns exactly as the door serves it; a search that narrows to nothing is refused.\n- **Serve what a write verb returns** (triage `5964426684` item 4). A write whose return carries the family's body or content hash is served projected and keyed, the same way a read is — a returned row is a serve.\n\nBoth are executed through the four refusal predicates the door uses, now exported from `@objectstack/metadata-protocol` (`storedMetadataBodyGroupingRefusal`, `storedMetadataBodyPredicateRefusal`, `storedMetadataHashEvaluateRefusal`, `storedMetadataSearchRefusal`). The search narrowing consumes the spec's own `resolveSearchFieldResolution` and the door's search predicate as the authority on which columns a search may never scan. Field collection for the filter/sort refusals uses `@objectstack/plugin-security`'s `collectConditionFields` (the door's sibling collector; the door's own `collectFilterFieldKeys` is internal to `protocol.ts`, PR #21473's file, and unreachable here). That collector gates on a dotted head and reads a cross-field reference, so it refuses MORE than the door — a dotted or cross-field reference to a family column the door's collector would miss — strictly in the safe direction, never a legitimate scalar-column query.\n\n### The engine action verb (`ScopedRepo.execute`), measured (triage `5964836549` item 1)\nThe reach reading: `execute` is UNREACHABLE from a served body. The sandbox VM bridge exposes only `find` / `findOne` / `count` / `aggregate` and the writes to a body — no `execute`, no `sudo`, no `withRunAs` — so a served body can never hand a raw scoped context to a nested action. The seam therefore leaves `execute` untouched and records the reading (pinned: a body's `typeof ctx.api.object(...).execute` is `undefined`).\n\n### Where #21520's write-verb refusal attaches\nThe maintainer approved #21520 option A (an app-authored body may not write the family's tables). That refusal is a SEPARATE card and is NOT implemented here. It attaches on the same write verbs this seam wraps, in `serveRepository`'s write branch, as a throw BEFORE the write runs — it needs no reshaping of this seam. A code comment names that point. Measured on `main` today (pre-#21520): an elevated body's family-table write is not refused and returns the stored row, so the write-return serve in this PR carries real content; it also covers the host-handler write path, which #21520's body refusal does not reach.\n\n### Reverse verification (ablation)\nEach new behavior ablated on disk (`scripts/ablation-replace.mjs`, mutation proven by blob hash + anchor count, restored to the HEAD blob), src-resolved (the pins import the seam by relative path):\n- disabling the evaluate refusal turned the 6 refusal / narrowing pins red; the serve, write-return, scalar and unreachability pins stayed green;\n- disabling the write-return serve turned exactly the write-return pin red; all else green.\n\n### Tests and gates\n- New pins: `stored-metadata-reader-seam.test.ts` (17) against a scoped-API double, and `stored-metadata-reader-contexts.pin.test.ts` (26) end to end through a booted kernel, for administrator and member alike.\n- `@objectstack/runtime` suite 4413 passed / 19 skipped; `@objectstack/metadata-protocol` suite 3151 passed / 19 skipped; both typecheck clean.\n- All 70 dispatch-derived gate families green (`check:engine-double-contract` pinned-ledger entry added through the gate's own `--write`).\n- Lint narrowing: the 4 changed TS files lint 0 errors / 0 warnings; the `.md` and `.json` have no matching eslint config; `eslint.config.mjs` enables no type-aware linting and no cross-file import rules, so this diff cannot move the verdict on any untouched file (the farm-wide `pnpm lint` is CI's).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016GiHYRmLSNWTfbX9gVQkpz)_\n"
+}
