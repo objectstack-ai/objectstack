@@ -128,7 +128,7 @@ export default class Start extends Command {
     // Storage
     database: Flags.string({
       char: 'd',
-      description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL; defaults to file:<home>/data/objectstack.db)',
+      description: 'Database URL: file:./db.sqlite | :memory: | libsql://... | postgres://... | mongodb://... (overrides $OS_DATABASE_URL; defaults to file:<home>/data/objectstack.db)',
     }),
     // Choices AND the enumerated list in the description come from the shared
     // driver table in `@objectstack/spec` (#6969) — this command states no driver
@@ -256,9 +256,11 @@ export default class Start extends Command {
     // The ONE shared resolution (#6469) — `os dev` / `os start` / `os migrate`
     // land on the same URL for the same project directory. Priority:
     // --database > $OS_DATABASE_URL / $DATABASE_URL / $TURSO_DATABASE_URL >
-    // explicit memory driver > config-declared default datasource >
-    // file:<home>/data/objectstack.db (legacy dev.db / standalone.db still
-    // compat-read, with a loud notice).
+    // config-declared default datasource > file:<home>/data/objectstack.db
+    // (legacy dev.db / standalone.db still compat-read, with a loud notice).
+    // A spelling of the retired in-memory engine in $OS_DATABASE_DRIVER is
+    // refused by the resolution itself, before any of these rungs, so this
+    // command never prints a Database row for a store its child would refuse.
     const resolvedDb = await resolveStartDatabase({
       databaseFlag: flags.database,
       databaseDriverFlag: flags['database-driver'],

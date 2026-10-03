@@ -95,17 +95,47 @@ describe('resolveProjectDatabaseUrl — priority ladder', () => {
     expect(r).toEqual({ url: `file:${unified()}`, source: 'unified-default' });
   });
 
-  it('an explicit memory driver (flag or env) imposes no file default', () => {
-    expect(resolveProjectDatabaseUrl({ explicitDriver: 'memory', env: {}, projectRoot: root }))
-      .toEqual({ url: 'memory://', source: 'memory-driver' });
-    expect(resolveProjectDatabaseUrl({ env: { OS_DATABASE_DRIVER: 'memory' }, projectRoot: root }))
-      .toEqual({ url: 'memory://', source: 'memory-driver' });
-    // …but an env URL still wins over the driver shortcut (driver selects the
-    // engine; it does not erase an explicitly-named database).
-    expect(resolveProjectDatabaseUrl({
-      env: { OS_DATABASE_DRIVER: 'memory', OS_DATABASE_URL: 'memory://named' },
-      projectRoot: root,
-    })).toEqual({ url: 'memory://named', source: 'env' });
+  // The `memory-driver` rung became a refusal: the in-memory (mingo) engine is
+  // not a boot store. What these pin is the refusal's KIND (a throw, not a URL),
+  // the spelling it names, and the two replacements it names — never its prose.
+  it.each(['memory', 'mingo', 'in-memory', 'inmemory', ' MEMORY '])(
+    'an explicit in-memory driver `%s` (flag or env) is refused, naming the SQLite replacements',
+    (spelling) => {
+      for (const opts of [
+        { explicitDriver: spelling, env: {} },
+        { env: { OS_DATABASE_DRIVER: spelling } },
+      ]) {
+        let message = '';
+        try {
+          resolveProjectDatabaseUrl({ ...opts, projectRoot: root });
+        } catch (err) {
+          message = (err as Error).message;
+        }
+        expect(message, `no refusal for ${JSON.stringify(opts)}`).toContain(`"${spelling.trim()}"`);
+        expect(message).toContain('--fresh');
+        expect(message).toContain(':memory:');
+      }
+    },
+  );
+
+  // Ahead of EVERY rung, not only where the old rung stood: a named URL does not
+  // turn a retired driver selection into an accepted one.
+  it('the refusal stands ahead of the explicit and env URL rungs', () => {
+    expect(() => resolveProjectDatabaseUrl({
+      explicitUrl: 'file:/abs/explicit.db', env: { OS_DATABASE_DRIVER: 'memory' }, projectRoot: root,
+    })).toThrow(/in-memory \(mingo\) engine/);
+    expect(() => resolveProjectDatabaseUrl({
+      env: { OS_DATABASE_DRIVER: 'mingo', OS_DATABASE_URL: 'memory://named' }, projectRoot: root,
+    })).toThrow(/in-memory \(mingo\) engine/);
+  });
+
+  // Control: the refusal is scoped to the retired engine, not to "a driver was
+  // named" — a selectable driver still imposes nothing and resolves as before.
+  it('a selectable driver with no URL is not refused and still gets the unified default', () => {
+    expect(resolveProjectDatabaseUrl({ env: { OS_DATABASE_DRIVER: 'sqlite' }, projectRoot: root }))
+      .toEqual({ url: `file:${unified()}`, source: 'unified-default' });
+    expect(resolveProjectDatabaseUrl({ explicitDriver: 'sqlite-wasm', env: {}, projectRoot: root }).source)
+      .toBe('unified-default');
   });
 
   it('fresh project: the unified default file, under <projectRoot>/.objectstack/data', () => {
@@ -254,6 +284,21 @@ describe('resolveProjectDatabaseUrl — config-declared default datasource', () 
       .toBe('unified-default');
   });
 
+  // The declaration is contract-valid (the spec keeps `memory` on its config
+  // contract face), so this function still EXPRESSES it as a URL; the boot that
+  // would open it refuses (pinned through the migrate seam below).
+  it('a declared memory datasource is expressed as memory:// — translation, not acceptance', () => {
+    const artifactPath = writeArtifact({
+      datasources: [{ name: 'scratch', driver: 'memory', config: {} }],
+      datasourceMapping: [{ default: true, datasource: 'scratch' }],
+    });
+    expect(resolveProjectDatabaseUrl({ env: {}, projectRoot: root, artifactPath })).toEqual({
+      url: 'memory://',
+      source: 'config-datasource',
+      datasourceName: 'scratch',
+    });
+  });
+
   it('missing or http(s) artifacts are skipped', () => {
     expect(resolveProjectDatabaseUrl({
       env: {}, projectRoot: root, artifactPath: join(root, 'nope.json'),
@@ -293,6 +338,26 @@ describe('resolveStandaloneDatabase — #6469 behaviours through the migrate sea
   it('still refuses a genuinely unsupported scheme, message intact', () => {
     expect(() => resolveStandaloneDatabase({ databaseUrl: 'redis://localhost:6379' }))
       .toThrow(/Unsupported database URL scheme/);
+  });
+
+  // The config-datasource door to the retired engine: the refusal names the
+  // DECLARATION that produced the URL, so an operator who never typed memory://
+  // is pointed at the datasource that did.
+  it('refuses a declared default memory datasource at boot, naming it and the replacements', () => {
+    const artifactPath = join(root, 'objectstack.json');
+    writeFileSync(artifactPath, JSON.stringify({
+      datasources: [{ name: 'scratch', driver: 'memory', config: {} }],
+      datasourceMapping: [{ default: true, datasource: 'scratch' }],
+    }));
+    let message = '';
+    try {
+      resolveStandaloneDatabase({ projectRoot: root, artifactPath });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain('"scratch"');
+    expect(message).toContain('--fresh');
+    expect(message).toContain(':memory:');
   });
 
   it('resolves the unified default for a projectRoot, and surfaces the legacy notice', () => {

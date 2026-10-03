@@ -26,6 +26,7 @@
 // own `supports()` is therefore the whole of this package's contract.
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { DATABASE_DRIVER_SELECTION_IDS } from '@objectstack/spec/data';
 import {
   resolveStandaloneDatabase,
   createStandaloneStack,
@@ -209,8 +210,8 @@ describe('OS_DATABASE_DRIVER — an unknown value is refused loudly, never SQLit
   it('an empty / whitespace-only value is "unset", not an unknown driver', () => {
     clearUrlEnv();
     process.env.OS_DATABASE_DRIVER = '   ';
-    process.env.OS_DATABASE_URL = 'memory://blank-driver';
-    expect(resolveStandaloneDatabase().driver).toBe('memory');
+    process.env.OS_DATABASE_URL = 'mysql://user:pw@localhost:3306/blank-driver';
+    expect(resolveStandaloneDatabase().driver).toBe('mysql');
   });
 
   // Normalization parity with the CLI's reader of this same variable
@@ -233,11 +234,39 @@ describe('OS_DATABASE_DRIVER — an unknown value is refused loudly, never SQLit
       expect(resolveStandaloneDatabase().driver).toBe(option);
     }
   });
+
+  // The two loops above iterate the enum, so they would stay green over an enum
+  // that kept offering a driver this stack refuses. This is the other half: the
+  // enum IS the spec's selection face, and the engine the face withdrew is
+  // refused on both doors that used to accept it — by name, with the
+  // replacements, never as an "unsupported driver" typo.
+  it('the enum is the selection face: the withdrawn in-memory engine is not offered', () => {
+    expect([...StandaloneDatabaseDriverSchema.options]).toEqual([...DATABASE_DRIVER_SELECTION_IDS]);
+    expect(StandaloneDatabaseDriverSchema.options).not.toContain('memory');
+  });
+
+  it.each(['memory', 'mingo', 'in-memory'])(
+    '`%s` is refused on the env door and the config door, naming the SQLite replacements',
+    (spelling) => {
+      clearUrlEnv();
+      process.env.OS_DATABASE_URL = 'file:/tmp/os-6265/env-driver.db';
+      process.env.OS_DATABASE_DRIVER = spelling;
+      expect(() => resolveStandaloneDatabase()).toThrow(/--fresh/);
+      expect(() => resolveStandaloneDatabase()).toThrow(/:memory:/);
+      expect(() => resolveStandaloneDatabase()).not.toThrow(/Unsupported OS_DATABASE_DRIVER value/);
+
+      delete process.env.OS_DATABASE_DRIVER;
+      // The config door refuses through zod, so the sentence arrives inside a
+      // ZodError's issue list — the retirement's, not the typo refusal's.
+      expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).toThrow(/--fresh/);
+      expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).toThrow(/in-memory \(mingo\) engine/);
+      expect(() => resolveStandaloneDatabase({ databaseDriver: spelling })).not.toThrow(/Unsupported databaseDriver value/);
+    },
+  );
 });
 
 describe('the existing schemes are untouched (positive controls, #6265)', () => {
   it.each([
-    ['memory://anything', 'memory'],
     ['postgres://user:pw@localhost:5432/db', 'postgres'],
     ['postgresql://user:pw@localhost:5432/db', 'postgres'],
     ['pg://user:pw@localhost:5432/db', 'postgres'],

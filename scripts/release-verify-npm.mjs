@@ -142,8 +142,10 @@
  *
  * The self-test's battery 12 runs the audit step itself — its text, read out of
  * `.github/workflows/release.yml` — against a throwaway repository, a stub
- * registry and stub `npm` / `gh` / `curl`, so the wiring is pinned where it
- * lives rather than described here.
+ * registry, a stub Actions API (the audit asks whether the version's publish
+ * is in flight in another run before it backfills any Release) and stub
+ * `npm` / `gh` / `curl`, so the wiring is pinned where it lives rather than
+ * described here.
  *
  * Battery 13 pins WHICH TREE that backfill builds from (#20982). The audit runs
  * on `github.sha`, the head of whichever push is audited, while the publish job
@@ -203,7 +205,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '9. The job summary is written SYNCHRONOUSLY, before process.exit': 4,
   '10. The probe: the whole group in one read, three answers': 9,
   '11. The 17.5.0 publish window, replayed on npm\'s own clock': 7,
-  '12. The audit step backfills only a version whose whole group is on npm': 17,
+  '12. The audit step backfills only a version whose whole group is on npm, and no publish of it is in flight': 24,
   '13. The backfill builds from the version commit\'s tree, as the publish does': 11,
 });
 
@@ -937,6 +939,47 @@ async function stubRegistryServer() {
 }
 
 /**
+ * The Actions API the audit's in-flight read asks (`release-pending-publish.mjs
+ * in-flight`), on 127.0.0.1. `set({ publishing, broken })`: `publishing` names
+ * a version whose publish job is `in_progress` in run 4242, which only the
+ * `in_progress` run-list filter lists; `broken` answers every request 503.
+ * Records every request, so a case can assert the audit asked, or did not.
+ */
+async function stubActionsApi() {
+  let state = { publishing: null, broken: false };
+  const asked = [];
+  const server = createServer((req, res) => {
+    const url = new URL(String(req.url), 'http://stub.invalid');
+    asked.push(`${req.method} ${url.pathname}${url.search}`);
+    const send = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    if (state.broken || req.method !== 'GET') return send(503, { message: 'unavailable' });
+    const run = { id: 4242, event: 'push', status: 'in_progress' };
+    if (url.pathname.endsWith('/actions/workflows/release.yml/runs')) {
+      const runs = state.publishing && url.searchParams.get('status') === 'in_progress' ? [run] : [];
+      return send(200, { total_count: runs.length, workflow_runs: runs });
+    }
+    if (state.publishing && url.pathname.endsWith('/actions/runs/4242')) return send(200, run);
+    if (state.publishing && url.pathname.endsWith('/actions/runs/4242/jobs')) {
+      return send(200, { total_count: 1, jobs: [{ name: `Publish ${state.publishing} to npm (awaiting approval)`, status: 'in_progress' }] });
+    }
+    return send(404, { message: 'Not Found' });
+  });
+  await new Promise((resolve_) => { server.listen(0, '127.0.0.1', resolve_); });
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    asked,
+    set(next) {
+      state = { publishing: next.publishing ?? null, broken: next.broken ?? false };
+      asked.length = 0;
+    },
+    close: () => new Promise((resolve_) => { server.close(resolve_); }),
+  };
+}
+
+/**
  * Stub `npm` / `gh` / `curl` for the audit step, each answering from env:
  * `npm view NAME@V version` from STUB_NPM_PRESENT (the same set the registry
  * serves), `gh release view` from STUB_GH, the two ghcr requests from STUB_GHCR.
@@ -1227,6 +1270,14 @@ async function stubReleasesApi() {
     req.on('data', (chunk) => { data += chunk; });
     req.on('end', () => {
       const url = String(req.url);
+      // The audit's in-flight read (`release-pending-publish.mjs in-flight`):
+      // this battery's release has no publish in flight, so every run list is
+      // empty and the audit goes on to request the backfill.
+      if (req.method === 'GET' && /\/actions\/workflows\/release\.yml\/runs\?/.test(url)) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{"total_count":0,"workflow_runs":[]}');
+        return;
+      }
       if (req.method === 'GET' && url.includes('/releases/tags/')) {
         res.writeHead(404, { 'content-type': 'application/json' });
         res.end('{"message":"Not Found"}');
@@ -1599,7 +1650,7 @@ export async function selfTest() {
   }
 
   // ── 12. The audit step itself ─────────────────────────────────────────────
-  battery('12. The audit step backfills only a version whose whole group is on npm');
+  battery('12. The audit step backfills only a version whose whole group is on npm, and no publish of it is in flight');
   {
     // The step's REAL text, read out of release.yml, run by bash the way
     // Actions runs it, in a throwaway repository: base (1.0.0) -> the version
@@ -1624,6 +1675,7 @@ export async function selfTest() {
 
     const root = mkdtempSync(join(tmpdir(), 'release-verify-npm-audit-'));
     const registry = await stubRegistryServer();
+    const actions = await stubActionsApi();
     try {
       const repo = join(root, 'repo');
       mkdirSync(repo);
@@ -1673,12 +1725,13 @@ export async function selfTest() {
       if (script !== null) writeFileSync(scriptFile, script);
 
       let runs = 0;
-      const audit = async ({ event = 'push', before, head, present, broken = [], releases = false, image = false }) => {
+      const audit = async ({ event = 'push', before, head, present, broken = [], releases = false, image = false, flight = {} }) => {
         runs += 1;
         const temp = join(root, `run-${runs}`);
         mkdirSync(temp);
         g('checkout', '-q', '--detach', head);
         registry.set({ present, broken });
+        actions.set(flight);
         const env = {
           PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH ?? ''}`,
           HOME: process.env.HOME ?? root,
@@ -1686,6 +1739,8 @@ export async function selfTest() {
           EVENT: event,
           BEFORE: before ?? '',
           GH_TOKEN: 'stub',
+          GITHUB_API_URL: actions.url,
+          GITHUB_RUN_ID: '9999',
           GITHUB_REPOSITORY: 'objectstack-ai/objectstack',
           GITHUB_OUTPUT: join(temp, 'output'),
           GITHUB_STEP_SUMMARY: join(temp, 'summary.md'),
@@ -1697,7 +1752,7 @@ export async function selfTest() {
         };
         const r = script === null ? { status: -1, stdout: '', stderr: 'no script' } : await runAsActions({ scriptFile, cwd: repo, env });
         const summary = existsSync(env.GITHUB_STEP_SUMMARY) ? readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8') : '';
-        return { ...r, outputs: readOutputs(env.GITHUB_OUTPUT), summary, asked: [...registry.asked] };
+        return { ...r, outputs: readOutputs(env.GITHUB_OUTPUT), summary, asked: [...registry.asked], actionsAsked: [...actions.asked] };
       };
       const said = (r) => `exit ${r.status}; outputs ${JSON.stringify(r.outputs)}; asked ${JSON.stringify(r.asked)}; ${r.stderr.trim().split('\n').slice(-2).join(' | ')}`;
       const backfills = (r) => r.outputs['image-missing'] === 'true' || r.outputs['releases-missing'] === 'true';
@@ -1764,8 +1819,42 @@ export async function selfTest() {
       const later = await audit({ before: landing, head: freshLanding, present: ['@objectstack/cli@1.1.0', '@objectstack/spec@1.1.0'] });
       t("a later landing's new package does not hold the backfill back: the image is requested", later.status === 0 && later.outputs['image-missing'] === 'true', said(later));
       t('...because the group read is the version commit\'s: the new package is never asked about', later.asked.length === 2 && !later.asked.includes('@objectstack/fresh'), said(later));
+
+      // The 17.6.0 race: npm settled before the publish job reached its own
+      // Releases step, and a landing's audit wrote the same Releases beside it.
+      // The two writers are in different runs, so the audit asks the Actions
+      // API whether this version's publish is in flight elsewhere.
+      const whole = ['@objectstack/cli@1.1.0', '@objectstack/spec@1.1.0'];
+      const flying = await audit({ before: vc, head: landing, present: whole, flight: { publishing: '1.1.0' } });
+      t('PUBLISH IN FLIGHT in another run (the whole group on npm, Releases missing): the audit stays green', flying.status === 0, said(flying));
+      t('...and backfills NO GitHub Release beside it', flying.outputs['releases-missing'] === undefined, said(flying));
+      t(
+        '...and says why, naming the run the publish is in flight in',
+        /::notice::1\.1\.0's GitHub Releases .* its publish is still in flight .*run 4242/.test(flying.stdout),
+        said(flying),
+      );
+      t(
+        'CONTROL: the backfill above passed THROUGH the in-flight read, which found nothing in flight',
+        done.actionsAsked.some((a) => /\/actions\/workflows\/release\.yml\/runs\?status=in_progress/.test(a)) && done.actionsAsked.every((a) => a.startsWith('GET ')),
+        JSON.stringify(done.actionsAsked),
+      );
+      const other = await audit({ before: vc, head: landing, present: whole, flight: { publishing: '1.2.0' } });
+      t('a publish of ANOTHER version in flight does not hold this one back: the Releases are backfilled', other.outputs['releases-missing'] === 'true', said(other));
+      const unreadable = await audit({ before: vc, head: landing, present: whole, flight: { broken: true } });
+      t(
+        'the Actions API unreadable: the audit stays green, backfills no GitHub Release off a guess, and a warning says so',
+        unreadable.status === 0 && unreadable.outputs['releases-missing'] === undefined &&
+          /::warning::1\.1\.0's GitHub Releases .* could not be read \(.*HTTP 503/.test(unreadable.stdout),
+        said(unreadable),
+      );
+      t(
+        'Releases present: the in-flight read is never asked — the common path pays no Actions reads',
+        complete.actionsAsked.length === 0,
+        JSON.stringify(complete.actionsAsked),
+      );
     } finally {
       await registry.close();
+      await actions.close();
       rmSync(root, { recursive: true, force: true });
     }
   }
@@ -2029,7 +2118,8 @@ export async function selfTest() {
     `OK release-verify-npm self-test: ${cases.length} cases pass across `
       + `${Object.keys(SELF_TEST_BATTERIES).length} batteries (the #15321 false red reproduced and absorbed, `
       + 'the masked partial publish caught, absence still fatal, the release audit backfilling '
-      + 'only a version whose whole group is on npm, and that backfill built from the version commit\'s tree).',
+      + 'only a version whose whole group is on npm and whose publish is not in flight, and that backfill built '
+      + 'from the version commit\'s tree).',
   );
   selfTestReachedVerdict = true;
   return 0;

@@ -108,11 +108,11 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
     });
 
     it('hands ObjectQLPlugin `hydrateMetadataFromDb: true` under every way an environment id is stamped', async () => {
-        const byDefault = await createStandaloneStack({ databaseUrl: 'memory://issue-20071-default' });
+        const byDefault = await createStandaloneStack({ databaseUrl: ':memory:' });
         expect(hydrationFlag(byDefault.plugins)).toEqual({ environmentId: 'env_local', hydrateMetadataFromDb: true });
 
         process.env.OS_ENVIRONMENT_ID = 'env_from_the_environment';
-        const byEnv = await createStandaloneStack({ databaseUrl: 'memory://issue-20071-env' });
+        const byEnv = await createStandaloneStack({ databaseUrl: ':memory:' });
         expect(hydrationFlag(byEnv.plugins)).toEqual({
             environmentId: 'env_from_the_environment',
             hydrateMetadataFromDb: true,
@@ -120,7 +120,7 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
 
         const byConfig = await createStandaloneStack({
             environmentId: 'env_from_the_config',
-            databaseUrl: 'memory://issue-20071-cfg',
+            databaseUrl: ':memory:',
         });
         expect(hydrationFlag(byConfig.plugins)).toEqual({
             environmentId: 'env_from_the_config',

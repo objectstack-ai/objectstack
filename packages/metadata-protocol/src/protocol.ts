@@ -1717,8 +1717,10 @@ function stripDerivedProvenance(item: unknown): unknown {
  * the same verdict from the same row (cloud#970's shape, for non-`object`
  * types).
  *
- * ⚠️ Its ONE caller applies it BEFORE {@link mergeArtifactProtection}, and the
- * order is the whole contract: where a real artifact exists the artifact's
+ * ⚠️ Both callers — the container in `hydrateOverlayIntoRegistry` and, since
+ * #21511, each view expansion it registers (`expandRuntimeViewContainer`
+ * under `tenantAuthored`) — apply it BEFORE {@link mergeArtifactProtection},
+ * and the order is the whole contract: where a real artifact exists the artifact's
  * envelope still overwrites `_provenance` (and `_packageId` /
  * `_packageVersion` / `_lock*`) on the way out, so package protection is
  * untouched — ADR-0010 §3.3 precedence is unchanged in both directions.
@@ -16790,7 +16792,18 @@ export class ObjectStackProtocolImplementation implements
     private expandRuntimeViewContainer(
         type: string,
         data: unknown,
-        options: { packageId?: string | null },
+        options: {
+            packageId?: string | null;
+            /**
+             * [#21511] State each expansion's authorship the way
+             * {@link hydrateOverlayIntoRegistry} states its container's:
+             * {@link stateTenantAuthorship} first, then the item's own
+             * artifact envelope merged over it. Set only by the caller that
+             * REGISTERS the expansions ({@link hydrateExpandedViewItems}); the
+             * registry-free reads serve exactly what they served before.
+             */
+            tenantAuthored?: boolean;
+        },
     ): Record<string, unknown>[] {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
         if (!isAggregatedViewContainer(data)) return [];
@@ -16824,7 +16837,11 @@ export class ObjectStackProtocolImplementation implements
             const ownArtifact = (viArtifact as { _packageId?: unknown } | undefined)?._packageId === ownPackageId
                 ? viArtifact
                 : undefined;
-            out.push(mergeArtifactProtection(item, ownArtifact) as Record<string, unknown>);
+            // [#21511] The marker goes on BEFORE the envelope, never after:
+            // where the item's own artifact exists, its `_provenance` still
+            // wins (ADR-0010 §3.3), as it does on the container.
+            const authored = options.tenantAuthored ? stateTenantAuthorship(item) : item;
+            out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
     }
@@ -16991,6 +17008,21 @@ export class ObjectStackProtocolImplementation implements
      * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
      * combination #7736's own pin ever exercised), now with the corrected
      * derivation chain.
+     *
+     * ## [#21511] An expansion inherits its container's authorship
+     *
+     * Every expansion registered here is derived from a stored row, so it is
+     * tenant-authored exactly as its container is, and it carries the same
+     * marker {@link hydrateOverlayIntoRegistry} stamps on the container
+     * ({@link stateTenantAuthorship}, applied before the item's own artifact
+     * envelope). Without it, an expansion of a package-bound container sat
+     * under its bare name wearing that package's `_packageId` and no tenant
+     * marker, so `SchemaRegistry.getArtifactItem`'s bare-key fallback took it
+     * for a code artifact: on an unscoped kernel the by-name read reported
+     * the expanded view `resettable` and the layers read reported it as its
+     * own `code` layer (for a package-less container too, through the
+     * runtime-only `getItem` arm), where `env_local`, which registers nothing,
+     * reported neither. With the marker both kernels give one answer.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -16998,7 +17030,7 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
-        for (const item of this.expandRuntimeViewContainer(type, data, options)) {
+        for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
             registry.registerItem(type, item, 'name' as any);
         }
     }

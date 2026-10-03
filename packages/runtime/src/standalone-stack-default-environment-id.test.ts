@@ -82,7 +82,7 @@ describe('[#13366] createStandaloneStack — default environment id', () => {
     });
 
     it('stamps `env_local` when neither the config nor OS_ENVIRONMENT_ID names one', async () => {
-        const stack = await createStandaloneStack({ databaseUrl: 'memory://standalone-envid-default' });
+        const stack = await createStandaloneStack({ databaseUrl: ':memory:' });
         // The literal, at both landing sites. `proj_local` here is the pre-#13366
         // value and is what this case exists to keep from coming back.
         expect(stampedIds(stack.plugins)).toEqual({ metadata: 'env_local', objectql: 'env_local' });
@@ -90,7 +90,7 @@ describe('[#13366] createStandaloneStack — default environment id', () => {
 
     it('OS_ENVIRONMENT_ID still overrides the default', async () => {
         process.env.OS_ENVIRONMENT_ID = 'env_from_the_environment';
-        const stack = await createStandaloneStack({ databaseUrl: 'memory://standalone-envid-env' });
+        const stack = await createStandaloneStack({ databaseUrl: ':memory:' });
         expect(stampedIds(stack.plugins)).toEqual({
             metadata: 'env_from_the_environment',
             objectql: 'env_from_the_environment',
@@ -101,7 +101,7 @@ describe('[#13366] createStandaloneStack — default environment id', () => {
         process.env.OS_ENVIRONMENT_ID = 'env_from_the_environment';
         const stack = await createStandaloneStack({
             environmentId: 'env_from_the_config',
-            databaseUrl: 'memory://standalone-envid-cfg',
+            databaseUrl: ':memory:',
         });
         expect(stampedIds(stack.plugins)).toEqual({
             metadata: 'env_from_the_config',

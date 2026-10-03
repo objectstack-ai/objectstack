@@ -3199,14 +3199,15 @@ export default class Serve extends Command {
       //        mysql://, mysql2://              → mysql
       //        libsql://, http(s):// + .turso.  → turso
       //        wasm-sqlite://, *.wasm.db        → sqlite-wasm
-      //        memory://, mingo://              → memory (mingo InMemoryDriver)
+      //        memory://, mingo://              → REFUSED (the retired in-memory engine)
       //        file:, sqlite:, *.db, :memory:   → sqlite (SQLite's own in-memory mode)
       //   3. Default: dev SQLite (native → wasm → in-memory step-down); prod none
       //
       // Kind-resolution and construction live in utils/storage-driver.ts so the
-      // whole dispatch is unit-testable (storage-driver.test.ts). #3276: the
-      // `memory` kind now maps to the mingo InMemoryDriver instead of silently
-      // falling through to the dev SQLite `:memory:` default.
+      // whole dispatch is unit-testable (storage-driver.test.ts). #3276: a
+      // `memory` selection never falls through to the dev SQLite `:memory:`
+      // default in silence — it used to build the mingo InMemoryDriver, and since
+      // the engine's retirement as a boot store it is refused (fatal, below).
       // A DefaultDatasourcePlugin counts as a driver provider (#3826): the
       // standalone stack now DECLARES its `default` datasource and connects it
       // at boot through the datasource connection service, so building a
@@ -3310,8 +3311,11 @@ export default class Serve extends Command {
            // Re-throw so run()'s fatal handler restores output, prints the
            // actionable message, and exits 1 (in dev AND prod). All OTHER driver
            // construction errors keep the prior best-effort silent behavior.
-           //   • UnsupportedDriverError — recognized kind, no usable definition
-           //     (`--database-driver turso` with no URL to connect to).
+           //   • UnsupportedDriverError — a selection with no usable definition
+           //     (`--database-driver turso` with no URL to connect to, an unknown
+           //     spelling, or the retired in-memory engine's spelling). The
+           //     `memory://` / `mingo://` refusal is the same class, raised by
+           //     `resolveDriverType` above this `try` and fatal the same way.
            //   • MissingDriverPackageError (#5602) — the optional driver package for
            //     a `libsql://` selection is not installed. Fatal for the same reason
            //     and with the same remedy shape: the message carries the exact
