@@ -13628,6 +13628,25 @@ export class ObjectQL implements IObjectQLEngine {
           );
         }
 
+        // [#21613] A write's returned row is a served row, so it carries the
+        // read verbs' default projection: the DECLARED field set
+        // (`declared-read-columns.ts`). A table column no metadata declares —
+        // a field retired in an upgrade, whose column additive sync leaves
+        // behind — rides back in `returning('*')` on driver-sql, and on a new
+        // row it reads null. Shaped HERE, on the rows as the driver returned
+        // them and after the one-row-per-input guard, so the formulas, the
+        // `afterInsert` hooks, the roll-up, the `data.record.created` events
+        // (and the webhooks that deliver them), the partial-mode outcomes and
+        // the door's own ingress strip all see the declared record — one
+        // decision for every door, never a per-door strip. Declared fields
+        // keep their treatment: `internal: true` fields stay whole on this
+        // engine-level result (the A-prime ruling, below), because an
+        // undeclared column is no field at all.
+        const declaredInsertColumns = declaredColumnSet(schemaForValidation);
+        result = isBatch
+          ? rowsWithDeclaredColumnsOnly(result as unknown[], declaredInsertColumns)
+          : withDeclaredColumnsOnly(result, declaredInsertColumns);
+
         // Coerce `boolean` fields (SQLite/libsql return 0/1) to real booleans on
         // the after-hook view so flow trigger conditions (`record.is_escalated
         // != true`) and `{record.<bool>}` interpolation see JS booleans, not
@@ -14433,7 +14452,16 @@ export class ObjectQL implements IObjectQLEngine {
            // the same for the same reason.
            const priorAst: QueryAST = { object, where: { id }, limit: 1 };
            const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
-           priorRecord = await driver.findOne(object, priorAst, preOpts);
+           // [#21613] The pre-image is shaped like every other row this engine
+           // reads off a driver: the declared field set, so `previous` (bound
+           // for the hooks below, and the audit ledger's side of every update
+           // diff) and the write's returned row are ONE view. Shaping only the
+           // returned row would make every update of a row carrying a retired
+           // column record that column as changed, its stored value included.
+           priorRecord = withDeclaredColumnsOnly(
+             await driver.findOne(object, priorAst, preOpts) as Record<string, unknown> | null,
+             declaredColumnSet(updateSchema),
+           );
            // ── [#7867] The not-found gate ──────────────────────────────────
            //
            // A by-id update whose id names no row was a SILENT NO-OP that
@@ -14556,7 +14584,13 @@ export class ObjectQL implements IObjectQLEngine {
            readPriorRows = async () => {
                if (!priorRowsRead) {
                    priorRowsRead = true;
-                   priorRows = (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [];
+                   // [#21613] The matched rows' pre-images, shaped like the
+                   // by-id prior read: each per-row `afterUpdate` composes its
+                   // `result` from one of them, so both sides stay declared.
+                   priorRows = rowsWithDeclaredColumnsOnly(
+                     (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [],
+                     declaredColumnSet(updateSchema),
+                   );
                }
                return priorRows;
            };
@@ -15082,6 +15116,15 @@ export class ObjectQL implements IObjectQLEngine {
                } catch (driverError) {
                    throw envelopeUniqueViolation(driverError, object);
                }
+               // [#21613] The by-id update returns the driver's post-write
+               // readback (`select *` on driver-sql), so a column no metadata
+               // declares rode back in the PATCH 200 `record` with its stored
+               // value. Same default projection as the read verbs and the
+               // insert result, applied on the row as the driver returned it:
+               // before the formulas, the `afterUpdate` hooks, the roll-up, the
+               // `data.record.updated` event and the door's ingress strip. A
+               // `null` readback (the row left the caller's scope) stays `null`.
+               result = withDeclaredColumnsOnly(result, declaredColumnSet(updateSchema));
            } else {
                // [#6262] A bulk SET clause must not carry `id`. Reaching this
                // branch AT ALL means `resolveEngineUpdateDispatch` returned
@@ -16735,10 +16778,18 @@ export class ObjectQL implements IObjectQLEngine {
       // tenant scope onto a raw driver read. Skipping it here would read
       // outside this write's transaction and across the tenant boundary —
       // `update()`'s prior read passes the same bag for the same reason.
+      // [#21613] Both pre-image reads below are shaped to the declared field
+      // set, as `update()`'s are: the pre-image is the delete's `previous`, and
+      // the audit ledger records it whole as the delete's `old_value`, so a
+      // column no metadata declares reached that served row with its value.
+      const declaredDeleteColumns = declaredColumnSet(deleteSchema);
       const readPreImage = async (targetId: unknown): Promise<Record<string, unknown> | null> => {
         const preAst: QueryAST = { object, where: { id: targetId }, limit: 1 };
         const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
-        return (await driver.findOne(object, preAst, preOpts)) as Record<string, unknown> | null;
+        return withDeclaredColumnsOnly(
+          (await driver.findOne(object, preAst, preOpts)) as Record<string, unknown> | null,
+          declaredDeleteColumns,
+        );
       };
       const bindPreImage = (row: Record<string, unknown> | null): void => {
         // Never fabricate: a row that is not there leaves `previous` UNBOUND
@@ -16878,7 +16929,11 @@ export class ObjectQL implements IObjectQLEngine {
         const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
         if (perRowBeforeHooks || perRowAfterHooks) {
           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
-          const doomed = (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [];
+          // [#21613] Each doomed row is its per-row `previous`: declared set.
+          const doomed = rowsWithDeclaredColumnsOnly(
+            (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [],
+            declaredDeleteColumns,
+          );
           // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
           // and before the driver call.
           this.assertBulkPerRowHookBudget(
