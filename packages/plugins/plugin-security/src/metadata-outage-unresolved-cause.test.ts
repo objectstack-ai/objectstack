@@ -347,7 +347,7 @@ describe('[#10424] the wording module states three distinct things', () => {
     expect(remedy).toContain('Do NOT change the declaration');
     expect(remedy).toContain('NOT a permissions problem');
     expect(unresolvedPostureExplainDetail('task', 'metadata_unavailable')).toContain('OUTAGE');
-    expect(unresolvedPostureExplainDetail('task', 'metadata_unavailable')).toContain('#3545');
+    expect(unresolvedPostureExplainDetail('task', 'metadata_unavailable')).toContain('rather than defaulting to public/uncontracted');
   });
 
   it('the outage denial keeps the pinned opening clause verbatim', () => {
@@ -362,7 +362,7 @@ describe('[#10424] the wording module states three distinct things', () => {
     for (const c of causes) {
       expect(unresolvedPostureDenialMessage('task', 'find', c)).toContain('[Security] Access denied:');
       expect(unresolvedPostureExplainDetail('task', c)).toContain('fails CLOSED');
-      expect(unresolvedPostureLogLine('task', 'find', 'u1', c)).toContain('fail-closed, #3545');
+      expect(unresolvedPostureLogLine('task', 'find', 'u1', c)).toContain('fail-closed: an unreadable posture never defaults to public');
     }
   });
 });

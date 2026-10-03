@@ -3797,6 +3797,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/stored-metadata-reader-seam.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts",
       "verb": "delete",
       "pinned": 1
