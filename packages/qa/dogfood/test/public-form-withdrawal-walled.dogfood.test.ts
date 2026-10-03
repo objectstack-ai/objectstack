@@ -162,6 +162,10 @@ describe('walled posture: withdrawing a public form from anonymous intake', () =
     const p = await probe();
     expect([p.get, p.submit]).toEqual([200, 201]);
     expect(p.landed).toHaveLength(1);
+    // [#21476] The control of `showcase-public-form-walled-intake.dogfood.test.ts`:
+    // a tenancy-disabled object takes intake on a walled posture, so the
+    // administrator's read states no intake reason.
+    expect((await read())._diagnostics?.warnings).toBeUndefined();
   });
 
   it('withdrawn in an organization: refused 403 NOT_OVERRIDABLE naming the env-wide save, and nothing is saved', async () => {

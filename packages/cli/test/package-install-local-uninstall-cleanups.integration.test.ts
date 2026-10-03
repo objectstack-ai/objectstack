@@ -25,14 +25,20 @@
  * ## What each `it` reads
  *
  * One fixture, two orders of events, each probed through the data route a user
- * and an admin use: the set by name, the user grant of it by set id, and — after
- * the restart — the package's object. The grant is made through the data door
- * before the uninstall, so "no binding" is read off a row that existed, not off
- * an empty table.
+ * and an admin use: the set by name, the user grant of it by set id, and the
+ * package's object — right after the DELETE and after the restart. The grant is
+ * made through the data door before the uninstall, so "no binding" is read off a
+ * row that existed, not off an empty table.
  *
  * A third order of events measures the re-seed window — DELETE, then a hot
- * install of ANOTHER package, then restart — and records, as `it.fails`, the
- * defect it found there; the block above that `describe` says what it is.
+ * install of ANOTHER package, then restart. #21576: the DELETE now withdraws the
+ * package from the running kernel (`SchemaRegistry.uninstallPackage`, the verb
+ * the protocol's own uninstall uses), so nothing re-projects its set there; the
+ * block above that `describe` says what used to happen.
+ *
+ * A fourth order is the withdrawal's control: a hot reinstall of the SAME
+ * package in the same process, right after its DELETE, registers it again —
+ * whatever the withdrawal took, the install path puts back.
  *
  * ## Spawn shape
  *
@@ -261,6 +267,10 @@ interface Run {
   uninstall?: Answer;
   /** Same process, right after the DELETE answered. */
   after?: Grants;
+  /** The package's object right before the DELETE — it answered, so a later 404 is the DELETE's. */
+  objectBefore?: Answer;
+  /** #21576: the package's object in the same process, right after the DELETE answered. */
+  objectAfter?: Answer;
   /** A restart on the same home. */
   restarted?: Grants;
   /** The package's object after the restart — the uninstall's own effect, as the control. */
@@ -269,6 +279,10 @@ interface Run {
   otherInstall?: { exit: number | null; output: string };
   /** Re-seed order only: same process, right after that second install. */
   afterOtherInstall?: Grants;
+  /** Reinstall order only: the same package installed again, in the same process, after its DELETE. */
+  reinstall?: { exit: number | null; output: string };
+  /** Reinstall order only: the object and the set right after that reinstall. */
+  afterReinstall?: { object: Answer; sets: Answer };
 }
 
 /**
@@ -288,8 +302,10 @@ async function grantThenUninstall(live: LiveStart, session: Session, run: Run): 
     permission_set_id: setId,
   });
   run.before = await readGrants(live, session.token, setId);
+  run.objectBefore = await http(live, 'GET', `/api/v1/data/${TASK}`, session.token);
   run.uninstall = await http(live, 'DELETE', UNINSTALL, session.token);
   run.after = await readGrants(live, session.token, setId);
+  run.objectAfter = await http(live, 'GET', `/api/v1/data/${TASK}`, session.token);
 }
 
 async function readAfterRestart(live: LiveStart, run: Run): Promise<void> {
@@ -298,7 +314,7 @@ async function readAfterRestart(live: LiveStart, run: Run): Promise<void> {
   run.object = await http(live, 'GET', `/api/v1/data/${TASK}`, token);
 }
 
-const runs: Record<'hot' | 'restarted' | 'reseed', Run> = { hot: {}, restarted: {}, reseed: {} };
+const runs: Record<'hot' | 'restarted' | 'reseed' | 'reinstall', Run> = { hot: {}, restarted: {}, reseed: {}, reinstall: {} };
 
 beforeAll(async () => {
   const root = mkdtempSync(join(tmpdir(), 'install-local-uninstall-'));
@@ -342,8 +358,9 @@ beforeAll(async () => {
   await stopGroup(e.child);
 
   // ── order 3: hot install → DELETE → hot install of ANOTHER package → restart ──
-  // The DELETE does not withdraw the package from the running kernel, so it is
-  // still registered when the second install announces `metadata:reloaded`.
+  // The second install announces `metadata:reloaded` into the process the
+  // DELETE ran in, so whatever that process still counts as registered is
+  // re-seeded — the withdrawal is what keeps the uninstalled package out of it.
   const reseedDir = join(root, 'reseed');
   mkdirSync(reseedDir, { recursive: true });
   const reseedHome = join(reseedDir, 'home');
@@ -357,7 +374,23 @@ beforeAll(async () => {
   const g = await bootStart(reseedDir, reseedHome, port);
   await readAfterRestart(g, runs.reseed);
   await stopGroup(g.child);
-}, 8 * BOOT_TIMEOUT_MS);
+
+  // ── order 4: hot install → DELETE → hot reinstall of the SAME package ──────
+  // The withdrawal's control: whatever `uninstallPackage` took from the running
+  // kernel, the install path registers again, in the same process.
+  const reinstallDir = join(root, 'reinstall');
+  mkdirSync(reinstallDir, { recursive: true });
+  const h = await bootStart(reinstallDir, join(reinstallDir, 'home'), port);
+  const hSession = await authenticate(h);
+  runs.reinstall.install = await packageInstall(appDir, h);
+  await grantThenUninstall(h, hSession, runs.reinstall);
+  runs.reinstall.reinstall = await packageInstall(appDir, h);
+  runs.reinstall.afterReinstall = {
+    object: await http(h, 'GET', `/api/v1/data/${TASK}`, hSession.token),
+    sets: await http(h, 'GET', `/api/v1/data/sys_permission_set?name=${PERMISSION_SET}`, hSession.token),
+  };
+  await stopGroup(h.child);
+}, 9 * BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
@@ -392,6 +425,16 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
         expect(rowsOf(run.after!.bindings), JSON.stringify(run.after!.bindings.body)).toEqual([]);
       });
 
+      // #21576: the DELETE withdraws the package from the running kernel, so
+      // its object answers at once what it used to answer only after a
+      // restart — the same status and the same code.
+      it('right after the DELETE: the package object answers what it answers after a restart — no restart needed', () => {
+        const run = runs[name];
+        expect(run.objectBefore?.status, JSON.stringify(run.objectBefore?.body)).toBe(200);
+        expect(run.objectAfter?.status, JSON.stringify(run.objectAfter?.body)).toBe(404);
+        expect(run.objectAfter?.body?.error?.code, JSON.stringify(run.objectAfter?.body)).toBe(run.object?.body?.error?.code);
+      });
+
       it('after a restart: still no set and no grant, and the package object is gone', () => {
         const run = runs[name];
         expect(run.object?.status, JSON.stringify(run.object?.body)).toBe(404);
@@ -403,19 +446,19 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
     });
   }
 
-  // ── The re-seed window: MEASURED RED, reported for filing, not fixed here ──
+  // ── The re-seed window (#21576) ─────────────────────────────────────────
   //
-  // This DELETE leaves the package registered in the running kernel until the
-  // next restart (the response's own note says so), and plugin-security's
-  // `metadata:reloaded` subscriber re-runs the declared-permission seeding over
-  // every package the kernel holds. So another package's hot install before
-  // that restart re-projects the uninstalled package's set as a fresh
-  // `managed_by: package` row, and the restart leaves it orphaned: the package
-  // is gone, its set is not. The grant does NOT come back — the cleanup deleted
-  // the binding and the seeding writes none — and that half is pinned plainly.
+  // This DELETE used to leave the package registered in the running kernel
+  // until the next restart, and plugin-security's `metadata:reloaded`
+  // subscriber re-runs the declared-permission seeding over every package the
+  // kernel holds. So another package's hot install before that restart
+  // re-projected the uninstalled package's set as a fresh `managed_by: package`
+  // row, and the restart left it orphaned: the package gone, its set not. The
+  // grant never came back — the cleanup deleted the binding and the seeding
+  // writes none.
   //
-  // The two set readings are `it.fails`: each turns red the day its half is
-  // fixed, which is the cue to promote it to a plain assertion.
+  // The DELETE now withdraws the package from the running kernel, so no reader
+  // of the registered packages — that seeding included — counts it again.
   describe('hot install → DELETE → hot install of another package → restart (the re-seed window)', () => {
     it('precondition: both installs landed, and the DELETE revoked the set and its grant', () => {
       const run = runs.reseed;
@@ -439,14 +482,40 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
       expect(run.object?.status, JSON.stringify(run.object?.body)).toBe(404);
     });
 
-    it.fails('KNOWN-BROKEN: the other package\'s hot install re-projects the uninstalled package\'s set (promote to a plain assertion once fixed)', () => {
+    it('the other package\'s hot install does not re-project the uninstalled package\'s set', () => {
       const run = runs.reseed;
       expect(rowsOf(run.afterOtherInstall!.sets), JSON.stringify(run.afterOtherInstall!.sets.body)).toEqual([]);
     });
 
-    it.fails('KNOWN-BROKEN: that re-projected set survives the restart as an orphan row (promote to a plain assertion once fixed)', () => {
+    it('after the restart there is no package-managed set for the uninstalled package — no orphan row', () => {
       const run = runs.reseed;
       expect(rowsOf(run.restarted!.sets), JSON.stringify(run.restarted!.sets.body)).toEqual([]);
+    });
+  });
+
+  // ── The withdrawal's control (#21576) ───────────────────────────────────
+  //
+  // `uninstallPackage` takes the package's objects, namespace, metadata items
+  // and record out of the running kernel. A hot reinstall of the same package
+  // in the same process puts every one of them back: the object answers again
+  // and the set is projected again — once, as the package's own.
+  describe('hot install → DELETE → hot reinstall of the same package (the withdrawal\'s control)', () => {
+    it('precondition: the install landed, and the DELETE took the object out of the running kernel', () => {
+      const run = runs.reinstall;
+      expect(run.install?.exit, run.install?.output).toBe(0);
+      expect(run.uninstall?.status, JSON.stringify(run.uninstall?.body)).toBe(200);
+      expect(run.objectBefore?.status, JSON.stringify(run.objectBefore?.body)).toBe(200);
+      expect(run.objectAfter?.status, JSON.stringify(run.objectAfter?.body)).toBe(404);
+      expect(rowsOf(run.after!.sets), JSON.stringify(run.after!.sets.body)).toEqual([]);
+    });
+
+    it('the reinstall registers the package again: its object answers, and its set is projected once', () => {
+      const run = runs.reinstall;
+      expect(run.reinstall?.exit, run.reinstall?.output).toBe(0);
+      expect(run.afterReinstall!.object.status, JSON.stringify(run.afterReinstall!.object.body)).toBe(200);
+      expect(run.afterReinstall!.sets.status).toBe(200);
+      expect(rowsOf(run.afterReinstall!.sets).map((r) => [r?.name, r?.managed_by, r?.package_id]), JSON.stringify(run.afterReinstall!.sets.body))
+        .toEqual([[PERMISSION_SET, 'package', APP_ID]]);
     });
   });
 });
