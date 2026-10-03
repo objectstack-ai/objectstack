@@ -119,9 +119,50 @@ export const StampInquiryDefaultsHook = {
   description: 'Stamps status=new and source=web on every new inquiry (public web-to-lead defaults).',
 };
 
+/**
+ * The sentence {@link GuardTaskReopenHook} refuses with. Exported so the
+ * fixture's test quotes the same string the hook throws.
+ */
+export const TASK_REOPEN_REFUSAL =
+  'A finished task cannot be reopened. Create a follow-up task instead.';
+
+/**
+ * beforeUpdate (gated) — the showcase's one hook that REFUSES a write, with a
+ * sentence addressed to the user.
+ *
+ * `throw new Error('<sentence>')` from a sandboxed body is the business-refusal
+ * shape: the write is aborted (`onError: 'abort'`) and the sentence travels to
+ * the caller as a 4xx — on `/data`, and through a script action's `ctx.api`
+ * write on `/actions` too (`packages/runtime/src/sandbox/
+ * nested-hook-refusal-is-a-rejection.test.ts`). `showcase_reopen_task`
+ * (`src/ui/actions/index.ts`) is the script action that reaches it, and the
+ * platform checklist item `records-forms.script-action-hook-refusal-toast`
+ * drives that action in the console.
+ *
+ * The condition is the two-root transition form (same lesson as
+ * {@link AuditTaskCompletionHook}): only the write that flips `done` from true
+ * to not-true is refused. An edit of a finished task that leaves `done` alone
+ * still lands.
+ */
+export const GuardTaskReopenHook = {
+  name: 'showcase_guard_task_reopen',
+  label: 'Guard Task Reopen',
+  object: 'showcase_task',
+  events: ['beforeUpdate'] as LifecycleEvent[],
+  condition: 'previous.done == true && record.done != true',
+  body: {
+    language: 'js' as const,
+    source: `throw new Error(${JSON.stringify(TASK_REOPEN_REFUSAL)});`,
+  },
+  priority: 60,
+  onError: 'abort' as const,
+  description: 'Refuses reopening a finished task (done true to false) with a user-facing sentence.',
+};
+
 export const allHooks = [
   NormalizeTaskTitleHook,
   StampInquiryDefaultsHook,
+  GuardTaskReopenHook,
   AuditTaskCompletionHook,
   WarnOverBudgetHook,
 ];
