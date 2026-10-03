@@ -285,6 +285,13 @@ pattern the metadata-revision / flow-run / notification list endpoints already u
 }
 ```
 
+Without `fields`, a read returns the object's **declared** fields plus the platform's
+system columns (`id`, `created_at`, `updated_at`, and the tenant, owner and audit columns
+the registry adds). A column no metadata declares is never returned — for example one a
+retired field left in the table until `os migrate apply --allow-destructive` drops it — and
+naming it in `fields` on the data API is refused with `400 INVALID_FIELD`. To read such a column's values
+for a one-time conversion, run the conversion before the field is retired.
+
 ### Nested / Related Fields
 
 {/* os:check */}
