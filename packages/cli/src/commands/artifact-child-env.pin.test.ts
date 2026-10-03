@@ -44,8 +44,10 @@ import path from 'path';
 import ts from 'typescript';
 import {
   INTERNAL_ARTIFACT_PATH_ENV,
+  INTERNAL_CONFIG_OUTPUT_PATH_ENV,
   childEnvWithResolvedArtifact,
   readInternalArtifactPath,
+  readInternalConfigOutputPath,
 } from '../utils/internal-artifact-channel.js';
 import {
   cwdConfigJoinsBoot,
@@ -122,6 +124,28 @@ describe('the child `serve` env — OS_ARTIFACT_PATH means an operator set it', 
       expect(childEnvWithResolvedArtifact(parentEnv, decision).OS_ARTIFACT_URL)
         .toBe('https://cdn.example.com/ref.json');
     }
+  });
+
+  it('carries where the parent compiles the cwd config only when the decision says so — and owns that variable too', () => {
+    const named = '/srv/app/build/named.json';
+    const withTarget = childEnvWithResolvedArtifact({}, { kind: 'resolved', path: named, configCompiledTo: named });
+    expect(withTarget[INTERNAL_CONFIG_OUTPUT_PATH_ENV]).toBe(named);
+    expect(readInternalConfigOutputPath(withTarget)).toBe(named);
+
+    // An inherited copy never speaks for a decision the parent did not make.
+    const parentEnv = { [INTERNAL_CONFIG_OUTPUT_PATH_ENV]: '/stale/inherited.json' };
+    for (const decision of [
+      { kind: 'resolved', path: ARTIFACT },
+      { kind: 'reference' },
+      { kind: 'empty' },
+    ] as const) {
+      const childEnv = childEnvWithResolvedArtifact(parentEnv, decision);
+      expect(
+        Object.prototype.hasOwnProperty.call(childEnv, INTERNAL_CONFIG_OUTPUT_PATH_ENV),
+        `decision ${decision.kind} declared no compile path, so the variable must be absent`,
+      ).toBe(false);
+    }
+    expect(readInternalConfigOutputPath({ [INTERNAL_CONFIG_OUTPUT_PATH_ENV]: '  ' })).toBeUndefined();
   });
 
   it('reads a blank channel value as no decision at all', () => {
@@ -290,6 +314,27 @@ describe('cwdConfigJoinsBoot — the last rung, one predicate for both ends (#21
         `${other} must boot alone, not under the cwd config`,
       ).toBe(false);
     }
+  });
+
+  it('a config takes part when the artifact is where THIS command compiled it — a named path (os dev under OS_ARTIFACT_PATH)', () => {
+    const named = path.join(projectDir, 'build', 'named.json');
+    expect(cwdConfigJoinsBoot({
+      configExists: true,
+      configPath,
+      artifact: { kind: 'path', path: named, configCompiledTo: named },
+    })).toBe(true);
+    expect(isConfigCompiledArtifact(named, configPath, path.join(projectDir, 'build', '.', 'named.json'))).toBe(true);
+    // Declaring a compile path does not make a DIFFERENT artifact the config's own,
+    expect(cwdConfigJoinsBoot({
+      configExists: true,
+      configPath,
+      artifact: { kind: 'path', path: path.join(tmpdir(), 'elsewhere.json'), configCompiledTo: named },
+    })).toBe(false);
+    // and a URL is never a place a config was compiled to.
+    expect(isConfigCompiledArtifact('https://cdn.example.com/a.json', configPath, 'https://cdn.example.com/a.json'))
+      .toBe(false);
+    // The conventional path stays the config's own output beside a declared one.
+    expect(isConfigCompiledArtifact(ownArtifact, configPath, named)).toBe(true);
   });
 
   it('a config does NOT take part under a reference (OS_ARTIFACT_URL)', () => {

@@ -18,7 +18,7 @@ import { printServerReady, type ServerReadyOptions } from './format.js';
 const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 describe('printServerReady Config:/Artifact: row (#8978)', () => {
-  const base: Omit<ServerReadyOptions, 'configFile' | 'artifactSource'> = {
+  const base: Omit<ServerReadyOptions, 'configFile' | 'artifactSource' | 'bundleSource'> = {
     externalBaseOrigin: 'http://localhost:3000',
     isDev: true,
     pluginCount: 1,
@@ -59,6 +59,12 @@ describe('printServerReady Config:/Artifact: row (#8978)', () => {
       artifactSource: 'http://127.0.0.1:41541/hotcrm-2.2.2.json',
     });
     expect(artifactLine()).toBe('Artifact: http://127.0.0.1:41541/hotcrm-2.2.2.json (OS_ARTIFACT_URL)');
+    expect(configLine()).toBeUndefined();
+  });
+
+  it('prints a plain Artifact: row for a config boot\'s compiled bundle — no OS_ARTIFACT_URL suffix, no Config: row (#21501)', () => {
+    printServerReady({ ...base, bundleSource: 'dist/objectstack.json' });
+    expect(artifactLine()).toBe('Artifact: dist/objectstack.json');
     expect(configLine()).toBeUndefined();
   });
 

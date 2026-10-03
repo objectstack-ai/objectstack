@@ -43,15 +43,24 @@
  *   takes). The served label alone cannot tell these apart under the source
  *   entry: it runs `NODE_ENV=development`, where the dev metadata door over
  *   the supervisor's answer serves ALPHA even with the config loaded beside it.
+ * - the honest ready banner on the bare `os start` path (no flag, the config's
+ *   own dist/ resolved, dist/ holding a different stack): a host config boots
+ *   its own module and the `serve` child's ready banner says `Config:`; a
+ *   non-host config serves its dist/ bundle and the banner says `Artifact:`
+ *   that file. No ready-banner row names a file the boot did not load.
+ * - `os dev` under a local `OS_ARTIFACT_PATH` at a named path compiles a host
+ *   config INTO that path; the file there is the config's own compiled output,
+ *   so the config still composes its plugins (read through the roster).
  * - flag over env — `dev -a` under an `OS_ARTIFACT_URL` naming the other one.
  * - the documented first-project path — `start --artifact
- *   ./dist/objectstack.json` beside its config — is the one boot a config
- *   still joins (that file is the config's OWN compiled output), and it serves
+ *   ./dist/objectstack.json` beside its config — is a boot the config still
+ *   joins (that file is the config's OWN compiled output), and it serves
  *   that file even under an exported `OS_ARTIFACT_PATH` naming another: the
  *   config boot is handed the supervisor's answer instead of re-deriving it.
  *
- * Each case also checks the supervisor's `Artifact:` row named the file that
- * was served: the card's rule is never to print one artifact and serve another.
+ * The named-artifact cases also check the supervisor's `Artifact:` row named the
+ * file that was served: the card's rule is never to print one artifact and
+ * serve another.
  *
  * ## Spawn shape
  *
@@ -83,8 +92,8 @@ import { defineStackSourceFromLiteral, linkSpec, writeDefineStackConfig } from '
 /** The banner's tail — every row above it has printed. */
 const READY = /Press Ctrl\+C to stop/;
 const BOOT_TIMEOUT_MS = 180_000;
-/** Eight boots, one after another, each well under its own budget when healthy. */
-const ALL_BOOTS_TIMEOUT_MS = 8 * (BOOT_TIMEOUT_MS + 30_000);
+/** Ten boots, one after another, each well under its own budget when healthy. */
+const ALL_BOOTS_TIMEOUT_MS = 10 * (BOOT_TIMEOUT_MS + 30_000);
 /** The host config's plugin — on the boot's plugin roster iff the config was loaded. */
 const HOST_MARKER = 'com.example.fx.host-marker';
 
@@ -218,6 +227,19 @@ function artifactRow(output: string): string | undefined {
   return /^.*\bArtifact: [^\n]*$/m.exec(output)?.[0];
 }
 
+/**
+ * The `serve` child's READY banner row — `Config:` or `Artifact:` — read only
+ * after `Server is ready`, so neither the supervisor's pre-boot rows nor the
+ * child's boot diagnostics can answer for it. `undefined` when the banner
+ * carries neither (an artifact-fallback boot omits the row by design).
+ */
+function readyRow(output: string): { label: 'Config' | 'Artifact'; value: string } | undefined {
+  const at = output.search(/Server is ready/);
+  if (at < 0) return undefined;
+  const m = /^[ \t]+(Config|Artifact):[ \t]+([^\n]*)$/m.exec(output.slice(at));
+  return m ? { label: m[1] as 'Config' | 'Artifact', value: m[2].trim() } : undefined;
+}
+
 interface Reading {
   served?: string;
   status?: number;
@@ -314,10 +336,10 @@ beforeAll(async () => {
   readings.leg2NoDist = await measure([...startArgs(join(root, 'h-leg2-nodist')), '--artifact', alpha], configOnly);
   readings.leg2Control = await measure([...startArgs(join(root, 'h-leg2-ctl')), '--artifact', alpha], noConfig);
   readings.hostConfig = await measure([...startArgs(join(root, 'h-host')), '--artifact', alpha], hostConfig);
-  readings.hostConfigOwn = await measure(
-    [...startArgs(join(root, 'h-host-own')), '--artifact', './dist/objectstack.json'],
-    hostConfig,
-  );
+  // The bare `os start` path beside a config: no flag, the config's own dist/
+  // resolved. dist/ holds BRAVO, a DIFFERENT stack from either config.
+  readings.hostConfigOwn = await measure([...startArgs(join(root, 'h-host-own'))], hostConfig);
+  readings.bareNonHost = await measure([...startArgs(join(root, 'h-bare-nonhost'))], withConfig);
   readings.flagOverEnv = await measure([...devArgs, '-a', alpha], bare, {
     OS_ARTIFACT_URL: pathToFileURL(bravo).href,
   });
@@ -326,6 +348,10 @@ beforeAll(async () => {
     withConfig,
     { OS_ARTIFACT_PATH: alpha },
   );
+  // `os dev` under a local OS_ARTIFACT_PATH at a NON-default path compiles the
+  // host config INTO it (it does not exist yet), so that file is the config's
+  // own compiled output and the config must still compose its plugins.
+  readings.devNamedPathHost = await measure([...devArgs], hostConfig, { OS_ARTIFACT_PATH: 'build/named.json' });
 }, ALL_BOOTS_TIMEOUT_MS);
 
 afterAll(async () => {
@@ -374,9 +400,29 @@ describe('#21501 — the named artifact is the served stack, beside a config or 
     expect(r.output).not.toContain(HOST_MARKER);
   });
 
-  it('a HOST config still boots ITSELF when the artifact is its own compiled output (the marker\'s positive control)', () => {
+  it('a bare `os start` beside a HOST config with a differing dist/ boots the config itself — and its ready banner says `Config:`', () => {
+    // Also the roster marker's positive control: the config's own compiled
+    // output is the one artifact a config still joins.
     const r = reading('hostConfigOwn');
     expect(r.status).toBe(200);
+    expect(r.output).toContain(HOST_MARKER);
+    // The served label is not asserted here: under the source entry
+    // (`NODE_ENV=development`) the dev metadata door over dist/ composes beside
+    // the host module — see the header.
+    expect(readyRow(r.output ?? '')).toEqual({ label: 'Config', value: 'objectstack.config.ts' });
+  });
+
+  it('a bare `os start` beside a NON-host config serves its dist/ bundle — and its ready banner says `Artifact:` that file', () => {
+    const r = reading('bareNonHost');
+    expect(r.status).toBe(200);
+    expect(r.served).toBe('Widget BRAVO');
+    expect(readyRow(r.output ?? '')).toEqual({ label: 'Artifact', value: 'dist/objectstack.json' });
+  });
+
+  it('`os dev` under OS_ARTIFACT_PATH at a named path compiles a HOST config there, and the config still composes its plugins', () => {
+    const r = reading('devNamedPathHost');
+    expect(r.status).toBe(200);
+    expect(r.artifactRow).toContain('build/named.json');
     expect(r.output).toContain(HOST_MARKER);
   });
 
