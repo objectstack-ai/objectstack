@@ -296,6 +296,13 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
         };
       }
       if (WRITE_RETURN_VERBS.has(prop)) {
+        // [#21454] Serve what the write RETURNS. Measured on `main` (pre-#21520):
+        // an elevated body's family-table write is NOT refused — it runs and
+        // returns the stored row — so this serve carries real family content.
+        // [#21520, option A] The write-verb REFUSAL (an elevated body may not
+        // write a family table at all) attaches HERE, on these same verbs, as a
+        // throw BEFORE `value.apply` — it needs no reshaping of this branch. This
+        // seam serves the return and leaves that policy to #21520.
         return async (...args: unknown[]) =>
           serveStoredMetadataWriteReturn(objectName, await value.apply(target, args), engine);
       }
