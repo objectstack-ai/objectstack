@@ -6266,7 +6266,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'ui-object-metric-aggregate-trend-typed',
-    order: 68,
+    order: 69,
     text:
       'It also types two members of the `object-metric` page block (#21464, the fourth stage of the '
       + '`ComponentPropsMap` `z.unknown()` close-out): `aggregate` and `trend` were `z.unknown()`, although '
