@@ -2409,6 +2409,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
