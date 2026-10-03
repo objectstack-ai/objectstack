@@ -227,7 +227,8 @@ describe('[#5930 step 4] one source: the native compiler and the echo compile th
   });
 
   it('a dateRange window: the same pair, through the same reader (item 8)', async () => {
-    const window = (dimension: string, end = '2026-07-28') => ({ timeDimensions: [{ dimension, dateRange: ['2026-07-28', end] }] });
+    const window = (dimension: string, end = '2026-07-28'): Partial<AnalyticsQuery> =>
+      ({ timeDimensions: [{ dimension, dateRange: ['2026-07-28', end] as [string, string] }] });
     for (const compile of [native, echo]) {
       const at = await compile(TYPED, window('signed_at'));
       expect(whereOf(at.sql)).toBe('(signed_at >= $1 AND signed_at < $2)');
