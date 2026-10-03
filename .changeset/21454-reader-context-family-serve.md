@@ -1,11 +1,11 @@
 ---
 '@objectstack/runtime': patch
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 ---
 
 fix(runtime): a sandboxed body or an action handler that reads the stored-metadata tables is served what the generic data door serves (#21454)
 
-Clause-②: no
+Clause-②: yes
 
 The two stored-metadata tables (the current metadata bodies and their version history) hold each body as stored, credential material included, and a content hash computed over it. The generic data door serves such a row with the body as its type's read projection, with the stored credential material withheld, and the hash in keyed form. Three in-process reader contexts served the same rows as stored:
 
@@ -20,3 +20,5 @@ An action body and an action handler run elevated, so the stored form reached wh
 **What does not change.** Every other object, every write and `count` behave as before. The platform's own readers of these tables still read the stored form, because the projection is applied at the reader contexts and not in the engine.
 
 `@objectstack/metadata-protocol` now exports the data door's stored-row serve, so these contexts consume it and keep no copy: `storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows`, `ephemeralStoredHashDigest` and the `StoredHashDigest` type. The exports are additive.
+
+The four functions `storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows` and `ephemeralStoredHashDigest`, and the type `StoredHashDigest`, are new public API of `@objectstack/metadata-protocol`, and `@objectstack/runtime` consumes them.
