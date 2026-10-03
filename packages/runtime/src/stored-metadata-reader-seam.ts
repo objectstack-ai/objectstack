@@ -287,7 +287,10 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
           serveStoredMetadataRead(objectName, query, engine, (q) => value.call(target, q, ...rest));
       }
       if (prop === COUNT_READ) {
-        return (query?: unknown, ...rest: unknown[]) => {
+        // `async` so a refusal leaves as a rejected promise, the shape every
+        // other verb's refusal takes — `count` answers a number, nothing to
+        // serve, so only the evaluate guard runs.
+        return async (query?: unknown, ...rest: unknown[]) => {
           refuseOrNarrowStoredMetadataEvaluate(objectName, query, engine);
           return value.call(target, query, ...rest);
         };
