@@ -1738,6 +1738,19 @@ function stateTenantAuthorship(data: unknown): unknown {
 }
 
 /**
+ * [#21639, #21638] Is this artifact a view ITEM — a view a package ships under
+ * its own name, `viewKind` set (the spec's ViewItem) — rather than a container
+ * or anything else? The save door's "a view item a package ships" and the
+ * package attribution of a container row both ask exactly this, positively:
+ * a body that is neither a container nor a view item is not a view item.
+ */
+function isShippedViewItem(artifact: unknown): artifact is Record<string, unknown> {
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return false;
+    const viewKind = (artifact as { viewKind?: unknown }).viewKind;
+    return typeof viewKind === 'string' && viewKind !== '';
+}
+
+/**
  * ADR-0048 (#1828) — composite dedup identity for the unscoped metadata list.
  *
  * Two installed packages may legitimately ship the same `type`/`name`
@@ -17055,11 +17068,12 @@ export class ObjectStackProtocolImplementation implements
      * the container it overlays, which is the slot the package-aware merge
      * seats it in. `undefined` for a package-less row that overlays nothing.
      *
-     * [#21638] Only a shipped CONTAINER is something a container row
-     * overlays. A container row stored under the name of a view ITEM a
-     * package ships is not that item's overlay — a container is not a view —
-     * so it belongs to no package, and its expansion is placed as any
-     * package-less container's is. Read through the shipped item instead,
+     * [#21638] A container row is not the overlay of a view ITEM. A
+     * package-less container row stored under the name of a view item a
+     * package ships (`viewKind` set, {@link isShippedViewItem}) is not that
+     * item's overlay — a container is not a view — so it belongs to no
+     * package, and its expansion is placed as any package-less container's
+     * is. The overlay of a shipped container keeps its package, as before. Read through the shipped item instead,
      * such a row was judged a container of the shipping package: on that
      * package's object its bare `list` took `<object>.default` and replaced
      * the packaged default on both doors, wearing the package's `_packageId`,
@@ -17077,7 +17091,7 @@ export class ObjectStackProtocolImplementation implements
         }
         if (typeof container.name !== 'string' || container.name === '') return undefined;
         const overlaid = this.lookupArtifactItem(type, container.name) as { _packageId?: unknown } | undefined;
-        if (!isAggregatedViewContainer(overlaid)) return undefined;
+        if (isShippedViewItem(overlaid)) return undefined;
         const overlaidPackage = overlaid?._packageId;
         return typeof overlaidPackage === 'string' && overlaidPackage !== '' ? overlaidPackage : undefined;
     }
@@ -17929,7 +17943,8 @@ export class ObjectStackProtocolImplementation implements
      *    own sibling;
      *  - a view item a package ships ({@link lookupArtifactItem}, the
      *    registry's artifact read, which never answers a tenant-authored
-     *    row), except the views of the shipped container this row overlays
+     *    row, holding a view item: {@link isShippedViewItem}), except the
+     *    views of the shipped container this row overlays
      *    by its own name ({@link overlaidShippedContainerViewNames}): ADR-0005
      *    keys an overlay by its own name, so an overlay of a package's
      *    container stands in for that container and its views.
@@ -18000,7 +18015,7 @@ export class ObjectStackProtocolImplementation implements
         const shippedServing = (name: string): Record<string, unknown> | undefined => {
             if (overlaid.has(name)) return undefined;
             const artifact = this.lookupArtifactItem(type, name) as Record<string, unknown> | undefined;
-            if (!artifact || isAggregatedViewContainer(artifact)) return undefined;
+            if (!isShippedViewItem(artifact)) return undefined;
             return typeof artifact._packageId === 'string' && artifact._packageId !== '' ? artifact : undefined;
         };
         const refusal = (text: string) => {
