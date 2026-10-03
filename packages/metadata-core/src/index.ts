@@ -137,3 +137,9 @@ export * from './record-organization.js';
 // metadata-protocol, and a boot log with its own opinion about which
 // declarations the registry will take is the very defect this card closes.
 export * from './object-field-type.js';
+
+// Which forms a `view` body opens to anonymous intake. The enforcing doors live
+// in `@objectstack/rest` and the write-time judgement of an organization-scoped
+// `view` write in `@objectstack/metadata-protocol`; both read this one rule, so
+// a form withdrawn by either declared switch is withdrawn everywhere.
+export * from './anonymous-form-intake.js';

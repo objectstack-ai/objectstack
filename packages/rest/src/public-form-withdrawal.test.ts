@@ -42,7 +42,7 @@ function mockRes() {
   return res;
 }
 
-function formView(allowAnonymous: boolean) {
+function formView(allowAnonymous: boolean, sharing?: Record<string, unknown>) {
   return {
     name: 'contact',
     object: 'inquiry',
@@ -50,7 +50,7 @@ function formView(allowAnonymous: boolean) {
     config: {
       data: { object: 'inquiry' },
       sections: [{ fields: ['name', 'email'] }],
-      sharing: { allowAnonymous, publicLink: '/forms/contact-us' },
+      sharing: sharing ?? { enabled: true, allowAnonymous, publicLink: '/forms/contact-us' },
     },
   };
 }
@@ -80,6 +80,8 @@ interface Setup {
   inOrg?: boolean;
   /** The tenancy provider's behaviour. */
   tenancy: 'org' | 'no-org' | 'not-registered' | 'unreachable';
+  /** Replaces the form's whole `sharing` on every read (the `envWide`/`inOrg` switch is then ignored). */
+  sharing?: Record<string, unknown>;
 }
 
 function build(setup: Setup) {
@@ -87,7 +89,7 @@ function build(setup: Setup) {
   const getMetaItems = vi.fn(async (req: { type: string; organizationId?: string }) => {
     if (req.type === 'view') {
       const effective = req.organizationId === ORG && setup.inOrg !== undefined ? setup.inOrg : setup.envWide;
-      return [formView(effective)];
+      return [formView(effective, setup.sharing)];
     }
     if (req.type === 'object') return [inquiryObject];
     return [];
@@ -194,4 +196,34 @@ describe('[#21331] public form withdrawal reaches every intake door', () => {
     expect(s.createData).not.toHaveBeenCalled();
     expect(s.getMetaItems).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'view' }));
   });
+});
+
+describe('either declared switch withdraws a public form from every anonymous door', () => {
+  const LINK = '/forms/contact-us';
+  const withdrawn: Array<[string, Record<string, unknown>]> = [
+    ['enabled: false', { enabled: false, allowAnonymous: true, publicLink: LINK }],
+    ['enabled absent (the schema default is false)', { allowAnonymous: true, publicLink: LINK }],
+    ['allowAnonymous: false', { enabled: true, allowAnonymous: false, publicLink: LINK }],
+    ['both cleared', { enabled: false, allowAnonymous: false, publicLink: LINK }],
+  ];
+  for (const tenancy of ['org', 'not-registered'] as const) {
+    for (const [label, sharing] of withdrawn) {
+      it(`${label} (tenancy ${tenancy}): both doors answer 404 FORM_NOT_FOUND and nothing is written`, async () => {
+        const s = build({ envWide: true, tenancy, sharing });
+        const get = await s.get();
+        expect(get.statusCode).toBe(404);
+        expect(get.body.code).toBe('FORM_NOT_FOUND');
+        const post = await s.post();
+        expect(post.statusCode).toBe(404);
+        expect(post.body.code).toBe('FORM_NOT_FOUND');
+        expect(s.createData).not.toHaveBeenCalled();
+      });
+    }
+    it(`published, enabled and allowAnonymous both true (tenancy ${tenancy}, control): both doors accept`, async () => {
+      const s = build({ envWide: false, tenancy, sharing: { enabled: true, allowAnonymous: true, publicLink: LINK } });
+      expect((await s.get()).statusCode).toBe(200);
+      expect((await s.post()).statusCode).toBe(201);
+      expect(s.createData).toHaveBeenCalledTimes(1);
+    });
+  }
 });
