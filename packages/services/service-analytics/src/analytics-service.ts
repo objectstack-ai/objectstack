@@ -1143,8 +1143,11 @@ export interface AnalyticsServiceConfig {
    * `undefined` when the host cannot answer. See
    * `DatasetScopedStrategyContext.dateBucketSql` (`strategies/types.ts`).
    *
-   * Answered by the plugin from the driver that executes the aggregate. A host
-   * that wires nothing keeps the echo's representative `date_trunc(…)`.
+   * Answered by the plugin from the driver that executes the aggregate. Asked
+   * only at a UTC or unset `timezone`: a non-UTC one is bucketed in memory, and
+   * the echo refuses it whatever is wired (#21630). At UTC, a host that wires
+   * nothing keeps the echo's representative `date_trunc(…)`, except on SQLite,
+   * where the echo refuses (#21595).
    */
   dateBucketSql?: (object: string, field: string, granularity: string) => string | undefined;
   /**
