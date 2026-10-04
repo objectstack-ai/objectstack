@@ -6,7 +6,7 @@ The spec's objectui citations, and the shipped description text that names the `
 
 Clause-②: no
 
-Every anchor was mapped through the objectui diff `ab1879721595..2e818d0b51ec`. Every cited file is byte-identical across the hop except four, and in those the cited text is byte-identical too:
+Every anchor was mapped through the objectui diff `ab1879721595..2e818d0b51ec`. Every file a current anchor cites is byte-identical across the hop except four, and in those the cited text is byte-identical too:
 
 - `plugin-dashboard/src/index.tsx`: objectui#11466 added lines above the `object-metric` registration, so the `object-metric` icon input record moves from `:269` to `:281`. It is still `{ name: 'icon', type: 'string' }`.
 - `packages/types/src/objectql.ts`: objectui#11216 declared `grouping` on `ObjectKanbanSchema` below the cited `limit` member.
