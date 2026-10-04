@@ -11,8 +11,8 @@
 ### The `defineView` container (`*.view.ts` file shape)
 
 Views ship **inside a `defineView` container** — one per object, aggregating
-the default `list`, named `listViews`, and `formViews`. The loader expands it
-into `<object>.<key>` view items that power the view switcher.
+the default `list` and `form`, named `listViews`, and `formViews`. The loader
+expands it into `<object>.<key>` view items that power the view switcher.
 
 <!-- os:check -->
 ```typescript
