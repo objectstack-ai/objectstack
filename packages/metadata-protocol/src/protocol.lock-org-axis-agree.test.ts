@@ -29,6 +29,11 @@
  *
  * It sits above PR #21693's and PR #21715's per-case pins and replaces neither.
  *
+ * Every row here is stored under the canonical type spelling — every row a
+ * live write can mint. The reads' at-rest tolerance for the other spelling is
+ * the one declared difference from the gate (`findServedOverlayRow`'s
+ * `otherSpelling`), so it is outside this table on purpose.
+ *
  * `@objectstack/objectql` cannot be imported here: it depends on this package.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';

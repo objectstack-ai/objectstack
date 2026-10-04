@@ -9348,12 +9348,21 @@ export class ObjectStackProtocolImplementation implements
      * and the env-wide row (`organization_id` null) is the fallback. Within
      * one scope, ADR-0048 prefer-local: with a `packageId`, that package's
      * row first and then the package-less row, never another package's; with
-     * none, any row. A row stored under the type's other spelling is the last
-     * resort in each scope.
+     * none, any row.
      *
      * `orgId` arrives already gated ({@link organizationIdForMetaRead}): an
      * organization only selects a row on a type the registry declares per-org
      * overridable, so a pre-#6190 phantom org row is never the served one.
+     *
+     * `otherSpelling` is the one declared difference between the callers. The
+     * reads pass `true` and keep the at-rest tolerance they have always had: a
+     * row stored under the type's other spelling (pre-#4432 residue) is the
+     * last resort in each scope. The `_lock` gate passes `false`: a write
+     * addresses the canonical namespace only (#4432, #9009 — the key
+     * `SysMetadataRepository.whereFor` stores under), and extending a tolerant
+     * lookup below the folding boundary into every write is what #4432
+     * refused. So the two agree on every row stored under the canonical
+     * spelling, which is every row a live write can mint.
      *
      * Returns `undefined` when neither scope holds a row. A failed read
      * propagates: each caller owns its #5532 / #5706 discrimination.
@@ -9364,6 +9373,7 @@ export class ObjectStackProtocolImplementation implements
         orgId: string | undefined;
         state: 'active' | 'draft';
         packageId?: string;
+        otherSpelling: boolean;
     }): Promise<{ row: any; scope: 'org' | 'env' } | undefined> {
         const inScope = async (oid: string | null): Promise<any | undefined> => {
             const lookup = async (t: string): Promise<any | undefined> => {
@@ -9387,7 +9397,7 @@ export class ObjectStackProtocolImplementation implements
                 return await this.engine.findOne('sys_metadata', { where: base });
             };
             const rec = await lookup(args.type);
-            if (rec) return rec;
+            if (rec || !args.otherSpelling) return rec;
             const alt = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
             return alt ? await lookup(alt) : undefined;
         };
@@ -9573,6 +9583,7 @@ export class ObjectStackProtocolImplementation implements
                     orgId,
                     state: 'draft',
                     ...(request.packageId ? { packageId: request.packageId } : {}),
+                    otherSpelling: true,
                 }))?.row;
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
@@ -9616,6 +9627,7 @@ export class ObjectStackProtocolImplementation implements
                 orgId,
                 state: readState,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
+                otherSpelling: true,
             }))?.row;
             // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
             if (record && !shippedFlowActiveRead) {
@@ -10153,6 +10165,7 @@ export class ObjectStackProtocolImplementation implements
                 orgId,
                 state: 'active',
                 ...(request.packageId ? { packageId: request.packageId } : {}),
+                otherSpelling: true,
             });
             if (served) {
                 const rec = served.row;
@@ -16171,7 +16184,8 @@ export class ObjectStackProtocolImplementation implements
      * env-wide row declares (the read reports that same row). ⛔ No second
      * predicate: a change to the read's precedence moves this limb with it.
      * The package-agnostic arm is asked (no `packageId`), as the doors carry
-     * none to this gate.
+     * none to this gate, under the canonical spelling only (#4432 — the one
+     * declared difference, stated on {@link findServedOverlayRow}).
      *
      * `'none'` is a VERDICT, not a default: both callers turn it into
      * "allow". So it is returned only when the absence of a lock was
@@ -16265,13 +16279,15 @@ export class ObjectStackProtocolImplementation implements
         //    makes this limb read the row the artifact limb already folded to.
         //    [#21716] …and the row the READ serves for this organization: the
         //    reads' own resolution, behind the reads' own organization gate —
-        //    see this method's header.
+        //    see this method's header. Canonical spelling only (#4432), the
+        //    one declared difference — see {@link findServedOverlayRow}.
         try {
             const served = await this.findServedOverlayRow({
                 type: canonicalType,
                 name,
                 orgId: organizationIdForMetaRead(canonicalType, organizationId ?? undefined),
                 state: 'active',
+                otherSpelling: false,
             });
             const row = served?.row;
             if (row) {
