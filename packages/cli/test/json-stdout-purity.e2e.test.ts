@@ -104,6 +104,10 @@ const FAMILY: Record<string, string[]> = {
   'migrate recorded-by': [],
   'migrate resume': [],
   'migrate summary-nulls': [],
+  // One object per run, so it needs a name: the fixture's own `jp_ticket`,
+  // which the composed host config registers. No database file exists, so the
+  // face driven here is its empty-work answer for a table not there yet.
+  'migrate unmapped-columns': ['--object', 'jp_ticket'],
   'migrate value-shapes': [],
   // Report-only is its DEFAULT and the only form driven here: without
   // `--delete` it boots, reports and writes nothing, so the family gains a

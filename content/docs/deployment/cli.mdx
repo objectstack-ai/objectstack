@@ -519,7 +519,7 @@ as the project's **default** datasource it is refused at boot the same way.
 **What it boots:**
 - Reads the artifact's `manifest`, `objects`, `views`, `flows`, …
 - Auto-registers the platform services declared in `requires: [...]` (e.g. `ai`, `automation`, `analytics`, `auth`, `ui`). Declaring a **service** capability (`automation`, `analytics`, `ai`, `audit`, …) is a *requirement*: if its provider package isn't installed, boot **fails fast** with a clear error instead of silently starting without a capability you asked for. (`auth` and `ui` are tier-gated with their own opt-in rules — `auth`'s secret-gated skip is described below.)
-- Auto-detects the driver from the database URL scheme (`libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite; `:memory:` is SQLite's own in-memory database). `memory://` and `mingo://` are refused — see the callout below.
+- Auto-detects the driver from the database URL scheme (`libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite; `:memory:` is SQLite's own in-memory database). `memory://` and `mingo://` are refused — see the callout above.
 - Runs standalone boot mode with one active environment.
 
 **Authentication:**
@@ -853,6 +853,7 @@ diverges from the live schema, and the physical column wins at write time.
 | `os migrate plan` | Dry-run: show how the database has drifted from metadata, categorised safe / needs-confirm / destructive (no changes applied) |
 | `os migrate apply` | Reconcile the database to metadata. Applies loosening changes; destructive ones require `--allow-destructive` |
 | `os migrate multi-value-columns` | Migrate a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — one of three drift ops `apply` never reconciles for you. Dry run by default; `--apply` runs the statement the finding prints |
+| `os migrate unmapped-columns` | Read the values of the columns `plan` reports as `unmapped_column` for one object, keyed by record id — the conversion route for a retired field's values before `apply --allow-destructive` drops its columns. Read-only, and operator-only: no runtime door serves these values |
 
 ```bash
 os migrate plan                              # Preview drift (no changes)
@@ -861,6 +862,7 @@ os migrate apply --yes                       # Skip the prompt (CI / scripts)
 os migrate apply --allow-destructive --yes   # Also drop orphaned columns, tighten NOT NULL, narrow types
 os migrate apply --force                     # Migrate even though another process is using the database
 os migrate plan --json                       # Machine-readable output
+os migrate unmapped-columns --object contact --json   # A retired field's stored values, keyed by record id (read-only)
 ```
 
 #### Nothing is written before you confirm
@@ -1047,6 +1049,54 @@ command converts the column and the values *in* it. A stringified array that a
 hook or an integration already copied into some *other* single-value column is
 not something it looks for, and it is deliberately not something it will grow
 into: that repair is specific to what your automations did with the value.
+
+#### `os migrate unmapped-columns`
+
+Retiring a field leaves its column in the table: the additive sync never drops
+one, and `os migrate plan` reports it as `unmapped_column` until
+`os migrate apply --allow-destructive` does. In between, the values are still
+stored, and no runtime door serves them: a read or a write through the data API
+returns the object's declared fields only, and naming the column in `fields` is
+refused. When the values have to move into the field that replaced it, this is
+the read:
+
+```bash
+os migrate unmapped-columns --object contact                    # The columns, and every record's values
+os migrate unmapped-columns --object contact --json > out.json  # The same, for a conversion script
+os migrate unmapped-columns --object contact --max-records 1000000 --json
+os migrate unmapped-columns --object contact --database-url postgres://…
+```
+
+The conversion route is three steps: read the values with this command, write
+them into the declared fields with your own script, then run
+`os migrate apply --allow-destructive` to drop the columns.
+
+- **One column set.** It reads exactly the columns `os migrate plan` reports as
+  `unmapped_column` for that object's table: the same differ, the same boot.
+  Columns the differ never reports are never read either, such as the driver's
+  own `id`, `created_at` and `updated_at`.
+- **Operator-only and read-only.** It runs under the database credentials you
+  pass, and covers every organization's rows. There is no REST route or API
+  flag behind it. It boots the way `plan` does, so it writes nothing, and it
+  drops nothing.
+- **Values as stored.** An unmapped column has no declared type, so each value is
+  emitted as the database client returns it, with no field-type decoding: a
+  retired `json` field on SQLite reads as its stored text, a retired `boolean`
+  as `0` or `1`, and a retired `datetime` on PostgreSQL arrives as a date and is
+  emitted as its ISO 8601 text. A value JSON cannot carry as stored (binary
+  bytes, a `bigint`, or a non-finite number) is refused with exit 1, naming the
+  column and the record id, and no record is emitted; read that column with
+  the database's own client.
+- **Empty work, exit 0**, for an object with no unmapped column, or with no table
+  in this database yet. `--json` prints one document:
+  `{ object, table, columns, count, records: [{ id, values }] }`.
+- **Refused, exit 1**: an object name the deployment does not declare
+  (`OBJECT_NOT_FOUND`); an object `plan` does not diff (federated, or bound to
+  another datasource), whose empty answer would be unmeasured; a read that
+  cannot be complete, such as one stopped by `--max-records`; and a value JSON
+  cannot carry as stored, described above. A partial set is
+  never emitted, because a conversion over part of a table, followed by the
+  drop, loses the rest.
 
 #### Data migrations
 
