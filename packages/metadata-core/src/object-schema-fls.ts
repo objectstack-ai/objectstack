@@ -43,7 +43,7 @@
  * | masking disabled (D8 escape hatch) / no `security` service / exempt caller (D4) | `passthrough` | serve unmasked, byte-identical to pre-ADR |
  * | `getReadableFields` → `undefined` (field universe unresolvable) | `undetermined` | serve unmasked + structured warn + metric + `Cache-Control: private, no-store`, **no shared ETag** |
  * | `getReadableFields` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never the unmasked body, never an empty-fields 200 |
- * | otherwise | `project` | fields ∉ readable are deleted whole |
+ * | otherwise | `project` | fields ∉ readable are deleted whole, references included |
  *
  * ## D3 — mask AFTER the cache, fingerprint the ETag
  *
@@ -57,6 +57,8 @@
  * permission cohort share 304s; a permission change moves the fingerprint and
  * self-invalidates the stale 304.
  */
+
+import { maskDeniedFieldReferences } from './object-schema-fls-references.js';
 
 /**
  * [#6603 / ADR-0066 D1] The capabilities that let a caller **write** an object
@@ -346,7 +348,10 @@ export interface ObjectSchemaMaskResult<T> {
 
 /**
  * Project a metadata document's `fields` onto the caller's readable set
- * (ADR-0106 D1) — remove an unreadable field **whole**.
+ * (ADR-0106 D1) — remove an unreadable field **whole**: its `fields` entry AND
+ * every reference to it elsewhere in the document (object-level rules, role
+ * pointers, name lists, expressions, and the definitions of the fields that
+ * stay), per {@link maskDeniedFieldReferences}.
  *
  * Pure and total, with the same tolerance contract as
  * {@link applyAuditFieldGovernance}: any input may be handed to it, including a
@@ -380,8 +385,13 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
         if (posture.readable.has(name)) kept[name] = def;
     }
 
+    // D1's "whole" covers the field's references too: a validation rule over it,
+    // a role pointer naming it, a readable field's formula reading it, … — see
+    // `object-schema-fls-references.ts` for every position and its disposition.
+    const projected = maskDeniedFieldReferences({ ...rec, fields: kept }, new Set(denied));
+
     return {
-        document: { ...rec, fields: kept } as unknown as T,
+        document: projected as unknown as T,
         denied,
         fingerprint: objectFieldVisibilityFingerprint(denied),
         emptied: Object.keys(kept).length === 0,
