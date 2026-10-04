@@ -12,6 +12,7 @@ import type {
 } from '@objectstack/spec/integration';
 import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
@@ -109,7 +110,7 @@ export interface AutomationServicePluginOptions {
      *
      * | Skipped in inert mode | Why it must be |
      * |---|---|
-     * | flow pull + `kernel:ready` / `metadata:reloaded` re-sync | `registerFlow` calls `activateFlowTrigger` — record triggers and scheduled jobs would go live |
+     * | flow pull + `kernel:ready` / `metadata:reloaded` re-sync + the metadata-mutation sync | `registerFlow` calls `activateFlowTrigger` — record triggers and scheduled jobs would go live |
      * | declarative connector materialization | opens real connections; an MCP provider spawns a child process |
      * | suspended-run wait-timer re-arm | would RESUME someone's paused approval mid-migration |
      *
@@ -296,6 +297,20 @@ function stableStringify(input: unknown): string {
     if (Array.isArray(input)) return '[' + input.map(stableStringify).join(',') + ']';
     const obj = input as Record<string, unknown>;
     return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+}
+
+/**
+ * [#21725] Whether the engine already holds exactly what `definition`
+ * registers as: the same canonical parse `registerFlow` would store. A
+ * definition that does not parse is not held — `registerFlow` refuses it and
+ * says why.
+ */
+function holdsFlowDefinition(engine: AutomationEngine, name: string, held: unknown, definition: unknown): boolean {
+    try {
+        return stableStringify(engine.canonicalizeStoredFlow(name, definition).parsed) === stableStringify(held);
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -624,6 +639,24 @@ export class AutomationServicePlugin implements Plugin {
     private credentialMigration: Promise<void> = Promise.resolve();
     /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
     private unsubscribeCryptoProvider?: () => void;
+    /**
+     * [#21725] One queue for every step that arms flows from the protocol's
+     * view after the boot pull: the `kernel:ready` bind, the
+     * `metadata:reloaded` re-sync and the metadata-mutation sync. A read and
+     * the registrations it drives never interleave with another step's.
+     */
+    private flowSyncQueue: Promise<void> = Promise.resolve();
+    /** [#21725] Flow names the metadata mutation signal reported, awaiting one coalesced re-read. */
+    private pendingFlowMutations = new Set<string>();
+    /**
+     * [#21725] Flow name → signature of the stored body the mutation sync
+     * armed since the last `metadata:reloaded` re-sync. A publish raises both
+     * signals, so that re-sync skips a flow armed from this exact body: one
+     * registration per publish, not two.
+     */
+    private mutationArmedFlows = new Map<string, string>();
+    /** [#21725] The `onMetadataMutation` subscription; dropped at destroy. */
+    private unsubscribeFlowMutations?: () => void;
 
     constructor(options: AutomationServicePluginOptions = {}) {
         this.options = options;
@@ -1369,9 +1402,14 @@ export class AutomationServicePlugin implements Plugin {
         // idempotently — ScheduleTrigger.start cancels + reschedules) and unregister
         // flows that vanished so their jobs stop.
         ctx.hook('metadata:reloaded', async (payload?: unknown) => {
-            // [#20790] A publish may have promoted credentials on another replica.
-            await this.loadCredentialIndex(ctx, 'metadata:reloaded');
-            await this.resyncFlowsFromProtocol(ctx);
+            // [#21725] On the flow sync queue: a publish raises the metadata
+            // mutation signal first, and this re-sync must see what that sync
+            // armed (see {@link subscribeFlowMutations}).
+            await this.enqueueFlowSync(async () => {
+                // [#20790] A publish may have promoted credentials on another replica.
+                await this.loadCredentialIndex(ctx, 'metadata:reloaded');
+                await this.resyncFlowsFromProtocol(ctx);
+            });
             // #7742 — take the connector collection off the payload FIRST. The
             // reconcile below used to read `listItems('connector')` alone, and
             // nothing on the reload path ever re-ingests connector items into
@@ -1412,10 +1450,14 @@ export class AutomationServicePlugin implements Plugin {
         // [#20913] …and it arms what the boot pull armed: both resolve through
         // the one precedence decision ({@link resolveFlowContenders}).
         ctx.hook('kernel:ready', async () => {
-            // [#20790] Reloaded first: the protocol's view binds stored rows,
-            // whose credentials the channel holds.
-            await this.loadCredentialIndex(ctx, 'kernel:ready');
-            await this.syncFlowsFromProtocol(ctx);
+            // [#21725] On the flow sync queue, behind any mutation sync a save
+            // during boot already queued.
+            await this.enqueueFlowSync(async () => {
+                // [#20790] Reloaded first: the protocol's view binds stored rows,
+                // whose credentials the channel holds.
+                await this.loadCredentialIndex(ctx, 'kernel:ready');
+                await this.syncFlowsFromProtocol(ctx);
+            });
             // Every plugin's init()/start() has completed here, so connector
             // plugins have registered their runtime connectors — the earliest
             // point the declared-vs-registered comparison is meaningful.
@@ -1432,6 +1474,13 @@ export class AutomationServicePlugin implements Plugin {
                 this.unsubscribeCryptoProvider = dataEngine.onCryptoProviderChange(() => this.scheduleCredentialMigration(ctx));
             }
         });
+
+        // ── Runtime re-bind: a flow saved, published or deleted at runtime ────
+        // [#21725] The protocol's mutation signal, which every metadata write
+        // raises — the same one ObjectQL re-binds authored hooks and actions
+        // on. Without it, a flow saved active through `PUT /meta/flow/:name`
+        // stayed unregistered until a restart; see {@link subscribeFlowMutations}.
+        this.subscribeFlowMutations(ctx);
 
         // ── Silent-miss audit: unbound triggered flows (2026-07-17 eval) ──────
         // kernel:bootstrapped fires strictly after EVERY kernel:ready handler —
@@ -2379,6 +2428,17 @@ export class AutomationServicePlugin implements Plugin {
         // precedence the boot pull used — never "last one registered wins".
         for (const entry of this.resolveFlowContenders(ctx, defs)) {
             freshNames.add(entry.name);
+            // [#21725] A publish raises the metadata mutation signal before this
+            // re-sync, and the mutation sync armed the published flow from this
+            // same stored body. Registering it again would arm it twice per publish.
+            const armedFrom = this.mutationArmedFlows.get(entry.name);
+            if (
+                armedFrom !== undefined
+                && armedFrom === stableStringify(entry.definition)
+                && (await this.engine.getFlow(entry.name)) !== null
+            ) {
+                continue;
+            }
             try {
                 this.engine.registerFlow(entry.name, entry.definition as never);
                 resynced++;
@@ -2406,6 +2466,9 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         this.syncedFlowNames = freshNames;
+        // [#21725] Every mark is spent: from here on this re-sync's
+        // registrations are the ones the engine holds.
+        this.mutationArmedFlows.clear();
 
         if (resynced > 0) {
             ctx.logger.info(`[Automation] Re-synced ${resynced} flow(s) after metadata reload`);
@@ -2446,6 +2509,148 @@ export class AutomationServicePlugin implements Plugin {
         }
     }
 
+    /**
+     * [#21725] Run `job` on the flow sync queue: after every flow sync queued
+     * before it, before every one queued after. The returned promise settles
+     * with the job; the queue itself never rejects, so one failed job does
+     * not stall the next.
+     */
+    private enqueueFlowSync(job: () => Promise<void>): Promise<void> {
+        const run = this.flowSyncQueue.then(job);
+        this.flowSyncQueue = run.catch(() => undefined);
+        return run;
+    }
+
+    /**
+     * [#21725] Arm, re-arm and disarm flows as the metadata store changes,
+     * on the signal every metadata write raises: `protocol.onMetadataMutation`,
+     * the one ObjectQL already re-binds authored hooks and actions on. One
+     * door, one arming rule — a flow saved active through
+     * `PUT /api/v1/meta/flow/:name` stayed unregistered until a restart while
+     * a hook or an action saved through the same door went live.
+     *
+     * The protocol raises it after every write lands: a save, a publish (per
+     * item and publish-drafts), a delete, a revert and a rollback — and, on a
+     * cluster, once more on every peer replica after that replica converged.
+     * A `draft` save leaves the live row as it was, so it changes nothing here.
+     *
+     * The listener only records the name: the protocol's fan-out is
+     * synchronous and fire-and-forget, so the re-read and the registrations
+     * run on the flow sync queue ({@link syncMutatedFlows}). The save's own
+     * answer therefore precedes the arming by that one read.
+     *
+     * Resolved at `start()`, once every plugin has inited, so a protocol that
+     * registers after this plugin is seen.
+     */
+    private subscribeFlowMutations(ctx: PluginContext): void {
+        let protocol: {
+            onMetadataMutation?(listener: (evt: MetadataMutationEvent) => void): () => void;
+            saveMetaItem?: unknown;
+        } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            protocol = undefined;
+        }
+        // No metadata store: flows come from code only, and nothing saves one.
+        if (!protocol) return;
+        if (typeof protocol.onMetadataMutation !== 'function') {
+            if (typeof protocol.saveMetaItem === 'function') {
+                ctx.logger.warn(
+                    '[Automation] the metadata protocol raises no mutation signal — a flow saved, deactivated or deleted '
+                        + 'through it is armed or disarmed only by a publish or a restart. Run a metadata protocol that '
+                        + 'offers onMetadataMutation.',
+                );
+            }
+            return;
+        }
+        this.unsubscribeFlowMutations = protocol.onMetadataMutation((evt) => {
+            if (evt?.type !== 'flow' || evt.state === 'draft') return;
+            if (typeof evt.name !== 'string' || evt.name === '') return;
+            const idle = this.pendingFlowMutations.size === 0;
+            this.pendingFlowMutations.add(evt.name);
+            // One queued sync drains every name reported before it starts.
+            if (idle) void this.enqueueFlowSync(() => this.syncMutatedFlows(ctx)).catch(() => undefined);
+        });
+    }
+
+    /**
+     * [#21725] Make the engine's registration of each reported flow follow its
+     * stored state — what a restart would arm, without the restart:
+     *
+     *  - **in the view** — re-read through the protocol's execution view, the
+     *    one read the `kernel:ready` bind and the `metadata:reloaded` re-sync
+     *    make, through the same precedence ({@link resolveFlowContenders}) —
+     *    it is registered. `registerFlow` arms it, or, for a `status` of
+     *    `'obsolete'` or `'invalid'`, keeps it registered and disarmed, exactly
+     *    as the boot registers such a flow;
+     *  - **gone from the view** (deleted) — it is unregistered, through
+     *    `withdrawFlow` as the re-sync's teardown is. Only a flow this plugin
+     *    armed from the view: a flow a caller registered straight into the
+     *    engine, with no stored row, is not the store's to take away.
+     *
+     * The read names no organization, as the boot's does, so a mutation never
+     * arms a flow beyond the reach the boot gives it. A definition the engine
+     * already holds — `PUT /api/v1/automation/:name` registers before it saves —
+     * is not registered a second time. A failed read changes nothing.
+     */
+    private async syncMutatedFlows(ctx: PluginContext): Promise<void> {
+        const names = [...this.pendingFlowMutations];
+        this.pendingFlowMutations.clear();
+        const engine = this.engine;
+        if (!engine || this.destroyed || names.length === 0) return;
+        // [#20790] A mutation replayed from a peer replica stored its credentials there.
+        await this.loadCredentialIndex(ctx, 'a metadata mutation');
+        const defs = await this.readFlowDefsFromProtocol(ctx);
+        if (!defs) return;
+        const reported = new Set(names);
+        const contenders = defs.filter((def) => typeof def?.name === 'string' && reported.has(def.name));
+        const resolved = new Map(this.resolveFlowContenders(ctx, contenders).map((entry) => [entry.name, entry] as const));
+
+        const armed: string[] = [];
+        const unregistered: string[] = [];
+        for (const name of names) {
+            const entry = resolved.get(name);
+            if (!entry) {
+                if (!this.syncedFlowNames.delete(name)) continue;
+                this.mutationArmedFlows.delete(name);
+                if ((await engine.getFlow(name)) === null) continue;
+                try {
+                    engine.withdrawFlow(name);
+                    unregistered.push(name);
+                } catch (err) {
+                    ctx.logger.warn('[Automation] a flow deleted from the metadata store could not be unregistered', {
+                        flow: name,
+                        ...describeThrownForLog(err),
+                    });
+                }
+                continue;
+            }
+            this.syncedFlowNames.add(name);
+            const held = await engine.getFlow(name);
+            if (held && holdsFlowDefinition(engine, name, held, entry.definition)) continue;
+            try {
+                engine.registerFlow(name, entry.definition as never);
+                this.mutationArmedFlows.set(name, stableStringify(entry.definition));
+                armed.push(name);
+            } catch (err) {
+                // #5048 — see ./thrown-cause-diagnostics.ts.
+                ctx.logger.warn(
+                    '[Automation] a flow changed in the metadata store could not be registered — the engine keeps the '
+                        + 'registration it had, if any',
+                    { flow: name, ...describeThrownForLog(err) },
+                );
+            }
+        }
+        if (armed.length > 0 || unregistered.length > 0) {
+            ctx.logger.info(
+                `[Automation] Followed a metadata change: registered ${armed.length} flow(s)`
+                    + `${armed.length > 0 ? ` (${armed.join(', ')})` : ''}, unregistered ${unregistered.length}`
+                    + `${unregistered.length > 0 ? ` (${unregistered.join(', ')})` : ''}`,
+            );
+        }
+    }
+
     async destroy(): Promise<void> {
         // Stop the degraded-instance retry loop first (#3017): mark destroyed so
         // an already-queued reconcile no-ops, and cancel any armed timer.
@@ -2454,6 +2659,11 @@ export class AutomationServicePlugin implements Plugin {
         this.unsubscribeCryptoProvider?.();
         this.unsubscribeCryptoProvider = undefined;
         await this.credentialMigration.catch(() => undefined);
+        // [#21725] No flow sync after shutdown, and none left in flight.
+        this.unsubscribeFlowMutations?.();
+        this.unsubscribeFlowMutations = undefined;
+        this.pendingFlowMutations.clear();
+        await this.flowSyncQueue;
         this.clearDeclarativeRetryTimer();
         this.degradedInstances.clear();
         // Tear down materialized provider-bound connectors (ADR-0097) — e.g. an

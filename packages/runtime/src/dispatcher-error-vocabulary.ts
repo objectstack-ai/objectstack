@@ -415,17 +415,6 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'outcome, not a request refusal.',
     },
     {
-        code: 'INVALID_SCREEN_INPUT',
-        file: 'packages/services/service-automation/src/engine.ts',
-        shape: 'objlit',
-        door: 'none',
-        verdict: 'foreign-vocabulary',
-        why:
-            'RETURNED in an automation result envelope (`{ success: false, code, error }`), never thrown. ' +
-            'When a rejected run reaches the door, `action-execution.ts` converts the result into a ' +
-            'throw of its own carrying FLOW_FAILED — so this string is not what lands in `error.code`.',
-    },
-    {
         code: 'IMPERSONATION_ROTATION_FAILED',
         file: 'packages/plugins/plugin-auth/src/impersonation-bearer-rotation.ts',
         shape: 'objlit',
@@ -582,8 +571,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'The ADR-0087 D4 conversion-notice vocabulary, not an error vocabulary at all: ' +
             '`applyConversions` PASSES this code to an `onNotice` callback in a structured ' +
             'ConversionNotice, and the loader, `validate` and the MCP deprecations surface consume that ' +
-            'shape. Nothing is thrown and no envelope is built. Same class as the INVALID_SCREEN_INPUT ' +
-            'row — a result envelope that merely spells itself `code`.',
+            'shape. Nothing is thrown and no envelope is built — a structured record that merely ' +
+            'spells itself `code`.',
     },
     {
         code: 'OS_METADATA_CONVERTED',

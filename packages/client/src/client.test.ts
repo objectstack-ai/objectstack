@@ -1549,11 +1549,16 @@ describe('ObjectStackClient.automation', () => {
 
     // [#8684] The stale-suspension half: nothing ran, the pause is gone for
     // good, so it rejects as a 404 rather than as a business rejection.
-    it('should reject with 404 when the suspension is stale', async () => {
+    //
+    // [#21724] The body is the one the door really sends: `RUN_NOT_FOUND`, the
+    // engine's code. It used to read `NOT_FOUND`, a spelling no door answers,
+    // and assert only that the code was not `FLOW_FAILED`. The real door is
+    // driven end to end in `automation-resume-refusal-codes.test.ts`.
+    it('should reject with 404 RUN_NOT_FOUND when the suspension is stale', async () => {
         const { client } = createMockClient({
             success: false,
             error: {
-                code: 'NOT_FOUND',
+                code: 'RUN_NOT_FOUND',
                 message: "Suspended node 'collect' no longer exists in flow 'my_flow'",
                 httpStatus: 404,
             },
@@ -1564,7 +1569,7 @@ describe('ObjectStackClient.automation', () => {
             .then(() => { throw new Error('expected the stale resume to reject'); }, (e) => e);
 
         expect(err.httpStatus).toBe(404);
-        expect(err.code).not.toBe('FLOW_FAILED');
+        expect(err.code).toBe('RUN_NOT_FOUND');
         expect(err.message).toMatch(/no longer exists in flow/);
     });
 

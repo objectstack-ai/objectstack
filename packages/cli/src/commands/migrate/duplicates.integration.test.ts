@@ -38,10 +38,12 @@
  * Both classes are asserted, separately, over one run.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
   resolveSeedTenancyExec,
@@ -53,7 +55,12 @@ import {
   SEQUENCES_TABLE,
 } from '@objectstack/metadata-protocol';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
-import { collectDuplicateIdentifierReport } from './duplicates.js';
+import { isExitSignal } from '../../utils/format.js';
+import MigrateDuplicates, { collectDuplicateIdentifierReport } from './duplicates.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** This package's root, where oclif reads its own manifest from. */
+const CLI_ROOT = resolve(HERE, '..', '..', '..');
 
 let dir: string;
 let dbFile: string;
@@ -63,12 +70,15 @@ const savedEnv: Record<string, string | undefined> = {};
  * The fixture's LOGICAL state — the schema plus every row of every table,
  * ordered — read with a connection of our own, never the booted stack's.
  *
- * ⚠️ Deliberately not a hash of the database FILE. SQLite rewrites header
- * bytes (the change counter, the version-valid-for cookie) on any read-write
- * open, so a file hash reports a difference after a run that only SELECTed and
- * would accuse this command of mutating the install it exists to describe —
- * measured, and very nearly filed as a defect. What must not change is the
- * schema and the rows.
+ * ⚠️ Deliberately not a hash of the database FILE — not on THIS fixture. It is
+ * written by a driver that never connected, so it is still on a rollback
+ * journal, and the boot's first connect converts it to WAL: a persistent
+ * header change (bytes 18–19, plus the change counter at 24–27 and the
+ * version-valid-for number at 92–95) that any first connect makes, measured.
+ * A plain open is byte-neutral, and a file a serving boot already configured
+ * comes through a whole run byte-identical — the second describe below pins
+ * that on its own fixture (#21734). What must not change HERE is the schema
+ * and the rows.
  */
 async function readState(): Promise<unknown> {
   const probe = new SqlDriver({
@@ -281,5 +291,105 @@ describe('#8928 os migrate duplicates — against a really booted stack', () => 
     // repair on this boot path, THIS is the assertion that says so, before an
     // operator finds out by losing their evidence.
     expect(await readState()).toEqual(before);
+  }, 120_000);
+});
+
+/**
+ * #21734 — the database FILE, not only its rows, comes out of a run unchanged.
+ *
+ * `SqlDriver.connect()` used to run `PRAGMA auto_vacuum = INCREMENTAL` on every
+ * connect. On a file a serving boot had already configured the setter changes
+ * no mode, but it stamps two header counters (bytes 24–27 and 92–95), so the
+ * whole-file md5 moved under a command that only SELECTed. The driver now reads
+ * the pragma first and sets it only when the file answers differently.
+ *
+ * Measured on a fixture shaped the way an install is: a driver CONNECTED to a
+ * fresh file first — so it is `auto_vacuum=INCREMENTAL` and in WAL, as `os dev`
+ * leaves it — and the rows written after. The command is the real one, run
+ * in-process (oclif parse, the read-only boot, the probes, the JSON payload,
+ * the shutdown) rather than spawned: one spawn of the source entry costs a tsx
+ * compile of the whole CLI for an answer that lies entirely inside `run()`.
+ */
+describe('#21734 os migrate duplicates — an already-configured database file is byte-identical after a run', () => {
+  const OVERRIDING_ENV = ['OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_HOME'] as const;
+  let booted: string;
+
+  const md5 = (file: string): string => createHash('md5').update(readFileSync(file)).digest('hex');
+
+  /** The command's one JSON document and its exit code, from an in-process run. */
+  async function runDuplicates(argv: string[]): Promise<{ payload: any; exitCode: number }> {
+    const savedExit = process.exitCode;
+    const savedCwd = process.cwd();
+    const saved: Record<string, string | undefined> = {};
+    for (const key of OVERRIDING_ENV) saved[key] = process.env[key];
+    const swallow = ((_chunk: unknown, ...rest: unknown[]) => {
+      const cb = rest.find((a) => typeof a === 'function') as (() => void) | undefined;
+      if (cb) cb();
+      return true;
+    }) as typeof process.stdout.write;
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(swallow);
+    vi.spyOn(process.stderr, 'write').mockImplementation(swallow);
+    let thrownExit: number | undefined;
+    try {
+      for (const key of OVERRIDING_ENV) delete process.env[key];
+      // The command has no project-root flag: it boots from the current directory.
+      process.chdir(dir);
+      try {
+        await MigrateDuplicates.run(argv, { root: CLI_ROOT });
+      } catch (error) {
+        if (!isExitSignal(error)) throw error;
+        thrownExit = (error as { oclif?: { exit?: number } }).oclif?.exit;
+      }
+      const out = stdout.mock.calls.map((c) => String(c[0])).join('').trim();
+      return { payload: JSON.parse(out), exitCode: thrownExit ?? (process.exitCode as number | undefined) ?? 0 };
+    } finally {
+      process.chdir(savedCwd);
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      process.exitCode = savedExit;
+      vi.restoreAllMocks();
+    }
+  }
+
+  beforeAll(async () => {
+    booted = join(dir, 'data', 'booted.db');
+    const d = new SqlDriver({ client: 'better-sqlite3', connection: { filename: booted }, useNullAsDefault: true });
+    await d.connect();
+    const k = (d as any).knex;
+    await k.schema.createTable('crm_case', (t: any) => {
+      t.string('id').primary();
+      t.timestamp('created_at');
+      t.timestamp('updated_at');
+      t.string('organization_id');
+      t.string('subject');
+      t.string('case_number');
+    });
+    await k('crm_case').insert([
+      { id: 's1', created_at: '2026-01-01T00:00:00.000Z', organization_id: null, subject: 'seeded', case_number: 'CASE-00001' },
+      { id: 'a1', created_at: '2026-02-01T00:00:00.000Z', organization_id: 'org_x', subject: 'api', case_number: 'CASE-00001' },
+    ]);
+    await d.disconnect();
+  }, 120_000);
+
+  it('`os migrate duplicates` leaves the md5 of an auto_vacuum=INCREMENTAL WAL file unchanged', async () => {
+    // The precondition, read on a connection of our own (a read is byte-neutral).
+    const probe = new SqlDriver({ client: 'better-sqlite3', connection: { filename: booted }, useNullAsDefault: true });
+    try {
+      const k = (probe as any).knex;
+      expect((await k.raw('PRAGMA auto_vacuum'))[0].auto_vacuum).toBe(2);
+      expect(String((await k.raw('PRAGMA journal_mode'))[0].journal_mode).toLowerCase()).toBe('wal');
+    } finally {
+      await probe.disconnect();
+    }
+    const before = md5(booted);
+
+    const { payload, exitCode } = await runDuplicates(['--database-url', `file:${booted}`]);
+
+    expect(exitCode).toBe(0);
+    // It really did look — a run that read nothing would leave the file alone trivially.
+    expect(payload.duplicates.map((entry: { value: string }) => entry.value)).toEqual(['CASE-00001']);
+    expect(md5(booted)).toBe(before);
   }, 120_000);
 });

@@ -55,6 +55,12 @@ import { stackDeclaresMetadata } from './stack-collections.js';
  *    an env var or a capability, and the auth family additionally behind "the
  *    config brought no `AuthPlugin`". Composing a tier-gated plugin here would
  *    be inventing an object set no boot of this deployment has.
+ *  - **A `requires`-supplied provider a composed plugin hard-depends on**
+ *    (#21732) — `serve` step 5's token lookup, narrowed to the providers the
+ *    kernel cannot order the composition without, each in a measured inert
+ *    posture ({@link resolveRequiredProviders}). Without it every config that
+ *    lists a connector in `plugins` and `automation` in `requires` — the blank
+ *    template and the showcase among them — could not boot this command.
  *
  * ## Phase 1 only for host plugins — and why that is the contract, not a dodge
  *
@@ -1247,6 +1253,153 @@ const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
 }) as SchemaMigrationComposition;
 
 /**
+ * How a `requires`-supplied provider is constructed on a declaration boot
+ * (#21732), keyed by the capability token `Serve.CAPABILITY_PROVIDERS` names it
+ * under. A token with no row here is never booted by this composition.
+ *
+ * One row today, because one provider is a hard dependency of shipped plugins:
+ * every connector (`connector-rest`, `-openapi`, `-mcp`, `-slack`) declares
+ * `dependencies = ['com.objectstack.service-automation']`, and the kernel
+ * refuses to order a plugin whose dependency is absent. The automation
+ * service is taken INERT, the posture the data-migration arm already uses
+ * (`./data-migration-plugins.ts`): `armRuntime: false` brings the engine and
+ * its node registry up and then registers no flow, binds no trigger or job,
+ * materializes no connector and resumes no suspended run — a migration is not
+ * a second server. Its suspended-run store is left at the default on purpose:
+ * in inert mode that store is never attached (the start pass returns first),
+ * and the default is what makes its `init()` declare `sys_automation_run` /
+ * `sys_flow_dispatch` beside `sys_flow_credential` — the tables `os serve`
+ * creates for this capability, so the plan covers them. `packageRoot` mirrors
+ * `serve`'s own argument for this token.
+ *
+ * ⛔ A row is a measured posture, never a guess: a provider whose `start()`
+ * arms or writes cannot be added here without saying how this boot keeps it
+ * from doing so.
+ */
+const DECLARATION_PROVIDER_POSTURES: Readonly<Record<string, (ctx: { packageRoot: string }) => unknown>> =
+  Object.freeze({
+    automation: ({ packageRoot }: { packageRoot: string }) => ({ armRuntime: false, packageRoot }),
+  });
+
+/** One plugin's `name` and hard `dependencies`, read the way the kernel reads them. */
+function pluginName(p: unknown): string | undefined {
+  const name = (p as { name?: unknown } | null | undefined)?.name;
+  return typeof name === 'string' ? name : undefined;
+}
+function hardDependencies(p: unknown): string[] {
+  const deps = (p as { dependencies?: unknown } | null | undefined)?.dependencies;
+  return Array.isArray(deps) ? deps.filter((d): d is string => typeof d === 'string') : [];
+}
+
+/**
+ * The `requires`-supplied providers a declaration boot must compose so the
+ * kernel can order what it already composed (#21732).
+ *
+ * ## The defect
+ *
+ * A config asks for a platform service through `requires: [...]`, and `os serve`
+ * turns each token into its provider plugin (`Serve.CAPABILITY_PROVIDERS`,
+ * `serve` step 5). This composition read `config.plugins` and never
+ * `requires`, so a host plugin with a HARD dependency on such a provider could
+ * not be ordered: `os migrate plan` / `apply` exited 1 with
+ * `Dependency 'com.objectstack.service-automation' not found for plugin
+ * 'com.objectstack.connector.rest'` on a fresh blank scaffold and on
+ * `examples/app-showcase`, both of which list connectors in `plugins` and
+ * `automation` in `requires`.
+ *
+ * ## What is resolved, and why only this
+ *
+ * The lookup is `serve`'s: the same token table, the same exact identity match
+ * ({@link Serve.providesCapability}), the same "an explicit instance in
+ * `plugins` wins" rule. What is narrower is WHICH tokens are booted — only a
+ * token whose provider is the missing hard dependency of something already
+ * composed. Composing every declared provider would boot the tier of services
+ * `serve` runs (email, storage, queue, approvals…) inside a dry run, each with
+ * its own `start()`; a dependency the kernel cannot order without is the one
+ * case where this boot cannot be correct without the provider. Iterated to a
+ * fixed point, so a provider's own hard dependencies are resolved the same way.
+ *
+ * The token set searched is the config's declared `requires` plus the
+ * always-on slate `serve` appends for every non-`minimal` preset
+ * (`Serve.ALWAYS_ON_CAPABILITIES`) — the tokens under which a served boot of
+ * this config would have mounted the provider. A dependency NO token supplies
+ * is left to the kernel, whose refusal is then the same one `os serve` gives
+ * for this config.
+ *
+ * A resolved token with no {@link DECLARATION_PROVIDER_POSTURES} row is
+ * REFUSED here, by name, rather than booted with a posture nobody measured:
+ * absence must be loud, and the refusal names the plugin, its dependency and
+ * the token, which the kernel's own message cannot.
+ */
+export async function resolveRequiredProviders(opts: {
+  requires: unknown;
+  composed: readonly unknown[];
+  packageRoot: string;
+}): Promise<{ plugins: unknown[]; notes: string[] }> {
+  // Nothing unordered, nothing to resolve — and `serve`'s module (the whole
+  // command) is not loaded for the configs that never needed it.
+  const composedNames = new Set(opts.composed.map(pluginName));
+  if (!opts.composed.some((p) => hardDependencies(p).some((d) => !composedNames.has(d)))) {
+    return { plugins: [], notes: [] };
+  }
+  const { default: Serve } = await import('../commands/serve.js');
+  const declared = Array.isArray(opts.requires)
+    ? opts.requires.filter((t): t is string => typeof t === 'string')
+    : [];
+  const tokens = [...new Set([...declared, ...Serve.ALWAYS_ON_CAPABILITIES])];
+
+  const plugins: unknown[] = [];
+  const notes: string[] = [];
+  const all = (): unknown[] => [...opts.composed, ...plugins];
+
+  for (;;) {
+    const names = new Set(all().map(pluginName).filter((n): n is string => n !== undefined));
+    let next: { owner: string; dependency: string; token: string } | undefined;
+    for (const p of all()) {
+      for (const dependency of hardDependencies(p)) {
+        if (names.has(dependency)) continue;
+        // A dependency NO token supplies is left to the kernel — `os serve`
+        // refuses this config the same way.
+        const token = tokens.find((t) => {
+          const spec = Serve.CAPABILITY_PROVIDERS[t];
+          // `serve`'s explicit-wins rule: a provider already composed (under
+          // its class name, say) is never mounted a second time.
+          return spec !== undefined
+            && spec.identities.includes(dependency)
+            && !Serve.providesCapability(all(), spec.identities);
+        });
+        if (token) { next = { owner: pluginName(p) ?? '(unnamed plugin)', dependency, token }; break; }
+      }
+      if (next) break;
+    }
+    if (!next) break;
+    const { owner, dependency, token } = next;
+    const spec = Serve.CAPABILITY_PROVIDERS[token]!;
+
+    const posture = DECLARATION_PROVIDER_POSTURES[token];
+    if (!posture) {
+      throw new Error(
+        `Plugin '${owner}' depends on '${dependency}', which \`requires: ['${token}']\` `
+        + `supplies under \`os serve\`, but the schema-migration boot has no declaration posture for '${token}' `
+        + '— composing it would run its start() inside a dry run. Add the plugin explicitly to `plugins`, '
+        + `or report that '${token}' needs a declaration posture in the CLI's schema-migration composition.`,
+      );
+    }
+    const mod = (await import(/* webpackIgnore: true */ spec.pkg)) as Record<string, unknown>;
+    const Ctor = mod[spec.export] as (new (arg: unknown) => unknown) | undefined;
+    if (typeof Ctor !== 'function') {
+      throw new Error(`Capability "${token}": ${spec.pkg} did not export ${spec.export}`);
+    }
+    plugins.push(new Ctor(posture({ packageRoot: opts.packageRoot })));
+    notes.push(
+      `Composed ${spec.export} for \`requires: ['${token}']\` — '${owner}' depends on it — `
+      + 'in its declaration posture (engine up, nothing armed).',
+    );
+  }
+  return { plugins, notes };
+}
+
+/**
  * The plugins `os migrate plan` / `apply` compose on top of the standalone data
  * stack — see this module's header for what and why.
  *
@@ -1285,6 +1438,9 @@ export async function buildSchemaMigrationPlugins(opts: {
   const notes: string[] = [];
   let hostConfigLoaded = false;
   let hostConfigError: string | null = null;
+  // #21732 — the config's capability declarations, read off the same loaded
+  // config the plugins came from. See {@link resolveRequiredProviders}.
+  let loadedRequires: unknown;
 
   if (hostConfigPath) {
     try {
@@ -1294,6 +1450,7 @@ export async function buildSchemaMigrationPlugins(opts: {
       const { loadConfig } = await import('./config.js');
       const { config } = await loadConfig(hostConfigPath);
 
+      loadedRequires = config?.requires;
       const hostPlugins: unknown[] = Array.isArray(config?.plugins) ? config.plugins : [];
       for (const plugin of hostPlugins) {
         if (plugin && typeof plugin === 'object') plugins.push(composeForDeclarations(plugin, lifecycle));
@@ -1372,6 +1529,20 @@ export async function buildSchemaMigrationPlugins(opts: {
     const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
     plugins.push(new PlatformObjectsPlugin());
     notes.push('Composed PlatformObjectsPlugin (the platform floor `os serve` composes unconditionally).');
+  }
+
+  // #21732 — `serve` step 5, narrowed to what this boot cannot start without:
+  // a provider the config's `requires` supplies, that a composed plugin
+  // hard-depends on. Only when the config LOADED — an unloadable config has
+  // no `requires` to read, and that path is refused on its own terms.
+  if (hostConfigLoaded && hostConfigPath) {
+    const resolved = await resolveRequiredProviders({
+      requires: loadedRequires,
+      composed: [...opts.basePlugins, ...plugins],
+      packageRoot: path.dirname(hostConfigPath),
+    });
+    plugins.push(...resolved.plugins);
+    notes.push(...resolved.notes);
   }
 
   return {

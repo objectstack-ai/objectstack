@@ -1056,6 +1056,7 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-automation': [
     'AUTOMATION_UNSCOPED_RUN_DATA_ACCESS',
     'EXECUTION_ERROR',
+    'INVALID_SCREEN_INPUT',       // [#21724] resume input violates the suspended screen's declared field contract (400, retryable)
     'INVALID_SIGNAL',             // resume signal writes engine-internal variables
     // [#21106] The connector sync executor (`connector-pull.ts`,
     // `pullConnectorSource`) stamps this row and `UNSUPPORTED_TRANSFORM` below
