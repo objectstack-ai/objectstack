@@ -343,7 +343,7 @@ describe('every repeater row property carries a JSON Schema title', () => {
     }
   });
 
-  it('dashboard.header.actions stays titled — the one carrier already titled', () => {
+  it('dashboard.header.actions stays titled — the first carrier given item-level names', () => {
     const c = CARRIERS.find((x) => x.id === 'dashboard:header.actions');
     expect(c, 'dashboard.header.actions is a repeater').toBeDefined();
     expect(c!.authorable).toEqual(['label', 'actionUrl', 'actionType', 'icon']);
