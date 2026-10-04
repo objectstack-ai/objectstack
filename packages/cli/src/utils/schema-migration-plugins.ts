@@ -1336,6 +1336,12 @@ export async function resolveRequiredProviders(opts: {
   composed: readonly unknown[];
   packageRoot: string;
 }): Promise<{ plugins: unknown[]; notes: string[] }> {
+  // Nothing unordered, nothing to resolve — and `serve`'s module (the whole
+  // command) is not loaded for the configs that never needed it.
+  const composedNames = new Set(opts.composed.map(pluginName));
+  if (!opts.composed.some((p) => hardDependencies(p).some((d) => !composedNames.has(d)))) {
+    return { plugins: [], notes: [] };
+  }
   const { default: Serve } = await import('../commands/serve.js');
   const declared = Array.isArray(opts.requires)
     ? opts.requires.filter((t): t is string => typeof t === 'string')
