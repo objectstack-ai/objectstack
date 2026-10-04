@@ -523,7 +523,7 @@ Sort field and direction pair
 | **formType** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional | Form presentation |
 | **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `number` | optional | Number of field columns (multi-column forms), honoured under either `layout` |
-| **fields** | `any[]` | optional | Limit/order the fields shown |
+| **fields** | `string[]` | optional | Field names to draw, in order — bare names selecting from the object's fields and from `customFields`. A `{ name }` or `{ field }` object entry is refused: a per-form label or required override goes on a `sections[].fields` entry |
 | **customFields** | `any` | optional | Custom field definitions merged into the generated set |
 | **sections** | `any[]` | optional | Form sections (`{ label, description?, fields }` — wizard steps / tab panes) |
 | **title** | `string \| Record<string, string>` | optional | Form title |
@@ -596,7 +596,7 @@ Sort field and direction pair
 | **holidays** | `string[]` | optional | Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math |
 | **persistLayout** | `boolean` | optional | Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName` |
 | **viewName** | `string` | optional | Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`) |
-| **markers** | `any[]` | optional | Extra vertical reference lines drawn like the Today marker (`{ date, label?, color? }`) |
+| **markers** | `{ date: string; label?: string; color?: string }[]` | optional | Extra vertical reference lines drawn like the Today marker — each `{ date, label?, color? }`: `date` places the line (a date outside the drawn range draws none), `label` is drawn against it, `color` paints it |
 | **criticalPath** | `boolean` | optional | Seed the critical-path highlight ON; the toolbar toggle stays available either way |
 | **showBaselines** | `boolean` | optional | Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it |
 | **readOnly** | `boolean` | optional | Disable every write path on this gantt and lock the record drawer |
@@ -695,6 +695,14 @@ Sort field and direction pair
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
 | **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+
+### Nested Shape: `ObjectGanttProps.markers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **date** | `string` | ✅ | Where the line stands — an ISO date (`2026-07-01`, read as that day on the chart's own calendar) or date-time string; a date that does not parse, or falls outside the drawn range, draws no line |
+| **label** | `string` | optional | Text drawn against the line |
+| **color** | `string` | optional | Line colour, any CSS colour (renderer default: the theme's primary colour) |
 
 
 ---
@@ -1083,7 +1091,7 @@ Sort field and direction pair
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
 | **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half |
 | **sections** | `any[]` | optional | Parent form sections |
-| **fields** | `any[]` | optional | Parent fields shown |
+| **fields** | `string[]` | optional | Parent field names to draw, in order — bare names, as on `object-form`; a `{ name }` or `{ field }` object entry is refused |
 | **details** | `{ childObject: string; relationshipField?: string; columns?: object[]; formFields?: string[]; … }[]` | optional | Detail collections — each a strict entry (`{ childObject, title?, addLabel?, columns?, relationshipField?, … }`) whose `columns` are the inline grid columns a relationship field's `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted |
 | **title** | `string \| Record<string, string>` | optional | Form title |
 | **submitText** | `string \| Record<string, string>` | optional | Submit button label |
@@ -1203,7 +1211,7 @@ View filter rule
 | **minDate** | `string` | optional | Pin the gantt axis start (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
 | **maxDate** | `string` | optional | Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
 | **descriptionField** | `string` | optional | Field rendered as each entry's description (renderer default `description`). Declared FLAT because the `timeline` block has no member for it — it is the only spelling this binding has |
-| **mapping** | `any` | optional | Record-to-entry field mapping (`{ title, date, description, variant }`) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has |
+| **mapping** | `{ title?: string; date?: string; description?: string; variant?: string }` | optional | Record-to-entry field mapping `{ title?, date?, description?, variant? }`, each a field name — the binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 
 ### Nested Shape: `ObjectTimelineProps.timeline`
@@ -1235,6 +1243,15 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to sort by |
 | **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+### Nested Shape: `ObjectTimelineProps.mapping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Field whose value is each entry's title — read after `timeline.titleField`, ahead of the flat `titleField` (renderer default `name`) |
+| **date** | `string` | optional | Field whose value is each entry's date — read after `timeline.startDateField` / `timeline.dateField`, ahead of the flat spellings |
+| **description** | `string` | optional | Field whose value is each entry's description — read ahead of `descriptionField` (renderer default `description`) |
+| **variant** | `string` | optional | Field whose value picks each entry's marker colour (renderer default `variant`) — the only spelling this binding has |
 
 ### Nested Shape: `ObjectTimelineProps.navigation`
 
