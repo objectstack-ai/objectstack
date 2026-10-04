@@ -45,6 +45,7 @@ import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { resolveItemLock, resolveItemLockLazily, type ItemLock } from './item-lock.js';
 import {
     bumpWriteEpoch,
     metaOverlayCacheTtlMs,
@@ -1715,10 +1716,20 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
  * always wins over whatever was persisted in the `sys_metadata` overlay
  * row. Returns `item` unchanged when no artifact baseline is available.
  *
- * The artifact's `_lock`, `_lockReason`, `_packageId`, `_packageVersion`,
- * and `_provenance` are the source of truth — an overlay copy may
- * pre-date the artifact's protection declaration and would otherwise
- * mask it.
+ * The artifact's `_packageId`, `_packageVersion` and `_provenance` are the
+ * source of truth — an overlay copy may pre-date the artifact's protection
+ * declaration and would otherwise mask it.
+ *
+ * [#21738] The lock family (`_lock`, `_lockReason`, `_lockDocsUrl`,
+ * `_lockSource`) is NOT decided here: it follows the one item-lock resolution
+ * ({@link resolveItemLock}). The artifact's family is copied over the item's
+ * only when the artifact's lock is the one that binds, which is exactly the
+ * case the sentence above exists for (an overlay never masks a packaged lock).
+ * An artifact that declares no lock, or an explicit `'none'`, leaves the
+ * item's own family in place. Before this, any declared artifact `_lock` was
+ * copied, `'none'` included, so an artifact's explicit `'none'` erased a
+ * stored row's `'full'` from the served body and from the read envelope while
+ * the write door, which skips `'none'`, still refused the save.
  */
 function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown {
     if (item === undefined || item === null) return item;
@@ -1726,14 +1737,26 @@ function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown 
     const a = artifactItem as Record<string, unknown>;
     if (typeof a !== 'object') return item;
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
-    if (a._lock !== undefined) out._lock = a._lock;
-    if (a._lockReason !== undefined) out._lockReason = a._lockReason;
-    if (a._lockDocsUrl !== undefined) out._lockDocsUrl = a._lockDocsUrl;
-    if (a._lockSource !== undefined) out._lockSource = a._lockSource;
+    if (resolveItemLock({ artifact: a, overlay: item }).layer === 'artifact') {
+        if (a._lock !== undefined) out._lock = a._lock;
+        if (a._lockReason !== undefined) out._lockReason = a._lockReason;
+        if (a._lockDocsUrl !== undefined) out._lockDocsUrl = a._lockDocsUrl;
+        if (a._lockSource !== undefined) out._lockSource = a._lockSource;
+    }
     if (a._packageId !== undefined) out._packageId = a._packageId;
     if (a._packageVersion !== undefined) out._packageVersion = a._packageVersion;
     if (a._provenance !== undefined) out._provenance = a._provenance;
     return out;
+}
+
+/**
+ * [#21738] The body a stored `sys_metadata` row holds, as written — the
+ * document a row contributes to the item-lock resolution's `overlay` layer
+ * ({@link resolveItemLock}), parsed the one way the `_lock` gate and both
+ * reads parse it. No conversion is replayed: none touches the `_lock` family.
+ */
+function storedRowDocument(row: { metadata?: unknown }): unknown {
+    return typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
 }
 
 /**
@@ -7825,8 +7848,18 @@ export class ObjectStackProtocolImplementation implements
                 // alone: a packaged base the write doors refuse reads locked on
                 // its item envelope, so the per-type tile counts it too. The
                 // derivation reads the registry only — no store read per item.
+                // [#21738] Its lock is the one item-lock resolution
+                // ({@link resolveItemLock}) over the item's artifact — the
+                // lookup the list's own merge made (ADR-0048 package scope) —
+                // and the document the list serves for it.
                 const itemName = typeof item?.name === 'string' ? item.name : '';
-                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName));
+                const itemLock = resolveItemLock({
+                    artifact: this.lookupArtifactItem(
+                        t, itemName, request.packageId ?? (item?._packageId as string | undefined),
+                    ),
+                    overlay: item,
+                });
+                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName), itemLock);
                 if (served.lock !== 'none') lockedCount += 1;
                 const diag: MetadataDiagnostics | undefined =
                     item?._diagnostics ?? computeMetadataDiagnostics(t, item);
@@ -9620,6 +9653,14 @@ export class ObjectStackProtocolImplementation implements
         //    `SchemaRegistry.getItem(type, name, pkg)`). [#21716] The ONE
         //    served-row resolution, which the `_lock` gate's overlay limb
         //    calls too — see {@link findServedOverlayRow}.
+        //
+        // [#21738] `overlayLockLayer` is that row's stored body, handed to the
+        // one item-lock resolution below as its `overlay` layer — the layer
+        // the `_lock` gate reads off the same resolution. Kept whether or not
+        // the row is ADOPTED as the served document: a shipped flow name does
+        // not serve its stored row (#20946), and the gate binds that row's
+        // `_lock` all the same.
+        let overlayLockLayer: unknown;
         try {
             const record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -9629,13 +9670,12 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.packageId ? { packageId: request.packageId } : {}),
                 otherSpelling: true,
             }))?.row;
+            if (record) overlayLockLayer = storedRowDocument(record);
             // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
             if (record && !shippedFlowActiveRead) {
                 item = this.convertStoredItem(
                     String(record.type ?? request.type),
-                    typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata,
+                    storedRowDocument(record),
                 );
                 // Surface the persisted software-package binding (parity with
                 // the list path in getMetaItems) so provenance/UI can read it.
@@ -9860,8 +9900,11 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0010 — surface lock/provenance flags so Studio can render
         // the correct affordances without a second round trip. [#21670] They
         // report the write doors' verdicts — see {@link servedLockState}.
+        // [#21738] The lock is the one item-lock resolution's, over the layers
+        // this read resolved — never the served document's `_lock`.
+        const itemLock = resolveItemLock({ artifact: artifactItem, overlay: overlayLockLayer });
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked);
+        const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked, itemLock);
         return {
             type: request.type,
             name: request.name,
@@ -9949,12 +9992,13 @@ export class ObjectStackProtocolImplementation implements
         lock: MetadataLock;
         lockReason?: string;
         // `MetadataLockSource` (artifact | package | env-forced) — the only
-        // producer feeding this field on this path is `resolveLockState`,
-        // whose return is typed `MetadataLockSource | undefined`. The
-        // `'overlay'` arm this annotation used to carry was dead: the one
-        // `lockSource: 'overlay'` producer in this file belongs to
-        // `getEffectiveLock`, a write/delete-door helper that never feeds
-        // this response (commit 11b779e0f).
+        // producer feeding this field on this path is the item-lock
+        // resolution's `lockSource` ([#21738] {@link resolveItemLock}: the
+        // binding layer's declared `_lockSource`), typed
+        // `MetadataLockSource | undefined`. The `'overlay'` arm this annotation
+        // used to carry was dead: the door's `'artifact' | 'overlay'` is the
+        // resolution's `layer`, which `getEffectiveLock` reports in its refusal
+        // text and which never feeds this response (commit 11b779e0f).
         lockSource?: MetadataLockSource;
         lockDocsUrl?: string;
         provenance?: MetadataProvenance;
@@ -10117,8 +10161,10 @@ export class ObjectStackProtocolImplementation implements
             // that carries package-provenance stamps under a name no package
             // ships is the same row: the hydrator restates its authorship over
             // whatever its bytes claim, and a stamp is not an artifact read, so
-            // `resolveLockState` below reads this item's code layer as `null`
-            // too (triage's ruling, overturnable by the maintainer). A
+            // the envelope's provenance fields below read this item's code
+            // layer as `null` too (triage's ruling, overturnable by the
+            // maintainer); its lock reads no code layer at all ([#21738], the
+            // item-lock resolution below). A
             // runtime-registered item with no package carries no tenant marker
             // and keeps its code layer.
             const runtimeOnly = (item: unknown): unknown =>
@@ -10135,14 +10181,17 @@ export class ObjectStackProtocolImplementation implements
         // [#5840] The code half of the rule #5707 wrote for the overlay half,
         // eleven lines below. `code: null` is not a shrug — this method states
         // it positively ("no packaged/code-layer definition exists"), and the
-        // response then DERIVES from it: `lockSource = code ?? overlay ?? {}`
-        // feeds `resolveLockState`, so an item whose code layer declares
-        // `_lock: 'full'` is rendered `editable: true, deletable: true` when
-        // the read that would have found that lock simply failed. An
-        // availability failure widening an affordance is precisely what
-        // ADR-0110 D3 forbids, and the overlay half of this very method
-        // already refuses to do it — the two halves were asymmetric only
-        // because the loader failure was invisible on this side.
+        // response then DERIVES from it: `effective` and the envelope's
+        // provenance fields. (It used to derive the lock too, from
+        // `code ?? overlay`, so an item whose code layer declared `_lock:
+        // 'full'` was rendered `editable: true, deletable: true` when the read
+        // that would have found that lock failed. [#21738] The lock is now the
+        // item-lock resolution's, over the registry's artifact lookup, which
+        // this read cannot lose.) An availability failure stated as an
+        // authorship fact is precisely what ADR-0110 D3 forbids, and the
+        // overlay half of this very method already refuses to do it — the two
+        // halves were asymmetric only because the loader failure was invisible
+        // on this side.
         //
         // Same narrow shape as the overlay half: the benign "nothing there"
         // still returns `code: null` normally (a clean miss is not degraded),
@@ -10155,6 +10204,9 @@ export class ObjectStackProtocolImplementation implements
         // ── overlay layer: sys_metadata row (org-scoped wins, then env-wide) ──
         let overlay: unknown | null = null;
         let overlayScope: 'org' | 'env' | null = null;
+        // [#21738] The served row's stored body: the `overlay` layer of the one
+        // item-lock resolution below, as in {@link getMetaItem}.
+        let overlayLockLayer: unknown;
         try {
             // ADR-0048 prefer-local within each scope. [#21716] The ONE
             // served-row resolution {@link getMetaItem} and the `_lock` gate's
@@ -10169,9 +10221,10 @@ export class ObjectStackProtocolImplementation implements
             });
             if (served) {
                 const rec = served.row;
+                overlayLockLayer = storedRowDocument(rec);
                 overlay = this.convertStoredItem(
                     String(rec.type ?? request.type),
-                    typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    storedRowDocument(rec),
                 );
                 overlayScope = served.scope;
             }
@@ -10283,11 +10336,23 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0010 — surface lock/provenance flags so the Studio editor
         // can render the correct affordances without a second round trip.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        // Lock resolution: artifact wins over overlay, matching getEffectiveLock.
-        const lockSource: any = code ?? overlay ?? {};
+        // [#21738] The lock is the one item-lock resolution's — the
+        // `getMetaItem` call over this read's artifact lookup and the served
+        // row's stored body — never `code ?? overlay`, which took the code
+        // layer's (absent) lock over a stored row's `_lock`. A row-less name a
+        // stored container expands contributes no `overlay` layer: the
+        // container's row is not this name's row, and the `_lock` gate does not
+        // read it. The provenance fields still come from the layer the
+        // response reports first.
+        const itemLock = resolveItemLock({
+            artifact: this.lookupArtifactItem(request.type, request.name, request.packageId),
+            overlay: overlayLockLayer,
+        });
         // [#21670] …joined with the locked-packaged-base verdict the write
         // doors answer — the same derivation `getMetaItem` publishes.
-        const lockState = this.servedLockState(request.type, request.name, lockSource, artifactBacked);
+        const lockState = this.servedLockState(
+            request.type, request.name, code ?? overlay ?? {}, artifactBacked, itemLock,
+        );
 
         // [#8154] The per-type credential redaction, on the ONE read exit
         // `decorateMetadataItem` does not reach — this method never calls it
@@ -10310,7 +10375,7 @@ export class ObjectStackProtocolImplementation implements
         // rather than discover it. ⛔ It is NOT a licence to fold, govern or
         // inject on these layers — redaction subtracts, and only a credential.
         //
-        // Placed AFTER `_diagnostics` and AFTER `resolveLockState`, both of
+        // Placed AFTER `_diagnostics` and AFTER `servedLockState`, both of
         // which must read the raw bodies: the diagnostics ordering is the
         // migration-inventory badge (see `decorateMetadataItem`), and a lock
         // resolved from a redacted body would be a lock resolved from a
@@ -15622,19 +15687,26 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#21670, ADR-0010 §5, ADR-0126 §2] The protection envelope a metadata READ
      * publishes beside the document — `lock`, `editable`, `deletable` and the
-     * rest — for `(type, name)`, whose served document is `document`. The ONE
-     * derivation both reads call: {@link getMetaItem} and
-     * {@link getMetaItemLayered} — and [#21694] the per-type `locked` count of
-     * {@link getMetaDiagnostics}, so the directory tile and the item agree.
+     * rest — for `(type, name)`, whose served document is `document` and whose
+     * item lock is `itemLock`. The ONE derivation both reads call:
+     * {@link getMetaItem} and {@link getMetaItemLayered} — and [#21694] the
+     * per-type `locked` count of {@link getMetaDiagnostics}, so the directory
+     * tile and the item agree.
      *
      * The flags are a promise about the write doors: `editable` says whether a
      * write of this item is refused on lock grounds, `deletable` whether its
      * removal is. Two limbs refuse such a write, so both are asked here, and
      * neither is re-derived:
      *
-     *  - the item's own ADR-0010 `_lock` — `resolveLockState`, unchanged. Its
-     *    door ({@link lockWriteRefusal} / {@link assertLockAllowsDelete})
-     *    answers on every topology since #21694, as the package limb does;
+     *  - the item's own ADR-0010 `_lock` — `itemLock`, the answer of the one
+     *    item-lock resolution ({@link resolveItemLock}, [#21738]) that the
+     *    `_lock` gate ({@link getEffectiveLock}, behind {@link lockWriteRefusal}
+     *    / {@link assertLockAllowsDelete}) takes too. The caller hands it the
+     *    layers it resolved; this method never reads a lock off `document`,
+     *    whose `_lock` used to be the reads' own derivation and disagreed with
+     *    the gate on the artifact layer (an explicit artifact `'none'`; the
+     *    layered read's `code ?? overlay`). The gate answers on every topology
+     *    since #21694, as the package limb does;
      *  - the locked packaged base: an item a code package ships, on a type with
      *    no overlay channel — {@link packagedBaseRefusal}, the verdict the
      *    `/meta` doors and the `/automation` doors already share (`NOT_OVERRIDABLE`,
@@ -15653,9 +15725,11 @@ export class ObjectStackProtocolImplementation implements
      * the shape the spec declares for it: `editable` false iff `lock` is
      * `no-overlay` or `full`, `deletable` false iff `no-delete` or `full`. An
      * item's own `_lock` and the package verdict JOIN; neither replaces the
-     * other. `lockReason` / `lockSource` / `lockDocsUrl` stay what the document
-     * declares: the package limb adds no prose of its own, and `provenance` /
-     * `packageId` already name the package.
+     * other. `lockReason` / `lockSource` / `lockDocsUrl` are the binding
+     * layer's, from the same resolution, and absent when no layer binds: the
+     * package limb adds no prose of its own, and `provenance` / `packageId` /
+     * `packageVersion` (read off `document`, unchanged) already name the
+     * package.
      *
      * ⛔ Not a policy. Which writes are refused is decided at the doors; this
      * method only reports their answer, so a door that moves moves this read
@@ -15666,11 +15740,12 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         document: unknown,
         artifactBacked: boolean,
+        itemLock: ItemLock,
     ): ReturnType<typeof resolveLockState> {
-        const declared = resolveLockState(document, artifactBacked);
-        const editable = declared.editable
+        const { provenance, packageId, packageVersion } = extractProtection(document);
+        const editable = evaluateLockForWrite(itemLock.lock) === null
             && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
-        const deletable = declared.deletable
+        const deletable = evaluateLockForDelete(itemLock.lock) === null
             && this.packagedBaseRefusal({ type, name, operation: 'delete' }) === null;
         const lock = MetadataLockSchema.options.find((state) =>
             (evaluateLockForWrite(state) === null) === editable
@@ -15683,7 +15758,18 @@ export class ObjectStackProtocolImplementation implements
                 `No ADR-0010 lock state answers editable=${editable}, deletable=${deletable}.`,
             );
         }
-        return { ...declared, lock, editable, deletable };
+        return {
+            lock,
+            lockReason: itemLock.lockReason,
+            lockSource: itemLock.lockSource,
+            lockDocsUrl: itemLock.lockDocsUrl,
+            provenance,
+            packageId,
+            packageVersion,
+            editable,
+            deletable,
+            resettable: artifactBacked,
+        };
     }
 
     /**
@@ -16164,6 +16250,18 @@ export class ObjectStackProtocolImplementation implements
      * case. It answers alike on every topology: no `environmentId` term,
      * and since #21694 neither caller gates on one.
      *
+     * ## [#21738] The rule is the one item-lock resolution's
+     *
+     * Which layer binds, and what an explicit `'none'` means, is decided by
+     * {@link resolveItemLock} — the resolution both reads' envelopes and the
+     * served body's lock family take too — never here. This method only
+     * gathers the two layers the gate reads (the artifact, then the overlay
+     * row, below) and reads the overlay row only when the artifact does not
+     * bind ({@link resolveItemLockLazily}), as it always has: a packaged lock
+     * is answered without a store read, and a store that cannot be read never
+     * turns its `ITEM_LOCKED` into a 503. The refusal's `source=` names the
+     * binding layer, as before.
+     *
      * ## [#21716] The overlay limb reads the row the READ serves
      *
      * The overlay limb used to query one row: `organization_id` equal to the
@@ -16264,23 +16362,37 @@ export class ObjectStackProtocolImplementation implements
     }> {
         // [#9009] ONE key for BOTH limbs — see this method's header.
         const canonicalType = canonicalMetaType(type);
-        // 1. Artifact wins. `lookupArtifactItem` is shadow-immune: a
-        //    sys_metadata overlay row hydrated into the registry's plain
-        //    key cannot mask the packaged artifact's `_lock` envelope.
-        const artifactItem = this.lookupArtifactItem(canonicalType, name) as any;
-        if (artifactItem) {
-            const p = extractProtection(artifactItem);
-            if (p.lock !== 'none') {
-                return { lock: p.lock, lockReason: p.lockReason, lockSource: 'artifact' };
-            }
-        }
+        // [#21738] The one item-lock resolution decides; the two readers below
+        // only gather its layers, the second only when the first does not bind.
+        const resolved = await resolveItemLockLazily({
+            // 1. Artifact. `lookupArtifactItem` is shadow-immune: a
+            //    sys_metadata overlay row hydrated into the registry's plain
+            //    key cannot mask the packaged artifact's `_lock` envelope.
+            artifact: () => this.lookupArtifactItem(canonicalType, name),
+            overlay: () => this.readLockGateOverlayLayer(canonicalType, name, organizationId),
+        });
+        return { lock: resolved.lock, lockReason: resolved.lockReason, lockSource: resolved.layer };
+    }
+
+    /**
+     * [#21738] The `_lock` gate's `overlay` layer for {@link getEffectiveLock}:
+     * the stored body of the row the gate binds, or `undefined` when there is
+     * none (or `sys_metadata` is not provisioned yet). Throws when the row
+     * cannot be read (#5706).
+     */
+    private async readLockGateOverlayLayer(
+        canonicalType: string,
+        name: string,
+        organizationId: string | null | undefined,
+    ): Promise<unknown> {
         // 2. Overlay row — addressed by the SAME canonical key the repository
         //    stores it under (`SysMetadataRepository.whereFor`), which is what
         //    makes this limb read the row the artifact limb already folded to.
         //    [#21716] …and the row the READ serves for this organization: the
         //    reads' own resolution, behind the reads' own organization gate —
-        //    see this method's header. Canonical spelling only (#4432), the
-        //    one declared difference — see {@link findServedOverlayRow}.
+        //    see {@link getEffectiveLock}'s header. Canonical spelling only
+        //    (#4432), the one declared difference — see
+        //    {@link findServedOverlayRow}.
         try {
             const served = await this.findServedOverlayRow({
                 type: canonicalType,
@@ -16290,13 +16402,7 @@ export class ObjectStackProtocolImplementation implements
                 otherSpelling: false,
             });
             const row = served?.row;
-            if (row) {
-                const body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
-                const p = extractProtection(body);
-                if (p.lock !== 'none') {
-                    return { lock: p.lock, lockReason: p.lockReason, lockSource: 'overlay' };
-                }
-            }
+            if (row) return storedRowDocument(row);
         } catch (error) {
             // #5706 — A LOCK GATE MUST NOT FAIL OPEN. This `catch` used to
             // swallow every read failure and fall through to `'none'`, and
@@ -16337,7 +16443,7 @@ export class ObjectStackProtocolImplementation implements
             // one uncertain write beats performing one that had to be refused.
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        return { lock: 'none', lockReason: undefined, lockSource: undefined };
+        return undefined;
     }
 
     /**
