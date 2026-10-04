@@ -629,6 +629,17 @@ export const ERROR_CODE_LEDGER = {
     'METADATA_CONFLICT',
     'METADATA_NOT_FOUND',
     'METADATA_SCHEMA_INVALID',
+    // [#21727] ADR-0087 D1's protocol handshake refused a package whose
+    // declared `engines.protocol` range excludes this runtime's major
+    // (`ProtocolIncompatibleError`, `protocol-handshake.ts`). Answered 422:
+    // the manifest is well-formed, but it declares a range this runtime can
+    // never satisfy, and the remedy is a body change
+    // (`objectstack migrate meta --from N`). It matches this package's own
+    // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
+    // refusals from environment state (FLOW_CONVERSION_CONFLICT). The one HTTP
+    // door that reaches the throw, `POST /api/v1/packages`, carries
+    // `requiredRange`, `rangeSource`, `protocolVersion`, `targetMajor` and
+    // `migrateCommand` in `error.details`.
     'OS_PROTOCOL_INCOMPATIBLE',
   ],
   '@objectstack/objectql': [
