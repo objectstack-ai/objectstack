@@ -35,7 +35,7 @@ import {
 // (#4834 superseded the kernel half: `DynamicLoadRequest` — the shape that
 // carried the tombstoned key — was removed whole, so this file's kernel-side
 // parse assertion is gone. See the block above the studio test.)
-describe('[#4657] ActivationEventSchema removal — no entry exports the name', () => {
+describe('ActivationEventSchema removal — no entry exports the name', () => {
   it('resolves the export surface: the retired names have ZERO holders across every public entry', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`

@@ -38,7 +38,7 @@ import {
 //
 // Form follows #11825 / commit 2c86fe3ea / #4988: resolved symbol identity over every
 // public entry via the build-time `export-origins/` artifact.
-describe('[#12007] kernel/ CLICommandContribution retirement', () => {
+describe('kernel/ CLICommandContribution retirement', () => {
   /** The 2 names the retired def exported (1 schema const + 1 type). */
   const RETIRED_NAMES = [
     'CLICommandContributionSchema',
@@ -71,7 +71,7 @@ describe('[#12007] kernel/ CLICommandContribution retirement', () => {
 
     // ── ABSENCE (every entry, not just ./kernel) ──────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #12007`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ describe('[#12007] kernel/ CLICommandContribution retirement', () => {
 
   it('the runtime barrel resolves without the retired schema and keeps the survivor', async () => {
     const kernel = await import('./index');
-    expect(kernel, 'CLICommandContributionSchema must not be exported after #12007')
+    expect(kernel, 'CLICommandContributionSchema must not be exported after its retirement')
       .not.toHaveProperty('CLICommandContributionSchema');
     // Anti-vacuity: the barrel really resolved and still exports the live
     // oclif surface plus an unrelated kernel anchor.

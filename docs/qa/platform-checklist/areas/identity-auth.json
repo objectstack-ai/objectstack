@@ -1266,7 +1266,7 @@
       "title": "TOTP enrollment reveal: /two-factor/enable returns a parseable otpauth:// URI + backup codes, the declared reveal dialog's paths resolve against that exact shape, and the live re-reveal endpoint's behavior is recorded",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user with a known password enrolling their own second factor"],
@@ -1278,7 +1278,7 @@
           "TOTP codes: copy the hand-rolled RFC 6238 helper (base32Decode + totp, node:crypto only) from two-factor-lockout.dogfood.test.ts — no otplib/speakeasy dependency exists anywhere in this repo and none may be added; better-auth's defaults are the RFC's (SHA-1, 6 digits, 30s)"
         ],
         "knownGaps": [
-          "BROWSER LANE BLOCKED(dependency): the QR-bearing reveal lives on sys_two_factor.enable_two_factor (resultDialog {path:'totpURI',format:'qrcode'} + {path:'backupCodes',format:'code-list'} + acknowledge gate — packages/platform-objects/src/identity/sys-two-factor.object.ts), but sys_two_factor is mounted in NO app (account.app.ts's tab list stops at sys_oauth_application), so there is no navigable surface that opens that dialog. The navigable variant, sys_user.enable_two_factor (sys-user.object.ts), declares NO resultDialog — only a static successMessage telling the user to scan a QR that is never rendered, and the source comment says outright the generic action engine can't render it yet. The resultDialog renderer contract itself is a SHOULD addressed to objectui with zero in-repo consumer (packages/spec/src/ui/action.zod.ts). Until an app mounts sys_two_factor or objectui ships the renderer, drive this item over the API and score the browser lane blocked(dependency) — never pass a QR clause on the strength of the successMessage text"
+          "[REWORDED, rev 2 — the gap text it replaces said no navigable surface renders the QR] The navigable enrollment surface DECLARES the reveal: sys_user.enable_two_factor (record_section on the sys_user page — packages/platform-objects/src/identity/sys-user.object.ts) carries resultDialog {path:'totpURI', format:'qrcode'} + {path:'backupCodes', format:'code-list'} + an acknowledge gate, and no successMessage (the dialog suppresses the toast) — the same shape sys_two_factor.enable_two_factor declares, though sys_two_factor itself is still mounted in no app (account.app.ts). What the declaration does NOT prove is pixels: the dialog DOM is objectui's renderer (ActionRunner → ActionResultDialog), so a browser-lane QR clause is scored only from what that dialog actually draws on the sys_user record page of a 2FA-armed boot — never from the declaration or the path resolution this API lane checks"
         ]
       },
       "steps": [
@@ -1289,7 +1289,7 @@
         "assert backupCodes is a non-empty array of strings and record its size/format",
         "cross-check the declared reveal contract against the live shape: sys_two_factor.enable_two_factor's resultDialog.fields[].path values ('totpURI', 'backupCodes' — sys-two-factor.object.ts) are dot paths into result.data (action.zod.ts resultDialog contract); confirm each resolves against the response the API actually returned",
         "probe the re-reveal endpoint: POST /api/v1/auth/two-factor/get-totp-uri (POST — auth-route-ledger.ts; the mounted-surface list is publication-not-liveness per #7735, so drive it, don't infer) with { password }, and record the actual behavior: status, whether it demands the password, and whether it returns the SAME secret as enable did — the 'shown only once' promise in the enable dialog copy (sys-two-factor.object.ts) does not account for this endpoint existing",
-        "observe-and-flag the navigable surface: read the sys_user action metadata (meta surface) and record that enable_two_factor there carries no resultDialog — the toast-only reveal is a recorded product gap, not a clause to pass or fail this run on",
+        "read the navigable surface's declaration: the sys_user action metadata (meta surface) for enable_two_factor — record its resultDialog (totpURI qrcode + backupCodes code-list + acknowledge, no successMessage) and resolve BOTH of its paths against the captured enable response, exactly as step 6 does for sys_two_factor",
         "negative lane: POST /two-factor/enable with a WRONG password (refused, no sys_two_factor row created) and as an anonymous caller (401)"
       ],
       "acceptance": [
@@ -1324,10 +1324,10 @@
           "evidence": "the recorded behavior table (secrets redacted)"
         },
         {
-          "clause": "OBSERVE-AND-FLAG — the only navigable enrollment surface renders no QR: sys_user.enable_two_factor declares no resultDialog, only a successMessage instructing the user to scan a QR the engine never draws (the source's own admission, sys-user.object.ts). Recorded as the standing product gap that keeps the browser lane blocked — never scored as a pass",
+          "clause": "the navigable enrollment surface declares the reveal: sys_user.enable_two_factor declares a resultDialog — totpURI as qrcode + backupCodes as code-list + an acknowledge gate — and no successMessage, and both of its paths resolve against the live enable response (the same join clause 4 makes for the unmounted sys_two_factor variant). A declared dialog aimed at a path the API does not return would open empty on the one surface a user can reach",
           "oracle": "api",
-          "verify": "the meta read of sys_user's actions shows enable_two_factor with successMessage and no resultDialog, while sys_two_factor (mounted nowhere) carries the real reveal dialog",
-          "evidence": "the two action-metadata reads"
+          "verify": "the meta read of sys_user's actions shows enable_two_factor with resultDialog.fields [{path:'totpURI', format:'qrcode'}, {path:'backupCodes', format:'code-list'}] and no successMessage; response[path] is a string for totpURI and a non-empty string[] for backupCodes. Pixels are NOT this clause: the dialog DOM is objectui's (ActionResultDialog) and is scored only on the browser lane",
+          "evidence": "the sys_user action-metadata read + the path-by-path resolution against the captured response"
         }
       ],
       "negative": [
@@ -1341,13 +1341,19 @@
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (POST /two-factor/enable, SDK row) + (POST /two-factor/get-totp-uri in BETTER_AUTH_MOUNTED_SURFACE — publication, not liveness, #7735)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts#LEDGERED_PLUGIN_CONFIG (endpoint EXISTENCE is already pinned at LEDGERED_PLUGIN_CONFIG twoFactor:true — behavior is this item's gap, not existence)",
         "packages/platform-objects/src/identity/sys-two-factor.object.ts#resultDialog (enable_two_factor resultDialog: totpURI qrcode + backupCodes code-list + acknowledge; the 'shown only once' copy)",
-        "packages/platform-objects/src/identity/sys-user.object.ts#resultDialog (the navigable variant: no resultDialog, successMessage only; the engine-can't-render-it-yet admission)",
+        "packages/platform-objects/src/identity/sys-user.object.ts#resultDialog (the navigable variant: enable_two_factor declares resultDialog totpURI qrcode + backupCodes code-list + acknowledge, no successMessage — 266654d82e)",
         "packages/spec/src/ui/action.zod.ts#resultDialog (resultDialog: dot paths into result.data; renderer contract is a SHOULD to objectui, no in-repo consumer)",
         "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts#secret (the hand-rolled RFC 6238 helper to copy — no OTP dependency exists or may be added) + (arming must precede bootStack) + (enable → totpURI → secret extraction precedent)",
         "packages/platform-objects/src/apps/account.app.ts#sys_inbox_message (mounts sys_inbox_message/sys_member/sys_account/sys_session/sys_api_key/sys_oauth_application — sys_two_factor absent, which is why the browser lane is blocked)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: the TOTP 'scan the QR' enrollment lifecycle had only its challenge gate covered (one clause of identity-auth.auth-method-matrix). This item takes the reveal half: enable's { totpURI, backupCodes } shape, the resultDialog path contract, the get-totp-uri re-reveal probe, and the recorded no-QR gap on the only navigable surface", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: the TOTP 'scan the QR' enrollment lifecycle had only its challenge gate covered (one clause of identity-auth.auth-method-matrix). This item takes the reveal half: enable's { totpURI, backupCodes } shape, the resultDialog path contract, the get-totp-uri re-reveal probe, and the recorded no-QR gap on the only navigable surface", "ref": "claude/new-session-0pv25p" },
+        {
+          "revision": 2,
+          "date": "2026-10-04",
+          "change": "A6, step 8 and the browser-lane knownGap re-pointed: sys_user.enable_two_factor now declares a resultDialog (totpURI qrcode + backupCodes code-list + acknowledge, no successMessage — sys-user.object.ts enable_two_factor), so A6 asserts the declaration and resolves its paths against the live enable response instead of flagging a toast-only gap; the knownGap is reworded (the navigable surface declares the reveal; pixels stay objectui's ActionResultDialog, scored on the browser lane only). Stale clause. Source 266654d82e (#11110)",
+          "ref": "#21735"
+        }
       ]
     },
     {
@@ -1431,10 +1437,10 @@
     },
     {
       "id": "identity-auth.two-factor-backup-codes",
-      "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — while the only navigable regenerate surface never shows the new codes",
+      "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
@@ -1446,7 +1452,7 @@
           "in-process system reads for the storage-shape observation (sys_two_factor REST is get-by-id only)"
         ],
         "knownGaps": [
-          "browser lane blocked(dependency) — same standing gap as identity-auth.two-factor-enrollment-reveal: sys_two_factor's one-shot regenerate reveal dialog is mounted in no app, and the navigable sys_user surface has no reveal at all (which this item records as its own observe-and-flag clause)"
+          "browser lane: the reveal is DECLARED on the navigable surface — sys_user.generate_backup_codes carries a one-shot resultDialog {path:'backupCodes', format:'code-list'} + acknowledge (sys-user.object.ts), alongside the still-unmounted sys_two_factor.regenerate_backup_codes variant; the pixels are objectui's ActionResultDialog, so a browser-lane clause is scored only from what that dialog draws on the sys_user record page, never from the declaration"
         ]
       },
       "steps": [
@@ -1458,7 +1464,7 @@
         "begin a fresh challenge and attempt an UNSPENT code from the OLD set; capture the refusal — regeneration invalidated the prior set wholesale",
         "spend one NEW code to prove the new set is live",
         "storage-shape observation: read sys_two_factor.backup_codes via the system-context read and record what the column actually carries (the declaration says JSON-serialized — sys-two-factor.object.ts; record whether the stored form is plaintext codes or an encrypted/hashed blob, without publishing either)",
-        "observe-and-flag the navigable surface: sys_user.generate_backup_codes (sys-user.object.ts) declares NO resultDialog — a toast only. On the only surface a user can actually reach, regenerating kills the old set and never shows the new one: a self-inflicted lockout path. The sys_two_factor variant with the one-shot reveal (sys-two-factor.object.ts) is mounted nowhere",
+        "read the navigable surface's declaration: sys_user.generate_backup_codes (sys-user.object.ts) declares a resultDialog — backupCodes as code-list + acknowledge, no successMessage — so on the surface a user can reach, regenerating kills the old set AND reveals the new one once; resolve its backupCodes path against the step-5 regenerate response (the sys_two_factor.regenerate_backup_codes variant carries the same reveal and is mounted nowhere)",
         "negative: generate-backup-codes with a wrong password refused (old set must survive the refused attempt); anonymous call 401"
       ],
       "acceptance": [
@@ -1493,10 +1499,10 @@
           "evidence": "the described (not quoted) column content"
         },
         {
-          "clause": "OBSERVE-AND-FLAG — the navigable regenerate is a lockout path: sys_user.generate_backup_codes has no resultDialog (successMessage toast only, refreshAfter:false), so the console user who regenerates has their old codes killed and the new ones never displayed. Recorded as the standing product gap (paired with the unmounted sys_two_factor reveal variant); never scored as a pass",
+          "clause": "the navigable regenerate reveals the new set: sys_user.generate_backup_codes declares a one-shot resultDialog (backupCodes as code-list + acknowledge; no successMessage, refreshAfter:false) and its backupCodes path resolves to the non-empty new set in the live regenerate response — the reveal that keeps regeneration from being a lockout path on the surface a user can reach",
           "oracle": "api",
-          "verify": "the meta read of sys_user.generate_backup_codes (no resultDialog) vs sys_two_factor.regenerate_backup_codes (one-shot reveal declared, surface unmounted)",
-          "evidence": "the two action-metadata reads"
+          "verify": "the meta read of sys_user.generate_backup_codes shows resultDialog.fields [{path:'backupCodes', format:'code-list'}] and no successMessage; response.backupCodes of the step-5 regenerate is a non-empty string[] (values redacted). Pixels are objectui's ActionResultDialog and are scored only on the browser lane",
+          "evidence": "the sys_user action-metadata read + the path resolution against the regenerate response (codes redacted)"
         }
       ],
       "negative": [
@@ -1509,11 +1515,17 @@
       "source": [
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /two-factor/generate-backup-codes, POST /two-factor/verify-backup-code — SDK rows)",
         "packages/platform-objects/src/identity/sys-two-factor.object.ts#resultDialog (regenerate_backup_codes: password param, one-shot resultDialog, 'previous codes stop working immediately') + (backup_codes storage declaration)",
-        "packages/platform-objects/src/identity/sys-user.object.ts#successMessage (generate_backup_codes on the navigable surface: successMessage only, NO resultDialog — the recorded lockout path)",
+        "packages/platform-objects/src/identity/sys-user.object.ts#resultDialog (generate_backup_codes on the navigable surface: one-shot resultDialog backupCodes code-list + acknowledge, no successMessage — 266654d82e)",
         "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts#beginChallenge (the arming + challenge-cookie rig this item reuses: beginChallenge/cookieHeader; TOTP helper)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: backup codes had zero coverage — spend/single-use/regenerate-invalidates were asserted nowhere, and the no-reveal regenerate on the navigable sys_user surface (a self-lockout path) was unrecorded", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: backup codes had zero coverage — spend/single-use/regenerate-invalidates were asserted nowhere, and the no-reveal regenerate on the navigable sys_user surface (a self-lockout path) was unrecorded", "ref": "claude/new-session-0pv25p" },
+        {
+          "revision": 2,
+          "date": "2026-10-04",
+          "change": "A6, step 9, title and the browser-lane knownGap re-pointed: sys_user.generate_backup_codes now declares a one-shot resultDialog (backupCodes code-list + acknowledge, no successMessage — sys-user.object.ts generate_backup_codes), so the navigable regenerate is no longer a lockout path; A6 asserts the declaration and resolves its path against the live regenerate response instead of flagging the toast-only gap. Stale clause. Source 266654d82e (#11110)",
+          "ref": "#21735"
+        }
       ]
     },
     {

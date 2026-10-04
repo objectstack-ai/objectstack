@@ -9334,6 +9334,81 @@ export class ObjectStackProtocolImplementation implements
         return found;
     }
 
+    /**
+     * [#21716, ADR-0005, ADR-0010 §3.3] The stored `sys_metadata` row a
+     * by-name read SERVES for `(type, name)` in `orgId`'s scope, and the
+     * scope it was read from — the ONE resolution {@link getMetaItem} (both
+     * its draft-preview arm and its row read), {@link getMetaItemLayered}
+     * and the ADR-0010 `_lock` gate's overlay limb ({@link getEffectiveLock})
+     * all call. So the row whose `_lock` a read reports is the row whose
+     * `_lock` the write doors enforce, for every request scope.
+     *
+     * Precedence is ADR-0005's, and it is precedence, never a merge (the
+     * ruling is recorded in {@link getMetaItem}): the org-scoped row wins,
+     * and the env-wide row (`organization_id` null) is the fallback. Within
+     * one scope, ADR-0048 prefer-local: with a `packageId`, that package's
+     * row first and then the package-less row, never another package's; with
+     * none, any row.
+     *
+     * `orgId` arrives already gated ({@link organizationIdForMetaRead}): an
+     * organization only selects a row on a type the registry declares per-org
+     * overridable, so a pre-#6190 phantom org row is never the served one.
+     *
+     * `otherSpelling` is the one declared difference between the callers. The
+     * reads pass `true` and keep the at-rest tolerance they have always had: a
+     * row stored under the type's other spelling (pre-#4432 residue) is the
+     * last resort in each scope. The `_lock` gate passes `false`: a write
+     * addresses the canonical namespace only (#4432, #9009 — the key
+     * `SysMetadataRepository.whereFor` stores under), and extending a tolerant
+     * lookup below the folding boundary into every write is what #4432
+     * refused. So the two agree on every row stored under the canonical
+     * spelling, which is every row a live write can mint.
+     *
+     * Returns `undefined` when neither scope holds a row. A failed read
+     * propagates: each caller owns its #5532 / #5706 discrimination.
+     */
+    private async findServedOverlayRow(args: {
+        type: string;
+        name: string;
+        orgId: string | undefined;
+        state: 'active' | 'draft';
+        packageId?: string;
+        otherSpelling: boolean;
+    }): Promise<{ row: any; scope: 'org' | 'env' } | undefined> {
+        const inScope = async (oid: string | null): Promise<any | undefined> => {
+            const lookup = async (t: string): Promise<any | undefined> => {
+                const base: Record<string, unknown> = {
+                    type: t, name: args.name, state: args.state, organization_id: oid,
+                };
+                if (args.packageId) {
+                    const scoped = await this.engine.findOne('sys_metadata', {
+                        where: { ...base, package_id: args.packageId },
+                    });
+                    if (scoped) return scoped;
+                    // ADR-0048 — no package-owned row; fall back to the GLOBAL
+                    // (package-less) row only. Must NOT match a different
+                    // package's row, or a collision would serve package B's
+                    // customization for a package A read.
+                    return await this.engine.findOne('sys_metadata', {
+                        where: { ...base, package_id: null },
+                    });
+                }
+                // No package context (legacy/runtime reader) — match any.
+                return await this.engine.findOne('sys_metadata', { where: base });
+            };
+            const rec = await lookup(args.type);
+            if (rec || !args.otherSpelling) return rec;
+            const alt = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
+            return alt ? await lookup(alt) : undefined;
+        };
+        if (args.orgId) {
+            const row = await inScope(args.orgId);
+            if (row) return { row, scope: 'org' };
+        }
+        const row = await inScope(null);
+        return row ? { row, scope: 'env' } : undefined;
+    }
+
     async getMetaItem(request: { type: string, name: string, packageId?: string, organizationId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
@@ -9350,7 +9425,7 @@ export class ObjectStackProtocolImplementation implements
         // ⭐ THE SHARPER HALF, and why the plural verb's fix did not cover it.
         // `getMetaItems` UNIONs its two `queryByOrg` reads, so an ungated
         // organization can only ADD rows — the resurrection commit 96326040f closed.
-        // The two `findOverlay` reads below combine with `??`, which is
+        // The two scope reads below ({@link findServedOverlayRow}) combine as
         // PRECEDENCE: an ungated organization can SUBSTITUTE. On a type the
         // registry declares `allowOrgOverride: false`, a pre-#6190 phantom
         // org-scoped row — the kind `loadMetaFromDb` walks past and
@@ -9499,32 +9574,17 @@ export class ObjectStackProtocolImplementation implements
         // item is tagged `_draft:true` so the UI can badge it.
         if (request.previewDrafts && readState !== 'draft') {
             try {
-                const findDraft = async (oid: string | null): Promise<any | undefined> => {
-                    // ADR-0048 prefer-local (parity with the active-read overlay below).
-                    const lookup = async (t: string): Promise<any | undefined> => {
-                        const base: Record<string, unknown> = {
-                            type: t, name: request.name, state: 'draft', organization_id: oid,
-                        };
-                        if (request.packageId) {
-                            const scoped = await this.engine.findOne('sys_metadata', {
-                                where: { ...base, package_id: request.packageId },
-                            });
-                            if (scoped) return scoped;
-                            // ADR-0048 — global (package-less) draft only, never
-                            // another package's draft.
-                            return await this.engine.findOne('sys_metadata', {
-                                where: { ...base, package_id: null },
-                            });
-                        }
-                        return await this.engine.findOne('sys_metadata', { where: base });
-                    };
-                    const rec = await lookup(request.type);
-                    if (rec) return rec;
-                    const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                    if (alt) return await lookup(alt);
-                    return undefined;
-                };
-                const draftRec = (orgId ? await findDraft(orgId) : undefined) ?? await findDraft(null);
+                // [#21716] The served-row resolution, on the draft partition
+                // (ADR-0048 prefer-local, parity with the row read below) — see
+                // {@link findServedOverlayRow}.
+                const draftRec = (await this.findServedOverlayRow({
+                    type: request.type,
+                    name: request.name,
+                    orgId,
+                    state: 'draft',
+                    ...(request.packageId ? { packageId: request.packageId } : {}),
+                    otherSpelling: true,
+                }))?.row;
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
                         String(draftRec.type ?? request.type),
@@ -9555,43 +9615,20 @@ export class ObjectStackProtocolImplementation implements
         //    Per ADR-0005 (revised), org-scoped row wins; env-wide
         //    (organization_id IS NULL) row is the fallback before falling
         //    through to the in-memory registry / MetadataService.
+        //    ADR-0048 prefer-local within each scope (a package id prefers that
+        //    package's row, then the package-less one, mirroring
+        //    `SchemaRegistry.getItem(type, name, pkg)`). [#21716] The ONE
+        //    served-row resolution, which the `_lock` gate's overlay limb
+        //    calls too — see {@link findServedOverlayRow}.
         try {
-            const findOverlay = async (oid: string | null): Promise<any | undefined> => {
-                // ADR-0048 prefer-local: when a package id is supplied and two
-                // installed packages ship the same type/name, prefer the row owned
-                // by that package before falling back to first-match (package-less
-                // query). This mirrors `SchemaRegistry.getItem(type, name, pkg)`.
-                const lookup = async (t: string): Promise<any | undefined> => {
-                    const base: Record<string, unknown> = {
-                        type: t,
-                        name: request.name,
-                        state: readState,
-                        organization_id: oid,
-                    };
-                    if (request.packageId) {
-                        const scoped = await this.engine.findOne('sys_metadata', {
-                            where: { ...base, package_id: request.packageId },
-                        });
-                        if (scoped) return scoped;
-                        // ADR-0048 — no package-owned overlay; fall back to the
-                        // GLOBAL (package-less) overlay only. Must NOT match a
-                        // different package's row, or a collision would serve
-                        // package B's customization for a package A read.
-                        return await this.engine.findOne('sys_metadata', {
-                            where: { ...base, package_id: null },
-                        });
-                    }
-                    // No package context (legacy/runtime reader) — match any.
-                    return await this.engine.findOne('sys_metadata', { where: base });
-                };
-                const rec = await lookup(request.type);
-                if (rec) return rec;
-                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) return await lookup(alt);
-                return undefined;
-            };
-            const record = (orgId ? await findOverlay(orgId) : undefined)
-                ?? await findOverlay(null);
+            const record = (await this.findServedOverlayRow({
+                type: request.type,
+                name: request.name,
+                orgId,
+                state: readState,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
+                otherSpelling: true,
+            }))?.row;
             // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
             if (record && !shippedFlowActiveRead) {
                 item = this.convertStoredItem(
@@ -10119,52 +10156,24 @@ export class ObjectStackProtocolImplementation implements
         let overlay: unknown | null = null;
         let overlayScope: 'org' | 'env' | null = null;
         try {
-            const findOverlay = async (oid: string | null) => {
-                // ADR-0048 prefer-local: when a package is supplied, the row
-                // owned by that package wins over a package-less first match.
-                const lookup = async (t: string) => {
-                    const base: Record<string, unknown> = {
-                        type: t, name: request.name, state: 'active', organization_id: oid,
-                    };
-                    if (request.packageId) {
-                        const scoped = await this.engine.findOne('sys_metadata', {
-                            where: { ...base, package_id: request.packageId },
-                        });
-                        if (scoped) return scoped;
-                        // ADR-0048 — fall back to the GLOBAL (package-less)
-                        // overlay only, never another package's row.
-                        return await this.engine.findOne('sys_metadata', {
-                            where: { ...base, package_id: null },
-                        });
-                    }
-                    return await this.engine.findOne('sys_metadata', { where: base });
-                };
-                let rec = await lookup(request.type);
-                if (!rec) {
-                    const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                    if (alt) rec = await lookup(alt);
-                }
-                return rec;
-            };
-            if (orgId) {
-                const rec = await findOverlay(orgId);
-                if (rec) {
-                    overlay = this.convertStoredItem(
-                        String(rec.type ?? request.type),
-                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
-                    );
-                    overlayScope = 'org';
-                }
-            }
-            if (overlay === null) {
-                const rec = await findOverlay(null);
-                if (rec) {
-                    overlay = this.convertStoredItem(
-                        String(rec.type ?? request.type),
-                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
-                    );
-                    overlayScope = 'env';
-                }
+            // ADR-0048 prefer-local within each scope. [#21716] The ONE
+            // served-row resolution {@link getMetaItem} and the `_lock` gate's
+            // overlay limb call too — see {@link findServedOverlayRow}.
+            const served = await this.findServedOverlayRow({
+                type: request.type,
+                name: request.name,
+                orgId,
+                state: 'active',
+                ...(request.packageId ? { packageId: request.packageId } : {}),
+                otherSpelling: true,
+            });
+            if (served) {
+                const rec = served.row;
+                overlay = this.convertStoredItem(
+                    String(rec.type ?? request.type),
+                    typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                );
+                overlayScope = served.scope;
             }
         } catch (error) {
             // [#5707] The same rule as the four overlay reads in
@@ -16152,9 +16161,31 @@ export class ObjectStackProtocolImplementation implements
      * lock (ADR-0010 §3.3).
      *
      * Returns `'none'` when nothing is locked, which is the common
-     * case. Safe to call when `environmentId` is undefined (control-
-     * plane bootstrap) — the lock check is only meaningful in tenant
-     * scope and the caller is expected to also gate on `environmentId`.
+     * case. It answers alike on every topology: no `environmentId` term,
+     * and since #21694 neither caller gates on one.
+     *
+     * ## [#21716] The overlay limb reads the row the READ serves
+     *
+     * The overlay limb used to query one row: `organization_id` equal to the
+     * request's organization, or null without one. The reads resolve by
+     * precedence instead — the org-scoped row, else the env-wide row
+     * (ADR-0005) — so for an organization with no row of its own, both reads
+     * served the env-wide row and published its `_lock` (`editable: false`
+     * under `full`) while this limb found nothing and answered `'none'`: an
+     * org-scoped save and delete of an item ADR-0010 §3.3 declares "Overlay
+     * writes rejected" were admitted. The door was looser than the read on the
+     * organization axis, as it had been on the topology axis (#21694).
+     *
+     * So the limb now asks {@link findServedOverlayRow} — the resolution both
+     * reads call — with the organization gated by the same
+     * {@link organizationIdForMetaRead} the reads apply. When the env-wide row
+     * is the one served, its `_lock` binds the organization's writes; when the
+     * organization's own row is served, that row's `_lock` does, whatever the
+     * env-wide row declares (the read reports that same row). ⛔ No second
+     * predicate: a change to the read's precedence moves this limb with it.
+     * The package-agnostic arm is asked (no `packageId`), as the doors carry
+     * none to this gate, under the canonical spelling only (#4432 — the one
+     * declared difference, stated on {@link findServedOverlayRow}).
      *
      * `'none'` is a VERDICT, not a default: both callers turn it into
      * "allow". So it is returned only when the absence of a lock was
@@ -16246,14 +16277,19 @@ export class ObjectStackProtocolImplementation implements
         // 2. Overlay row — addressed by the SAME canonical key the repository
         //    stores it under (`SysMetadataRepository.whereFor`), which is what
         //    makes this limb read the row the artifact limb already folded to.
+        //    [#21716] …and the row the READ serves for this organization: the
+        //    reads' own resolution, behind the reads' own organization gate —
+        //    see this method's header. Canonical spelling only (#4432), the
+        //    one declared difference — see {@link findServedOverlayRow}.
         try {
-            const where: Record<string, unknown> = {
+            const served = await this.findServedOverlayRow({
                 type: canonicalType,
                 name,
+                orgId: organizationIdForMetaRead(canonicalType, organizationId ?? undefined),
                 state: 'active',
-                organization_id: organizationId ?? null,
-            };
-            const row = await this.engine.findOne('sys_metadata', { where });
+                otherSpelling: false,
+            });
+            const row = served?.row;
             if (row) {
                 const body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
                 const p = extractProtection(body);

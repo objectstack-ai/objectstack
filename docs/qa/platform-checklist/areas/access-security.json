@@ -1499,7 +1499,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1526,7 +1526,7 @@
         "mint a password-gated link; anon resolve WITHOUT ?password / x-share-password header → 401; with a WRONG password → 401; with the correct password → 200",
         "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' and resolve with an email OFF the allowlist → refused",
         "DELETE /api/v1/share-links/<idOrToken> (revoke); anon resolve → 410 EXPIRED_OR_REVOKED; mint a short-expiry link and, after it expires, resolve → 410 — the record must never appear",
-        "delete the shared record r, then anon resolve the still-live token → 410 RECORD_GONE (fail-closed, #5190)",
+        "delete the shared record r, then anon resolve the still-live (un-passworded, link_only) token → 404 INVALID_OR_EXPIRED, byte-identical to the answer for an unknown token (fail-closed, #5190: \"that record is gone\" is itself information) — capture it beside an unknown-token resolve for the byte comparison",
         "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links"
       ],
       "acceptance": [
@@ -1555,10 +1555,10 @@
           "evidence": "the two traces"
         },
         {
-          "clause": "revoke / expiry / record-gone name the refusal, NEVER the record: after DELETE, past expiresAt, or record deletion, resolve answers 410 (EXPIRED_OR_REVOKED / RECORD_GONE) — a dead token must never leak the row (#5190 fail-closed)",
+          "clause": "revoke / expiry / record-gone refuse, NEVER serving the record: after DELETE or past expiresAt, resolve answers 410 EXPIRED_OR_REVOKED; after record deletion the still-live token answers 404 INVALID_OR_EXPIRED, byte-identical to an unknown token (no distinct record-gone code — that would itself be an existence oracle) — a dead token must never leak the row (#5190 fail-closed)",
           "oracle": "api",
-          "verify": "post-revoke, post-expiry, and post-record-delete resolves each answer 410 with no record in the body",
-          "evidence": "the three traces"
+          "verify": "post-revoke and post-expiry resolves answer 410 EXPIRED_OR_REVOKED; the post-record-delete resolve answers 404 INVALID_OR_EXPIRED whose status + body are byte-identical to an unknown-token resolve; no record in any body (resolveToken returns null at share-link-service.ts loadRecordForServing; the probe's live-row arm falls through to invalidOrExpired(), share-links.ts)",
+          "evidence": "the three traces plus the unknown-token control resolve"
         },
         {
           "clause": "the list is caller-scoped: GET /share-links returns only links created_by the caller; a second member cannot enumerate the minter's tokens even with a guessed recordId",
@@ -1610,6 +1610,12 @@
           "date": "2026-08-30",
           "change": "cross-referenced the new UI half (access-security.share-link-landing-page — the /s/:token console page): API semantics stay scored on this item, rendering on that one, so a leak found through the page's network trace is recorded here once and cross-referenced there, never double-counted",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-04",
+          "change": "A5 record-gone leg and step 7 re-pointed to the measured answer: a deleted record's still-live link resolves 404 INVALID_OR_EXPIRED, byte-identical to an unknown token, never 410 RECORD_GONE (resolveToken's #5190 fail-closed record probe — share-link-service.ts loadRecordForServing — returns null, and the route's row probe in share-links.ts falls through to its one generic refusal, invalidOrExpired). Revoke/expiry legs unchanged (410 EXPIRED_OR_REVOKED). Stale clause found by the 17.7 pre-release runs",
+          "ref": "#21735"
         }
       ]
     },

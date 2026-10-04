@@ -137,7 +137,7 @@ describe('`version` is SemVer 2.0.0, exactly — the canon for this concept', ()
     // Case-preserving, which the standard requires and one sibling carrier used
     // to refuse.
     '1.0.0-Beta.1', '1.0.0+Build.5',
-  ])('accepts %s, which the pre-#16365 regex refused', (version) => {
+  ])('accepts %s, which the regex refused before the SemVer widening', (version) => {
     expect(parses(version)).toBe(true);
   });
 
@@ -217,7 +217,7 @@ describe('`version` is SemVer 2.0.0, exactly — the canon for this concept', ()
   });
 });
 
-describe('the lifecycle-hook family stays retired (#4212)', () => {
+describe('the lifecycle-hook family stays retired', () => {
   it('PluginSchema declares none of the five hooks', () => {
     // The kernel's plugin contract is `init`/`start`/`destroy`
     // (`packages/core/src/types.ts`). The `onInstall` family was declared here

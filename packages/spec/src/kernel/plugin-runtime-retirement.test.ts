@@ -40,7 +40,7 @@ import {
 //      honest — the C14/C15 lesson);
 //   3. point the entry enumeration at nothing → the anti-vacuity guards trip
 //      instead of the suite passing silently.
-describe('[#4834] plugin-runtime family removal — no entry exports any of the five names', () => {
+describe('plugin-runtime family removal — no entry exports any of the five names', () => {
   /** The five schema names + every type alias they published. */
   const RETIRED = [
     'DynamicLoadRequestSchema',

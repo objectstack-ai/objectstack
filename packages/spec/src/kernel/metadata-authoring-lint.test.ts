@@ -49,7 +49,7 @@ const lintAuthoring = (raw: unknown) => lintUnknownAuthoringKeys(raw, ObjectStac
  */
 const VIEW_ENTRY = { name: 'v1', object: 'task', list: { columns: ['title'] }, bogusViewKey: 1 };
 
-describe('coverage derivation (#3786 — no third hand-written list)', () => {
+describe('coverage derivation (no third hand-written list)', () => {
   it('spans the non-strict population, not a sample', () => {
     // #4148 covered object+field: 2 surfaces. The point of this walker is the
     // rest. If the derivation regresses to a handful, the "evidence base" for
@@ -92,7 +92,7 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     }
   });
 
-  it('reads posture from the schema the PARSE applies, not the type registry (#10039)', () => {
+  it('reads posture from the schema the PARSE applies, not the type registry', () => {
     // `view` was counted as lint-covered because the posture came from
     // `getMetadataTypeSchema('view')` — `ViewMetadataSchema`, the strip-mode
     // UNION over persisted view BODIES. What `defineStack` actually applies to
@@ -181,7 +181,7 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
   });
 });
 
-describe('the #4148 behaviours survive the generalization', () => {
+describe('the object/field unknown-key warnings survive the generalization', () => {
   const stackWith = (obj: Record<string, unknown>, field: Record<string, unknown>) => ({
     objects: [
       { name: 'crm_case', label: 'Case', fields: { owner: { label: 'Owner', type: 'text', ...field } }, ...obj },
@@ -301,7 +301,7 @@ describe('the #4148 behaviours survive the generalization', () => {
   });
 });
 
-describe('nested descent (#4001 evidence phase)', () => {
+describe('nested descent (the evidence base for the strict tiers)', () => {
   // Before this the walk stopped at each item's top level plus a hard-coded
   // hop into `object.fields`, leaving 227 strip-mode objects below those roots
   // reporting nothing. These pin the four structural moves the descent makes
@@ -436,7 +436,7 @@ describe('nested descent (#4001 evidence phase)', () => {
   });
 });
 
-describe('top-level stack keys (#4167 → #8687)', () => {
+describe('top-level stack keys (named, then refused at parse)', () => {
   const lint = (raw: unknown) => lintUnknownStackKeys(raw, ObjectStackDefinitionSchema);
 
   // GRADUATION (#8687): `ObjectStackDefinitionSchema` is now `.strict()`, so
@@ -518,7 +518,7 @@ describe('STACK_KEY_GUIDANCE does not rot', () => {
     }
   });
 
-  it('every runtime member is a key the schema now declares (#8687)', () => {
+  it('every runtime member is a key the schema now declares', () => {
     // Until #8687 this pin ran the other way: `onEnable` had to be excluded
     // AND undeclared, because the exclusion list was what kept the lint from
     // calling an honoured-but-undeclared member "dropped at load". The strict
@@ -545,7 +545,7 @@ describe('STACK_KEY_GUIDANCE does not rot', () => {
   });
 });
 
-describe('one voice, and a single report per record (#10039)', () => {
+describe('one voice, and a single report per record', () => {
   // The card's measured repro, kept in the shape it was filed in. An otherwise
   // VALID view container (it has `list`, so nothing else is wrong with it) plus
   // one undeclared key used to produce BOTH:

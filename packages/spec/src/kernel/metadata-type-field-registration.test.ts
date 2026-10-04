@@ -77,11 +77,11 @@ describe('`field` registry flags — the authorization verdict, written down', (
   // record rather than quiet — and these pins are what make a silent re-flip
   // loud from here on.
 
-  it('declares `allowRuntimeCreate: false` — the runtime create door is retired (#7893)', () => {
+  it('declares `allowRuntimeCreate: false` — the runtime create door is retired', () => {
     expect(fieldEntry()!.allowRuntimeCreate).toBe(false);
   });
 
-  it('IS code-only: no runtime write channel is declared (#5086 refuses the inlet)', () => {
+  it('IS code-only: no runtime write channel is declared (PUT /meta refuses the inlet)', () => {
     // The exact predicate #5086 (PR #5263) refuses on, spelled as the gate
     // spells it. `true` here is what makes PUT /api/v1/meta/field/:name answer
     // 403 `NOT_CREATABLE` instead of 200 "Saved" — in draft mode too, since the
@@ -91,7 +91,7 @@ describe('`field` registry flags — the authorization verdict, written down', (
     expect(codeOnly).toBe(true);
   });
 
-  it('declares `allowOrgOverride: false` — UNCHANGED, #7743’s overlay refusal stays', () => {
+  it('declares `allowOrgOverride: false` — UNCHANGED, the field overlay refusal stays', () => {
     // Binding carry-over of the 2026-08-12 ruling. This card closed the create
     // tier; the override tier was already closed and must not move in either
     // direction as a side effect.

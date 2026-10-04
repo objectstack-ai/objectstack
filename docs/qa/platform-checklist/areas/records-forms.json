@@ -3645,7 +3645,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3654,18 +3654,18 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an isolated dev boot on the memory driver (the stock `os serve` default) + a manage_metadata session — the item authors its own scratch object",
+          "an isolated dev boot on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
           "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
         ],
         "knownGaps": [
           "NO showcase object declares `unique` on any field — the write vectors run against the inline-authored qa_unique object; landing a unique field on the field zoo would retire this gap",
-          "the SQL-family live leg needs a SQL-datasource boot; without one, score clause 5's SQL half from the pinned suites (sql-driver-8577-tenant-scoped-declared-unique.test.ts drives 409 UNIQUE_VIOLATION over real REST) and record which of the two the verdict rests on",
+          "[INVERTED, rev 2 — this gap used to say the SQL-family live leg needed a SQL-datasource boot] the live legs now run on the SQL family (stock SQLite); it is the MEMORY-driver half that is no longer live-drivable, since no boot door accepts the in-memory engine (9a4182a75). Score the memory driver's own refusal wording (`object.field` named in backticks, the scope suffix) and its scope/converge legs from the pinned memory-unique-constraint.test.ts, and record which of the two each verdict rests on",
           "the per-organization scope leg needs TWO organizations with a colliding value in each — runtime-creatable via the better-auth org endpoints but not stock; record blocked(fixture) live and fall back to the unit pin (memory-unique-constraint.test.ts)",
           "the autonumber-collision converge leg is not drivable over plain HTTP (it needs a stale counter planted mid-flight) — unit-pin verdict (memory-unique-constraint.test.ts), plus the engine's 'Autonumber collided — re-seeding' warn line if one occurs naturally"
         ]
       },
       "steps": [
-        "boot showcase isolated on the memory driver; author qa_unique via the package-install + PUT /api/v1/meta/object/qa_unique pattern",
+        "boot showcase isolated on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qa_unique via the package-install + PUT /api/v1/meta/object/qa_unique pattern",
         "POST /api/v1/data/qa_unique {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
         "POST two rows with sku absent → both land (NULL-distinct)",
         "PATCH r2 to sku:'A-1' → capture the refusal and re-read r2; PATCH r1 touching only `nick` → 2xx (no self-collision)",
@@ -3674,9 +3674,9 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), message naming object.field and stating 'No record was written', with NO driver prefix — and the row count is unchanged",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), a message that NAMES THE OBJECT ('Duplicate record refused on 'qa_unique': …') and states 'No record was written.', with NO driver prefix and no driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
-          "verify": "the refusal body + a post-refusal count; wire identity single-sourced at packages/drivers/driver-memory/src/memory-unique-constraint.ts (uniqueViolationError)",
+          "verify": "the refusal body + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
         },
         {
@@ -3712,7 +3712,7 @@
       ],
       "negative": [
         "a colliding write landing 2xx with both rows readable is a FAIL — that is the exact pre-#13197 memory-driver behavior (create was a table.push) this item exists to keep closed",
-        "a refusal message carrying a [driver-memory] prefix is a FAIL — the wire identity is the SQL family's, driver-anonymous by contract",
+        "a refusal message carrying a driver prefix (e.g. [driver-memory]) or the driver's own statement text (SQLite's 'UNIQUE constraint failed: …' with bound values) is a FAIL — the wire identity is the platform envelope's, driver-anonymous by contract",
         "a half-applied updateMany (some rows stamped before the refusal) is a FAIL",
         "two organizations' identical values colliding under bare `unique: true` is a FAIL: bare true is the positional spelling of 'organization', NOT 'global' — getting it backwards builds the cross-tenant existence oracle ADR-0120 D1 exists to remove"
       ],
@@ -3728,7 +3728,8 @@
         "packages/drivers/driver-memory/src/memory-driver.ts#updateMany (updateMany check-before-mutate)",
         "packages/drivers/driver-sql/src/schema-drift.ts#uniqueIndexesFromFields (uniqueIndexesFromFields, ADR-0120 D1/D3)",
         "packages/objectql/src/engine.ts#createWithAutonumberResync (createWithAutonumberResync — the branch the enforcement makes reachable)",
-        "content/docs/capabilities/data.mdx ('Uniqueness … per-field switches' — the docs claim this item makes testable)"
+        "content/docs/capabilities/data.mdx ('Uniqueness … per-field switches' — the docs claim this item makes testable)",
+        "packages/objectql/src/duplicate-record-error.ts#buildDuplicateMessage (the SQL-family 409 UNIQUE_VIOLATION envelope the live SQLite legs answer with: object named, 'No record was written.', driver prose never quoted)"
       ],
       "history": [
         {
@@ -3736,6 +3737,12 @@
           "date": "2026-08-30",
           "change": "initial — 2-angle sweep hit (routes/runtime, docs-claims): field-level unique enforcement landed on the memory driver 2026-08-30 (#13197/#13249) closing a declared-but-unenforced constraint; no checklist item drove the write path on either family. Scope legs and autonumber converge rest on the landing's own pins; live HTTP vectors run against an inline-authored scratch object because no showcase object declares unique",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-04",
+          "change": "A1, step 1 and fixtures re-pointed to the stock SQLite store: the in-memory engine is no longer a boot store (every boot door refuses it), so the live legs run on SQLite and answer 409 UNIQUE_VIOLATION with the object named and 'No record was written.' (duplicate-record-error.ts buildDuplicateMessage); the `object.field` wording stays a memory-pin assertion (memory-unique-constraint.test.ts). 'memory driver (the stock default)' dropped; the SQL knownGap inverted into a memory-leg-is-pin-only gap; negative and source follow. Stale clause. Source 9a4182a75 (#21598)",
+          "ref": "#21735"
         }
       ]
     },

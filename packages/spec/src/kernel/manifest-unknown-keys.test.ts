@@ -59,7 +59,7 @@ const unrecognized = (result: ReturnType<typeof ManifestSchema.safeParse>) => {
     | undefined;
 };
 
-describe("#14192 — unknown keys inside `manifest:` are refused at parse (the card's measurement, inverted)", () => {
+describe("unknown keys inside `manifest:` are refused at parse (the silent-drop measurement, inverted)", () => {
   it('a transposed `namesapce` is a named refusal carrying the rename — not an undefined namespace', () => {
     // The card's own measurement: parse success, key dropped, namespace undefined.
     const { namespace: _omitted, ...withoutNamespace } = legal();
@@ -108,7 +108,7 @@ describe("#14192 — unknown keys inside `manifest:` are refused at parse (the c
   });
 });
 
-describe('#14192 — the refusal reaches every door the measurement listed', () => {
+describe('the refusal reaches every door the measurement listed', () => {
   const typo = () => {
     const { namespace: _omitted, ...rest } = legal();
     return { ...rest, namesapce: 'probe' };
@@ -218,7 +218,7 @@ describe('#14192 — the refusal reaches every door the measurement listed', () 
   });
 });
 
-describe('#14192 — the nested blocks inside `manifest:` are closed under the same measurement', () => {
+describe('the nested blocks inside `manifest:` are closed under the same measurement', () => {
   it('`contributes.kind` (for `kinds`) is refused at the block, with the rename', () => {
     const result = ManifestSchema.safeParse({ ...legal(), contributes: { kind: [{ id: 'sys.bi.report' }] } });
     expect(result.success).toBe(false);
@@ -278,7 +278,7 @@ describe('#14192 — the nested blocks inside `manifest:` are closed under the s
   });
 });
 
-describe('#14192 — the accept side does not move, and `main` is declared', () => {
+describe('the accept side does not move, and `main` is declared', () => {
   it('every live key parses and survives — the whole declared vocabulary in one manifest', () => {
     const full = {
       ...legal(),
@@ -357,7 +357,7 @@ describe('#14192 — the accept side does not move, and `main` is declared', () 
   });
 });
 
-describe('#16328 — the `permissions` union door names the surface and the rename, like every other door', () => {
+describe('the `permissions` union door names the surface and the rename, like every other door', () => {
   // ## What #16328 reported, and what was actually wrong
   //
   // The card measured `{ services: ['object'], hoooks: ['x'] }` refused with a

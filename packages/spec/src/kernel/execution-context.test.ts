@@ -69,7 +69,7 @@ describe('ExecutionContextSchema', () => {
 // `message: undefined`. The contract is stated here, at the producer's
 // declaration, rather than tolerated at each consumer.
 // ---------------------------------------------------------------------------
-describe('ExecutionContextSchema.authGate — the ADR-0069 gate posture (#7280)', () => {
+describe('ExecutionContextSchema.authGate — the ADR-0069 gate posture is a declared field', () => {
   it('accepts a well-formed gate', () => {
     const ctx = ExecutionContextSchema.parse({
       userId: 'u1',
@@ -164,7 +164,7 @@ describe('ExecutionContextSchema.authGate — the ADR-0069 gate posture (#7280)'
 // were emptied, so the non-empty check is what makes this pin fail on a blank
 // cell rather than only on changed wording.
 // ---------------------------------------------------------------------------
-describe('ExecutionContextSchema.preserveAudit — the published description (#6881)', () => {
+describe('ExecutionContextSchema.preserveAudit — the published description', () => {
   const description = ExecutionContextSchema.shape.preserveAudit.description ?? '';
 
   it('is present and non-empty, so the generated reference row is not blank', () => {
@@ -216,7 +216,7 @@ describe('ExecutionContextSchema.preserveAudit — the published description (#6
 // that lost it once seeded with automation live while the main path had it
 // suppressed, a self-trigger loop that wedged first boot (#3760). So "one flag
 // looks redundant, drop it" is exactly the edit that must go red.
-describe('[#17178] SEED_WRITE_EXECUTION_CONTEXT', () => {
+describe('SEED_WRITE_EXECUTION_CONTEXT — one spelling of the seed posture', () => {
   it('is a valid ExecutionContext — the WHOLE value parses, not merely its key names', () => {
     const parsed = ExecutionContextSchema.safeParse(SEED_WRITE_EXECUTION_CONTEXT);
     expect(parsed.success, JSON.stringify('error' in parsed ? parsed.error : {})).toBe(true);
@@ -230,11 +230,11 @@ describe('[#17178] SEED_WRITE_EXECUTION_CONTEXT', () => {
     ]);
   });
 
-  it('sets `skipTriggers` — `isSystem` alone does NOT suppress trigger dispatch (#3760)', () => {
+  it('sets `skipTriggers` — `isSystem` alone does NOT suppress trigger dispatch', () => {
     expect(SEED_WRITE_EXECUTION_CONTEXT.skipTriggers).toBe(true);
   });
 
-  it('sets `seedReplay` — the state_machine exemption a mid-lifecycle seed row needs (#3433)', () => {
+  it('sets `seedReplay` — the state_machine exemption a mid-lifecycle seed row needs', () => {
     expect(SEED_WRITE_EXECUTION_CONTEXT.seedReplay).toBe(true);
   });
 

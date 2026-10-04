@@ -41,7 +41,7 @@ describe('MetadataPluginProtocol', () => {
       expect(() => MetadataTypeSchema.parse('approval')).toThrow();
     });
 
-    it('should reject `validation` as a metadata type (#4509: rules are inline object.validations[])', () => {
+    it('should reject `validation` as a metadata type (rules are inline object.validations[])', () => {
       // ADR-0088 retirement. A standalone rule had no object-binding key —
       // ValidationRuleSchema carries none and every variant is strict — so an
       // item authored as its own artifact bound to nothing and intercepted no
@@ -243,7 +243,7 @@ describe('MetadataPluginProtocol', () => {
   // compile-time (typeof import is type-level only — no runtime barrel
   // load): if either bare name is re-added here, the conditional type flips
   // to `true` and the `false` assignment fails `tsc --noEmit`.
-  it('does not re-expose the bare MetadataEvent/MetadataBulkRegisterRequest names from ./kernel (#4587)', () => {
+  it('does not re-expose the bare MetadataEvent/MetadataBulkRegisterRequest names from ./kernel', () => {
     type MetadataPluginModule = typeof import('./metadata-plugin.zod');
     const hasEventSchema: 'MetadataEventSchema' extends keyof MetadataPluginModule
       ? true

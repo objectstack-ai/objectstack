@@ -9,7 +9,7 @@
       "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -28,7 +28,7 @@
         "POST /api/v1/batch with the same operations and a TOP-LEVEL atomic: false; capture status + error code. ⛔ Spelled as options {atomic: false} the key is stripped, atomic defaults to true, and the batch simply SUCCEEDS — the clause below then reads as a product failure when nothing failed",
         "POST /api/v1/batch where a MIDDLE operation must fail (e.g. create showcase_invoice missing its required name), sandwiched between two valid creates; capture the per-operation results and re-read all three would-be rows",
         "POST /api/v1/batch with operations.length > maxBatchSize (201 no-op creates on the default config); capture the rejection",
-        "POST /api/v1/data/showcase_private_note/batch (the PER-OBJECT batch door) with a mixed valid/invalid set and NO atomic flag; capture the per-row outcomes"
+        "POST /api/v1/data/showcase_private_note/batch (the PER-OBJECT batch door) with a mixed set [valid, invalid, valid], NO atomic flag and options {continueOnError: true}; capture the per-row outcomes. Then repeat the same set with NO options at all (continueOnError defaults false) and capture the stop: the row before the failure written, the failing row its own error, the tail NOT_ATTEMPTED"
       ],
       "acceptance": [
         {
@@ -56,10 +56,10 @@
           "evidence": "response + count"
         },
         {
-          "clause": "the per-object /data/:object/batch door defaults to NON-atomic per-row outcomes (ADR-0119 D4: atomic defaults false there — the declared-but-unenforced default(true) was the defect): valid rows land, invalid rows report their error, neither blocks the other",
+          "clause": "the per-object /data/:object/batch door defaults to NON-atomic per-row outcomes (ADR-0119 D4: atomic defaults false there — the declared-but-unenforced default(true) was the defect). With options.continueOnError: true valid rows land and invalid rows report their error — neither blocks the other. With the default (continueOnError: false) the first failure ENDS the run: rows before it stay written (nothing rolled back), and every row after it reports errors[0].code NOT_ATTEMPTED rather than being omitted, so succeeded + failed === total (batch.zod.ts continueOnError)",
           "oracle": "api",
-          "verify": "step-6 response has per-row success and error entries; re-reads confirm valid rows persisted",
-          "evidence": "response + re-reads"
+          "verify": "continueOnError:true response has per-row success and error entries and re-reads confirm BOTH valid rows persisted; the default-options response has row 0 success, row 1 its own validation error, row 2 errors[0].code NOT_ATTEMPTED, and re-reads find row 0 persisted and row 2 absent",
+          "evidence": "both responses + re-reads"
         }
       ],
       "negative": [
@@ -93,6 +93,12 @@
           "date": "2026-08-18",
           "change": "corrected three separate wrong shapes, each of which made correct behaviour read as a defect. (a) capabilities.transactionalBatch is a CapabilityDescriptor object on the wire, so the clause's literal == true is always false — only the @objectstack/client getter flattens it to a boolean. (b) Steps 2-3 sent atomic inside an options wrapper; CrossObjectBatchRequestSchema declares a TOP-LEVEL atomic and no options, so Zod strips the wrapper and atomic defaults to true — the atomic:false probe therefore succeeds instead of answering BATCH_NOT_ATOMIC. (c) Clause 3 attached the #4793 per-row codes to the cross-object door, whose response schema is { results, droppedFields? } with no per-row error envelope; those codes live on the per-object door (#9417)",
           "ref": "#9386"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-04",
+          "change": "A5 / step 6 re-pointed: \"neither blocks the other\" holds only with options.continueOnError: true; the default (false) stops at the first failure with a NOT_ATTEMPTED tail and nothing rolled back. The clause now names the flag for the mixed-outcome leg and asserts the default stop as a second leg (batch.zod.ts BatchOptionsSchema.continueOnError and the BatchOperationResult errors describe; protocol.ts continueOnError branch). Assertion defect: the clause expected the mixed outcome from the default. Source 744b8f5f5 (#7581)",
+          "ref": "#21735"
         }
       ]
     },
@@ -166,22 +172,22 @@
       "title": "Removed/retired authoring keys fail at parse/build with located guidance",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "build",
       "steps": [
         "sample retired keys across the ADR-0087 registries, at minimum: a query-surface tombstone (QueryAST cursor / joins / distinct / windowFunctions — retiredKey per #4286), the error-envelope tombstone (EnhancedApiError.fieldErrors, renamed to fields by ADR-0114 D4), and one entry from the retired-filter-operator registry in packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)",
-        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors, author an object using the retired filter operator; run ObjectSchema.create / os build where the key is config-side",
+        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it (e.g. { name: { $regex: 'acme' } } in a view or widget filter) and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the filter-regex-options-retired advisory",
         "capture each rejection's full text",
         "author one key documented as silently-stripped-by-design (a pure display annotation) and parse it — the strip must be deliberate, documented behavior, not an accident",
         "record which registry each sampled key came from"
       ],
       "acceptance": [
         {
-          "clause": "each tombstoned key is REJECTED at parse/build — never silently stripped (the retiredKey mechanism exists precisely because non-strict schemas would otherwise drop the key clean)",
+          "clause": "each tombstoned KEY is REJECTED at parse/build — never silently stripped (the retiredKey mechanism exists precisely because non-strict schemas would otherwise drop the key clean). The retired-filter-operator registry (RETIRED_FILTER_OPERATORS) is the declared exception and is scored on its own terms: a filter is an open record, so a stored $regex / $options parses and builds GREEN; it is refused at RUNTIME with 400 INVALID_FILTER naming the operator RETIRED with its prescription (write $icontains, or $contains), and `os migrate meta` lists it as the semantic advisory filter-regex-options-retired",
           "oracle": "build",
-          "verify": "safeParse fails / os build exits non-zero for every sampled tombstone",
-          "evidence": "the rejections"
+          "verify": "safeParse fails / os build exits non-zero for every sampled tombstoned key; for the retired filter operator: parse/build green, the runtime query answers 400 code INVALID_FILTER whose message says the operator is RETIRED — with the operator, field and the RETIRED_FILTER_OPERATORS prescription on a caller-authored where (a predicate whose provenance cannot be vouched gets the withheld sentence and the full diagnostic in the server log, sql-driver.ts retiredFilterOperatorError / withheldFilterError) — and the migrate-meta output lists filter-regex-options-retired among the manual changes. A build-time rejection of a stored $regex is NOT the expected shape",
+          "evidence": "the rejections, plus for the filter operator the green parse/build, the runtime 400 body and the migrate-meta advisory line"
         },
         {
           "clause": "every rejection carries LOCATED guidance naming the replacement: cursor → keyset where-predicate on the sort key, joins → expand, fieldErrors → fields (ADR-0114 D4 #3977), retired filter operator → its registry-declared successor",
@@ -226,15 +232,21 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-04",
+          "change": "A1 / step 2 re-pointed: the retired-filter-operator registry is not a parse/build gate — FilterConditionSchema is an open record, so a stored $regex / $options parses and builds green; it is refused at runtime with 400 INVALID_FILTER and the RETIRED_FILTER_OPERATORS prescription, and `os migrate meta` lists it (semantic entry filter-regex-options-retired). The clause now scores that registry on those terms. Assertion defect. Source filter.zod.ts RETIRED_FILTER_OPERATORS, 85d95e7d92 (#5701 / #5752)",
+          "ref": "#21735"
         }
       ]
     },
     {
       "id": "api-backend.server-timing-admin-gated",
-      "title": "Server-Timing spans emit for admins only — on the server os dev actually runs",
+      "title": "Server-Timing: the per-request X-OS-Debug-Timing path discloses spans to admins only, OS_SERVER_TIMING global mode to everyone, per-query detail admin-only always — on the server os dev actually runs",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -242,29 +254,29 @@
         "non-admin member"
       ],
       "steps": [
-        "start the REAL dev server (os dev) with OS_SERVER_TIMING enabled — never a simulated dispatch; the #3361 regression lived exactly in the dispatcher-vs-hono seam while unit tests stayed green",
-        "as admin: GET /api/v1/data/showcase_task with the X-OS-Debug-Timing request header; dump all response headers",
+        "start the REAL dev server (os dev) WITHOUT OS_SERVER_TIMING / OS_PERF_TIMING (global mode off — the per-request, admin-gated path is the default) — never a simulated dispatch; the #3361 regression lived exactly in the dispatcher-vs-hono seam while unit tests stayed green",
+        "as admin: GET /api/v1/data/showcase_task with the request header X-OS-Debug-Timing: 1; dump all response headers",
         "as the non-admin member: the identical request; dump headers",
-        "restart the server WITHOUT OS_SERVER_TIMING and repeat the admin request",
-        "capture the three header dumps"
+        "restart the server WITH OS_SERVER_TIMING=true (global mode) and send GET /api/v1/data/showcase_task with X-OS-Debug-Timing: json as the non-admin member AND as admin; dump both",
+        "capture the four header dumps"
       ],
       "acceptance": [
         {
-          "clause": "admin responses carry the Server-Timing spans (auth/db/hooks/serialize) on the live hono server",
+          "clause": "with global mode OFF, the per-request path discloses to an admin: the admin request carrying X-OS-Debug-Timing carries the Server-Timing spans (total/auth/db/hooks/serialize) on the live hono server — the dispatcher opens the disclosure gate only after resolving an admin/service identity",
           "oracle": "network",
           "verify": "step-2 response has a Server-Timing header naming the span set",
           "evidence": "header dump"
         },
         {
-          "clause": "non-admin responses carry NO spans — the gate keys on the caller's privilege, and the payload of the response is otherwise identical (timing must not leak through a side door)",
+          "clause": "with global mode OFF, the non-admin request carrying the same X-OS-Debug-Timing header gets NO spans — the per-request gate keys on the caller's privilege, and the payload of the response is otherwise identical (timing must not leak through a side door)",
           "oracle": "network",
           "verify": "step-3 response lacks Server-Timing entirely",
           "evidence": "header dump"
         },
         {
-          "clause": "with the env flag off, even the admin gets no spans — the opt-in is the second gate, both sides verified",
+          "clause": "OS_SERVER_TIMING=true is GLOBAL mode and opens the gate up front: EVERY caller, the non-admin member included, gets the Server-Timing spans — while the X-OS-Debug-Timing-Detail header (per-query SQL shapes, requested by X-OS-Debug-Timing: json) is returned to the admin ONLY, never to the non-admin even in global mode",
           "oracle": "network",
-          "verify": "step-4 response lacks Server-Timing",
+          "verify": "step-4 non-admin response HAS Server-Timing and LACKS X-OS-Debug-Timing-Detail; step-4 admin response has both (hono-plugin.ts serverTiming middleware: globalTiming → gate.allowed; detail only when gate.privileged)",
           "evidence": "header dump"
         },
         {
@@ -275,7 +287,7 @@
         }
       ],
       "negative": [
-        "a run that only checks the admin side is at best partial: the non-admin absence is the security half of the item, and it must be measured on the same live server in the same run"
+        "a run that only checks the admin side is at best partial: the non-admin absence in per-request mode, and the non-admin detail absence in global mode, are the security half of the item, and both must be measured on the same live server build in the same run. Spans reaching a non-admin under OS_SERVER_TIMING=true are the DECLARED global mode, not a leak"
       ],
       "traps": [
         "dispatcher-vs-hono-route",
@@ -283,7 +295,8 @@
       ],
       "source": [
         "#3358 §9",
-        "#3361"
+        "#3361",
+        "packages/plugins/plugin-hono-server/src/hono-plugin.ts#serverTiming (GLOBAL vs PER-REQUEST disclosure modes; X-OS-Debug-Timing-Detail admin-only)"
       ],
       "history": [
         {
@@ -297,6 +310,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-04",
+          "change": "A1-A3 and steps 1/4 re-pointed: the modes were swapped. With OS_SERVER_TIMING off, X-OS-Debug-Timing is the admin-only per-request gate (admin gets spans, non-admin none); OS_SERVER_TIMING=true is global mode and sends spans to EVERY caller, with only X-OS-Debug-Timing-Detail admin-only (hono-plugin.ts: the serverTiming option doc and the Server-Timing middleware's globalTiming / gate.privileged branches). Title and negative follow; source cites the file. Assertion defect: the clause expected the env flag to be a second admin gate. Source #3163 / #3169",
+          "ref": "#21735"
         }
       ]
     },

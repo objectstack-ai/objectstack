@@ -43,7 +43,7 @@ import {
 // plus the D3 semantic entry `startup-orchestrator-retired` ARE the
 // declaration. Form follows #11825 / commit 2c86fe3ea / #4988: resolved symbol identity
 // over every public entry via the build-time `export-origins/` artifact.
-describe('[#16059] startup orchestrator retirement', () => {
+describe('startup orchestrator retirement', () => {
   /** The 8 names the retired defs and the retired interface exported. */
   const RETIRED_NAMES = [
     'StartupOptionsSchema',
@@ -82,7 +82,7 @@ describe('[#16059] startup orchestrator retirement', () => {
 
     // ── ABSENCE (every entry, not just the two that declared them) ─────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #16059`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ describe('[#16059] startup orchestrator retirement', () => {
       'HealthStatusSchema',
       'StartupOrchestrationResultSchema',
     ]) {
-      expect(kernel, `${name} must not be exported after #16059`).not.toHaveProperty(name);
+      expect(kernel, `${name} must not be exported after its retirement`).not.toHaveProperty(name);
     }
     // Anti-vacuity: the barrel really resolved, and the kept contract stands.
     expect(kernel).toHaveProperty('PluginStartupResultSchema');

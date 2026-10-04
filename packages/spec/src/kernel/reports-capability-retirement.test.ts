@@ -45,7 +45,7 @@ function refusalOf(requires: string[]): { code?: string; status?: number; messag
   throw new Error(`defineStack accepted requires: ${JSON.stringify(requires)}`);
 }
 
-describe('[#20102] the `reports` capability token is retired', () => {
+describe('the `reports` capability token is retired', () => {
   it('is gone from the vocabulary and from the provider map', () => {
     expect(PLATFORM_CAPABILITY_TOKENS).not.toContain('reports');
     expect(isKnownPlatformCapability('reports')).toBe(false);

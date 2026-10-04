@@ -42,7 +42,7 @@ const baseManifest = {
   sandbox: {},
 } as const;
 
-describe('[#15932] plugin-security scan-result retirement', () => {
+describe('plugin-security scan-result retirement', () => {
   it('REJECTS an authored `scanResults` array, naming the key and carrying the fix', () => {
     const result = PluginSecurityManifestSchema.safeParse({
       ...baseManifest,
@@ -120,7 +120,7 @@ describe('[#15932] plugin-security scan-result retirement', () => {
   it('does not export the retired scan-result defs from ./kernel', async () => {
     const kernel = await import('./index');
     for (const name of ['KernelSecurityScanResultSchema', 'KernelSecurityVulnerabilitySchema']) {
-      expect(kernel, `${name} must not be exported after #15932`).not.toHaveProperty(name);
+      expect(kernel, `${name} must not be exported after its retirement`).not.toHaveProperty(name);
     }
 
     // Anti-vacuity: this pin means nothing unless the barrel really resolved and
