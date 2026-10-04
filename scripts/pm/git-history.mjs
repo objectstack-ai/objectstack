@@ -187,12 +187,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'pure decisions': 10,
   'real repos': 15,
   'historyHorizon: the read-only reading the #9902 adopters call': 12,
+  'bare dates: the instant the proof reads is the instant git counts': 16,
   'touch: the provenance reading a shallow clone fabricates': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -944,7 +945,10 @@ function selfTest() {
   // additionally leaves 12 h — half the fixture's daily cadence, the widest gap
   // available — between it and the nearest commit stamp. `collect-release-notes.sh
   // --self-test`, which runs over an identical fixture in the same `lint.yml`
-  // step, has always spelled its window this way.
+  // step, has always spelled its window this way. The CLI now normalises a bare
+  // date itself (`windowInstant()`), but the BASELINE below hands these edges to
+  // raw git, which still approxidates; the 'bare dates' battery pins the
+  // normalisation at two injected clocks.
   battery('real repos');
   const FIXTURE_EPOCH = '2026-06-01T12:00:00Z';
   const FIXTURE_COMMITS = 40;
@@ -1101,6 +1105,118 @@ function selfTest() {
     const ens = runCliAllowFail(['ensure', `--since=${NARROW_SINCE}`], shallowDeep);
     t('ensure proves coverage and prints no number', ens.code === 0 && ens.stdout.trim() === '',
       JSON.stringify(ens));
+
+    // ── bare dates: the instant the proof reads is the instant git counts ───
+    // The fourth trap in the header. git reads a bare YYYY-MM-DD at the CURRENT
+    // time of day; the proof reads it as that day's 00:00:00Z. So both clocks
+    // here are INJECTED, through git's own `GIT_TEST_DATE_NOW` (epoch seconds,
+    // the clock its approxidate consults), and every pin is taken at a morning
+    // AND an evening: a pin read at one wall-clock hour is the shape that kept
+    // this battery's predecessor green before noon and red after it. `TZ` is
+    // pinned as well, because git approxidates a bare date in LOCAL time and
+    // each BASELINE has to form the same way on every runner. The BASELINEs
+    // come first and prove the injected clock reaches git, so a pin that holds
+    // below holds because the tool normalised, not because the clock was ignored.
+    battery('bare dates: the instant the proof reads is the instant git counts');
+    const BARE_SINCE = WINDOW_SINCE.slice(0, 10); // 2026-06-20; c19 landed that day at 12:00Z
+    const BARE_NARROW = NARROW_SINCE.slice(0, 10); // 2026-07-08; c37 landed that day at 12:00Z
+    const BARE_UNTIL = '2026-07-10'; // c39, the fixture's last commit, landed that day at 12:00Z
+    const MORNING = '2026-07-15T06:00:00Z';
+    const EVENING = '2026-07-15T18:00:00Z';
+    const clockEnv = (nowIso) => ({
+      ...process.env,
+      TZ: 'UTC',
+      GIT_TEST_DATE_NOW: String(Math.floor(Date.parse(nowIso) / 1000)),
+    });
+    const runCliAt = (nowIso, args, cwd) => {
+      const r = spawnSync(process.execPath, [self, ...args, `--cwd=${cwd}`], {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: clockEnv(nowIso),
+      });
+      return { stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), code: r.status };
+    };
+    const rawCountAt = (nowIso, windowFlags, cwd) => execFileSync(
+      'git', ['rev-list', '--count', '--first-parent', ...windowFlags, 'origin/main'],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: clockEnv(nowIso) },
+    ).trim();
+
+    t('windowInstant reads a bare date as that day\'s 00:00:00Z — the instant Date.parse already gave the proof',
+      windowInstant(BARE_SINCE) === WINDOW_SINCE, String(windowInstant(BARE_SINCE)));
+    t('windowInstant hands every complete-instant edge of the battery above back BYTE-IDENTICAL, so those '
+      + 'windows reach git exactly as they did before normalising existed',
+      [WINDOW_SINCE, WINDOW_UNTIL, NARROW_SINCE].every((e) => windowInstant(e) === e),
+      JSON.stringify([WINDOW_SINCE, WINDOW_UNTIL, NARROW_SINCE].map(windowInstant)));
+    t('an offset is restated in Z and milliseconds survive (the --days shape), so the instant never moves',
+      windowInstant('2026-06-20T08:00:00+08:00') === WINDOW_SINCE
+        && windowInstant('2026-06-20T00:00:00.250Z') === '2026-06-20T00:00:00.250Z');
+    t('a spelling Date.parse cannot place is null, never guessed — resolveSince refuses it as usage, as before',
+      windowInstant('30 days ago') === null);
+
+    const rawMorning = rawCountAt(MORNING, [`--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    const rawEvening = rawCountAt(EVENING, [`--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    t('BASELINE — raw git counts the bare --since window as 21 at 06:00Z and 20 at 18:00Z: the injected clock '
+      + 'reaches its approxidate, and the day\'s 12:00Z commit falls out after noon (the defect, reproduced)',
+      rawMorning === '21' && rawEvening === '20', `morning ${rawMorning} evening ${rawEvening}`);
+    const rawUntilMorning = rawCountAt(MORNING, [`--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    const rawUntilEvening = rawCountAt(EVENING, [`--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    t('BASELINE — raw git counts the bare --until window the other way round, 20 at 06:00Z and 21 at 18:00Z',
+      rawUntilMorning === '20' && rawUntilEvening === '21', `morning ${rawUntilMorning} evening ${rawUntilEvening}`);
+    const rawSlashEvening = rawCountAt(EVENING, ['--since=2026/06/20', `--until=${WINDOW_UNTIL}`], full);
+    t('BASELINE — the bare date is one spelling of the trap, not the trap: raw git reads `2026/06/20` at '
+      + '18:00Z as well, and answers 20',
+      rawSlashEvening === '20', `evening ${rawSlashEvening}`);
+
+    const bareMorning = runCliAt(MORNING, ['count', `--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    const bareEvening = runCliAt(EVENING, ['count', `--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    const explicitEvening = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
+    t('the tool answers the bare --since window with 21 at 06:00Z AND at 18:00Z — the explicit-instant answer, '
+      + 'whatever the time of day',
+      bareMorning.code === 0 && bareEvening.code === 0 && bareMorning.stdout.trim() === '21'
+        && bareEvening.stdout.trim() === '21' && explicitEvening.stdout.trim() === '21',
+      JSON.stringify({ bareMorning, bareEvening, explicitEvening }));
+    t('and its receipt names the instant git counted from, not the bare date it was given',
+      bareEvening.stderr.includes(` since ${WINDOW_SINCE} until ${WINDOW_UNTIL} · `)
+        && !bareEvening.stderr.includes(` since ${BARE_SINCE} `), bareEvening.stderr);
+
+    const untilMorning = runCliAt(MORNING, ['count', `--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    const untilEvening = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}`], full);
+    const untilExplicit = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, `--until=${BARE_UNTIL}T00:00:00Z`], full);
+    t('a bare --until is that day\'s 00:00:00Z too: 20 at both hours, the explicit-instant answer',
+      untilMorning.stdout.trim() === '20' && untilEvening.stdout.trim() === '20' && untilExplicit.stdout.trim() === '20',
+      JSON.stringify({ untilMorning, untilEvening, untilExplicit }));
+    t('and the receipt names that instant as the until edge',
+      untilEvening.stderr.includes(` until ${BARE_UNTIL}T00:00:00Z · `), untilEvening.stderr);
+
+    const slashEvening = runCliAt(EVENING, ['count', '--since=2026/06/20', `--until=${WINDOW_UNTIL}`], full);
+    t('every spelling Date.parse places is normalised the same way: `2026/06/20` answers 21 at 18:00Z and its '
+      + 'receipt names 2026-06-20T00:00:00Z',
+      slashEvening.code === 0 && slashEvening.stdout.trim() === '21'
+        && slashEvening.stderr.includes(` since ${WINDOW_SINCE} `), JSON.stringify(slashEvening));
+
+    const shallowEvening = runCliAt(EVENING, ['count', `--since=${BARE_NARROW}`, `--until=${WINDOW_UNTIL}`, '--no-fetch'], shallowDeep);
+    const rawShallowEvening = rawCountAt(EVENING, [`--since=${BARE_NARROW}`, `--until=${WINDOW_UNTIL}`], shallowDeep);
+    t('the filing card\'s shape — a shallow clone whose floor predates the window, asked after noon — answers 3 '
+      + 'without fetching, the complete-instant answer of the battery above, where the raw bare date counts 2',
+      shallowEvening.code === 0 && shallowEvening.stdout.trim() === narrow.stdout.trim()
+        && shallowEvening.stdout.trim() === '3' && /no fetch/.test(shallowEvening.stderr) && rawShallowEvening === '2',
+      JSON.stringify({ shallowEvening, rawShallowEvening }));
+
+    const logEvening = runCliAt(EVENING, ['log', `--since=${BARE_SINCE}`, `--until=${WINDOW_UNTIL}`, '--format=%H'], full);
+    t('`log` reads the same normalised window as `count`: 21 lines at 18:00Z',
+      logEvening.code === 0 && logEvening.stdout.trim().split('\n').length === 21, JSON.stringify(logEvening));
+
+    const refusedEvening = runCliAt(EVENING, ['count', `--since=${BARE_SINCE}`, '--no-fetch'], shallowDeep);
+    t('a refusal names the instant too, with exit 2 and EMPTY stdout',
+      refusedEvening.code === 2 && refusedEvening.stdout.trim() === ''
+        && refusedEvening.stderr.includes(`window: since ${WINDOW_SINCE}`), JSON.stringify(refusedEvening));
+
+    const untilNow = runCliAt(EVENING, ['count', `--since=${WINDOW_SINCE}`, '--until=now'], full);
+    t('an --until Date.parse cannot place still reaches git as given, and the receipt prints it as given — '
+      + 'normalising added no refusal',
+      untilNow.code === 0 && untilNow.stdout.trim() === '21' && untilNow.stderr.includes(' until now · '),
+      JSON.stringify(untilNow));
 
     // ── touch: the provenance reading a shallow clone fabricates ────────────
     // The fixture's `charter.md` was last touched at c2; every shallow clone
