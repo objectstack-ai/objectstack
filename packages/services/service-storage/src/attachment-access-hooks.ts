@@ -1,7 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 
 import type {
   AttachmentLifecycleEngine,
@@ -39,6 +41,10 @@ import type {
  *    write verbs). This is the rule the derived sys_comment kit
  *    (`comment-access-hooks.ts`) has carried on update since #4630; the
  *    source kit was missing the limb its derivative copied.
+ *  - Both write verbs refuse a caller who cannot READ the parent with the
+ *    platform's not-visible refusal instead of the named one (#21755) — see
+ *    {@link refuseNotVisible}. The named refusals below are what a caller who
+ *    can read the parent, but may not edit it, receives.
  *  - beforeDelete: the caller must be the uploader OR hold edit on the
  *    parent record (sharing service's `canEdit`; public-model parents are
  *    editable by design). Fail-closed 403 `ATTACHMENT_DELETE_DENIED`; a
@@ -92,6 +98,125 @@ function forbid(code: string, message: string, object?: string): never {
   err.status = 403;
   if (object) err.object = object;
   throw err;
+}
+
+/**
+ * The code of the platform's not-visible refusal: the one plugin-security's
+ * by-id write pre-image check throws when the caller's own read visibility
+ * does not reach the target row (`PermissionDeniedError`, 403).
+ */
+const NOT_VISIBLE_CODE: StandardErrorCode = 'PERMISSION_DENIED';
+const NOT_VISIBLE_STATUS = 403;
+
+/**
+ * [#21755] Refuse a write on an attachment whose parent the caller cannot
+ * READ — with the platform's not-visible refusal, never the gate's named one.
+ *
+ * The named refusals ({@link forbid} with `ATTACHMENT_DELETE_DENIED` /
+ * {@link UPDATE_DENY_CODE}) name the parent record (`object/id`) in the
+ * message and its object on the envelope. That is honest to a caller who can
+ * read the parent and may not edit it; to a caller who cannot read it, it is a
+ * disclosure across the read boundary — the read door answers that same caller
+ * "not found" for the attachment, because an attachment's visibility IS its
+ * parent's ({@link installAttachmentReadVisibility}). The by-id write pre-image
+ * check already refuses such a write before this gate runs for every principal
+ * its row filter binds; this is the same answer for the principals it does not
+ * bind, so the gate never becomes the door that names what the read door hides.
+ *
+ * The same answer, not a lookalike: the sentence is rendered by the shared
+ * Operation Message Catalog under the pre-image check's own key
+ * (`record_access_denied`, which names nothing), through the same
+ * locale/override ladder, and the envelope carries the pre-image check's code
+ * and status. Nothing about the parent rides on it — no `object` (the doors
+ * fill the ROUTE's object, exactly as for the pre-image check), no `details`,
+ * no `developerMessage`. The operator's half is logged by the caller instead.
+ *
+ * Who may write does not change: this replaces the refusal a caller was
+ * already getting, on exactly the rows that were already refused.
+ */
+function refuseNotVisible(
+  callerCtx: ExecutionContext,
+  messageTranslator: (() => ValidationMessageTranslator | undefined) | undefined,
+): never {
+  let translate: ValidationMessageTranslator | undefined;
+  try {
+    translate = messageTranslator?.();
+  } catch {
+    // i18n is optional and late-bound; the built-in catalog still renders the
+    // caller's locale without it.
+    translate = undefined;
+  }
+  const locale = typeof callerCtx?.locale === 'string' ? callerCtx.locale : undefined;
+  const err: any = new Error(renderOperationMessage({ messageKey: 'record_access_denied' }, { locale, translate }));
+  err.name = 'PermissionDeniedError';
+  err.code = NOT_VISIBLE_CODE;
+  err.status = NOT_VISIBLE_STATUS;
+  err.statusCode = NOT_VISIBLE_STATUS;
+  throw err;
+}
+
+/**
+ * The parent an attachment row names, or `null` when it names none a caller
+ * could read — the ONE rule both the read-visibility middleware (which skips
+ * such rows, so nobody reads them) and the write gate's not-visible check use.
+ * `sys_attachment` itself is never a valid files-enabled target, and probing
+ * it would re-enter this module's own middleware.
+ */
+function attachmentParentOf(row: Record<string, unknown>): { object: string; id: string } | null {
+  const po = row.parent_object;
+  const pid = row.parent_id;
+  if (typeof po !== 'string' || !po || po === 'sys_attachment') return null;
+  if (pid === undefined || pid === null || pid === '') return null;
+  return { object: po, id: String(pid) };
+}
+
+/**
+ * Which of these parent records can the CALLER read? Answered per parent
+ * object by ONE caller-scoped engine read of the candidate ids, so the parent
+ * object's own OWD/sharing, RLS and object-level CRUD decide.
+ *
+ * This is the one answer both halves of this module ask: the read-visibility
+ * middleware (which attachments a read may return) and the write gate's
+ * not-visible check (#21755). One evaluator, so an attachment can never be
+ * hidden by the read door and named by the write door.
+ *
+ * An object whose read throws (unknown to the engine, refused, driver fault)
+ * contributes no visible id — fail closed.
+ *
+ * [#7145] The caller's envelope, minus the operation-private keys: this probe
+ * reads a DIFFERENT object than the one the middleware resolved its depth for,
+ * and `__readScope` / `__expandRead` are widening inputs that would arrive
+ * attached to the wrong question (the security middleware re-stamps the depth
+ * for THIS object when it resolves any set, so the only thing dropping them can
+ * do is leave the owner-match at its narrowest — the safe direction). Same rule
+ * as `callerContext` below, and the same half of #7141 / PR #7143 the comment
+ * kit already carries.
+ */
+async function resolveReadableParentIds(
+  engine: Pick<AttachmentLifecycleEngine, 'find'>,
+  callerContext: Record<string, unknown> | undefined,
+  idsByObject: ReadonlyMap<string, ReadonlySet<string>>,
+): Promise<Map<string, Set<string>>> {
+  const callerEnvelope = withoutOperationPrivateKeys((callerContext ?? {}) as Record<string, unknown>);
+  const visibleByObject = new Map<string, Set<string>>();
+  for (const [parentObject, idSet] of idsByObject) {
+    const ids = [...idSet];
+    let visible: string[] = [];
+    try {
+      const rows = await engine.find(parentObject, {
+        where: { id: { $in: ids } },
+        fields: ['id'],
+        limit: ids.length,
+        context: { ...callerEnvelope },
+      });
+      visible = rows.map((r) => String(r.id)).filter(Boolean);
+    } catch {
+      // Unknown/failing parent object → none visible (fail closed).
+      visible = [];
+    }
+    visibleByObject.set(parentObject, new Set(visible));
+  }
+  return visibleByObject;
 }
 
 function asIdList(id: unknown): Array<string | number> | null {
@@ -177,10 +302,20 @@ function callerContext(ctx: any): ExecutionContext {
   return { userId: s.userId, tenantId: s.organizationId, positions: s.positions };
 }
 
+/**
+ * Install the write-side gates on `sys_attachment` (insert / update / delete).
+ *
+ * `messageTranslator` resolves the deployment's i18n lookup for the
+ * not-visible refusal's sentence ({@link refuseNotVisible}) — lazily, per
+ * refusal, because the i18n service is contributed by another plugin that may
+ * start after this one. Absent, the built-in catalog still renders the
+ * caller's locale.
+ */
 export function installAttachmentAccessHooks(
   engine: AttachmentLifecycleEngine,
   getSharing: () => AttachmentSharingLike | null | undefined,
   logger: AttachmentLifecycleLogger,
+  messageTranslator?: () => ValidationMessageTranslator | undefined,
 ): void {
   /** Resolve every sys_attachment row a write matches, under SYSTEM context
    * — the caller may legitimately be unable to READ rows they are allowed to
@@ -259,6 +394,8 @@ export function installAttachmentAccessHooks(
     const sharing = getSharing();
     const callerCtx = callerContext(ctx);
     const canEditCache = new Map<string, boolean>();
+    /** Parent READ verdicts, asked only for a row about to be refused. */
+    const canReadCache = new Map<string, boolean>();
     for (const row of rows) {
       if (userId && row.uploaded_by === userId) continue; // the uploader governs their own attachment
 
@@ -284,11 +421,32 @@ export function installAttachmentAccessHooks(
         canEditCache.set(cacheKey, allowed);
       }
       if (!allowed) {
-        forbid(
-          denyCode,
-          `Cannot ${verb} attachment ${row.id}: only the uploader or a user who can edit the parent record (${parentObject}/${parentId}) may ${verb} it`,
-          parentObject,
-        );
+        // [#21755] The named refusal below names the parent. It is only for a
+        // caller who can READ that parent; one who cannot gets the platform's
+        // not-visible refusal, decided by the same evaluator the read door
+        // uses (so the write door never names what the read door hides).
+        const parent = attachmentParentOf(row);
+        let canRead = canReadCache.get(cacheKey);
+        if (canRead === undefined) {
+          canRead = parent
+            ? !!(await resolveReadableParentIds(engine, callerCtx, new Map([[parent.object, new Set([parent.id])]])))
+                .get(parent.object)
+                ?.has(parent.id)
+            : false;
+          canReadCache.set(cacheKey, canRead);
+        }
+        const namedMessage = `Cannot ${verb} attachment ${row.id}: only the uploader or a user who can edit the parent record (${parentObject}/${parentId}) may ${verb} it`;
+        if (!canRead) {
+          // The operator's half stays server-side, where the parent may be named.
+          logger.warn(`[storage] attachment access: ${namedMessage} (the caller cannot read the parent; answered not-visible)`, {
+            operation: verb,
+            object: 'sys_attachment',
+            recordId: row.id,
+            userId: userId ?? 'unknown',
+          });
+          refuseNotVisible(callerCtx, messageTranslator);
+        }
+        forbid(denyCode, namedMessage, parentObject);
       }
     }
   };
@@ -573,49 +731,29 @@ async function computeParentVisibilityFilter(
 
   const byObject = new Map<string, Set<string>>();
   for (const row of candidates) {
-    const po = row.parent_object;
-    const pid = row.parent_id;
-    // Skip self-referential rows (no valid files-enabled target is
-    // sys_attachment) — also prevents caller-scoped re-entry into this
-    // middleware during the visibility probe below.
-    if (typeof po !== 'string' || !po || po === 'sys_attachment') continue;
-    if (pid === undefined || pid === null || pid === '') continue;
-    let ids = byObject.get(po);
-    if (!ids) byObject.set(po, (ids = new Set()));
-    ids.add(String(pid));
+    // Skip rows that name no readable parent — self-referential rows included
+    // (no valid files-enabled target is sys_attachment), which also prevents
+    // caller-scoped re-entry into this middleware during the probe below.
+    const parent = attachmentParentOf(row);
+    if (!parent) continue;
+    let ids = byObject.get(parent.object);
+    if (!ids) byObject.set(parent.object, (ids = new Set()));
+    ids.add(parent.id);
   }
   if (byObject.size === 0) return READ_DENY_ALL;
 
   // 2. Per parent_object, the visible id subset via the CALLER's context —
-  //    the parent object's own RLS/OWD/sharing applies.
-  //
-  //    [#7145] The caller's envelope, minus the operation-private keys: this
-  //    probe reads a DIFFERENT object than the one the middleware resolved its
-  //    depth for, and `__readScope` / `__expandRead` are widening inputs that
-  //    would arrive attached to the wrong question (the security middleware
-  //    re-stamps the depth for THIS object when it resolves any set, so the
-  //    only thing dropping them can do is leave the owner-match at its
-  //    narrowest — the safe direction). Same rule as `callerContext` above,
-  //    and the same half of #7141 / PR #7143 the comment kit already carries.
-  const callerEnvelope = withoutOperationPrivateKeys(
-    (ctx.context ?? {}) as Record<string, unknown>,
+  //    the parent object's own RLS/OWD/sharing applies. The write gate's
+  //    not-visible check asks the same evaluator (#21755); the envelope rule
+  //    (#7145) lives on it.
+  const visibleByObject = await resolveReadableParentIds(
+    engine,
+    ctx.context as Record<string, unknown> | undefined,
+    byObject,
   );
   const clauses: Array<Record<string, unknown>> = [];
-  for (const [parentObject, idSet] of byObject) {
-    const ids = [...idSet];
-    let visible: string[] = [];
-    try {
-      const rows = await engine.find(parentObject, {
-        where: { id: { $in: ids } },
-        fields: ['id'],
-        limit: ids.length,
-        context: { ...callerEnvelope },
-      });
-      visible = rows.map((r) => String(r.id)).filter(Boolean);
-    } catch {
-      // Unknown/failing parent object → none visible (fail closed).
-      visible = [];
-    }
+  for (const parentObject of byObject.keys()) {
+    const visible = [...(visibleByObject.get(parentObject) ?? [])];
     if (visible.length) {
       clauses.push({ parent_object: parentObject, parent_id: { $in: visible } });
     }

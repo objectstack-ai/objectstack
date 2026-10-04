@@ -21,8 +21,8 @@
  *   is no longer `z.unknown()` fails, so typing a member deletes its line and
  *   the ledger cannot outlive the debt it records.
  * - §2 EACH REASON IS CHECKED AGAINST THE SCHEMA, where it can be: a slot is a
- *   declared slot position, and a runner-forwarded member says so in its own
- *   `.describe()`.
+ *   declared slot position, and a runner-forwarded member and a member held
+ *   opaque each say so in their own `.describe()`.
  * - §3 THE WALK CAN FAIL: it finds a `z.unknown()` in every position it claims
  *   to walk, so a green §1 is not a walk that saw nothing.
  * - §4 THE MEMBERS THIS CARD TYPES: `navigation` on `object-map`,
@@ -32,6 +32,8 @@
  * - §5 THE HOLD THIS FILE RECORDED, EXITED: `object-kanban`
  *   `conditionalFormatting` is the list view's own member, by identity, the
  *   same way (the S-kanban-cf stage).
+ * - §6 THE CLOSE-OUT: no stage is declared and no line is `staged` — the last
+ *   three forks are typed (the S-final stage), with a firing control.
  *
  * Later stages pin the members they type in their own file, beside this one:
  * the list family (`object-grid` `columns` / `fields` / `selection` /
@@ -47,31 +49,48 @@
  * contracts the last stage could type (`object-gantt` `markers`,
  * `object-timeline` `mapping`, and the field-name `fields` of `object-form`
  * and `object-master-detail-form`) in
- * `component-objectui-held-typed-members.pin.test.ts`; the rest of them are
- * held below as forks — the drill-down's `report`, the timeline's `items` and
- * the action containers' members. Two of that stage's forks were ruled and
- * typed in the S-forms stage — the form's `customFields` and both forms'
- * `sections` — and are pinned in
- * `component-form-custom-fields-sections-typed.pin.test.ts`; the predicate ASTs
- * and the roll-up filter inside them are lines here. The one member this ledger held for a ruling,
+ * `component-objectui-held-typed-members.pin.test.ts`; that stage held the
+ * other five as forks, and the maintainer ruled all five. Two were typed in
+ * the S-forms stage — the form's `customFields` and both forms' `sections` —
+ * and are pinned in `component-form-custom-fields-sections-typed.pin.test.ts`;
+ * the last three in the S-final stage — the drill-down's `report`, the
+ * timeline's `items` and the action containers' members — and are pinned in
+ * `component-report-items-action-members-typed.pin.test.ts`. The predicate
+ * ASTs, the runner-forwarded members, the filters and the timeline entry's
+ * opaque `content` inside those shapes are lines here, each with its reason.
+ * The one member this ledger held for a ruling,
  * `object-kanban` `conditionalFormatting`, exited its hold once objectui's
  * kanban declared the list view's rule as its only dialect, and is pinned
  * in §5 below, where its hold was recorded.
  *
- * ## The STAGED reason is debt, not a verdict
+ * ## The STAGED reason is debt, not a verdict — and the debt is paid
  *
- * A `staged` member IS read with a fixed shape at the `.objectui-sha` pin; its
- * reader is cited on its line. Typing it is the next stage of #21464's
+ * A `staged` member WAS read with a fixed shape at the `.objectui-sha` pin, its
+ * reader cited on its line, and typing it was a later stage of #21464's
  * close-out (the census found more than one reviewable PR's worth), each stage
- * preceded by its own census of authored writers. The ledger may only lose
- * `staged` lines: a stage that types a member deletes its line here (§1's
+ * preceded by its own census of authored writers. The ledger could only lose
+ * `staged` lines: a stage that typed a member deleted its line here (§1's
  * second half enforces that), and ⛔ a NEW renderer-read member is typed, never
  * added as `staged`.
  *
- * A `fork` line is a member the stage that owned it measured and did NOT type
- * under the stop valve: its contract has two or more viable shapes that no
- * ruling decides. The line names the shapes (§2 checks there are at least
- * two), and the fork is on the card with its census, for a ruling.
+ * A `fork` line was a member the stage that owned it measured and did NOT type
+ * under the stop valve: its contract had two or more viable shapes that no
+ * ruling decided, so the line named the shapes (§2 checked there were at least
+ * two) and the fork went to the card with its census. All five were ruled
+ * (decision card #21704), and the S-final stage typed the last three.
+ *
+ * So {@link STAGES} is EMPTY, and §6 pins that: no member across the map is
+ * staged. The machinery stays, so a line that tried to come back as `staged`
+ * would have no stage to name and could not compile.
+ *
+ * ## The OPAQUE reason
+ *
+ * An `opaque` member is read with a fixed shape, and a RULING keeps it
+ * unjudged on its row until a writer appears — the timeline feed entry's
+ * `content` (child schema nodes), which the ruling on #21704's fork 4 holds
+ * opaque rather than making it a slot position the page walks visit. The line
+ * names the ruling record, and the member says so in its own `.describe()`
+ * (§2).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -149,9 +168,7 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  * Each stage runs its own census of authored writers first; a narrowing that
  * would refuse a measured writer is reported, not shipped.
  */
-const STAGES = {
-  'fork': 'element contracts whose declaration is still objectui\'s (the timeline items, and `UIActionSchema` — an objectui interface that borrows some members from the spec `Action`) and the metric drill-down\'s `report`: the S-objectui-held stage, the last of #21464, measured each and found two or more viable spec shapes that no ruling decides, so under the stop valve each is held and its fork reported on the card with its census; the member is typed once a ruling picks a shape (the runtime form field and the form sections were ruled, and typed in the S-forms stage)',
-} as const;
+const STAGES = {} as const satisfies Record<string, string>;
 type Stage = keyof typeof STAGES;
 
 type Reason =
@@ -167,6 +184,12 @@ type Reason =
   | { readonly kind: 'any-value'; readonly why: string }
   /** A deliberately open bag: the declared members are typed, the rest pass through. */
   | { readonly kind: 'open-bag'; readonly why: string }
+  /**
+   * Read with a fixed shape, and held unjudged on its row by a ruling until a
+   * writer appears (`ruling` names the record); checked: the member's own
+   * `.describe()` says it is held opaque.
+   */
+  | { readonly kind: 'opaque'; readonly ruling: string; readonly why: string }
   /**
    * Read with a fixed shape at the pin (`reader`); typing it is a named later
    * stage. A `fork` line also names the viable shapes no ruling has chosen
@@ -199,15 +222,19 @@ const FILTER_CONDITION: Reason = {
   owner: 'data/filter.zod.ts `FilterConditionSchema`',
   why: 'a summary field\'s roll-up `filter` is a query `where` condition: each key names a field of the CHILD object and each value is its comparand, which the filter schema judges with its own refinement (`checkFilterConditionComparands`) and no page-component row can know',
 };
+const REPORT_RUNTIME_FILTER: Reason = {
+  kind: 'shared',
+  owner: 'ui/report.zod.ts `ReportSchema.runtimeFilter` / `JoinedReportBlockSchema.runtimeFilter` (`analyticsCarrierFilter`, over data/filter.zod.ts `FilterConditionSchema`)',
+  why: 'a report\'s render-time scope filter is a query `where` condition over its dataset: each key names a field and each value is its comparand, which the filter schema and the analytics carrier\'s own refinement judge and no page-component row can know',
+};
 const RECORDS: Reason = { kind: 'records' };
 const SLOT: Reason = { kind: 'slot' };
 const RUNNER: Reason = { kind: 'runner' };
-const fork = (reader: string, shapes: readonly string[]): Reason => ({ kind: 'staged', stage: 'fork', reader, shapes });
 
 /**
  * `ObjectUI` source paths are at the `.objectui-sha` pin `89cad75d55`, except
- * the `fork` lines, read at the `.objectui-sha` pin `ab1879721595` (each read
- * point unchanged at objectui `main` `94985a92ba`).
+ * the S-final stage's line (the timeline entry's `content`), read at the
+ * `.objectui-sha` pin `2e818d0b51ec`.
  */
 const LEDGER = new Map<string, Reason>();
 const on = (types: readonly string[], paths: readonly string[], reason: Reason): void => {
@@ -225,6 +252,9 @@ on(['page:footer', 'page:sidebar', 'page:section'], ['children[]'], SLOT);
 // The engine AST beside every evaluated expression's `source`.
 on(['page:tabs'], ['items[].visibleWhen.ast'], EXPRESSION_AST);
 on(['record:alert', 'action:group', 'action:menu'], ['visible.ast'], EXPRESSION_AST);
+// The S-final stage: each `action:group` / `action:menu` member carries the
+// rows' own `visible` / `disabled` predicate.
+on(['action:group', 'action:menu'], ['actions[].visible.ast', 'actions[].disabled.ast'], EXPRESSION_AST);
 on(['action:button', 'action:icon'], ['visible.ast', 'disabled.ast'], EXPRESSION_AST);
 on(['record:line_items'], ['columns[].readonlyWhen.ast', 'columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'details[].columns[].requiredWhen.ast'], EXPRESSION_AST);
@@ -243,8 +273,11 @@ on(['object-form', 'object-master-detail-form'], [
   'sections[].visibleWhen.ast', ...FORM_FIELD_AST_PATHS.map((p) => `sections[].fields[].${p}`),
 ], EXPRESSION_AST);
 
-// The action blocks' runner-forwarded members.
+// The action blocks' runner-forwarded members — and, since the S-final stage,
+// each `action:group` / `action:menu` member's, which the container forwards
+// the same way (`buildActionGroupMember` / `buildActionMenuMember`).
 on(['action:button', 'action:icon'], ACTION_RUNNER_PATHS, RUNNER);
+on(['action:group', 'action:menu'], ACTION_RUNNER_PATHS.map((p) => `actions[].${p}`), RUNNER);
 
 // The data-source binding every record-source block shares.
 on(VIEW_DATA_TYPES, ['data.read.params{}', 'data.read.body', 'data.write.params{}', 'data.write.body'], HTTP_REQUEST);
@@ -263,6 +296,10 @@ on(['object-kanban'], ['columns[].cards[].*'], RECORDS);
 on(['object-grid'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
 on(['object-form'], ['customFields[].summaryOperations.filter{}'], FILTER_CONDITION);
 on(['object-form', 'object-master-detail-form'], ['sections[].fields[].summaryOperations.filter{}'], FILTER_CONDITION);
+// The S-final stage: the drill-down's `report` is `ReportSchema`, by reference,
+// and carries the report's own render-time filter on the report and on each
+// joined block.
+on(['object-metric'], ['drillDown.report.runtimeFilter{}', 'drillDown.report.blocks[].runtimeFilter{}'], REPORT_RUNTIME_FILTER);
 
 // The rest, one line each.
 on(['element:definition-list'], ['items[].description'], {
@@ -274,48 +311,17 @@ on(['object-grid'], ['pagination.*'], {
   why: '`z.looseObject` on purpose: `pageSize` and `pageSizeOptions` are typed and are the only members a read point names; the member\'s own docblock records why the bag stays open',
 });
 
-// Read with a fixed shape at the pin — the forks the S-objectui-held stage
-// reported.
-//
-// The metric tile's four members are typed (stages 4 and 5); the drill-down's
-// `report` is not. The tile hands it to the shared drawer, which draws a
-// dataset-bound report (`isDatasetBoundReport`) and lists the records for any
-// other value. Measured against it, the by-reference candidate admits a joined
-// report with no dataset-bound block, which the drawer does not draw, and
-// refuses a dataset-bound report with no name, label or values, which it does.
-on(['object-metric'], ['drillDown.report'], fork(
-  'plugin-dashboard/src/DrillDownDrawer.tsx:92 (`isDatasetBoundReport`), used at :115; handed over at ObjectMetricWidget.tsx:742',
-  [
-    '`ReportSchema` by reference, as it stands: a joined report whose blocks bind no dataset is accepted and lists the records',
-    '`ReportSchema` once a joined report\'s blocks must each bind a dataset, as its own refinement comment says they do',
-    'a drill-report shape of its own, the two arms the drawer draws',
-  ],
-));
-// The authored timeline entry is objectui's (`TimelineFeedItem` /
-// `TimelineGanttItem`): a feed entry's `content` is child schema nodes, and the
-// arm an entry must match is chosen by the parent's `variant`.
-on(['object-timeline'], ['items[]'], fork(
-  'plugin-timeline/src/ObjectTimeline.tsx:587, into renderer.tsx (`TimelineFeedItem` / `TimelineGanttItem`, types/src/data-display.ts:2973, :3042)',
-  [
-    'the two arms with `content` a slot position the page walks judge, and the arm chosen by a row refinement on `variant`',
-    'the two arms with `content` an opaque member and a plain union of the arms',
-  ],
-));
-// Each member is objectui's `UIActionSchema`, drawn and run by the container.
-on(['action:group'], ['actions[]{}'], fork(
-  'components/src/renderers/action/action-group.tsx:303 (`UIActionSchema[]`), members at :91-249, run at :329-382',
-  [
-    'the read set, `action:button`\'s keys by `type`, without the keys the rows leave undecided',
-    'the read set with `outcomeMessages`, a member `className` and the member `properties.params` bag declared',
-  ],
-));
-on(['action:menu'], ['actions[]{}'], fork(
-  'components/src/renderers/action/action-menu.tsx:342 (`UIActionSchema[]`), members at :80-147, :408, run at :264-328',
-  [
-    'the read set, `action:button`\'s keys by `type`, without the keys the rows leave undecided',
-    'the read set with `outcomeMessages`, a member `className` and the member `properties.params` bag declared',
-  ],
-));
+// Held opaque by a ruling. A timeline feed entry's `content` is child schema
+// nodes the entry draws below its description (`plugin-timeline/src/renderer.tsx:1659`,
+// `:1716`, `renderChildren`); the ruling on the decision card #21704's fork 4
+// (letter B) keeps it unjudged on this row rather than making it a slot
+// position the page walks visit, until a writer appears — the census found
+// none.
+on(['object-timeline'], ['items[].content'], {
+  kind: 'opaque',
+  ruling: 'decision card #21704, fork 4, letter B (record 5979239990)',
+  why: 'child schema nodes no measured writer authors; it becomes a slot position the page walks judge once one does',
+});
 
 /** Every `z.unknown()` member of every row, keyed as the ledger keys it. */
 function census(): Map<string, UnknownMember> {
@@ -398,6 +404,17 @@ describe('§2 each recorded reason holds', () => {
       } else {
         expect(reason.shapes, key).toBeUndefined();
       }
+    }
+  });
+
+  it('an `opaque` member says so in its own `.describe()`, and its line names the ruling that holds it', () => {
+    const opaque = entries.filter(([, reason]) => reason.kind === 'opaque');
+    // LIT CONTROL: the timeline entry's `content` is the one opaque line, so
+    // the two checks below cannot pass over an empty set.
+    expect(opaque.map(([key]) => key)).toEqual(['object-timeline items[].content']);
+    for (const [key, reason] of opaque) {
+      expect(members.get(key)?.describe ?? '', key).toMatch(/Held opaque/);
+      expect(reason.kind === 'opaque' && reason.ruling, key).toMatch(/#21704/);
     }
   });
 
@@ -569,5 +586,26 @@ describe('§5 `conditionalFormatting` on object-kanban is the list view\'s own m
 
   it('is registered as the ADR-0087 D3 entry step 18 carries', () => {
     expect(MIGRATIONS_BY_MAJOR[18]!.semantic.map((s) => s.id)).toContain('ui-object-kanban-conditional-formatting-typed');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// §6 the close-out: no member is staged
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('§6 #21464 is closed out — every renderer-read member is typed, or listed with a standing reason', () => {
+  it('no stage is declared, and no ledger line is `staged`', () => {
+    expect(Object.keys(STAGES)).toEqual([]);
+    expect([...LEDGER.entries()].filter(([, reason]) => reason.kind === 'staged').map(([key]) => key)).toEqual([]);
+  });
+
+  it('the members the last three forks held are typed: none of them is a `z.unknown()` any more', () => {
+    const members = census();
+    for (const key of ['object-metric drillDown.report', 'object-timeline items[]', 'action:group actions[]{}', 'action:menu actions[]{}']) {
+      expect(members.has(key), key).toBe(false);
+    }
+    // FIRING CONTROL: the census does key a member this way — the timeline
+    // entry's opaque `content` is one.
+    expect(members.has('object-timeline items[].content')).toBe(true);
   });
 });
