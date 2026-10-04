@@ -204,7 +204,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -218,7 +218,7 @@
         "boot the scratch app once with `os dev -d file:/tmp/<run>/migrate.db` so the base schema exists; stop it",
         "add a new field to one object in the config and `os build`; run bare `os migrate` twice — both runs must print the SAME pending add-column plan and mutate nothing",
         "run `os migrate plan --json; echo $?` and capture the payload ({ database, managedTables, total, changes, pending })",
-        "run `os migrate apply --yes; echo $?` and capture the applied list; then `os migrate plan` again (expect in-sync) and `os migrate apply --json --yes; echo $?` (expect message in_sync) — the idempotent re-run",
+        "run `os migrate apply --yes; echo $?` and capture the applied list; then `os migrate plan` again and `os migrate apply --json --yes; echo $?` — the idempotent re-run. On the showcase (it declares federated showcase_external objects, which have no managed table) expect the PARTIAL reading: plan prints 'No drift over the N object(s) this plan examined — but M of T declared object(s) were NOT examined … PARTIAL plan', and the JSON re-apply answers message in_sync_partial with composition.coverage.reasons.federated > 0. Plain in_sync is the answer only for an app whose every declared object was examined",
         "remove a field from the config + `os build`; run `os migrate apply --yes` WITHOUT --allow-destructive (the drop must be SKIPPED with a warning), then with `--allow-destructive --yes` (applied)",
         "with the dev server booted and holding the DB, run `os migrate apply --yes; echo $?` (expect the busy refusal, exit 1, without --force) and `os migrate plan` (proceeds with a warning — a plan writes nothing either way)",
         "run `os migrate apply --json` WITHOUT --yes on a pending change: the payload must say confirmation_required with the pass--yes hint and mutate nothing",
@@ -250,9 +250,9 @@
           "evidence": "the two apply outputs"
         },
         {
-          "clause": "idempotent re-run: after a successful apply, plan reports in-sync ('nothing to migrate') and apply --json answers message in_sync with exit 0",
+          "clause": "idempotent re-run: after a successful apply there is nothing left to apply and the re-run exits 0 — and the in-sync claim is scoped to what was EXAMINED: on the showcase, whose federated objects are never diffed, plan prints the PARTIAL warning (not the 'in sync' success line) and apply --json answers message in_sync_partial carrying composition.coverage (unexaminedObjects > 0, reasons.federated > 0); only an app with no unexamined object answers in_sync / 'Physical schema is in sync with metadata — nothing to migrate.'",
           "oracle": "log",
-          "verify": "the post-apply plan prints the in-sync success line; the JSON re-apply payload is { …, message: 'in_sync' } and echo $? is 0",
+          "verify": "on the showcase: the post-apply plan prints the PARTIAL warning naming the unexamined count; the JSON re-apply payload is { applied: [], skipped: [], created: [], message: 'in_sync_partial', composition: { coverage: { unexaminedObjects > 0, reasons.federated > 0 } } } and echo $? is 0 (apply.ts / plan.ts in-sync early returns, schema-migration-plugins.ts coverage). An app with nothing unexamined answers message 'in_sync' and the in-sync success line instead. ⛔ in_sync_partial on the showcase is NOT a failed migration — it is the declared honest reading of a partial reconcile",
           "evidence": "outputs + exit codes"
         },
         {
@@ -281,19 +281,29 @@
         "meta",
         "files-to-references",
         "summary-nulls",
-        "value-shapes"
+        "value-shapes",
+        "account-issuer",
+        "audit-metadata-bodies",
+        "multi-value-columns",
+        "unmapped-columns"
       ],
       "traps": ["stale-dist"],
       "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts" },
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
-        "packages/cli/src/commands/migrate/ (the nine registered subcommands enumerated as variants)",
+        "packages/cli/src/commands/migrate/ (the 13 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
         "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the migrate topic's read-only/apply/idempotency contract from plan.ts+apply.ts, with #4873 --json exit-code honesty as a load-bearing clause pinned to format.exit-code.test.ts and the subcommand set enumerated from src/commands/migrate/", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-20", "change": "scoped scan-functionality sweep: the enumeration-as-variants under-counted — `duplicates` (#8928, landed 2026-08-16) made it NINE registered subcommands in src/commands/migrate/, not the eight the source note claimed. Added the ninth as a variant pointing detailed coverage at the new cli.migrate-duplicates-inventory item, with the one property a sweep of THIS item must know: duplicates has no --json flag (its output is always the JSON report), so the #4873 exit-code sweep must not feed it one and read the oclif Nonexistent-flag 2 as a violation", "ref": "claude/new-session-0pv25p" }
+        { "revision": 2, "date": "2026-08-20", "change": "scoped scan-functionality sweep: the enumeration-as-variants under-counted — `duplicates` (#8928, landed 2026-08-16) made it NINE registered subcommands in src/commands/migrate/, not the eight the source note claimed. Added the ninth as a variant pointing detailed coverage at the new cli.migrate-duplicates-inventory item, with the one property a sweep of THIS item must know: duplicates has no --json flag (its output is always the JSON report), so the #4873 exit-code sweep must not feed it one and read the oclif Nonexistent-flag 2 as a violation", "ref": "claude/new-session-0pv25p" },
+        {
+          "revision": 3,
+          "date": "2026-10-04",
+          "change": "A5 / step 4 re-pointed: an in-sync showcase answers in_sync_partial (its federated showcase_external objects have no managed table and are never examined), and plan prints the PARTIAL warning rather than the in-sync line; plain in_sync is the answer only when nothing is unexamined (apply.ts / plan.ts in-sync early returns, schema-migration-plugins.ts coverage). Also the subcommand count: 13 registered under `os migrate`, not nine — the four missing (account-issuer, audit-metadata-bodies, multi-value-columns, unmapped-columns) are added to variants. Stale clause. Source 6c6157af05 (#13057)",
+          "ref": "#21735"
+        }
       ]
     },
     {
@@ -677,7 +687,7 @@
       "title": "os migrate meta replays the spec migration chain over authored sources and PRINTS the mechanical edit list the retirement messages prescribe — it rewrites no source file, its --out snapshot is schema-valid, replay is idempotent, and a below-floor --from is refused",
       "since": "v14.7",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
@@ -701,7 +711,7 @@
         "confirm every planted spelling appears in the printed `Applied <N> mechanical change(s):` block as `<path>: <from> → <to> (<conversionId>)`, naming the successor the registry declares",
         "re-checksum the scratch tree and confirm every authored file is byte-identical — the run's only file write is --out",
         "re-run with `--out <snapshot>.json`, read the snapshot back, and confirm the run states its schema verdict honestly: `Migrated stack is schema-valid` when it is, and the `Migrated stack does not yet pass schema validation — resolve the manual changes above, then run \\`os validate\\`` warning when manual changes are still outstanding",
-        "idempotence: replay from the TARGET major (`--from <current major>`) and confirm `Nothing to migrate — the metadata is already canonical for this range.` with exit 0; then run the identical `--from <previous major>` command a second time and diff the two stdouts",
+        "idempotence: replay a CANONICAL source (the unmodified authored tree, carrying no retired spelling) over a real range — `os migrate meta --from 17` (--to defaults to 18, CHAIN_TERMINUS_MAJOR: the highest major this build carries a step for, ahead of the runtime's PROTOCOL_MAJOR 17) — and confirm NO `Applied <N> mechanical change(s):` block and exit 0; the step-18 semantic advisories are still listed (every hop lists its semantic entries unconditionally), so `Nothing to migrate …` is NOT the expected line here. Then run the identical `--from <previous major>` command on the planted tree a second time and diff the two stdouts. Separately record the EMPTY-RANGE answer: `--from 18` (range 18 → 18, no step) prints `⚠ No migration step exists for protocol 18 → 18, so this run replayed nothing — that is not a finding that the metadata is canonical.` — never the canonical success line",
         "run it with a --from BELOW the supported floor and capture the MigrationFloorError path (`Cannot migrate from protocol <N>: the chain's support floor is <F>`)",
         "run it with --json where supported and check the exit code in the same way #4873 required of every other migrate subcommand",
         "confirm the semantic-only entries behave as ADVISORIES: they are reported under `<N> manual change(s) require your judgment:` with their why/verify text, never silently 'fixed' (a semantic change has no mechanical rewrite by definition)",
@@ -727,10 +737,10 @@
           "evidence": "the snapshot, the verdict line, and the --json schemaValid field"
         },
         {
-          "clause": "replay is IDEMPOTENT: replaying from the target major applies nothing and still exits 0, and two identical runs print the same thing",
+          "clause": "replay is IDEMPOTENT: replaying a canonical source over a range that CONTAINS steps lists zero mechanical edits and exits 0, and two identical runs print the same thing — while an EMPTY range (--from equal to the --to default, 18) is answered as an empty range ('⚠ No migration step exists for protocol N → N …'), never as a green 'already canonical' verdict over a check that never ran",
           "oracle": "log",
-          "verify": "`--from <current major>` prints `Nothing to migrate — the metadata is already canonical for this range.` and exits 0; the two identical runs diff empty. An upgrader re-runs this command, and a chain reporting fresh work on clean input cannot be trusted",
-          "evidence": "both exit codes + the diff of the two stdouts"
+          "verify": "the canonical-source replay `--from 17` (default --to 18) prints no `Applied <N> mechanical change(s):` block (only the step-18 advisories) and exits 0; `--from 18` prints `⚠ No migration step exists for protocol 18 → 18, so this run replayed nothing — that is not a finding that the metadata is canonical.` (meta.ts printEmptyRangeAnswer) and NOT `Nothing to migrate — …`; the two identical planted-tree runs diff empty. An upgrader re-runs this command, and a chain reporting fresh work on clean input cannot be trusted",
+          "evidence": "the canonical-replay output + exit code, the empty-range output, and the diff of the two identical-run stdouts"
         },
         {
           "clause": "a --from below the supported floor is REFUSED loudly (MigrationFloorError) rather than silently doing a partial or wrong replay",
@@ -795,6 +805,12 @@
           "date": "2026-08-20",
           "change": "rewritten to the contract the command actually ships. Revisions 1-2 asserted an in-place source codemod: the title said it 'actually rewrites authored sources', and the steps prescribed grepping the spec for `Run \\`os migrate meta --from <N>\\` to rewrite existing sources automatically`, then diffing the tree to confirm each planted spelling had been rewritten. Both halves are false. The command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json — no --write/--fix/in-place — and the authored-source arm's only file write is `if (flags.out) writeFileSync(...)`, a JSON snapshot; meta.ts's own header calls the AST rewrite 'unsafe and lossy'. The prescribed grep also finds nothing in shipped sources: #9529 (closed 2026-08-18) reworded the class-wide sentence to '... to list the mechanical edits for existing sources; apply them by hand', which left this item the last place in the repo asserting the withdrawn promise as live (the only other carriers are the deliberate pin test and four CHANGELOGs). So the item was replaced clause-for-clause with what IS real today — the printed mechanical-edit list, sources provably untouched, the schema-valid --out snapshot, idempotent replay, floor refusal, semantic advisories, --json exit honesty — and kept `active`/P1 rather than retired: the reason it could not pass was a wording defect in the ITEM, not missing coverage, and retiring it would have dropped six assertions that hold today to zero. The rewrite half is NOT re-homed as a parked item; #9591 (v18, pm:on-hold) already carries it with a Restart-when line, so the restart lives here as a mechanical trigger instead — the last step and the last acceptance clause read the --help flag surface, and a --write appearing there is defined as the signal to restore these assertions and bump the revision, not as a failure. The id keeps its `-codemod` spelling because ids are immutable and never reused (README lifecycle); it reads as a forward reference until #9591 lands, at which point it is accurate again. Added the `absence-inference` trap: the runner's live false-positive risk is now the inverse of revision 1's — reading 'no files changed' as a broken capability when print-only is the shipped contract",
           "ref": "#9733"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-04",
+          "change": "A4 / step 8 re-pointed: replaying from the target major is now an EMPTY range and prints '⚠ No migration step exists for protocol N → N …' (no longer the 'Nothing to migrate' success line); idempotence is proven by replaying a canonical source over --from 17 with the default --to 18 (CHAIN_TERMINUS_MAJOR, ahead of PROTOCOL_MAJOR 17): zero mechanical edits, exit 0, the step-18 semantic advisories still listed (chain.ts lists every hop's semantic entries unconditionally, so 'Nothing to migrate' does not print over 17 → 18). meta.ts printEmptyRangeAnswer / printMigrationReport, the --to flag default. Stale clause. Source fb39b385f1 (#17462, fixes #17134)",
+          "ref": "#21735"
         }
       ]
     },
@@ -1076,7 +1092,7 @@
       "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell, pre-repair audit)"],
@@ -1094,7 +1110,7 @@
       "steps": [
         "boot the scratch app once with `os dev -d file:/tmp/<run>/dup.db` so the base schema exists; stop it",
         "seed via direct SQL per the fixture recipe: the cross-partition duplicate, the within-partition repeat, an organizations row for '<org>', and the paired sequence counters",
-        "md5sum the DB file; run `os migrate duplicates > report.json; echo $?`; md5sum again and byte-compare",
+        "dump the DB's CONTENT before the run — every user table's rows (sqlite3 <db> '.dump' with the CREATE lines aside, or one ordered SELECT * per table), `SELECT * FROM _objectstack_sequences ORDER BY 1`, and `SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name` — and checksum each dump; run `os migrate duplicates > report.json; echo $?`; dump and checksum again and byte-compare the three pairs. ⛔ Do not use the whole-file md5 as the oracle: it is not what the read-only contract promises (rows, counters and schema)",
         "jq the report: .report/.reportVersion/.generatedAt/.database/.globalPartition/.filter/.counters/.scanned/.skipped/.duplicates/.liveConditions/.runtimeIndexPreflight/.summary",
         "seed the kernel:ready blocker too (#8725): two ACTIVE sys_view_definition rows with the SAME name and organization_id/owner both NULL — then jq .runtimeIndexPreflight and .summary.runtimeIndexesBlocked",
         "run `os migrate duplicates --object <the-object>` and `--object <an-object-with-no-findings>` — capture .filter in both payloads",
@@ -1116,10 +1132,10 @@
           "evidence": "the seeded values vs the report's duplicates array"
         },
         {
-          "clause": "read-only in fact, not just in intent: the DB file is byte-identical before and after a full run — no DDL, no seed, no row written (deferSchemaDdl + readOnlyProbe boot, duplicates.ts)",
+          "clause": "read-only in fact, not just in intent: the DB's CONTENT is byte-identical before and after a full run — every table's rows, the _objectstack_sequences counters, and sqlite_master (so no DDL: no table, index or column created or altered) — no seed, no row written (deferSchemaDdl + readOnlyProbe boot, duplicates.ts header: 'a full run leaves both the rows and `_objectstack_sequences` byte-identical')",
           "oracle": "log",
-          "verify": "the two md5sums match; duplicates.pre-repair.test.ts pins the same invariant down to _objectstack_sequences",
-          "evidence": "the md5 pair"
+          "verify": "the before/after checksums of the three dumps match pair by pair (rows, _objectstack_sequences, sqlite_master); duplicates.pre-repair.test.ts pins the same rows + _objectstack_sequences invariant. The whole-file md5 is NOT the judged quantity — a differing file checksum with all three dump pairs identical is not a FAIL of this clause",
+          "evidence": "the three before/after dump-checksum pairs (rows, _objectstack_sequences, sqlite_master)"
         },
         {
           "clause": "the kernel:ready pre-flight (#8725) reports the RUNTIME-migration class os migrate plan cannot see: one entry per index the three kernel:ready migrations tighten (four — the overlay migration owns two), each blocked|clear|table-absent|unreadable, a blocked one naming every colliding key group and its row count",
@@ -1161,7 +1177,7 @@
       "traps": ["stale-dist", "absence-inference"],
       "source": [
         "packages/cli/src/commands/migrate/duplicates.ts#report (the contract header encoding the 2026-08-16 maintainer ruling's five points; report interfaces; the cross-partition HAVING; the seam-answer guards; flags; read-only boot; no_sql_seam refusal)",
-        "packages/cli/src/commands/migrate/duplicates.contract.test.ts (the full JSON shape against a real sqlite), duplicates.pre-repair.test.ts (byte-identical DB + the #8686 repair measured destroying the evidence), duplicates.integration.test.ts, duplicates.probe-sql.test.ts — seam pins; none drives the oclif command end-to-end, hence no automated entry",
+        "packages/cli/src/commands/migrate/duplicates.contract.test.ts (the full JSON shape against a real sqlite), duplicates.pre-repair.test.ts (byte-identical rows + _objectstack_sequences + the #8686 repair measured destroying the evidence), duplicates.integration.test.ts, duplicates.probe-sql.test.ts — seam pins; none drives the oclif command end-to-end, hence no automated entry",
         "#8928 (the card and ruling), #8686 / #8844 (the closed producers whose damage this inventories)",
         "sibling item cli.migrate-plan-apply-json (lists duplicates as a variant; the scratch-DB boot recipe is shared)"
       ],
@@ -1169,7 +1185,13 @@
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os migrate duplicates` landed 2026-08-16 (#8928) after the sibling migrate item's enumeration was authored, so the subcommand had no functional coverage. Authored from the contract header's five ruling points, with the perishability ordering (seed → scan → only then any repair-bearing boot) carried as a load-bearing knownGap and the no-JSON-flag posture spelled out so the #4873 sweep does not misread an oclif 2", "ref": "claude/new-session-0pv25p" },
         { "revision": 2, "date": "2026-08-21", "change": "clause-7 knownGap was factually wrong about the memory driver, and the run that trusted it produced a false all-clear: the driver exposes a NO-OP `execute` seam (warn + return null), not no seam, so the no_sql_seam refusal never fired and the scan answered exit 0 with `duplicates:[]` — indistinguishable from `never looked`. Corrected the knownGap, and re-derived the drifted duplicates.ts line citations against the fix that makes the refusal live (#10677). The mongodb half is left explicitly UNVERIFIED rather than restated: that driver was not loaded for the fix", "ref": "#10677" },
         { "revision": 3, "date": "2026-08-22", "change": "the #11031 revision bump landed the kernel:ready pre-flight (#8725) without this entry: the report contract moved reportVersion 1 → 2, gaining `runtimeIndexPreflight[]` plus `summary.runtimeIndexesBlocked` and `summary.runtimeIndexBlockingRows`; the jq walk step now includes `.runtimeIndexPreflight`; a seeding step was added for the `kernel:ready` blocker (two ACTIVE `sys_view_definition` rows sharing a name with `organization_id` and `owner` both NULL); and a new acceptance clause covers the kernel:ready pre-flight — one entry per index the three `kernel:ready` migrations tighten (four, the overlay migration owns two), each `blocked`/`clear`/`table-absent`/`unreadable`, with the matched control written into its verify step (the same database run through `os migrate plan` names neither the index nor the view). This entry repairs that ledger gap; no further change to the item's fields", "ref": "#11031" },
-        { "revision": 4, "date": "2026-10-03", "change": "the no_sql_seam negative could no longer be staged on a memory-driver scratch config: the in-memory engine was retired as a boot store, and `os migrate duplicates --database-url memory://qa` now answers {error: 'boot_failed'} exit 1 with the retirement message (measured on the change's own build). The negative step and clause 8's verify now cite the seam-double pin, duplicates.null-seam.test.ts — the real command over a driver whose execute answers no result set, plus a control seam that answers an empty result set — and keep the memory:// run as a boot_failed probe; the knownGap says why. The mongodb branch stays explicitly unverified", "ref": "#21492" }
+        { "revision": 4, "date": "2026-10-03", "change": "the no_sql_seam negative could no longer be staged on a memory-driver scratch config: the in-memory engine was retired as a boot store, and `os migrate duplicates --database-url memory://qa` now answers {error: 'boot_failed'} exit 1 with the retirement message (measured on the change's own build). The negative step and clause 8's verify now cite the seam-double pin, duplicates.null-seam.test.ts — the real command over a driver whose execute answers no result set, plus a control seam that answers an empty result set — and keep the memory:// run as a boot_failed probe; the knownGap says why. The mongodb branch stays explicitly unverified", "ref": "#21492" },
+        {
+          "revision": 5,
+          "date": "2026-10-04",
+          "change": "A3 and its step re-pointed: the read-only oracle is the DB's content — rows, _objectstack_sequences and sqlite_master byte-identical before and after — not the whole-file md5, which is not what the contract promises (duplicates.ts header: 'a full run leaves both the rows and `_objectstack_sequences` byte-identical'; duplicates.pre-repair.test.ts pins the same). Assertion defect. Source duplicates.ts contract header",
+          "ref": "#21735"
+        }
       ]
     },
     {
@@ -1177,7 +1199,7 @@
       "title": "os datasource list-tables/introspect/validate: the federation door answers, the generated draft is cwd-jailed and compiles, and schema drift maps to ✗ diffs with exit 1",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell) whose token HOLDS manage_platform_settings — all three commands address federation READ routes, which require it since #9901/#10255", "integration author (adopting a remote table), same capability"],
@@ -1200,7 +1222,7 @@
         "escape probes: re-run with `--out ../qa-escape.object.ts` and `--out /tmp/qa-escape.object.ts` — capture both refusals and `echo $?`, and confirm neither file exists afterwards",
         "wire the generated object into the scratch config and run `os build; echo $?`",
         "`os datasource validate showcase_external --url … --token <t>; echo $?` on the untouched fixture (expect ✓ rows, exit 0); then rename a column in the fixture DB (sqlite3 ALTER TABLE) or edit the adopted object's column mapping, re-run, and capture the ✗ diff rows and exit 1",
-        "negative: run all three commands against a datasource name that does not exist and capture each error + exit code"
+        "negative: run list-tables and introspect against a datasource name that does not exist and capture each error + exit code. Also run `os datasource validate <that name>; echo $?` and RECORD (do not score as an error-arm probe) its vacuous ok: the validate route is scoped by the call to the federated objects bound to :name, an unknown name binds none, so the server answers {ok:true, results:[]} and the CLI prints 'No federated objects to validate.' with exit 0 — by design"
       ],
       "acceptance": [
         {
@@ -1234,10 +1256,10 @@
           "evidence": "both transcripts + exit codes"
         },
         {
-          "clause": "the server's error arm is honored on all three commands: a body.error (unknown datasource, driver failure) becomes this.error — a printed error WITH a nonzero exit, never a 0",
+          "clause": "the server's error arm is honored: a body.error (unknown datasource on list-tables / introspect, a driver failure on any of the three) becomes this.error — a printed error WITH a nonzero exit, never a 0. The unknown-name probe is limited to list-tables and introspect: validate on an unknown name is NOT an error by design — it validates the federated objects bound to that name, of which there are none, and answers a vacuous ok (exit 0)",
           "oracle": "log",
-          "verify": "the unknown-name probes each exit nonzero with the server's own error text (list-tables.ts, introspect.ts, validate.ts)",
-          "evidence": "the three error captures + exit codes"
+          "verify": "the list-tables and introspect unknown-name probes each exit nonzero with the server's own error text (list-tables.ts, introspect.ts); the validate unknown-name run prints 'No federated objects to validate.' and exits 0 (external-datasource-routes.ts validate route → validateDatasource(:name), which filters to objects whose datasource is :name; validate.ts empty-results branch) — recorded, not failed",
+          "evidence": "the two error captures + exit codes, and the validate vacuous-ok capture + exit code"
         }
       ],
       "negative": [
@@ -1257,7 +1279,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): the datasource topic's three subcommands had only a --help variant, no functional coverage. Re-verified against source during authoring: the hunter brief asked whether an --out escape refusal exists — it DOES (introspect.ts, absolute + traversal both refused before any write), so the jail is asserted positively with both escape probes rather than worded observe-and-flag. The /external/tables-vs-/remote-tables mount split is recorded as a runner trap with the admin twin explicitly routed to the integration-system area", "ref": "claude/new-session-0pv25p" },
-        { "revision": 2, "date": "2026-08-24", "change": "spell the CAPABILITY persona out. Read in the same pass as #11138 and confirmed rather than assumed: this item was authored 2026-08-20 against the pre-#9901 federation door, so its fixture asked only for \"an admin session token\" behind \"the auth guard\" — the #9686 AUTHENTICATION floor. At head all three commands address federation READ routes (list-tables GET /external/tables, introspect POST /external/tables/:remote/draft, validate POST /external/validate), each gated on FEDERATION_READ_CAPABILITY = manage_platform_settings by #9901/#10255, so a merely-authenticated token 403s every clause in the item. The capability is now named in both personas and in the token fixture, and the resulting all-403 run is recorded as a negative (the wrong-persona trap this item already declares) so a runner re-mints instead of filing the landed gate as a CLI regression", "ref": "#11138" }
+        { "revision": 2, "date": "2026-08-24", "change": "spell the CAPABILITY persona out. Read in the same pass as #11138 and confirmed rather than assumed: this item was authored 2026-08-20 against the pre-#9901 federation door, so its fixture asked only for \"an admin session token\" behind \"the auth guard\" — the #9686 AUTHENTICATION floor. At head all three commands address federation READ routes (list-tables GET /external/tables, introspect POST /external/tables/:remote/draft, validate POST /external/validate), each gated on FEDERATION_READ_CAPABILITY = manage_platform_settings by #9901/#10255, so a merely-authenticated token 403s every clause in the item. The capability is now named in both personas and in the token fixture, and the resulting all-403 run is recorded as a negative (the wrong-persona trap this item already declares) so a runner re-mints instead of filing the landed gate as a CLI regression", "ref": "#11138" },
+        {
+          "revision": 3,
+          "date": "2026-10-04",
+          "change": "A6 and its negative step re-pointed: the unknown-name error-arm probe is limited to list-tables / introspect; validate on an unknown name answers a vacuous ok by design — the route is scoped by the call (validateDatasource(:name) validates the federated objects bound to that name; none → {ok:true, results:[]}, CLI 'No federated objects to validate.' exit 0). Assertion defect. Source e634ecf6a (#10537 / #10960)",
+          "ref": "#21735"
+        }
       ]
     },
     {
@@ -1450,7 +1478,7 @@
       "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `packaging` forks the artifact, and the compiled manifest the artifact carries is readable back",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -1475,7 +1503,7 @@
         "compare the two artifacts: extract each (gunzip + tar) and diff the FILE LISTS and the bundled entry. Expect package.json (and pnpm-lock.yaml when present) inside the manifest-deps artifact and absent from the bundled one, and expect the declared dependency's import to survive as an external import in the manifest-deps dist/index.mjs while its code is inlined in the bundled one",
         "read the compiled manifest out of each artifact (the objectstack.plugin.json entry inside the archive) and compare it to the authored one: expect the authored keys plus `main` and an `integrity` map",
         "run `os plugin publish` against the good artifact with no token → capture the output up to and including the auth refusal; then run it against an artifact whose compiled manifest lacks a version → capture that refusal",
-        "REFUSAL probes, each in the second scratch dir, each followed by a check that NO artifact file was written: (a) objectstack.plugin.json that is not valid JSON; (b) a manifest missing `id`; (c) a manifest whose `version` is not semver; (d) a manifest with `id: \"\"` — which z.string() admits, so it reaches the explicit post-parse guard; (e) a manifest with no `main` and no src/index.* entry candidate",
+        "REFUSAL probes, each in the second scratch dir, each followed by a check that NO artifact file was written: (a) objectstack.plugin.json that is not valid JSON; (b) a manifest missing `id`; (c) a manifest whose `version` is not semver; (d) a manifest with `id: \"\"` — which the reverse-domain rule on manifest.id (MANIFEST_ID_PATTERN) refuses at safeParse with a located error; (e) a manifest with no `main` and no src/index.* entry candidate",
         "run `os lint` on a scaffold config whose manifest declares NO engines range → capture the finding (rule, severity, path, fix); then run it on a bare metadata fragment that declares no manifest at all → confirm the rule does NOT fire there",
         "teardown: delete both scratch directories. ⚠️ Do not re-run the packaging comparison over the artifacts of a previous run — each mode writes its own --out path and a leftover file from an earlier run reads exactly like a fresh one"
       ],
@@ -1487,9 +1515,9 @@
           "evidence": "each refusal's full output with its exit code, plus the directory listing taken after it"
         },
         {
-          "clause": "identity is guarded in BOTH shapes, and the second guard is not redundant: `id` and `version` are required by the schema (an absent one fails safeParse with a located error, a non-semver version fails its regex), while `id: \"\"` satisfies z.string() and is caught only by the explicit post-parse refusal naming both keys — that guard is the one thing between an empty id and a nameless artifact",
+          "clause": "identity is guarded at the SCHEMA, with located errors for every shape: `id` and `version` are required by ManifestSchema (an absent one fails safeParse with a located error), a non-semver version fails its SemVer regex, and `id: \"\"` fails manifest.id's reverse-domain rule — a located Zod error ('Invalid package id '' on `manifest.id`. Expected reverse-domain notation …'), not the build's post-parse 'must declare both \"id\" and \"version\"' guard. That guard (build.ts) is now unreachable from a manifest that passed safeParse; an empty id never reaches it, and it is not scored",
           "oracle": "log",
-          "verify": "probes 6b, 6c and 6d, read as three DIFFERENT refusals — 6b/6c located Zod errors, 6d the worded 'must declare both \"id\" and \"version\"' line. Collapsing them into one 'it refuses' observation cannot tell a working post-parse guard from a removed one",
+          "verify": "probes 6b, 6c and 6d, each read as its OWN located refusal under 'objectstack.plugin.json is invalid:' — 6b the missing key, 6c the version regex, 6d the reverse-domain refusal naming manifest.id with the received '' — each exiting nonzero with no artifact. 6d printing 'must declare both \"id\" and \"version\"' instead would mean the schema rule regressed. Collapsing the three into one 'it refuses' observation cannot tell which rule answered",
           "evidence": "the three refusals side by side, each with its exit code"
         },
         {
@@ -1538,6 +1566,12 @@
           "date": "2026-08-24",
           "change": "new — the packaging half of classifying the `manifest` capability for the coverage ratchet, which had flagged it UNCLASSIFIED since its liveness ledger landed. Authored VERIFY-FIRST against source, and two plausible sketch claims were corrected before they became clauses: (1) `id`/`version` are REQUIRED by ManifestSchema, so the explicit post-parse guard in build.ts is the empty-string arm rather than the only identity check — the clause now asserts both shapes as different refusals; (2) the manifest os plugin build reads is objectstack.plugin.json, not the objectstack.config.ts the manifest liveness ledger names first. `since` is v15 as a FLOOR, not a discovery: the protocol/missing-engines-range rule this item's last clause covers is dated to v15 by the release notes, and os plugin build already predates the earliest release in the CLI changelog reachable from this checkout. The two open enforce-or-remove findings on this surface (#11330 runtime tier printed-not-enforced, #11331 integrity computed-not-verified) are recorded in `negative` so a run cannot score either as working machinery",
           "ref": "#11421"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-04",
+          "change": "A2 and refusal probe (d) re-pointed: `id: \"\"` is now a located Zod error at safeParse — manifest.id enforces the reverse-domain rule (MANIFEST_ID_PATTERN / manifestIdRefusal, manifest.zod.ts) — so the build.ts post-parse 'must declare both \"id\" and \"version\"' guard is unreachable from it and is no longer scored. Stale clause. Source 097d26859 (#18319)",
+          "ref": "#21735"
         }
       ]
     },

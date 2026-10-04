@@ -172,22 +172,22 @@
       "title": "Removed/retired authoring keys fail at parse/build with located guidance",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "build",
       "steps": [
         "sample retired keys across the ADR-0087 registries, at minimum: a query-surface tombstone (QueryAST cursor / joins / distinct / windowFunctions — retiredKey per #4286), the error-envelope tombstone (EnhancedApiError.fieldErrors, renamed to fields by ADR-0114 D4), and one entry from the retired-filter-operator registry in packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)",
-        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors, author an object using the retired filter operator; run ObjectSchema.create / os build where the key is config-side",
+        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it (e.g. { name: { $regex: 'acme' } } in a view or widget filter) and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the filter-regex-options-retired advisory",
         "capture each rejection's full text",
         "author one key documented as silently-stripped-by-design (a pure display annotation) and parse it — the strip must be deliberate, documented behavior, not an accident",
         "record which registry each sampled key came from"
       ],
       "acceptance": [
         {
-          "clause": "each tombstoned key is REJECTED at parse/build — never silently stripped (the retiredKey mechanism exists precisely because non-strict schemas would otherwise drop the key clean)",
+          "clause": "each tombstoned KEY is REJECTED at parse/build — never silently stripped (the retiredKey mechanism exists precisely because non-strict schemas would otherwise drop the key clean). The retired-filter-operator registry (RETIRED_FILTER_OPERATORS) is the declared exception and is scored on its own terms: a filter is an open record, so a stored $regex / $options parses and builds GREEN; it is refused at RUNTIME with 400 INVALID_FILTER naming the operator RETIRED with its prescription (write $icontains, or $contains), and `os migrate meta` lists it as the semantic advisory filter-regex-options-retired",
           "oracle": "build",
-          "verify": "safeParse fails / os build exits non-zero for every sampled tombstone",
-          "evidence": "the rejections"
+          "verify": "safeParse fails / os build exits non-zero for every sampled tombstoned key; for the retired filter operator: parse/build green, the runtime query answers 400 code INVALID_FILTER whose message says the operator is RETIRED — with the operator, field and the RETIRED_FILTER_OPERATORS prescription on a caller-authored where (a predicate whose provenance cannot be vouched gets the withheld sentence and the full diagnostic in the server log, sql-driver.ts retiredFilterOperatorError / withheldFilterError) — and the migrate-meta output lists filter-regex-options-retired among the manual changes. A build-time rejection of a stored $regex is NOT the expected shape",
+          "evidence": "the rejections, plus for the filter operator the green parse/build, the runtime 400 body and the migrate-meta advisory line"
         },
         {
           "clause": "every rejection carries LOCATED guidance naming the replacement: cursor → keyset where-predicate on the sort key, joins → expand, fieldErrors → fields (ADR-0114 D4 #3977), retired filter operator → its registry-declared successor",
@@ -232,6 +232,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-04",
+          "change": "A1 / step 2 re-pointed: the retired-filter-operator registry is not a parse/build gate — FilterConditionSchema is an open record, so a stored $regex / $options parses and builds green; it is refused at runtime with 400 INVALID_FILTER and the RETIRED_FILTER_OPERATORS prescription, and `os migrate meta` lists it (semantic entry filter-regex-options-retired). The clause now scores that registry on those terms. Assertion defect. Source filter.zod.ts RETIRED_FILTER_OPERATORS, 85d95e7d92 (#5701 / #5752)",
+          "ref": "#21735"
         }
       ]
     },
