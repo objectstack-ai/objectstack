@@ -3,12 +3,16 @@
 /**
  * [#21464, stage 3] Four of the form family's nine `z.unknown()` members are
  * typed: `object-form` `contentLayout`, `submitBehavior`, `navigateOnSuccess`
- * and `mobile`. The other five stay in the enumeration pin's ledger: the
- * form's `fields` and `sections` and the master-detail form's two are held,
- * because the form draws a value each typed shape would refuse (a `{ name }`
+ * and `mobile`. The other five stayed in the enumeration pin's ledger: the
+ * form's `fields` and `sections` and the master-detail form's two were held,
+ * because the form drew a value each typed shape would refuse (a `{ name }`
  * field entry; an inline runtime field inside a section), and `customFields`
- * waits with the objectui-held contracts (its entries are objectui's runtime
- * `FormField`, which the spec has not declared).
+ * waited with the objectui-held contracts (its entries are objectui's runtime
+ * `FormField`, which the spec has not declared). The S-objectui-held stage
+ * typed both forms' `fields` as field names once objectui retired the
+ * `{ name }` entry (`component-objectui-held-typed-members.pin.test.ts`), and
+ * held `customFields` and both `sections` as forks: the runtime form field has
+ * more than one viable spec shape.
  *
  * ## The defect this file closes
  *

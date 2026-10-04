@@ -107,7 +107,7 @@ describe('renderDiffMessage', () => {
   });
 
   /**
-   * [#11166] `unreachable` is a member of the kind vocabulary (the "could not
+   * [commit 735f5c709] `unreachable` is a member of the kind vocabulary (the "could not
    * be read" entry — a statement that validation was indeterminate, not a
    * schema fact) and renders like every other kind: the raw kind name plus the
    * carried error text, so an unknown-to-a-consumer entry is still loud.

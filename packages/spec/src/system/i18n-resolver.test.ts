@@ -1607,7 +1607,7 @@ describe('translatePage', () => {
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
           { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
           // Was `element:form` until #9249 retired that element whole, then a
-          // bespoke type carrying the `submitLabel` pin pending #10926. That
+          // bespoke type carrying the `submitLabel` pin until commit d173125fb, whose
           // ruling retired the key from the copy face, so the node now pins
           // the NEGATIVE: a bespoke component's `submitLabel` is no longer
           // overlaid, however the bundle spells it.
@@ -1798,7 +1798,7 @@ describe('translatePage', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// #12961 — the descent into a container's declared `properties.children`
+// Commit 901355c3b — the descent into a container's declared `properties.children`
 //
 // Ruled 2026-08-29 (maintainer, verbatim 「同意」, option A): `translatePage`
 // descends into DECLARED `properties.children` arrays, so copy authored for a
@@ -1965,7 +1965,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
 
     it('descends into `items[].children` — the contract call the #12961 line left open, made by #16772', () => {
       // `page:tabs` / `page:accordion` nest their children one level deeper,
-      // under `properties.items[].children`. The #12961 ruling named
+      // under `properties.items[].children`. The 2026-08-29 ruling (commit 901355c3b) named
       // `properties.children` and recorded this one as "its own contract
       // call"; #16772 is that call, measured on a slotted contract page whose
       // seven tab panels held every related list the resolver never reached.
@@ -2196,13 +2196,13 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// #13218 — walkAddressedPageComponents, THE shared addressed-component walk
+// Commit c45d8e6b4 — walkAddressedPageComponents, THE shared addressed-component walk
 // ────────────────────────────────────────────────────────────────────────────
 //
 // The exported contract behind both `translatePage` (above — its behaviour
 // through the walk is pinned by every fixture in that block) and the CLI
 // extractor's `collectExpectedEntries`. These pins address the walk DIRECTLY,
-// extractor-style, so each of the five converged invariants (#13218) has a
+// extractor-style, so each of the five converged invariants (commit c45d8e6b4) has a
 // red test naming it in the package that owns it; the cross-package
 // differential lives in `packages/cli/test/platform-page-i18n-parity.test.ts`.
 

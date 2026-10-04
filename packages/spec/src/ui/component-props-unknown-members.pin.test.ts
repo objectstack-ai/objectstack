@@ -38,13 +38,16 @@
  * since stage 5, which exited its hold once objectui retired the grid's read of
  * a column `options`. The form family (`object-form` `contentLayout` /
  * `submitBehavior` / `navigateOnSuccess` / `mobile`) in
- * `component-form-family-typed-members.pin.test.ts`; its `fields` and
- * `sections`, and the master-detail form's two, are held below, and its
- * `customFields` waits with the objectui-held contracts. The metric tile
+ * `component-form-family-typed-members.pin.test.ts`. The metric tile
  * (`object-metric` `aggregate` / `trend` / `drillDown` / `compareTo`) in
- * `component-metric-family-typed-members.pin.test.ts`; the drill-down's
- * `report` waits below with the objectui-held contracts, until the spec
- * declares a drill report.
+ * `component-metric-family-typed-members.pin.test.ts`. The objectui-held
+ * contracts the last stage could type (`object-gantt` `markers`,
+ * `object-timeline` `mapping`, and the field-name `fields` of `object-form`
+ * and `object-master-detail-form`) in
+ * `component-objectui-held-typed-members.pin.test.ts`; the rest of them are
+ * held below as forks — the drill-down's `report`, the form's `customFields`
+ * and both forms' `sections`, the timeline's `items` and the action
+ * containers' members.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -55,6 +58,11 @@
  * `staged` lines: a stage that types a member deletes its line here (§1's
  * second half enforces that), and ⛔ a NEW renderer-read member is typed, never
  * added as `staged`.
+ *
+ * A `fork` line is a member the stage that owned it measured and did NOT type
+ * under the stop valve: its contract has two or more viable shapes that no
+ * ruling decides. The line names the shapes (§2 checks there are at least
+ * two), and the fork is on the card with its census, for a ruling.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -132,7 +140,7 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  * would refuse a measured writer is reported, not shipped.
  */
 const STAGES = {
-  'objectui-held': 'element contracts the spec does not declare yet, whose declaration is still objectui\'s (`GanttMarker`, `TimelineMappingSchema`, the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`), and the metric drill-down\'s `report`, which objectui types as the spec\'s own `ReportSchema` input while no spec drill shape declares a `report` member (the chart\'s drill-down refuses it); the spec declares each first, contract-first, then the row takes it',
+  'fork': 'element contracts whose declaration is still objectui\'s (the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`, which a form section\'s inline entry is too) and the metric drill-down\'s `report`: the S-objectui-held stage, the last of #21464, measured each and found two or more viable spec shapes that no ruling decides, so under the stop valve each is held and its fork reported on the card with its census; the member is typed once a ruling picks a shape',
   'held-for-decision': 'a typed shape exists (by reference, or the renderer\'s own declared type), but measured writers author values it refuses that the renderer draws — the narrowing waits for a ruling',
 } as const;
 type Stage = keyof typeof STAGES;
@@ -150,8 +158,12 @@ type Reason =
   | { readonly kind: 'any-value'; readonly why: string }
   /** A deliberately open bag: the declared members are typed, the rest pass through. */
   | { readonly kind: 'open-bag'; readonly why: string }
-  /** Read with a fixed shape at the pin (`reader`); typing it is a named later stage. */
-  | { readonly kind: 'staged'; readonly stage: Stage; readonly reader: string };
+  /**
+   * Read with a fixed shape at the pin (`reader`); typing it is a named later
+   * stage. A `fork` line also names the viable shapes no ruling has chosen
+   * between (`shapes`).
+   */
+  | { readonly kind: 'staged'; readonly stage: Stage; readonly reader: string; readonly shapes?: readonly string[] };
 
 const EXPRESSION_AST: Reason = {
   kind: 'shared',
@@ -177,11 +189,12 @@ const RECORDS: Reason = { kind: 'records' };
 const SLOT: Reason = { kind: 'slot' };
 const RUNNER: Reason = { kind: 'runner' };
 const staged = (stage: Stage, reader: string): Reason => ({ kind: 'staged', stage, reader });
+const fork = (reader: string, shapes: readonly string[]): Reason => ({ kind: 'staged', stage: 'fork', reader, shapes });
 
 /**
  * `ObjectUI` source paths are at the `.objectui-sha` pin `89cad75d55`, except
- * the `object-metric` `drillDown.report` line, read at the `.objectui-sha` pin
- * `ab1879721595`.
+ * the `fork` lines, read at the `.objectui-sha` pin `ab1879721595` (each read
+ * point unchanged at objectui `main` `94985a92ba`).
  */
 const LEDGER = new Map<string, Reason>();
 const on = (types: readonly string[], paths: readonly string[], reason: Reason): void => {
@@ -233,24 +246,73 @@ on(['object-grid'], ['pagination.*'], {
   why: '`z.looseObject` on purpose: `pageSize` and `pageSizeOptions` are typed and are the only members a read point names; the member\'s own docblock records why the bag stays open',
 });
 
-// Read with a fixed shape at the pin — the later stages.
+// Read with a fixed shape at the pin — the forks the S-objectui-held stage
+// reported, and the one member still held for a ruling.
+//
 // The metric tile's four members are typed (stages 4 and 5); the drill-down's
 // `report` is not. The tile hands it to the shared drawer, which draws a
 // dataset-bound report (`isDatasetBoundReport`) and lists the records for any
-// other value; objectui types it as the spec's own `ReportSchema` input, but no
-// spec drill shape declares a `report` member — the chart's drill-down refuses
-// it — so the spec declares that contract first.
-on(['object-metric'], ['drillDown.report'], staged('objectui-held', 'plugin-dashboard/src/DrillDownDrawer.tsx:92 (`isDatasetBoundReport`), used at :115; handed over at ObjectMetricWidget.tsx:742'));
+// other value. Measured against it, the by-reference candidate admits a joined
+// report with no dataset-bound block, which the drawer does not draw, and
+// refuses a dataset-bound report with no name, label or values, which it does.
+on(['object-metric'], ['drillDown.report'], fork(
+  'plugin-dashboard/src/DrillDownDrawer.tsx:92 (`isDatasetBoundReport`), used at :115; handed over at ObjectMetricWidget.tsx:742',
+  [
+    '`ReportSchema` by reference, as it stands: a joined report whose blocks bind no dataset is accepted and lists the records',
+    '`ReportSchema` once a joined report\'s blocks must each bind a dataset, as its own refinement comment says they do',
+    'a drill-report shape of its own, the two arms the drawer draws',
+  ],
+));
 // The form's inline members are objectui's runtime form field (`FormField`,
 // identity key `name`), merged over the generated set and drawn whole; the spec
 // declares no such field — its own form field is keyed by `field`, and the
-// merge never matches it — so the spec declares that contract first.
-on(['object-form'], ['customFields'], staged('objectui-held', 'plugin-form/src/customFieldsMerge.ts:78-108 (`FormField`, by `name`), from ObjectForm.tsx:755, :1180'));
-on(['object-gantt'], ['markers[]'], staged('objectui-held', 'plugin-gantt/src/ObjectGantt.tsx:2497 (`GanttMarker`)'));
-on(['object-timeline'], ['items[]'], staged('objectui-held', 'plugin-timeline/src/ObjectTimeline.tsx:587'));
-on(['object-timeline'], ['mapping'], staged('objectui-held', 'plugin-timeline/src/ObjectTimeline.tsx:551, :576-579'));
-on(['action:group'], ['actions[]{}'], staged('objectui-held', 'components/src/renderers/action/action-group.tsx:303 (`UIActionSchema[]`)'));
-on(['action:menu'], ['actions[]{}'], staged('objectui-held', 'components/src/renderers/action/action-menu.tsx:339 (`UIActionSchema[]`)'));
+// merge never matches it. objectui's field is open (an index signature) and
+// eight of its forty-five members are the grid widget's snake_case keys.
+on(['object-form'], ['customFields'], fork(
+  'plugin-form/src/customFieldsMerge.ts:78-108 (`FormField`, by `name`), from ObjectForm.tsx:755, :1180',
+  [
+    'objectui\'s `FormField` as it stands, open, with its snake_case grid keys',
+    'a closed spec runtime field of the members a form draws, the grid keys camelCased or left out',
+    'the spec\'s own `FormFieldSchema` re-keyed by `name`',
+  ],
+));
+// A section's `fields` draws, beside a name and the form view's `{ field }`
+// entry, an inline runtime form field as it stands ("shape 3") — kept by
+// objectui#11550's ruling and declared by objectui
+// (`ObjectFormSection.fields: (string | FormField)[]`). So this member takes a
+// shape once the spec declares the runtime form field: `customFields`'s fork.
+on(['object-form', 'object-master-detail-form'], ['sections[]'], fork(
+  'plugin-form/src/sectionFields.ts:369-370 (shape 3), reached from ObjectForm.tsx:364, :1518 and every sectioned arm; the master-detail form hands it on at MasterDetailForm.tsx:1692',
+  [
+    'the form view\'s `FormSectionSchema`, its field entry widened by the runtime form field `customFields` declares',
+    'a page-block section shape of its own, the form view\'s section keys plus the three entry arms the form reads',
+  ],
+));
+// The authored timeline entry is objectui's (`TimelineFeedItem` /
+// `TimelineGanttItem`): a feed entry's `content` is child schema nodes, and the
+// arm an entry must match is chosen by the parent's `variant`.
+on(['object-timeline'], ['items[]'], fork(
+  'plugin-timeline/src/ObjectTimeline.tsx:587, into renderer.tsx (`TimelineFeedItem` / `TimelineGanttItem`, types/src/data-display.ts:2973, :3042)',
+  [
+    'the two arms with `content` a slot position the page walks judge, and the arm chosen by a row refinement on `variant`',
+    'the two arms with `content` an opaque member and a plain union of the arms',
+  ],
+));
+// Each member is objectui's `UIActionSchema`, drawn and run by the container.
+on(['action:group'], ['actions[]{}'], fork(
+  'components/src/renderers/action/action-group.tsx:303 (`UIActionSchema[]`), members at :91-249, run at :329-382',
+  [
+    'the read set, `action:button`\'s keys by `type`, without the keys the rows leave undecided',
+    'the read set with `outcomeMessages`, a member `className` and the member `properties.params` bag declared',
+  ],
+));
+on(['action:menu'], ['actions[]{}'], fork(
+  'components/src/renderers/action/action-menu.tsx:342 (`UIActionSchema[]`), members at :80-147, :408, run at :264-328',
+  [
+    'the read set, `action:button`\'s keys by `type`, without the keys the rows leave undecided',
+    'the read set with `outcomeMessages`, a member `className` and the member `properties.params` bag declared',
+  ],
+));
 // The list view's own `conditionalFormatting` is the by-reference shape, as on
 // `object-grid` (#21445) — but objectui's own kanban fixtures author both rule
 // dialects it refuses (`plugin-kanban/src/__tests__/ObjectKanban.
@@ -258,27 +320,6 @@ on(['action:menu'], ['actions[]{}'], staged('objectui-held', 'components/src/ren
 // `types/src/__tests__/kanban-conditional-formatting.test.ts:29-52`), so the
 // narrowing is reported for a ruling instead of shipped.
 on(['object-kanban'], ['conditionalFormatting'], staged('held-for-decision', 'plugin-kanban/src/KanbanBoardCore.tsx:114, evaluated at KanbanImpl.tsx:179 (`resolveConditionalFormatting`)'));
-// The renderer's own declared type for the form's `fields` is field-name
-// strings (`ObjectFormSchema.fields: string[]`), but its read also draws a
-// `{ name }` entry by that name, and measured writers author one: objectui's
-// published page-builder guide (`skills/objectui/guides/page-builder.md:263`),
-// its field-security and system-managed payload pins, and the `{ name }` row it
-// pins as behaviour (`plugin-form/src/__tests__/objectFormFieldsMembers-8071.test.tsx:165-167`).
-// Typing the member to strings would refuse a value the form draws.
-on(['object-form'], ['fields[]'], staged('held-for-decision', 'plugin-form/src/ObjectForm.tsx:961-981 and flatFields.ts:71-79, a `{ name }` entry drawn by that name'));
-// The form view's own `sections` is the by-reference shape, and every section
-// key the form reads is declared there — but a section's `fields` also draws an
-// inline runtime form field `{ name, type, … }` as it stands ("shape 3"), which
-// the form view's field entry (keyed by `field`) refuses; objectui's README
-// (`plugin-form/README.md:764`) and its submit-target pins
-// (`plugin-form/src/submitTargetRefusal.test.tsx:331-358`) author that shape
-// and assert that it renders and submits.
-on(['object-form'], ['sections[]'], staged('held-for-decision', 'plugin-form/src/sectionFields.ts:367-369 (shape 3), reached from ObjectForm.tsx:364, :1518 and every sectioned arm'));
-// The master-detail form hands both to its parent `object-form` verbatim, so
-// each is read exactly as that block's member is, and held with it; its own
-// `fields` writers author the `{ name }` entry too
-// (`plugin-form/src/__tests__/topLevelFieldsWarnCoverage-8847.test.tsx:254-257`).
-on(['object-master-detail-form'], ['sections[]', 'fields[]'], staged('held-for-decision', 'plugin-form/src/MasterDetailForm.tsx:1692-1693, into the parent form, read as `object-form`\'s'));
 
 /** Every `z.unknown()` member of every row, keyed as the ledger keys it. */
 function census(): Map<string, UnknownMember> {
@@ -349,6 +390,18 @@ describe('§2 each recorded reason holds', () => {
       if (reason.kind !== 'staged') continue;
       expect(Object.keys(STAGES), key).toContain(reason.stage);
       expect(reason.reader, key).toMatch(/\.tsx?:\d/);
+    }
+  });
+
+  it('a `fork` line names the two or more shapes no ruling has chosen between, and only a fork does', () => {
+    for (const [key, reason] of entries) {
+      if (reason.kind !== 'staged') continue;
+      if (reason.stage === 'fork') {
+        expect(reason.shapes?.length ?? 0, key).toBeGreaterThanOrEqual(2);
+        expect(new Set(reason.shapes).size, `${key}: each shape is a different one`).toBe(reason.shapes!.length);
+      } else {
+        expect(reason.shapes, key).toBeUndefined();
+      }
     }
   });
 

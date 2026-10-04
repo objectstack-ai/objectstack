@@ -8,7 +8,7 @@ import {
   resolveScheduleOrganization,
 } from './schedule-organization.zod';
 
-// [#16659] The declaration side of the acting-organization ruling. Two
+// [commit ecdfc9411] The declaration side of the acting-organization ruling. Two
 // consumers read this module and they must not be able to disagree about what
 // counts as DECLARED: the automation engine lifts the value onto the trigger
 // binding (`resolveTriggerBinding`), and both time triggers refuse a binding

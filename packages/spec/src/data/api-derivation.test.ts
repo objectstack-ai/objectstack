@@ -229,12 +229,12 @@ describe('api-derivation (#3391)', () => {
       );
       expect(doc, 'DATA_ACTION_TO_API_OPERATION lost its TSDoc block').toBeTruthy();
       // The block has two halves and only the first is a claim about today:
-      // the vocabulary description, then a `[#6259]` note recording what was
+      // the vocabulary description, then a `[commit 6968885ef]` note recording what was
       // removed and why. The note is EXPECTED to say `batch`; the description
       // saying it is the drift this issue is about ("runtime `callData`
       // actions (`query`/`find`→`list`, `batch`→`bulk`)").
-      const [description, history] = doc![0].split('[#6259]');
-      expect(history, 'the `[#6259]` removal note vanished from the TSDoc').toBeTruthy();
+      const [description, history] = doc![0].split('[commit 6968885ef]');
+      expect(history, 'the `[commit 6968885ef]` removal note vanished from the TSDoc').toBeTruthy();
       expect(description).not.toMatch(/batch/);
     });
   });

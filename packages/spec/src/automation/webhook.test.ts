@@ -276,10 +276,10 @@ describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
   });
 
   /**
-   * [#6362] The measurement that card asked for, kept as a pin.
+   * [commit b5404f496] The measurement that commit took in the same pass, kept as a pin.
    *
-   * #6362 fixed `connector`, which TOLERATED the stamped envelope and then
-   * stripped it — success with silent data loss — and asked whether `webhook`
+   * Commit b5404f496 fixed `connector`, which TOLERATED the stamped envelope and then
+   * stripped it — success with silent data loss — and measured whether `webhook`
    * had the same drop. It does not: `WebhookSchema` has carried
    * `...MetadataProtectionFields` since #4001 batch 11, and all SEVEN keys
    * survive the round-trip. No spread was added here; this pin is what makes
