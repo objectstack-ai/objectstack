@@ -780,34 +780,45 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
- * [#21658] The save door's refusal of a `hook` whose `handler` names a
- * function and that carries no `body`: such a hook can never run once this
- * door has stored it.
+ * [#21658, #21689] The save door's refusal of a `hook` that carries no `body`:
+ * such a hook can never run once this door has stored it. One predicate, two
+ * shapes it meets, one envelope: a hook whose `handler` names a function, and a
+ * hook with neither field.
  *
- * Why it can never bind. A hook's `handler` name resolves inside the hook's
- * own package only (the maintainer's ruling on #21604, letter B; the binder's
- * `resolveHandler` in `@objectstack/objectql`'s `hook-binder.ts`). A hook this
- * door stores ships with no code package: the runtime binds every stored hook
- * under the synthetic owner `metadata-service` (`ObjectQLPlugin`'s authored
- * hook re-sync), with no `functions` map, and no package of that name
- * registers functions. So the name has nothing to resolve against, and the
- * binder refuses the hook at registration (`INVALID_REFERENCE` / 400, logged
- * at `error`) after this door has already answered success. Refusing it here
- * says so to the author, before anything is stored.
+ * Why it can never run. A hook this door stores ships with no code package:
+ * the runtime binds every stored hook under the synthetic owner
+ * `metadata-service` (`ObjectQLPlugin`'s authored hook re-sync), with no
+ * `functions` map, and no package of that name registers functions. So a
+ * `body`, which is stored with the hook, is the only code it can run.
  *
- * The predicate is the binder's own body-first test: a `body` object is bound
- * through the body runner and the `handler` is never consulted, so a hook
- * carrying BOTH a `body` and a `handler` saves (its body runs), as it installs
- * on the install-local door. Asked after the type schema has accepted the
- * body, so `body` here is either absent or a declared hook body, and a
- * malformed `body` gets the schema's own located `422` instead of this
- * refusal's "give it a body".
+ *   - A `handler` name resolves inside the hook's own package only (the
+ *     maintainer's ruling on #21604, letter B; the binder's `resolveHandler` in
+ *     `@objectstack/objectql`'s `hook-binder.ts`), so it has nothing to resolve
+ *     against, and the binder refuses the hook at registration
+ *     (`INVALID_REFERENCE` / 400, logged at `error`).
+ *   - A hook with neither field has nothing to bind at all, and the binder
+ *     skips it at every re-sync (`skipping hook with unresolved handler`,
+ *     logged at `warn`).
+ *
+ * Either way the door would already have answered success, and the hook would
+ * be served by name and never run. Refusing it here says so to the author,
+ * before anything is stored.
+ *
+ * The predicate is the binder's own body-first test, the judgement
+ * install-local's `collectHooksWithoutBody` makes on its own door (#21585): a
+ * `body` object is bound through the body runner and the `handler` is never
+ * consulted, so a hook carrying BOTH a `body` and a `handler` saves (its body
+ * runs), and every hook without a `body` object is refused, whatever its
+ * `handler` holds. Asked after the type schema has accepted the body, so
+ * `body` here is either absent or a declared hook body, and a malformed `body`
+ * gets the schema's own located `422` instead of this refusal's "give it a
+ * body".
  *
  * ⛔ Not a `HookSchema` rule: a build artifact legitimately carries the string
  * form (`objectstack build` lowers an inline function to the hook's name and
  * ships the function in the artifact's runtime module), and the artifact and
  * boot doors never reach `saveMetaItem`. This is the runtime-authoring door's
- * rule only, the same shape install-local refuses on its own door (#21585).
+ * rule only.
  *
  * Every writer through this door is judged: the REST and dispatcher saves, in
  * draft and in publish mode, and the two server-stated re-savers
@@ -815,12 +826,12 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
  * the row's failure. A row stored before this rule keeps its bytes.
  *
  * `VALIDATION_ERROR` / 400, the envelope of the name check the door runs on
- * every body (`savedItemNameRefusal`). The message names the hook and its
- * `handler`, prescribes the `body` first, and only then explains: a 4xx
- * message crosses the REST boundary bounded at 500 characters with its TAIL
- * truncated, and the whole sentence stays under that bound for any hook and
- * function name shorter than about 65 characters each. Runtime words carry no
- * tracker number.
+ * every body (`savedItemNameRefusal`). The message names the hook (and the
+ * function, when its `handler` names one), prescribes the `body` first, and
+ * only then explains: a 4xx message crosses the REST boundary bounded at 500
+ * characters with its TAIL truncated, and the whole sentence stays under that
+ * bound for any hook and function name shorter than about 65 characters each.
+ * Runtime words carry no tracker number.
  */
 function runtimeHookWithoutBodyRefusal(
     singularType: string,
@@ -831,12 +842,15 @@ function runtimeHookWithoutBodyRefusal(
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
     const hook = item as { handler?: unknown; body?: unknown };
     if (hook.body && typeof hook.body === 'object') return undefined;
-    if (typeof hook.handler !== 'string' || hook.handler === '') return undefined;
+    const prescription = 'Give it a `body` (sandboxed JS, `{ language: \'js\', source }`, or an expression), '
+        + 'which is stored with the hook. A hook saved through the metadata API ships with no code package, so ';
     const err = new Error(
-        `Invalid hook: '${saveName}' names the function '${hook.handler}' in its \`handler\` and carries no \`body\`, `
-        + 'so it can never run. Give it a `body` (sandboxed JS, `{ language: \'js\', source }`, or an expression), '
-        + 'which is stored with the hook. A hook saved through the metadata API ships with no code package, so it '
-        + "holds no functions, and a `handler` name resolves only inside the hook's own package.",
+        typeof hook.handler === 'string' && hook.handler !== ''
+            ? `Invalid hook: '${saveName}' names the function '${hook.handler}' in its \`handler\` and carries no \`body\`, `
+                + `so it can never run. ${prescription}it holds no functions, and a \`handler\` name resolves only inside `
+                + "the hook's own package."
+            : `Invalid hook: '${saveName}' carries no \`body\`, so it has nothing to run. ${prescription}`
+                + 'its `body` is the only code it can run.',
     ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
     err.code = 'VALIDATION_ERROR';
     err.status = 400;
