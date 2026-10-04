@@ -19,7 +19,7 @@ import { F } from '@objectstack/spec';
  * open approvals, not the append-only request history.
  *
  * `approver` holds one identity literal exactly as it appears in the CSV:
- * a user id, an email, or a `role:<name>` / `team:<name>` style literal.
+ * a user id, an email, or a `position:<name>` / `team:<name>` style literal.
  * Equality (or `$in`) on this column is the indexed replacement for the old
  * per-row substring match.
  *
@@ -75,7 +75,7 @@ export const SysApprovalApprover = ObjectSchema.create({
       label: 'Approver',
       required: true,
       maxLength: 255,
-      description: 'One pending-approver identity: user id, email, or role:/team: literal',
+      description: 'One pending-approver identity: user id, email, or position:/team: literal',
       group: 'Target',
     }),
 

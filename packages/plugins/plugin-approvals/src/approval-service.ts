@@ -1598,10 +1598,11 @@ export class ApprovalService implements IApprovalService {
 
     // Named something else — allow it ONLY if the server can prove the caller
     // holds that identity. `positions` is resolved by the shared authz resolver
-    // (never client-supplied); `role:` is the ADR-0090 D3 deprecated spelling
-    // that 15.x-era slots and the Console's own identity list still carry. The
-    // spellings come from `positionAddresses` — the one equivalence every
-    // reader takes (`approver-address.ts`). Which SLOT the admitted actor then
+    // (never client-supplied), and a held position is named `position:<p>`:
+    // the address comes from `positionAddresses` — the one equivalence every
+    // reader takes (`approver-address.ts`). `role:<p>` names no position
+    // (ADR-0090 D3, no alias window), so it is refused here like any other
+    // identity the caller cannot prove. Which SLOT the admitted actor then
     // takes is the decision methods' question (`takenSlot`).
     const named = String(actorId);
     for (const position of context.positions ?? []) {
@@ -1661,12 +1662,12 @@ export class ApprovalService implements IApprovalService {
    * with `actorId` exactly as {@link ApprovalService.resolveActor} returned it.
    *
    * The default actor (the caller's own user id) takes a slot under their user
-   * id, their account's email or any spelling of a position they hold; a named
-   * position address takes its position's slot under either spelling. That is
-   * the set `resolveActor` already admitted — a holder could always decide a
+   * id, their account's email or the `position:<p>` address of a position they
+   * hold; a named position address takes its position's slot. That is the set
+   * `resolveActor` already admitted — a holder could always decide a
    * `position:<p>` slot by naming that exact spelling — so this widens nobody:
-   * it makes the default actor and the console's `role:<p>` reach the same
-   * slot. A user who holds a different position takes nothing.
+   * it makes the default actor reach the same slot. A user who holds a
+   * different position takes nothing.
    *
    * ⭐ What a slot-gated action records: TWO facts, each in its own column.
    * `sys_approval_action.acted_as` is the slot it was admitted under — the
@@ -1709,7 +1710,8 @@ export class ApprovalService implements IApprovalService {
    *   - `user`       → literal value
    *
    * `role` is accepted as the deprecated spelling of `org_membership_level`
-   * (ADR-0090 D3) for one window: it resolves identically and logs a warning.
+   * (ADR-0090 D3) for one window: it resolves identically — the empty-lookup
+   * fallback literal included — and logs a warning.
    *
    * **Out-of-office (#1322 M1):** individually-routed approvers — the ones that
    * resolve to a specific person (`user` / `field` / `manager`) — are passed
@@ -1798,9 +1800,11 @@ export class ApprovalService implements IApprovalService {
     substitutions?: OooSubstitution[],
   ): Promise<string[]> {
     // ADR-0090 D3: `role` is the deprecated spelling of `org_membership_level`.
-    // Resolve on the canonical type, but keep the AUTHORED spelling in the
-    // `type:value` fallback below — stored `sys_approval_approver` rows and
-    // `pending_approvers` slots from 15.x carry the old literal.
+    // Resolve on the canonical type, and write the canonical type in the
+    // `type:value` fallback below too: no path writes a `role:` slot, a
+    // spelling no reader addresses (`approver-address.ts`). A slot stored under
+    // it by a 15.x-era request stays as stored, decidable by the privileged
+    // override — no stored slot is rewritten.
     const type = canonicalApproverType(String(a.type));
     if (type !== a.type) {
       this.logger?.warn?.(
@@ -1915,7 +1919,7 @@ export class ApprovalService implements IApprovalService {
         { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
-    return [`${a.type}:${a.value}`];
+    return [`${type}:${a.value}`];
   }
 
   /**
@@ -4548,7 +4552,7 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
 
     // Per-approver fan-out: concrete identities (user ids / emails) each get
-    // their OWN one-tap approve/reject links (ADR-0043); `role:*`-style
+    // their OWN one-tap approve/reject links (ADR-0043); `position:*`-style
     // literals can't carry a personal token and fall back to a plain nudge.
     let notified = 0;
     const concrete = pending.filter(a => a && !a.includes(':'));
@@ -6143,7 +6147,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     // Display names for submitters AND user-id approvers in one lookup.
-    // `role:<r>` (and other `type:value` literals) are already readable.
+    // `position:<p>` (and other `type:value` literals) are already readable.
     const userIdentifiers: Array<string | null | undefined> = [];
     for (const r of rows) {
       userIdentifiers.push(r.submitter_id);
@@ -6442,12 +6446,11 @@ export class ApprovalService implements IApprovalService {
    * slot. Returns null when the filter is absent (callers skip the id
    * constraint).
    *
-   * A position address matches under EVERY spelling of that position — the
-   * index stores the slot as it was written (`position:<p>` for a slot opened
-   * on an unstaffed position, `role:<p>` for a 15.x-era one), while a client
-   * may ask under either. The spellings come from `equivalentApproverAddresses`,
-   * the same equivalence `resolveActor` admits a caller under; ⛔ never a
-   * second fold written here.
+   * A position address matches through `equivalentApproverAddresses`, the
+   * same equivalence `resolveActor` admits a caller under: `position:<p>`, the
+   * literal a slot opened on an unstaffed position stores, is the one spelling
+   * (a stored 15.x-era `role:<p>` row is no position address, ADR-0090 D3, and
+   * matches only itself). ⛔ Never a second fold written here.
    */
   private async approverRequestIds(
     targets: string[],
@@ -6491,12 +6494,11 @@ export class ApprovalService implements IApprovalService {
    * "Current approver" means a pending slot the caller could ACT under, which
    * is wider than their concrete user id: position/team/manager/field
    * approvers are resolved to concrete user ids at open time, but a position
-   * that nobody held at open time leaves the literal `position:<p>` slot (and a
-   * 15.x-era slot reads `role:<p>`), a `user` approver authored as an email
-   * leaves the email, and the default actor takes any of those — a position
-   * `p` the caller holds (server-resolved `context.positions`, never
-   * client-supplied) under either spelling, the email their own account
-   * carries. Keying on the user id alone hid exactly those requests from the
+   * that nobody held at open time leaves the literal `position:<p>` slot, a
+   * `user` approver authored as an email leaves the email, and the default
+   * actor takes any of those — a position `p` the caller holds
+   * (server-resolved `context.positions`, never client-supplied) as
+   * `position:<p>`, the email their own account carries. Keying on the user id alone hid exactly those requests from the
    * people who could decide them: absent from "My Pending" under every
    * spelling the client asked for, `404` on the request itself. So the probe
    * asks for the caller's acting addresses (`actingAddresses`,
