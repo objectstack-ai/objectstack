@@ -31,7 +31,7 @@
     "assertion deleted. Measured on the branch point e900015cd (2026-08-05)."
   ],
   "nonTest": {
-    "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 2,
+    "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 1,
     "packages/core/src/security/resolve-authz-context.ts": 1,
     "packages/metadata-protocol/src/protocol.ts": 6,
     "packages/metadata-protocol/src/seed-loader.ts": 3,
