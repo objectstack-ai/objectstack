@@ -1,5 +1,5 @@
 ---
-'@objectstack/metadata-core': patch
+'@objectstack/metadata-core': minor
 ---
 
 The object-schema field mask (ADR-0106 D1) now removes a denied field's references from the rest of the served object document, not only its `fields` entry.
