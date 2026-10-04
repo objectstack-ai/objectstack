@@ -159,13 +159,13 @@ const LOAD_CONFIG = {
 
 const seed = (object: string, records: Array<Record<string, unknown>>) => ({
   object,
-  externalId: 'code',
+  externalId: 'ref',
   mode: 'upsert',
   env: ['prod', 'dev', 'test'],
   records,
 });
 
-/** The validation sentence a seed error quotes, after its `(code=…): ` lead. */
+/** The validation sentence a seed error quotes, after its `(ref=…): ` lead. */
 const quotedSentence = (message: string) => message.slice(message.indexOf('): ') + 3);
 
 /** The thrown refusal, read the way an HTTP boundary reads it. */
@@ -208,7 +208,7 @@ describe('a system writer is exempt from the readonly strip, never from the valu
         label: name,
         datasource: 'seed-store',
         fields: {
-          code: { name: 'code', label: 'Code', type: 'text' },
+          ref: { name: 'ref', label: 'Ref', type: 'text' },
           subject: { name: 'subject', label: 'Subject', type: 'text' },
           run_at: { name: 'run_at', label: 'Run At', type: 'datetime', readonly },
           // The constraint arms a readonly value does NOT reach (see
@@ -229,11 +229,11 @@ describe('a system writer is exempt from the readonly strip, never from the valu
   const loader = () => new SeedLoaderService(objectql as never, emptyMetadata() as never, quietLogger as never);
   const load = (...seeds: ReturnType<typeof seed>[]) =>
     loader().load({ seeds: seeds as never, config: LOAD_CONFIG });
-  const rows = (object: string, code: string) =>
-    Array.from(storeFor(object).values()).filter((r) => r.code === code);
-  const stored = (object: string, code: string) => {
-    const found = rows(object, code);
-    expect(found.length, `exactly one stored ${object} row for code ${code}`).toBe(1);
+  const rows = (object: string, ref: string) =>
+    Array.from(storeFor(object).values()).filter((r) => r.ref === ref);
+  const stored = (object: string, ref: string) => {
+    const found = rows(object, ref);
+    expect(found.length, `exactly one stored ${object} row for ref ${ref}`).toBe(1);
     return found[0];
   };
 
@@ -241,8 +241,8 @@ describe('a system writer is exempt from the readonly strip, never from the valu
   describe("pin 1: 'yesterday' on a readonly datetime in a seed is refused, as the non-readonly path refuses it", () => {
     it('the seed loader counts it as a seed error, quotes the non-readonly sentence, and stores no row', async () => {
       const result = await load(
-        seed(RO, [{ code: 'bad', run_at: 'yesterday' }]),
-        seed(RW, [{ code: 'bad', run_at: 'yesterday' }]),
+        seed(RO, [{ ref: 'bad', run_at: 'yesterday' }]),
+        seed(RW, [{ ref: 'bad', run_at: 'yesterday' }]),
       );
 
       expect(result.summary.totalErrored).toBe(2);
@@ -255,10 +255,10 @@ describe('a system writer is exempt from the readonly strip, never from the valu
     });
 
     it('the replay (UPDATE) of an existing seed row is refused too, and the stored value stands', async () => {
-      const first = await load(seed(RO, [{ code: 'r', run_at: ISO }]));
+      const first = await load(seed(RO, [{ ref: 'r', run_at: ISO }]));
       expect(first.errors).toEqual([]);
 
-      const replay = await load(seed(RO, [{ code: 'r', run_at: 'yesterday' }]));
+      const replay = await load(seed(RO, [{ ref: 'r', run_at: 'yesterday' }]));
       expect(replay.summary.totalErrored).toBe(1);
       expect(quotedSentence(replay.errors[0].message)).toBe('Run At must be a valid datetime (ISO-8601)');
       expect(stored(RO, 'r').run_at).toBe(ISO);
@@ -266,12 +266,12 @@ describe('a system writer is exempt from the readonly strip, never from the valu
 
     it('the refusal is VALIDATION_FAILED / 400 on all four write seams, with the non-readonly field envelope', async () => {
       const ctx = { context: SEED_WRITE_EXECUTION_CONTEXT };
-      const [existing] = await objectql.insert(RO, [{ code: 'e', run_at: ISO }], ctx);
+      const [existing] = await objectql.insert(RO, [{ ref: 'e', run_at: ISO }], ctx);
 
       const seams: Array<[string, () => Promise<unknown>]> = [
-        ['insert', () => objectql.insert(RO, { code: 'i', run_at: 'yesterday' }, ctx)],
+        ['insert', () => objectql.insert(RO, { ref: 'i', run_at: 'yesterday' }, ctx)],
         ['update by id', () => objectql.update(RO, { id: existing.id, run_at: 'yesterday' }, ctx)],
-        ['update by predicate', () => objectql.update(RO, { run_at: 'yesterday' }, { ...ctx, where: { code: 'e' }, multi: true } as any)],
+        ['update by predicate', () => objectql.update(RO, { run_at: 'yesterday' }, { ...ctx, where: { ref: 'e' }, multi: true } as any)],
       ];
       for (const [seam, write] of seams) {
         const r = await refusal(write);
@@ -281,18 +281,18 @@ describe('a system writer is exempt from the readonly strip, never from the valu
         ]);
       }
       // The control: the SAME write on the non-readonly twin answers the same envelope.
-      const control = await refusal(() => objectql.insert(RW, { code: 'i', run_at: 'yesterday' }, ctx));
+      const control = await refusal(() => objectql.insert(RW, { ref: 'i', run_at: 'yesterday' }, ctx));
       expect([control.code, control.status]).toEqual(['VALIDATION_FAILED', 400]);
       expect(control.fields.map((f) => [f.field, f.code, f.message])).toEqual([
         ['run_at', 'invalid_date', 'Run At must be a valid datetime (ISO-8601)'],
       ]);
       expect(stored(RO, 'e').run_at).toBe(ISO);
       // Positive control on the predicate seam: a valid value lands through it.
-      await objectql.update(RO, { run_at: DAYS_AGO_5 }, { ...ctx, where: { code: 'e' }, multi: true } as any);
+      await objectql.update(RO, { run_at: DAYS_AGO_5 }, { ...ctx, where: { ref: 'e' }, multi: true } as any);
       expect(stored(RO, 'e').run_at).toBe(DAYS_AGO_5);
 
       // The dry run (fourth seam) reports what the write refuses.
-      const preview = await objectql.validate(RO, { code: 'p', run_at: 'yesterday' }, { mode: 'insert', context: SEED_WRITE_EXECUTION_CONTEXT });
+      const preview = await objectql.validate(RO, { ref: 'p', run_at: 'yesterday' }, { mode: 'insert', context: SEED_WRITE_EXECUTION_CONTEXT });
       expect(preview.valid).toBe(false);
       expect(preview.results[0].errors.map((f: any) => [f.field, f.code])).toEqual([['run_at', 'invalid_date']]);
     });
@@ -303,15 +303,15 @@ describe('a system writer is exempt from the readonly strip, never from the valu
       // call shape, single-row and array.
       const ctx = { context: SEED_WRITE_EXECUTION_CONTEXT };
       for (const write of [
-        () => objectql.insert(RO, { code: 'c1', run_at: cel`daysAgo(5)` }, ctx),
-        () => objectql.insert(RO, [{ code: 'c2', run_at: cel`daysAgo(5)` }], ctx),
+        () => objectql.insert(RO, { ref: 'c1', run_at: cel`daysAgo(5)` }, ctx),
+        () => objectql.insert(RO, [{ ref: 'c2', run_at: cel`daysAgo(5)` }], ctx),
       ]) {
         const r = await refusal(write);
         expect([r.code, r.status]).toEqual(['VALIDATION_FAILED', 400]);
         expect(r.fields.map((f) => [f.field, f.code])).toEqual([['run_at', 'invalid_date']]);
       }
       // The injected audit column the seed keeps since #21646.
-      const audit = await refusal(() => objectql.insert(RO, { code: 'ca', created_at: 'yesterday' }, ctx));
+      const audit = await refusal(() => objectql.insert(RO, { ref: 'ca', created_at: 'yesterday' }, ctx));
       expect([audit.code, audit.status]).toEqual(['VALIDATION_FAILED', 400]);
       expect(audit.fields.map((f) => [f.field, f.code])).toEqual([['created_at', 'invalid_date']]);
       expect(rows(RO, 'c1')).toEqual([]);
@@ -323,8 +323,8 @@ describe('a system writer is exempt from the readonly strip, never from the valu
   // ── Pin 2 ────────────────────────────────────────────────────────────────
   it('pin 2: a valid ISO value on a readonly field under the seed context is kept — authored, evaluated from `cel`, or on `created_at`', async () => {
     const result = await load(seed(RO, [
-      { code: 'iso', run_at: ISO, created_at: ISO },
-      { code: 'cel', run_at: cel`daysAgo(5)`, created_at: cel`daysAgo(5)` },
+      { ref: 'iso', run_at: ISO, created_at: ISO },
+      { ref: 'cel', run_at: cel`daysAgo(5)`, created_at: cel`daysAgo(5)` },
     ]));
     expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
     expect(stored(RO, 'iso').run_at).toBe(ISO);
@@ -333,7 +333,7 @@ describe('a system writer is exempt from the readonly strip, never from the valu
     expect(new Date(stored(RO, 'cel').created_at).toISOString()).toBe(DAYS_AGO_5);
 
     // The replay keeps it too.
-    const replay = await load(seed(RO, [{ code: 'iso', subject: 'v2', run_at: ISO, created_at: ISO }]));
+    const replay = await load(seed(RO, [{ ref: 'iso', subject: 'v2', run_at: ISO, created_at: ISO }]));
     expect(replay.errors).toEqual([]);
     expect(stored(RO, 'iso').subject).toBe('v2');
     expect(stored(RO, 'iso').run_at).toBe(ISO);
@@ -342,17 +342,17 @@ describe('a system writer is exempt from the readonly strip, never from the valu
   // ── Pin 3 ────────────────────────────────────────────────────────────────
   describe('pin 3: the non-readonly path is unchanged', () => {
     it('a non-readonly datetime takes a valid value and refuses a malformed one, as before', async () => {
-      const result = await load(seed(RW, [{ code: 'ok', run_at: ISO }]));
+      const result = await load(seed(RW, [{ ref: 'ok', run_at: ISO }]));
       expect(result.errors).toEqual([]);
       expect(stored(RW, 'ok').run_at).toBe(ISO);
-      const r = await refusal(() => objectql.insert(RW, { code: 'no', run_at: 'yesterday' }, { context: { isSystem: true } }));
+      const r = await refusal(() => objectql.insert(RW, { ref: 'no', run_at: 'yesterday' }, { context: { isSystem: true } }));
       expect([r.code, r.status]).toEqual(['VALIDATION_FAILED', 400]);
       expect(r.fields.map((f) => [f.field, f.code])).toEqual([['run_at', 'invalid_date']]);
     });
 
     it('a NON-system caller\'s readonly value is still dropped by the strip, never refused — on insert and on a whole-record write-back', async () => {
       const user = { context: { userId: 'user-1' } };
-      const [row] = await objectql.insert(RO, [{ code: 'u', run_at: 'yesterday' }], user);
+      const [row] = await objectql.insert(RO, [{ ref: 'u', run_at: 'yesterday' }], user);
       expect(stored(RO, 'u').run_at).toBeUndefined();
 
       // A form round-trip echoes every key it read, a malformed legacy one
@@ -367,11 +367,11 @@ describe('a system writer is exempt from the readonly strip, never from the valu
     it('a readonly value reaches the SHAPE arms only: an undeclared option and an out-of-bound number are stored, as before', async () => {
       // The open-vocabulary ruling on `sys_activity.type` (commit 88b9d749a):
       // a readonly option set is the built-in set, not a closed enum.
-      await objectql.insert(RO, { code: 'k', kind: 'author_value', score: 9 }, { context: SEED_WRITE_EXECUTION_CONTEXT });
+      await objectql.insert(RO, { ref: 'k', kind: 'author_value', score: 9 }, { context: SEED_WRITE_EXECUTION_CONTEXT });
       expect(stored(RO, 'k').kind).toBe('author_value');
       expect(stored(RO, 'k').score).toBe(9);
       // …while the non-readonly twin refuses both, unchanged.
-      const r = await refusal(() => objectql.insert(RW, { code: 'k', kind: 'author_value', score: 9 }, { context: SEED_WRITE_EXECUTION_CONTEXT }));
+      const r = await refusal(() => objectql.insert(RW, { ref: 'k', kind: 'author_value', score: 9 }, { context: SEED_WRITE_EXECUTION_CONTEXT }));
       expect([r.code, r.status]).toEqual(['VALIDATION_FAILED', 400]);
       expect(r.fields.map((f) => [f.field, f.code]).sort()).toEqual([['kind', 'invalid_option'], ['score', 'max_value']]);
     });
