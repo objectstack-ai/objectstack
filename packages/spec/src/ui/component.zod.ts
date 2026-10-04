@@ -6607,24 +6607,32 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `GanttMarker` this feeds also takes a `Date`, which only a code-composed
  * chart can hand it). Closed here, as every element shape on this map is: a
  * misspelled member was dropped by the chart in silence.
+ *
+ * A factory the row calls, as {@link masterDetailDetailEntry} is, not a
+ * {@link lazySchema}: an array element is built with its row, so its alias
+ * table is registered wherever the row is (a bare lazy proxy as an array
+ * element is never forced by `alias-integrity.test.ts`'s walk, which reds on
+ * the unreached table).
  */
-const ObjectGanttMarkerSchema = lazySchema(() => strictObject({
-  surface: 'this `object-gantt` marker',
-  history:
-    'Until this shape was declared, `markers` was `z.array(z.unknown())`: a marker with no `date`, a '
-    + 'numeric `date` or a misspelled member passed, and the chart drew no line, or drew it with no label '
-    + 'and in the default colour.',
-  aliases: {
-    at: 'date', day: 'date', when: 'date',
-    title: 'label', text: 'label', name: 'label',
-    colour: 'color', stroke: 'color',
-  },
-}, {
-  date: z.string()
-    .describe('Where the line stands — an ISO date (`2026-07-01`, read as that day on the chart\'s own calendar) or date-time string; a date that does not parse, or falls outside the drawn range, draws no line'),
-  label: z.string().optional().describe('Text drawn against the line'),
-  color: z.string().optional().describe('Line colour, any CSS colour (renderer default: the theme\'s primary colour)'),
-}));
+function objectGanttMarker() {
+  return strictObject({
+    surface: 'this `object-gantt` marker',
+    history:
+      'Until this shape was declared, `markers` was `z.array(z.unknown())`: a marker with no `date`, a '
+      + 'numeric `date` or a misspelled member passed, and the chart drew no line, or drew it with no label '
+      + 'and in the default colour.',
+    aliases: {
+      at: 'date', day: 'date', when: 'date',
+      title: 'label', text: 'label', name: 'label',
+      colour: 'color', stroke: 'color',
+    },
+  }, {
+    date: z.string()
+      .describe('Where the line stands — an ISO date (`2026-07-01`, read as that day on the chart\'s own calendar) or date-time string; a date that does not parse, or falls outside the drawn range, draws no line'),
+    label: z.string().optional().describe('Text drawn against the line'),
+    color: z.string().optional().describe('Line colour, any CSS colour (renderer default: the theme\'s primary colour)'),
+  });
+}
 
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
@@ -6757,7 +6765,7 @@ const ObjectGanttMarkerSchema = lazySchema(() => strictObject({
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
  * `schema.showBaselines !== false`, `schema.persistLayout === false`,
- * `new Set(schema.holidays)`. `markers` takes {@link ObjectGanttMarkerSchema}
+ * `new Set(schema.holidays)`. `markers` takes {@link objectGanttMarker}'s shape
  * since #21464's S-objectui-held stage: objectui's own authoring declaration of
  * the element, `{ date, label?, color? }` (it was `z.array(z.unknown())` while
  * the element contract lived only in `GanttView`'s runtime `GanttMarker`).
@@ -6816,7 +6824,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
     .describe('Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName`'),
   viewName: z.string().optional()
     .describe("Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`)"),
-  markers: z.array(ObjectGanttMarkerSchema).optional()
+  markers: z.array(objectGanttMarker()).optional()
     .describe('Extra vertical reference lines drawn like the Today marker — each `{ date, label?, color? }`: `date` places the line (a date outside the drawn range draws none), `label` is drawn against it, `color` paints it'),
   criticalPath: z.boolean().optional()
     .describe('Seed the critical-path highlight ON; the toolbar toggle stays available either way'),
