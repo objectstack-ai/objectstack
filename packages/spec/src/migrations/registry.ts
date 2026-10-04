@@ -6184,6 +6184,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-object-form-fields-names-typed',
+    order: 74,
+    text:
+      'It also types the top-level `fields` of the `object-form` and `object-master-detail-form` page '
+      + 'blocks (the last stage of the `ComponentPropsMap` `z.unknown()` close-out), the two members the third '
+      + 'stage held: the form drew a `{ name }` field entry its own page-builder guide taught, with a `label`, '
+      + '`type` and `required` it silently dropped, and objectui has since retired that entry from every '
+      + 'authoring face, drawing only a stored one by its name. So both rows take field names, objectui\'s own '
+      + 'declaration of the member, and refuse an object entry with what to write instead — a `{ name }` entry '
+      + 'is its bare name, and a `{ field }` entry belongs in a section. Read by the component-props gate '
+      + '(advisory); a stored page still saves and loads, so no conversion is registered. Its D3 record is the '
+      + 'semantic entry `ui-object-form-fields-names-typed`.',
+  },
+  {
     id: 'ui-object-form-members-typed',
     order: 67,
     text:
@@ -6198,6 +6212,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'runtime form field its entries are. Read by the component-props gate (advisory); a stored page '
       + 'still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-form-members-typed`.',
+  },
+  {
+    id: 'ui-object-gantt-markers-typed',
+    order: 75,
+    text:
+      'It also types the `object-gantt` page block\'s `markers` (the same stage): its entries were '
+      + '`z.unknown()` because the marker contract lived only in objectui, so a marker with no `date`, a numeric '
+      + '`date` or a misspelled member passed every door and the chart drew no line, or drew it unlabelled. The '
+      + 'spec now declares objectui\'s own authoring declaration of a marker, `{ date, label?, color? }` with '
+      + '`date` a string, and the row takes it. Read by the component-props gate (advisory); a stored page still '
+      + 'saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-gantt-markers-typed`.',
   },
   {
     id: 'ui-object-grid-columns-typed',
@@ -6335,6 +6361,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'dataset-bound report, but the spec declares no drill report yet, and declares that contract first. '
       + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-metric-drill-down-typed`.',
+  },
+  {
+    id: 'ui-object-timeline-mapping-typed',
+    order: 76,
+    text:
+      'It also types the `object-timeline` page block\'s `mapping` (the same stage): the binding record — '
+      + 'four optional field names for an entry\'s title, date, description and marker colour — was '
+      + '`z.unknown()` because its contract lived only in objectui, so a bare field name or a misspelled member '
+      + 'passed every door and the rail drew the default field. The spec now declares objectui\'s own '
+      + 'declaration of it, and the row takes it. The stage\'s other members — the metric drill-down\'s '
+      + '`report`, the form\'s `customFields` and both forms\' `sections`, the timeline\'s `items` and the '
+      + 'action containers\' members — stay open: each contract has more than one viable shape that no ruling '
+      + 'decides yet. Read by the component-props gate (advisory); a stored page still saves and loads, so no '
+      + 'conversion is registered. Its D3 record is the semantic entry `ui-object-timeline-mapping-typed`.',
   },
   {
     id: 'ui-record-line-items-props-closed',
@@ -19717,6 +19757,46 @@ const step18: MigrationStep = {
         + 'group per value of that field, and a board that showed one swimlane shows one swimlane per value — '
         + 'check that this is the grouping you meant.',
     },
+    // #21464 — the top-level `fields` of the `object-form` and
+    // `object-master-detail-form` page blocks was `z.array(z.unknown())`, held
+    // while the form drew a `{ name }` field entry its own page-builder guide
+    // taught. objectstack-ai/objectui#11550 retired that entry from every authoring
+    // face (the form still draws a STORED one, by its name, as tolerance), so both
+    // rows now take field names — objectui's own declaration of the member — and
+    // an object entry is refused with what to write instead. D3 only: page-
+    // component `properties` is not parsed on the metadata save or load path, so a
+    // stored page is never refused; and the authored census found no authored
+    // value to respell — the refused values are fixtures probing the stored read,
+    // the console warning and objectui's own refusal.
+    {
+      id: 'ui-object-form-fields-names-typed',
+      surface: 'page `object-form` and `object-master-detail-form` components — `properties.fields` (whose '
+        + 'entries used to accept any value)',
+      replacement: 'a list of bare field names, in the order the form draws them. Write a `{ name: \'email\' }` '
+        + 'entry as `\'email\'` — the form only ever drew its name — and move a `label` or `required` override '
+        + 'onto a `sections[].fields` entry (`type` is always the object field\'s); write a `{ field: \'email\' }` '
+        + 'entry as `\'email\'`, or move it into a section\'s `fields`, the vocabulary it belongs to.',
+      reason: 'The form reads its top-level `fields` as the names of the fields to draw, in order, selecting '
+        + 'from the object\'s fields and from `customFields`; the master-detail form hands its own to the parent '
+        + 'form verbatim. objectui declares the member `string[]`, but the page-component rows declared it '
+        + '`z.array(z.unknown())` while the form drew a `{ name }` entry by that name — the shape objectui\'s '
+        + 'page-builder guide taught, with a `label`, `type` and `required` the form silently dropped. '
+        + 'objectui has since retired that entry from every authoring face — the guide and its fixtures name the '
+        + 'fields — keeping only a STORED one readable; so both rows now take field names, and refuse an object entry with what to write instead: a '
+        + '`{ name }` entry is its bare name, and a `{ field }` entry — the `sections[].fields` vocabulary, which '
+        + 'the form skips at the top level with a console warning — is its bare name or belongs in a section. It is '
+        + 'read where every page component\'s props are: the component-props gate reports a refused value as an '
+        + 'advisory `component-props-invalid` finding on `objectstack validate`, `objectstack build` and '
+        + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s `properties` is '
+        + 'not parsed on the metadata save or load path. No conversion is registered: nothing on the load path '
+        + 'refuses the shape, the form already draws a stored `{ name }` entry by its name, and an override written '
+        + 'beside it has no rewrite that keeps it — moving it onto a section is the judgment this entry leaves to '
+        + 'the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-form` and `object-master-detail-form` node validates: `objectstack '
+        + 'validate` reports no `component-props-invalid` finding under `properties.fields`. Each form draws the '
+        + 'fields its list names, in that order, with any per-form label or required override taken from its '
+        + 'section entry.',
+    },
     // #21464 — four members of the `object-form` page block were `z.unknown()`
     // although the form reads each with a fixed shape, so an off-shape value passed
     // the component-props gate and the form fell back or ignored it in silence. The
@@ -19765,6 +19845,42 @@ const step18: MigrationStep = {
         + '`component-props-invalid` / `component-props-unknown-key` finding under the four members\' paths. '
         + 'Each form that set one of them now shows it: the post-submit behaviour it names, the modal\'s tabbed '
         + 'sections, the navigation after a save, and the phone presentation.',
+    },
+    // #21464 — the `object-gantt` page block's `markers` was `z.array(z.unknown())`:
+    // its element contract lived only in objectui, so a marker with no `date`, a
+    // numeric `date` or a misspelled member passed the component-props gate, and
+    // the chart drew no line, or drew it unlabelled and in the default colour. The
+    // spec now declares objectui's own authoring declaration of a marker,
+    // `{ date, label?, color? }` with `date` a string, and the row takes it. D3
+    // only: page-component `properties` is not parsed on the metadata save or load
+    // path, so a stored page is never refused; a misspelled member has no rewrite
+    // that says which of the three the author meant; and the authored census found
+    // no authored value to respell — the one refused value is objectui's own
+    // compile-time refusal probe.
+    {
+      id: 'ui-object-gantt-markers-typed',
+      surface: 'page `object-gantt` components — `properties.markers` (whose entries used to accept any value)',
+      replacement: 'a list of `{ date, label?, color? }`: `date` an ISO date or date-time string (required), `label` '
+        + 'the text drawn against the line, `color` any CSS colour. Write a marker `title`, `text` or `name` as '
+        + '`label`, and a `colour` as `color`; give every marker a string `date`.',
+      reason: 'The gantt reads each marker with one shape — `date` places the line, and a date that does not '
+        + 'parse or falls outside the drawn range draws none; `label` is drawn against it; `color` paints it, the '
+        + 'theme\'s primary colour when absent — and the page-component row declared the entries `z.unknown()`, '
+        + 'because that contract was objectui\'s alone. So a marker with no `date`, a numeric `date` or a '
+        + 'misspelled member passed the component-props gate, and the chart drew no line, or drew it with no label '
+        + 'and in the default colour. The spec now declares objectui\'s own authoring declaration of a marker, '
+        + '`{ date, label?, color? }` with `date` a string (authored metadata is JSON, which cannot carry a '
+        + '`Date`), closed as every element shape on that map is. It is read where every page component\'s props '
+        + 'are: the component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and `objectstack '
+        + 'lint`, and a stored page still saves and loads, because a page component\'s `properties` is not parsed '
+        + 'on the metadata save or load path. No conversion is registered: nothing on the load path refuses the '
+        + 'shape, and a misspelled member has no rewrite that says which member the author meant — which is the '
+        + 'judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-gantt` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.markers`. Each '
+        + 'gantt that sets markers draws one line per marker whose date falls in the drawn range, with the label '
+        + 'and colour written.',
     },
     // #21464 — the `object-grid` page block's `columns` was `z.array(z.unknown())`
     // although the grid reads it with one shape, so a column keyed `accessorKey` /
@@ -20233,6 +20349,40 @@ const step18: MigrationStep = {
         + 'that sets a drill-down opens it as written: the panel shape `target` names, the heading `title` names, '
         + 'and the records behind the number, scoped by the metric\'s own `filter`, in the columns and page size '
         + 'written.',
+    },
+    // #21464 — the `object-timeline` page block's `mapping` was `z.unknown()`: its
+    // contract lived only in objectui, so a bare field name, a non-string binding
+    // or a misspelled member (`titleField` inside `mapping`) passed the
+    // component-props gate, and the rail bound nothing for it and drew the default
+    // field. The spec now declares objectui's own declaration of the binding
+    // record, four optional field names, and the row takes it. D3 only: page-
+    // component `properties` is not parsed on the metadata save or load path, so a
+    // stored page is never refused; and the authored census found no refused
+    // authored value — every one parses.
+    {
+      id: 'ui-object-timeline-mapping-typed',
+      surface: 'page `object-timeline` components — `properties.mapping` (which used to accept any value)',
+      replacement: 'the binding record the rail reads: `{ title?, date?, description?, variant? }`, each a field '
+        + 'name. Write `titleField`, `dateField` / `startDateField`, `descriptionField` and `variantField` inside '
+        + '`mapping` as `title`, `date`, `description` and `variant`; write a bare field name as the member it '
+        + 'binds (`mapping: { title: \'subject\' }`).',
+      reason: 'The timeline rail reads `mapping` as four field names — `title` and `date` between the `timeline` '
+        + 'block\'s own member and the flat fallback, `description` ahead of `descriptionField`, and `variant`, '
+        + 'the field whose value picks each entry\'s marker colour and the one binding with no other spelling — '
+        + 'and the page-component row declared it `z.unknown()`, because that contract was objectui\'s alone. So a '
+        + 'bare field name, a non-string binding or a misspelled member passed the component-props gate, and the '
+        + 'rail bound nothing for it and drew the default field. The spec now declares objectui\'s own declaration '
+        + 'of the binding record, four optional field names, closed as every element shape on that map is. It is '
+        + 'read where every page component\'s props are: the component-props gate reports a refused value as an '
+        + 'advisory `component-props-invalid` / `component-props-unknown-key` finding on `objectstack validate`, '
+        + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a page '
+        + 'component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
+        + 'registered: nothing on the load path refuses the shape, and the authored census found nothing to '
+        + 'respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-timeline` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.mapping`. Each '
+        + 'timeline that sets a mapping draws its entries\' title, date, description and marker colour from the '
+        + 'fields it names.',
     },
     {
       id: 'ui-react-list-view-binding-aliases-retired',
