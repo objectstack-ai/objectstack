@@ -63,7 +63,7 @@ const TABLE: Array<{ name: string; branch: Node; refused: boolean; refusedWith?:
   { name: 'no `expression` key', branch: { label: 'y' }, refused: true, refusedWith: undefined },
   { name: '`expression: null`', branch: { label: 'y', expression: null }, refused: true, refusedWith: null },
   { name: 'the predicate under the edge\'s spelling `condition`', branch: { label: 'y', condition: 'true' }, refused: true, refusedWith: undefined },
-  { name: 'a blank string — the control: a blank predicate is already refused', branch: { label: 'y', expression: '   ' }, refused: true, refusedWith: '   ' },
+  { name: 'a blank string — blanks are refused', branch: { label: 'y', expression: '   ' }, refused: true, refusedWith: '   ' },
   { name: 'a real predicate — the accept control', branch: { label: 'y', expression: 'true' }, refused: false },
 ];
 
