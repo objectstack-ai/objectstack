@@ -53,14 +53,15 @@ function makeEngine(tables: Record<string, Row[]>, refuse: Record<string, string
         async find(object: string, query?: any): Promise<any[]> {
             reads.push({ object, query });
             const where: Record<string, unknown> = query?.where ?? {};
-            for (const [k, v] of Object.entries(where)) {
+            const rows = (tables[object] ?? []).filter((row) => Object.entries(where).every(([k, v]) => {
+                // Scalar equality only; anything else is refused, never guessed.
                 if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
-                    throw new Error(`fake engine: only scalar equality is implemented (got '${k}')`);
+                    throw new Error(`only scalar equality is implemented here (got '${k}')`);
                 }
-            }
-            return (tables[object] ?? [])
-                .filter((row) => Object.entries(where).every(([k, v]) => row[k] === v))
-                .map((row) => ({ ...row }));
+                return row[k] === v;
+            }));
+            const page = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+            return page.map((row) => ({ ...row }));
         },
         async delete(object: string, options?: any): Promise<boolean> {
             const dispatch = assertEngineDeleteDispatch(options);
