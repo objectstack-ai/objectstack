@@ -6063,9 +6063,10 @@ export class ObjectQL implements IObjectQLEngine {
         // so the same declaration behaved differently per datasource. That
         // split surfaced two ways: a validation-visible field was REJECTED by
         // the engine's own write validator ("must be a valid datetime"), and a
-        // `readonly`/`system` field — which `validateRecord` skips, i.e. the
-        // ~100 `created_at`/`updated_at` platform declarations — silently
-        // stored the four characters `NOW()`.
+        // `readonly`/`system` field — which `validateRecord` then skipped, i.e.
+        // the ~100 `created_at`/`updated_at` platform declarations — silently
+        // stored the four characters `NOW()`. (Since #21663 a readonly value's
+        // shape is judged too, so that literal would now be refused.)
         //
         // Resolved from the caller's `nowSnapshot`, so every defaulted field
         // in one insert (and every row of one batch) carries the SAME instant.
@@ -9884,12 +9885,19 @@ export class ObjectQL implements IObjectQLEngine {
    * — and not raw type membership, because the registry INJECTS covered-type
    * fields into every object it registers: `organization_id` and `owner_id`
    * (both `system`), plus `created_by` / `updated_by` (both in `SKIP_FIELDS`),
-   * are all `lookup`s. `validateRecord` skips every one of them before it ever
-   * reaches the value-shape check, so counting them made this answer `true` for
-   * literally every object — the dormancy rule above never fired, and this
-   * cache memoized a constant. Same predicate as the scanner for the same
-   * reason the scanner imports it: three readings of "a covered field" drifting
-   * by one clause is how a gate ends up governing fields nothing enforces.
+   * are all `lookup`s. A caller never writes any of them, so counting them made
+   * this answer `true` for literally every object — the dormancy rule above
+   * never fired, and this cache memoized a constant. Same predicate as the
+   * scanner for the same reason the scanner imports it: three readings of "a
+   * covered field" drifting by one clause is how a gate ends up governing
+   * fields nothing enforces.
+   *
+   * [#21663] The three that are `readonly` (`organization_id`, `created_by`,
+   * `updated_by`) DO reach the value-shape check now, on the value a system
+   * writer, hook or stamp stores. They still do not count here, so an object
+   * whose only covered fields are those stays warn-first for them: a malformed
+   * value is admitted, logged and reported, never stored silently. See
+   * `isScannableValueShapeField` for why widening this test is not the fix.
    */
   private objectHasCoveredValueField(objectSchema: any): boolean {
     if (!objectSchema?.fields) return false;
@@ -12724,8 +12732,13 @@ export class ObjectQL implements IObjectQLEngine {
         });
       };
       try {
+        // [#21663] `'include'` in both modes: the caller-write strips ran
+        // above, so this is the payload the write stores — and the write
+        // judges its readonly values' shape (insert in the same call, update
+        // in a second pass after its own strip).
         validateRecord(schemaForValidation, row, mode, {
           mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
+          readonlyValues: 'include',
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
@@ -13515,8 +13528,13 @@ export class ObjectQL implements IObjectQLEngine {
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
-            normalizeMultiValueFields(schemaForValidation, rows[i]);
-            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
+            // [#21663] `'include'`: the readonly strip ran above, so every
+            // readonly value still on the row is one the driver will store —
+            // a system writer's (seed, migration), a hook's or a stamp — and
+            // its SHAPE is judged here like any other field's. See
+            // `ReadonlyValueScope` (record-validator.ts).
+            normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
+            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, readonlyValues: 'include' });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -15051,6 +15069,15 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
+               // [#21663] The payload is FINAL here (see the seam below), so
+               // every readonly value on it is one the driver will store: a
+               // system writer's (the strip above never ran for it), a hook's,
+               // or a stamp. Its SHAPE is judged now, by the same arms and
+               // sentences as the caller-writable fields the first
+               // `validateRecord` above judged ahead of the strip — `'only'`,
+               // because those are already judged. See `ReadonlyValueScope`.
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, readonlyValues: 'only' });
                // ── [#19989] The post-image seam on the BY-ID path ─────────────
                //
                // The by-id twin of the predicate-path call below, placed at the
@@ -15305,6 +15332,12 @@ export class ObjectQL implements IObjectQLEngine {
                // caller is told before N rows are written with a column missing
                // — the failure mode a bulk write makes N times larger.
                assertNoStrictDrops();
+               // [#21663] The predicate-path twin of the by-id second pass, at the
+               // same point and for the same reason: the readonly values left on
+               // the final payload are stored, so their SHAPE is judged — before
+               // N rows are written.
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, readonlyValues: 'only' });
                // ── [#19950] The post-image seam on the PREDICATE path ─────────
                //
                // An enforcement layer's write `check` must hold for EVERY row a
