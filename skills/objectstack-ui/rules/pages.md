@@ -157,7 +157,7 @@ export const ReleaseNotesPage = definePage({
   source: `
 <flex direction="col" gap={6} style={{"maxWidth":"768px","margin":"0 auto","padding":"40px"}}>
   <h1 style={{"fontSize":"32px","fontWeight":700,"color":"hsl(var(--foreground))"}}>Release Notes</h1>
-  <object-metric objectName="ticket" aggregate="count" label="Open tickets" />
+  <object-metric objectName="ticket" aggregate={{"function":"count"}} label="Open tickets" />
 </flex>`,
 });
 ```
