@@ -481,6 +481,8 @@
     "system/Job:handler",
     "system/Job:label",
     "system/Job:name",
+    "system/Job:organization",
+    "system/Job:pull",
     "system/Job:retryPolicy",
     "system/Job:schedule",
     "system/Job:timeout [RETIRED]",

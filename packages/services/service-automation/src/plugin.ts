@@ -636,8 +636,13 @@ export class AutomationServicePlugin implements Plugin {
      * the `protocol` service, and resolves the connector against the instances
      * this plugin materialized from `connectors[]`.
      *
-     * ⛔ Nothing calls this on a schedule: a `job` drives a pull, and the
-     * caller supplies the execution context (`opts.context`) it runs under.
+     * The engine serves this as the `automation` service's contract method
+     * (`IAutomationService.pullConnectorSource`): `init()` attaches it with
+     * `setConnectorPullSource`, because the registered service is the ENGINE
+     * and the materialized-connector map it needs is this plugin's. A `job`
+     * whose `pull` names the mapping reaches it that way, through the service
+     * registry, and supplies the execution context (`opts.context`) built from
+     * the job's `organization`.
      */
     async pullConnectorSource(opts: ConnectorPullOptions): Promise<ConnectorPullResult> {
         const ctx = this.ctx;
@@ -855,6 +860,12 @@ export class AutomationServicePlugin implements Plugin {
         // metadata save door stores them in it (registered at `start()`).
         this.credentialChannel = new FlowCredentialChannel(() => this.resolveDataEngine(ctx));
         this.engine.setFlowCredentialSource(this.credentialChannel);
+
+        // [#20281 stage ③] The connector sync executor, served on the
+        // `automation` service's contract (`pullConnectorSource`) — the door a
+        // job's `pull` run form binds through. Attached before the service is
+        // registered, so no caller can resolve the service without it.
+        this.engine.setConnectorPullSource((request) => this.pullConnectorSource(request));
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);

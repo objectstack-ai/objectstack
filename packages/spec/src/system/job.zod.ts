@@ -13,6 +13,8 @@ import { retiredKey } from '../shared/retired-key';
 import { isValueDomainMember } from '../shared/value-domain.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ScriptBodySchema } from '../data/hook-body.zod';
+import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { ScheduleOrganizationSchema } from '../automation/schedule-organization.zod';
 import { bannedKeys, requiredOneOf } from '../shared/refinement-projection';
 
 /**
@@ -188,8 +190,47 @@ const JOB_TIMEOUT_RETIRED =
  */
 const JOB_RUNS_NOTHING =
   'A job needs something to run: declare `body` (a sandboxed JS body, `{ language: "js", source, '
-  + 'capabilities }` — the preferred form) or `handler` (the name of a `defineStack({ functions })` '
-  + 'entry — deprecated). This job declares neither, so no boot could ever schedule it.';
+  + 'capabilities }` — the preferred form for code), `pull` (`{ mapping: "<mapping name>" }` — pull '
+  + 'that mapping\'s `connectorSource` on this job\'s schedule, no code) or `handler` (the name of a '
+  + '`defineStack({ functions })` entry — deprecated). This job declares none of them, so no boot '
+  + 'could ever schedule it.';
+
+/**
+ * A job's `pull` is a run form of its own, the declarative one (ruling Q1-B on
+ * the connector-sync card): the platform binds it and calls the automation
+ * service's pull, so there is no code beside it to run. `body` + `handler`
+ * stays legal (the body wins, the deprecated handler beside it is never run);
+ * `pull` + either is refused, because one of the two would silently never run.
+ */
+const JOB_PULL_EXCLUSIVE =
+  'A job with `pull` runs that pull and nothing else: `pull` cannot be declared beside `body` or '
+  + '`handler`, because the platform binds the pull itself and one of the two run forms would never '
+  + 'run. Keep `pull` and delete the code, or keep the code (`body`) and delete `pull` — a body cannot '
+  + 'call a pull; a pull on a schedule is this declaration.';
+
+/**
+ * The organization a job runs as — its `body`'s `ctx.api`, the execution
+ * context its `handler` is handed, and its `pull`'s target read and writes
+ * alike. The value shape is the scheduled flow's
+ * ({@link ScheduleOrganizationSchema}, `sys_organization.id`), reused, and so
+ * is the deployment-posture rule that judges it: the maintainer's 2026-09-08
+ * ruling on scheduled work across organizations, extended from scheduled flows
+ * to jobs by ruling Q2-O1 on the connector-sync card. That rule is
+ * `resolveScheduledWorkPolicy` (`@objectstack/types`), read by the job binder
+ * at BIND — never here: whether the key is required depends on the
+ * deployment's tenancy posture and its scheduled-work switch, and neither is
+ * knowable at authoring time (`automation/schedule-organization.zod.ts` says
+ * why an authoring-time rule for it must not exist).
+ */
+const JOB_ORGANIZATION_DESCRIPTION =
+  'Organization id (sys_organization.id) this job runs as — its `body`\'s `ctx.api`, the execution '
+  + 'context its `handler` is handed, and its `pull`\'s reads and writes alike, as a system run '
+  + 'carrying that organization. A scheduled run has no session to inherit one from. Judged at bind '
+  + 'by the posture rule scheduled flows use: required under the isolated tenancy posture (a job that '
+  + 'declares none is not scheduled); optional under group (undeclared, the run carries no '
+  + 'organization and a tenant-scoped write it makes is refused); not required under single (the '
+  + 'install\'s one organization is resolved beneath each write). Where declared, it is the '
+  + 'organization the run acts as on every posture.';
 
 /**
  * The time limit of a body job has ONE spelling: the job's own `timeoutMs`.
@@ -211,7 +252,16 @@ export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
     'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
-  aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled' },
+  aliases: {
+    cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled',
+    // A pull written as a bare mapping name, or under the binding's own word.
+    mapping: 'pull', sync: 'pull', connectorSource: 'pull',
+    // The organization under the near-miss spellings the scheduled flow's
+    // refusal names — on this closed shape they are refused at parse, by name.
+    // One spelling per probe: the probe folds case and `_`, so `organization_id`,
+    // `org_id` and `tenant_id` are caught by the camelCase entries.
+    organizationId: 'organization', orgId: 'organization', tenantId: 'organization', tenant: 'organization',
+  },
   guidance: { id: JOB_ID_RETIRED },
 }, {
   // `id` removed in 17.0.0 (#4667) — see JOB_ID_RETIRED. `name` is the identity.
@@ -228,10 +278,12 @@ export const JobSchema = lazySchema(() => strictObject({
    * imports that module can bind. `body` is the form that travels with the
    * metadata itself, exactly as it did for hooks.
    *
-   * Optional since `body` exists, but not both absent: {@link JOB_RUNS_NOTHING}.
-   * When both are present `body` wins, as for hooks.
+   * Optional since `body` exists, but not all three of `body` / `handler` /
+   * `pull` absent: {@link JOB_RUNS_NOTHING}. When both `body` and `handler` are
+   * present `body` wins, as for hooks; beside `pull` it is refused
+   * ({@link JOB_PULL_EXCLUSIVE}).
    */
-  handler: z.string().optional().describe('Handler function name (must match a key in `defineStack({ functions })`) — DEPRECATED, prefer `body`. When both are present `body` wins; a job must declare one of the two.'),
+  handler: z.string().optional().describe('Handler function name (must match a key in `defineStack({ functions })`) — DEPRECATED, prefer `body`. When both are present `body` wins; refused beside `pull`. A job must declare one of `body`, `handler` or `pull`.'),
   /**
    * Job Body (L2 sandboxed JS) — the hook body shape, reused by reference.
    *
@@ -267,8 +319,49 @@ export const JobSchema = lazySchema(() => strictObject({
       + 'Preferred over `handler`: when both are present `body` wins. '
       + 'It runs in the QuickJS sandbox with no module scope (no imports, no helpers or constants from the surrounding file): it reaches data only through `ctx.api` under its declared `capabilities` (`api.read` / `api.write` / `api.transaction`) and logs through `ctx.log` (`log`); the in-process handler context (`ql`, `logger`, `bundle`) does not exist there. '
       + "Its time limit is the job's `timeoutMs` (see there): long-running work declares a `timeoutMs` that covers it, or splits into bounded runs that each finish within it. "
-      + "Every door that brings an artifact in schedules a job's `body` — the boot, and `os package install` on install and on every restart — while a `handler` is code that travels only in the artifact's runtime module and runs only on a boot that loads it (a config, or `os start --artifact`); `os package install` therefore refuses an enabled job with no `body`.",
+      + "Every door that brings an artifact in schedules a job's `body` — the boot, and `os package install` on install and on every restart — while a `handler` is code that travels only in the artifact's runtime module and runs only on a boot that loads it (a config, or `os start --artifact`); `os package install` therefore refuses an enabled job with no `body` (a `pull` job excepted: it is data too). "
+      + 'Refused beside `pull`.',
   ),
+  /**
+   * Job Pull — the declarative run form (ruling Q1-B on the connector-sync
+   * card): on each tick the platform pulls the named `mapping`'s
+   * `connectorSource` through the automation service
+   * (`IAutomationService.pullConnectorSource`) and writes the rows through
+   * the import runner. No code: the job says WHAT it does, so "which job pulls
+   * mapping M" is a metadata query, and the run's outcome is mapped once, by
+   * the binder — a refused pull is a `failed` run (retried per `retryPolicy`),
+   * a pull whose rows the import runner refused is `degraded`.
+   *
+   * A third run form beside `body` and `handler`, exclusive with both
+   * ({@link JOB_PULL_EXCLUSIVE}). It is data, so it travels with the artifact
+   * and binds on every door, as a `body` does. ⛔ Not a second code mechanism —
+   * a job carries code only as a `body` (the hook body shape, one binder) —
+   * and not a precedent for further task kinds: a second declarative member
+   * needs its own pull.
+   *
+   * `mapping` names a `mapping` the same stack declares, with a
+   * `connectorSource`: `defineStack` (and so `os validate`) refuses a name that
+   * resolves to neither.
+   */
+  pull: strictObject({
+    surface: 'this job’s pull',
+    history:
+      'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+    aliases: { name: 'mapping', mappingName: 'mapping', source: 'mapping', connectorSource: 'mapping', from: 'mapping' },
+  }, {
+    mapping: SnakeCaseIdentifierSchema.describe(
+      'Name of the `mapping` whose `connectorSource` this job pulls on its schedule — a mapping the same '
+      + 'stack declares, with a `connectorSource` (refused at `defineStack` / `os validate` otherwise). The '
+      + 'mapping says where the rows come from, the field map, the write mode and the match key; the job '
+      + 'says when.',
+    ),
+  }).optional().describe(
+    'Pull run form: on each run the platform pulls the named mapping\'s `connectorSource` (one action call, '
+    + 'one response) and writes the rows through the import runner — no code. A refused pull records the run '
+    + '`failed` (retried per `retryPolicy`); a pull whose rows the import runner refused records it '
+    + '`degraded`. Data like `body`, so every door schedules it. Refused beside `body` or `handler`.',
+  ),
+  organization: ScheduleOrganizationSchema.optional().describe(JOB_ORGANIZATION_DESCRIPTION),
   retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 — state a count to opt in.'),
   // Renamed from `timeout` (#14478): the unit (milliseconds) lived only in the
   // description while the sibling `retryPolicy.backoffMs` spells its own.
@@ -292,7 +385,15 @@ export const JobSchema = lazySchema(() => strictObject({
 // Declared through the closed projection list, so the published JSON Schema
 // states the rule (`anyOf` of one `required` per key) instead of being wider
 // than the parse.
-}).refine(requiredOneOf(['body', 'handler']), { message: JOB_RUNS_NOTHING, path: ['body'] }));
+}).refine(requiredOneOf(['body', 'handler', 'pull']), { message: JOB_RUNS_NOTHING, path: ['body'] })
+// "`pull` excludes `body` and `handler`" has no arm in the closed projection
+// list, so the published JSON Schema stays wider than this rule; the site is
+// recorded in `dropped-refinements.baseline.json`, beside every other
+// mutual-exclusion refinement in this package.
+  .refine((job) => job.pull === undefined || (job.body === undefined && job.handler === undefined), {
+    message: JOB_PULL_EXCLUSIVE,
+    path: ['pull'],
+  }));
 
 export type Job = z.input<typeof JobSchema>;
 /** Post-parse shape of {@link Job} — defaults applied, transforms run (ADR-0122). */

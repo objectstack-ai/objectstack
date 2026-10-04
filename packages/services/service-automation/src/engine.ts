@@ -10,7 +10,7 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import {
     validateScreenInputs,
@@ -2420,6 +2420,8 @@ export class AutomationEngine implements IAutomationService {
     private packagedFlowSource?: PackagedFlowSource;
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
+    /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
+    private connectorPullSource?: (request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>;
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
      * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
@@ -4756,6 +4758,44 @@ export class AutomationEngine implements IAutomationService {
      */
     setFlowCredentialSource(source: FlowCredentialSource | undefined): void {
         this.flowCredentialSource = source;
+    }
+
+    /**
+     * [#20281 stage ③] Attach the connector sync executor this engine serves as
+     * {@link pullConnectorSource}. The automation plugin calls this at
+     * `init()`, before it registers the engine as the `automation` service:
+     * the executor resolves connectors against the instances the PLUGIN
+     * materialized, which the engine does not hold, so the plugin hands the
+     * engine the call rather than the map.
+     */
+    setConnectorPullSource(
+        source: ((request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>) | undefined,
+    ): void {
+        this.connectorPullSource = source;
+    }
+
+    /**
+     * [#20281 stage ③] `IAutomationService.pullConnectorSource` — pull one
+     * `mapping`'s `connectorSource` and write the records through the import
+     * runner, under `request.context`. The door a job's `pull` run form binds
+     * through. Rejects, naming the gap, on an engine no plugin attached an
+     * executor to: there is nothing that could pull, and answering as if a
+     * pull ran would be the silent no-op the contract's rejection rule exists
+     * to rule out.
+     */
+    async pullConnectorSource(request: ConnectorSourcePullRequest): Promise<ConnectorSourcePullResult> {
+        if (!this.connectorPullSource) {
+            // ADR-0112: the code the executor itself answers for "cannot pull
+            // now" (a degraded connector), so a caller branches on one pair.
+            throw Object.assign(
+                new Error(
+                    `[Automation] pullConnectorSource('${request.mapping}'): this automation engine has no connector sync `
+                    + 'executor attached — it is attached by AutomationServicePlugin at init(); a bare engine cannot pull. Nothing was pulled.',
+                ),
+                { code: 'SERVICE_UNAVAILABLE', status: 503 },
+            );
+        }
+        return this.connectorPullSource(request);
     }
 
     /** [#20790] Does the credential channel hold the LIVE credential at this position? */

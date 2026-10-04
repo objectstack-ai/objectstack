@@ -65,13 +65,35 @@
  * (the job service and the engine have registered), while install-local's
  * doors are already past that point. One implementation, two moments.
  *
- * A job runs on a JSON door only through a `body` that binds. Its deprecated
- * `handler` names a `defineStack({ functions })` entry, which is code: it
- * travels in the artifact's runtime module, which only `os start --artifact`
- * loads, so no JSON door can ever resolve it. {@link collectJobsWithoutBody}
- * names those jobs — and the ones whose `body` the declaration refuses
- * (`judgeJobBody`) — and the install-local install route refuses a package that
- * declares one enabled.
+ * A job runs on a JSON door only through a `body` that binds, or a `pull`. Its
+ * deprecated `handler` names a `defineStack({ functions })` entry, which is
+ * code: it travels in the artifact's runtime module, which only `os start
+ * --artifact` loads, so no JSON door can ever resolve it.
+ * {@link collectJobsWithoutBody} names those jobs — and the ones whose `body`
+ * the declaration refuses (`judgeJobBody`) — and the install-local install route
+ * refuses a package that declares one enabled.
+ *
+ * ## The pull run form, and the organization a job runs as (#20281 stage ③)
+ *
+ * `JobSchema.pull` (ruling Q1-B) is the third run form, and the declarative
+ * one: `{ mapping }` names a mapping whose `connectorSource` the job pulls on
+ * its schedule. It carries no code, so it binds HERE, in this one binder —
+ * {@link judgeJobPull} judges it, and each run calls the `automation` service's
+ * contract method, `IAutomationService.pullConnectorSource`, resolved through
+ * the service registry. A refused pull rejects the run (`failed`, retried per
+ * `retryPolicy`); a pull whose rows the import runner refused resolves
+ * `degraded` ({@link pullRunOutcomeOf}). It is data, like a `body`, so
+ * {@link collectJobsWithoutBody} never names it.
+ *
+ * `JobSchema.organization` (ruling Q2-O1) is the organization a job runs as —
+ * its `body`, its `handler` and its `pull` alike — judged here, at bind, by the
+ * deployment-posture rule scheduled flows already use
+ * (`resolveScheduledWorkPolicy`, `@objectstack/types`): required under
+ * `isolated` (a job that declares none is NOT scheduled, at `error`), optional
+ * under `group` (an undeclared job runs with no organization, said once at
+ * `warn`), not required under `single`. Each run's execution context is
+ * `{ isSystem: true, tenantId: <organization> }`, or `{ isSystem: true }` for a
+ * job that declares none ({@link jobExecutionContext}).
  *
  * A job's identity is the package's and the job's name together, as the
  * metadata registry keys it (`<packageId>:<name>`), so two packages may each
@@ -101,8 +123,23 @@
  */
 
 import type { PluginContext } from '@objectstack/core';
-import type { IJobService, IObjectQLEngine, JobHandler, Logger } from '@objectstack/spec/contracts';
-import { resolveScheduledWorkEnabled, SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
+import type {
+    ConnectorSourcePullResult,
+    IAutomationService,
+    IJobService,
+    IObjectQLEngine,
+    JobHandler,
+    JobRunOutcome,
+    Logger,
+} from '@objectstack/spec/contracts';
+import { JobSchema } from '@objectstack/spec/system';
+import { ScheduleOrganizationSchema } from '@objectstack/spec/automation';
+import {
+    resolveScheduledWorkEnabled,
+    resolveScheduledWorkPolicy,
+    SCHEDULED_WORK_DISABLED_REASON,
+    type ScheduledWorkPolicy,
+} from '@objectstack/types';
 import { SEMCONV } from '@objectstack/observability';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory, jobBodyRunnerFactory, judgeJobBody } from './sandbox/body-runner.js';
@@ -326,12 +363,19 @@ export interface JobWithoutBody {
  * Reads the jobs the binder reads ({@link collectBundleJobs}), and calls a job
  * enabled exactly when the binder does: `enabled: false` is the one value that
  * disables it (the schema's default is `true`).
+ *
+ * A job declaring `pull` is never named (#20281 stage ③): the pull run form is
+ * data, like a `body`, and binds on every door. Whether its pull binds is
+ * {@link judgeJobPull}'s question, answered by the binder at bind — named here
+ * it would read as "has no `body`" and send the author to write one beside the
+ * pull, which the declaration refuses.
  */
 export function collectJobsWithoutBody(bundle: unknown): JobWithoutBody[] {
     const out: JobWithoutBody[] = [];
     for (const job of collectBundleJobs(bundle)) {
         if (!job || typeof job !== 'object') continue;
         if (job.enabled === false) continue;
+        if (job.pull !== undefined) continue;
         let bodyRefusal: string | undefined;
         if (job.body) {
             const judged = judgeJobBody(job.body);
@@ -345,6 +389,141 @@ export function collectJobsWithoutBody(bundle: unknown): JobWithoutBody[] {
         });
     }
     return out;
+}
+
+// ─── The pull run form, and the organization a job runs as (#20281 stage ③) ─
+
+/** What {@link judgeJobPull} answers for a job that declares `pull`. */
+export type JobPullJudgement =
+    | { binds: true; mapping: string }
+    | { binds: false; refusal: string };
+
+/**
+ * The mappings an artifact declares — the resolved top-level `mappings`
+ * (ADR-0130 D4: every package body's too), else the legacy `manifest.mappings`,
+ * the same one-list-or-the-other read {@link collectBundleJobs} makes. A
+ * collection in the record form (`{ <name>: mapping }`) is read by its keys.
+ */
+function collectBundleMappings(bundle: unknown): Array<Record<string, unknown>> {
+    const stack = resolveArtifactCollections(bundle) as any;
+    const raw = stack?.mappings !== undefined ? stack.mappings : (bundle as any)?.manifest?.mappings;
+    if (Array.isArray(raw)) return raw.filter((m): m is Record<string, unknown> => !!m && typeof m === 'object');
+    if (raw && typeof raw === 'object') {
+        return Object.entries(raw as Record<string, unknown>)
+            .filter(([, m]) => !!m && typeof m === 'object')
+            .map(([key, m]) => ({ name: key, ...(m as Record<string, unknown>) }));
+    }
+    return [];
+}
+
+/**
+ * Does a job's `pull` bind on this artifact? The ONE judgement, read by the
+ * binder ({@link scheduleAppArtifactJobs}) before it schedules a pull job.
+ *
+ * It binds when the job declares no code beside it (the declaration refuses
+ * `pull` + `body` / `handler`), `pull` parses against `JobSchema.pull`, and the
+ * artifact declares the named mapping WITH a `connectorSource` — the reference
+ * `defineStack` (and so `os validate`) checks against the stack's mappings. A
+ * pull that does not bind is not scheduled: a run of it could only ever be
+ * refused by the automation service (`mapping_not_found` /
+ * `no_connector_source`), so the reason is said once, at bind, rather than on
+ * every tick.
+ *
+ * `refusal` is the sentence the author acts on, prefixed with the key it names.
+ */
+export function judgeJobPull(
+    job: { pull?: unknown; body?: unknown; handler?: unknown },
+    bundle: unknown,
+): JobPullJudgement {
+    if (job.body !== undefined || job.handler !== undefined) {
+        return {
+            binds: false,
+            refusal: 'pull: the job declares `body` or `handler` beside `pull`, which the declaration refuses — the platform '
+                + 'binds the pull itself, so one of the two run forms would never run; keep `pull` or keep the code',
+        };
+    }
+    const parsed = JobSchema.shape.pull.safeParse(job.pull);
+    if (!parsed.success || parsed.data === undefined) {
+        const first = parsed.success ? undefined : parsed.error.issues[0];
+        const at = first && first.path.length > 0 ? `pull.${first.path.map(String).join('.')}: ` : 'pull: ';
+        return { binds: false, refusal: `${at}${first ? first.message : 'expected `{ mapping: "<mapping name>" }`'}` };
+    }
+    const mapping = parsed.data.mapping;
+    const declared = collectBundleMappings(bundle).find((m) => m.name === mapping);
+    if (!declared) {
+        return {
+            binds: false,
+            refusal: `pull.mapping: this artifact declares no mapping '${mapping}' — declare it (its targetObject, fieldMapping `
+                + 'and a connectorSource naming the rest or openapi connector it pulls from) beside the job, or correct the name',
+        };
+    }
+    if (declared.connectorSource === undefined) {
+        return {
+            binds: false,
+            refusal: `pull.mapping: mapping '${mapping}' declares no connectorSource, so there is nothing to pull — add `
+                + 'connectorSource: { connector, action } naming the rest or openapi connector it reads from',
+        };
+    }
+    return { binds: true, mapping };
+}
+
+/**
+ * The organization a job declares (`JobSchema.organization`), or `undefined`.
+ * A present-but-unusable value (an empty string, a number) answers `undefined`
+ * — the value shape is the scheduled flow's (`ScheduleOrganizationSchema`), and
+ * so is the reading: reporting "declared" for a value nothing can act on is the
+ * silent acceptance the key exists to end (`resolveScheduleOrganization`).
+ */
+export function resolveJobOrganization(job: { organization?: unknown }): string | undefined {
+    const parsed = ScheduleOrganizationSchema.safeParse(job.organization);
+    return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The execution context a job RUNS AS — its `body`'s `ctx.api`, its
+ * `handler`'s `JobHandlerContext.executionContext` and its `pull`'s target read
+ * and writes alike: system, carrying the job's organization as `tenantId` (the
+ * field the tenancy guard reads) where it declares one. Fresh per run, never a
+ * shared constant — an execution envelope is a value the engine may extend.
+ */
+export function jobExecutionContext(organization: string | undefined): { isSystem: true; tenantId?: string } {
+    return organization !== undefined ? { isSystem: true, tenantId: organization } : { isSystem: true };
+}
+
+/**
+ * The run outcome of a pull that RESOLVED, mapped once here rather than left to
+ * each author: rows the import runner refused make the run `degraded` — it ran
+ * to completion and part (or all) of its work did not happen, and a retry
+ * would refuse the same rows — with the counts as the reason; otherwise the
+ * run `completed`, including a pull that carried no records. A pull that was
+ * REFUSED never reaches here: the service rejected, which is the job's
+ * `failed` (and the retry policy's trigger).
+ */
+export function pullRunOutcomeOf(result: ConnectorSourcePullResult): JobRunOutcome {
+    const summary = result?.summary;
+    const errors = Number(summary?.errors ?? 0);
+    if (errors > 0) {
+        return {
+            outcome: 'degraded',
+            reason: `mapping '${result.mapping}': ${errors} of ${result.pulled} pulled record(s) were refused by the import runner `
+                + `(${Number(summary?.created ?? 0)} created, ${Number(summary?.updated ?? 0)} updated, ${Number(summary?.skipped ?? 0)} skipped)`,
+        };
+    }
+    return { outcome: 'completed' };
+}
+
+/**
+ * The sentence an `isolated` deployment's binder logs (at `error`) for a job
+ * that declares no organization — the job's counterpart of the scheduled
+ * flow's `describeMissingScheduleOrganization`: the same rule, said about a
+ * job's key rather than a start node's.
+ */
+function describeMissingJobOrganization(jobName: string): string {
+    return `job '${jobName}' declares no \`organization\`, and this deployment runs the 'isolated' tenancy posture `
+        + 'with package-authored scheduled work switched on: a scheduled run has no session to inherit an organization '
+        + 'from, so its tenant-scoped writes would all be refused — the job is NOT scheduled. Declare the organization it '
+        + "runs in: `organization: '<sys_organization.id>'` on the job. Work wanted in several organizations is one job "
+        + 'per organization — a job is never fanned out across them, and no organization is ever chosen for it.';
 }
 
 // ─── Hooks with no `body` (#21585) ─────────────────────────────────────
@@ -415,16 +594,26 @@ export interface AppArtifactJobSchedulingOptions {
 export interface AppArtifactJobScheduling {
     /**
      * Set when nothing was scheduled for a reason that holds for every job:
-     * the deployment does not run package-authored scheduled work (#17396), or
-     * no job service is registered.
+     * the deployment does not run package-authored scheduled work (#17396), no
+     * job service is registered, or (#20281 stage ③) the deployment's
+     * scheduled-work policy could not be read — an unrecognized tenancy
+     * posture, so whether a job must declare its organization is unknown.
      */
-    withheld?: 'scheduled-work-disabled' | 'no-job-service';
+    withheld?: 'scheduled-work-disabled' | 'no-job-service' | 'scheduled-work-policy-unreadable';
     /** Jobs scheduled to run their sandboxed `body`. */
     bodies: string[];
     /** Jobs scheduled to run the `functions` entry their `handler` names. */
     handlers: string[];
-    /** Enabled jobs with nothing this door could run (an unbindable body, an unresolvable handler, no name). */
+    /** [#20281 stage ③] Jobs scheduled to pull the mapping their `pull` names. */
+    pulls: string[];
+    /** Enabled jobs with nothing this door could run (an unbindable body or pull, an unresolvable handler, no name). */
     notScheduled: string[];
+    /**
+     * [#20281 stage ③] Enabled jobs NOT scheduled because they declare no
+     * `organization` on a deployment whose posture requires one (`isolated`,
+     * with scheduled work switched on).
+     */
+    missingOrganization: string[];
     /** Jobs whose `IJobService.schedule` call threw. */
     failed: string[];
     /**
@@ -445,6 +634,14 @@ export interface AppArtifactJobScheduling {
  * Per job, in this order:
  *
  *   - `enabled: false` → skipped (debug);
+ *   - (#20281 stage ③) no `organization` on a deployment whose scheduled-work
+ *     policy requires one (`isolated`, switch on) → NOT scheduled, at `error`
+ *     ({@link describeMissingJobOrganization}), whatever its run form;
+ *   - a `pull` → the mapping pull, when {@link judgeJobPull} binds it and the
+ *     `automation` service serves `pullConnectorSource`; each run calls that
+ *     contract method through the service registry under the job's execution
+ *     context, and maps the result with {@link pullRunOutcomeOf}. A pull that
+ *     does not bind schedules nothing (warn);
  *   - a `body` → the sandboxed body (`jobBodyRunnerFactory`), and the `body`
  *     WINS when a `handler` is declared beside it. A body that cannot be bound
  *     (wrong shape, a `body.timeoutMs`) schedules nothing — never the handler
@@ -454,6 +651,11 @@ export interface AppArtifactJobScheduling {
  *     functions, so on install-local this resolves nothing — which is why that
  *     door refuses the shape up front ({@link collectJobsWithoutBody});
  *   - else → not scheduled (warn).
+ *
+ * Every form runs as {@link jobExecutionContext} of the job's organization —
+ * the body's `ctx.api`, the handler's `executionContext`, the pull's
+ * `context`. Under `group`, the jobs that declare none are named once at
+ * `warn`: they are armed, and a tenant-scoped write they make is refused.
  *
  * The schedule is lowered to the boundary tier (`toBoundaryJobSchedule`), and
  * the job's `retryPolicy` / `timeoutMs` are threaded to the adapter. For a body
@@ -488,7 +690,9 @@ export async function scheduleAppArtifactJobs(
     const { appId, ql } = options;
     const logger: Logger = ctx.logger;
     const tag = `[${options.source ?? 'AppPlugin'}]`;
-    const out: AppArtifactJobScheduling = { bodies: [], handlers: [], notScheduled: [], failed: [], cancelled: [] };
+    const out: AppArtifactJobScheduling = {
+        bodies: [], handlers: [], pulls: [], notScheduled: [], missingOrganization: [], failed: [], cancelled: [],
+    };
 
     const jobs = collectBundleJobs(bundle);
     let svc: IJobService | undefined;
@@ -529,6 +733,28 @@ export async function scheduleAppArtifactJobs(
         logger.warn(`${tag} job service not registered — skipping declarative jobs`, { appId, jobCount: jobs.length });
         return { ...out, withheld: 'no-job-service' };
     }
+    // [#20281 stage ③] The posture half of the scheduled-work policy — read
+    // once per call, AFTER the switch: whether a job must declare its
+    // organization is the rule scheduled flows bind by
+    // (`requiresActingOrganization`, `runOwnership`), and it is only asked of
+    // a deployment that runs scheduled work at all. An unrecognized tenancy
+    // posture makes the resolver throw (a typo must not resolve to `single`
+    // and drop the requirement with it), so this fails CLOSED: nothing is
+    // scheduled, and the reason is said at `error`.
+    let policy: ScheduledWorkPolicy;
+    try {
+        policy = resolveScheduledWorkPolicy();
+    } catch (err: any) {
+        logger.error(
+            `${tag} declarative jobs NOT scheduled — the deployment's scheduled-work policy could not be read, so whether `
+            + 'each job must declare its `organization` is unknown. Correct the tenancy posture the error names, then restart.',
+            err as Error,
+            { appId, jobCount: jobs.length },
+        );
+        out.cancelled = await retireAppJobs(svc, appId, new Set(), logger, tag);
+        return { ...out, withheld: 'scheduled-work-policy-unreadable' };
+    }
+
     const jobService: IJobService = svc;
     ensureJobUninstallCleanup(ctx, jobService);
 
@@ -541,6 +767,10 @@ export async function scheduleAppArtifactJobs(
     const collections = resolveArtifactCollections(bundle);
     const bodyRunner = jobBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId });
     const metrics = resolveMetrics(ctx);
+    // [#20281 stage ③] Jobs armed with NO organization on a posture whose
+    // writes need one (`group`): legal, and refused at their first
+    // tenant-scoped write — said once below, with the remedy.
+    const armedWithoutOrganization: string[] = [];
 
     for (const job of jobs) {
         const jobName: string = job?.name;
@@ -554,12 +784,72 @@ export async function scheduleAppArtifactJobs(
             continue;
         }
 
+        // [#20281 stage ③] The organization the job runs as, judged by the
+        // scheduled flows' posture rule. ⛔ No limb picks one for a job that
+        // declares none: under `isolated` it is not scheduled, and elsewhere
+        // it runs with none — a wrong `organization_id` is worse than a
+        // refusal, because it is silently authoritative to every reader.
+        const organization = resolveJobOrganization(job);
+        if (organization === undefined && policy.requiresActingOrganization) {
+            logger.error(`${tag} NOT SCHEDULED — ${describeMissingJobOrganization(jobName)}`, undefined, {
+                appId,
+                job: jobName,
+                posture: policy.posture,
+            });
+            out.missingOrganization.push(jobName);
+            continue;
+        }
+        if (organization === undefined && policy.runOwnership === 'per-record') {
+            armedWithoutOrganization.push(jobName);
+        }
+
         let run: JobHandler;
-        let form: 'body' | 'handler';
-        if (job.body) {
+        let form: 'body' | 'handler' | 'pull';
+        if (job.pull !== undefined) {
+            // The declarative run form. Judged against the artifact first: a
+            // pull whose mapping is missing (or has no `connectorSource`)
+            // could only ever be refused, so it is not scheduled.
+            const judged = judgeJobPull(job, bundle);
+            if (!judged.binds) {
+                logger.warn(`${tag} job pull does not bind — the job is NOT scheduled: ${judged.refusal}`, {
+                    appId,
+                    job: jobName,
+                });
+                out.notScheduled.push(jobName);
+                continue;
+            }
+            const mapping = judged.mapping;
+            let automation: IAutomationService | undefined;
+            try { automation = ctx.getService<IAutomationService>('automation'); } catch { /* not installed */ }
+            if (typeof automation?.pullConnectorSource !== 'function') {
+                logger.warn(
+                    `${tag} job '${jobName}' pulls mapping '${mapping}', but no \`automation\` service serving `
+                    + '`pullConnectorSource` is registered — the job is NOT scheduled. Compose AutomationServicePlugin '
+                    + '(`@objectstack/service-automation`), which holds the connector registry a pull reads through.',
+                    { appId, job: jobName, mapping },
+                );
+                out.notScheduled.push(jobName);
+                continue;
+            }
+            // Resolved again on every run, through the registry — never the
+            // instance read above, so a re-registered service is the one called.
+            run = async () => {
+                let service: IAutomationService | undefined;
+                try { service = ctx.getService<IAutomationService>('automation'); } catch { /* reported below */ }
+                if (typeof service?.pullConnectorSource !== 'function') {
+                    throw new Error(
+                        `job '${jobName}' pulls mapping '${mapping}', but the \`automation\` service no longer serves `
+                        + '`pullConnectorSource` — nothing was pulled',
+                    );
+                }
+                const result = await service.pullConnectorSource({ mapping, context: jobExecutionContext(organization) });
+                return pullRunOutcomeOf(result);
+            };
+            form = 'pull';
+        } else if (job.body) {
             // The body wins over a `handler` beside it, as for hooks. When it
             // cannot be bound the factory has said why, and nothing runs.
-            const bound = bodyRunner(job);
+            const bound = bodyRunner({ ...job, organization });
             if (!bound) {
                 out.notScheduled.push(jobName);
                 continue;
@@ -593,6 +883,9 @@ export async function scheduleAppArtifactJobs(
                     bundle: collections,
                     ql: ql as IObjectQLEngine,
                     logger,
+                    // [#20281 stage ③] The envelope this job runs as — the one
+                    // its `body` or `pull` would carry. `ql` stays the raw engine.
+                    executionContext: jobExecutionContext(organization),
                 };
                 // #14256: RETURN the handler's resolved value. `JobHandler` is
                 // `(context) => Promise<void | JobRunOutcome>` and all three
@@ -622,7 +915,7 @@ export async function scheduleAppArtifactJobs(
                     ? { retryPolicy: job.retryPolicy, timeoutMs: job.timeoutMs }
                     : undefined,
             );
-            (form === 'body' ? out.bodies : out.handlers).push(jobName);
+            (form === 'body' ? out.bodies : form === 'pull' ? out.pulls : out.handlers).push(jobName);
             claimJobKey(jobService, appId, jobName, key);
             if (heldBy !== undefined) {
                 logger.info(
@@ -648,14 +941,38 @@ export async function scheduleAppArtifactJobs(
         }
     }
 
-    out.cancelled = await retireAppJobs(jobService, appId, new Set([...out.bodies, ...out.handlers]), logger, tag);
+    out.cancelled = await retireAppJobs(
+        jobService,
+        appId,
+        new Set([...out.bodies, ...out.handlers, ...out.pulls]),
+        logger,
+        tag,
+    );
 
-    const scheduled = out.bodies.length + out.handlers.length;
+    // [#20281 stage ③] Said once, at `warn`, the way the scheduled flows'
+    // bind line says it for a record-less flow under `group`: armed and legal,
+    // and its first tenant-scoped write is refused — boot is where an operator
+    // is reading, so the remedy is given here rather than only at that tick.
+    const armed = new Set([...out.bodies, ...out.handlers, ...out.pulls]);
+    const unscoped = armedWithoutOrganization.filter((name) => armed.has(name));
+    if (unscoped.length > 0) {
+        logger.warn(
+            `${tag} ${unscoped.length} job(s) scheduled with NO acting organization (tenancy posture '${policy.posture}'): `
+            + `${unscoped.join(', ')}. A job has no record to derive one from, so any tenant-scoped row it writes is REFUSED `
+            + 'at the write. Declare `organization` on the job if it writes per-organization data.',
+            { appId, jobs: unscoped, posture: policy.posture },
+        );
+    }
+
+    const scheduled = out.bodies.length + out.handlers.length + out.pulls.length;
     logger.info(`${tag} Scheduled background jobs`, {
         appId,
         count: scheduled,
         bodies: out.bodies.length,
         handlers: out.handlers.length,
+        pulls: out.pulls.length,
+        notScheduled: out.notScheduled.length,
+        missingOrganization: out.missingOrganization.length,
         failed: out.failed.length,
         cancelled: out.cancelled.length,
     });

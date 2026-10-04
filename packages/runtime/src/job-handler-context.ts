@@ -91,4 +91,24 @@ export interface JobHandlerContext {
      * diagnostics land in the platform's log stream instead of `console`.
      */
     logger: Logger;
+    /**
+     * The execution context this job RUNS AS — the envelope the binder builds
+     * from the job's declared `organization` (`JobSchema.organization`, judged
+     * at bind by the scheduled-work posture rule; ruling Q2-O1 on the
+     * connector-sync card): `{ isSystem: true, tenantId: '<organization id>' }`,
+     * or `{ isSystem: true }` for a job that declares none. The same envelope a
+     * `body` job's `ctx.api` and a `pull` job's reads and writes carry.
+     *
+     * `ql` is the raw engine and stays so (an existing handler is unchanged byte
+     * for byte), so a handler writes as the job's organization by passing this
+     * as each call's `context` — `ql.insert('task', row, { context:
+     * executionContext })`. A call that passes none carries no organization,
+     * and under the `group` / `isolated` postures a tenant-scoped system write
+     * without one is refused at the write.
+     *
+     * Always set when the binder invokes the handler; optional in the type only
+     * so that code which BUILDS a context (a test calling a handler directly)
+     * keeps compiling — the widening stays additive in both directions.
+     */
+    executionContext?: { isSystem: true; tenantId?: string };
 }

@@ -18,8 +18,9 @@
  * the binding, so the ledger rows are `live` and carry no `authorWarn`
  * (`liveness/mapping.json`) — a warned `live` row made the author-side lint
  * throw, so `os validate` / `os lint` crashed on every stack authoring the
- * binding (#21127). Nothing schedules a pull until the `job` stage lands, and
- * the key's own description says so. The last block pins both.
+ * binding (#21127). A pull runs when a `job` whose `pull` names the mapping
+ * drives it (`JobSchema.pull`), and the key's own description says so. The
+ * last block pins both.
  */
 
 import fs from 'node:fs';
@@ -177,7 +178,7 @@ describe('mapping.connectorSource — the closed door and what it does not carry
   });
 });
 
-describe('mapping.connectorSource — executed when a job drives it, scheduled by nothing yet: the ledger and the schema say so', () => {
+describe('mapping.connectorSource — executed when a job\'s `pull` drives it: the ledger and the schema say so', () => {
   const LEDGER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../liveness/mapping.json');
 
   it('every key of the binding is `live`, citing the executor, and no row of it opts into an author warning', () => {
@@ -218,7 +219,10 @@ describe('mapping.connectorSource — executed when a job drives it, scheduled b
   it('the schema says it too, where an author reads it — including where the watermark is read from and the one-response limit', () => {
     const shape = (MappingSchema as unknown as { shape: Record<string, { description?: string; unwrap?: () => unknown }> }).shape;
     const source = shape.connectorSource!;
-    expect(source.description).toContain('Pulled when a job drives it; nothing schedules it yet');
+    expect(source.description).toContain('Pulled when a job drives it');
+    expect(source.description).toContain('`pull: { mapping }`');
+    expect(source.description).toContain('the binding alone moves no rows');
+    expect(source.description).not.toContain('nothing schedules');
     const inner = (source.unwrap!() as { shape: Record<string, { description?: string; unwrap?: () => unknown }> }).shape;
     const watermark = inner.watermark!;
     expect(watermark.description).toContain('ONE action call and reads ONE response');
