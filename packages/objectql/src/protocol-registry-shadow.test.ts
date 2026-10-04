@@ -5,8 +5,8 @@
  *
  * Regression suite for the "registry pollution" bug: on a control-plane
  * kernel (`environmentId === undefined`), PUT /meta/app/<name> on a
- * `_lock: full` artifact-backed app succeeded (the L3 gate is
- * intentionally bypassed there), and the next GET list hydrated the
+ * `_lock: full` artifact-backed app succeeded (the L3 gate was bypassed
+ * there until #21694), and the next GET list hydrated the
  * overlay body into the SchemaRegistry under the PLAIN key — shadowing
  * the packaged artifact registered under `<packageId>:<name>`. Every
  * envelope reader (`lookupArtifactItem` / `getEffectiveLock` /
@@ -170,8 +170,8 @@ function makeStubDriver() {
     return { driver, stores };
 }
 
-/** Artifact app shipped by a code package with a hard lock. */
-function artifactApp() {
+/** Artifact app shipped by a code package with a lock (`full` unless a case needs removal to pass the L3 gate). */
+function artifactApp(lock: 'full' | 'no-overlay' = 'full') {
     return {
         name: 'setup',
         label: 'Setup',
@@ -179,7 +179,7 @@ function artifactApp() {
         _packageId: PKG,
         _packageVersion: '1.0.0',
         _provenance: 'package',
-        _lock: 'full',
+        _lock: lock,
         _lockReason: 'Core admin UI shipped by the platform package.',
     };
 }
@@ -223,17 +223,32 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         await engine.init();
         engine.registry.registerObject(sysMetadataObject);
         engine.registry.registerObject(sysMetadataHistoryObject);
-        engine.registry.registerItem('app', artifactApp(), 'name', PKG);
-        // No environmentId — single-kernel / control-plane mode, where the
-        // L3 lock gate is bypassed and the GET list hydrates overlay rows
-        // into the process-wide registry.
+        // No environmentId — single-kernel / control-plane mode, where the GET
+        // list hydrates overlay rows into the process-wide registry. The
+        // artifact is installed by each case (see `overlayRowThenLockedArtifact`).
         protocol = new ObjectStackProtocolImplementation(engine);
     });
 
     afterEach(resetEnvHatch);
 
-    it('GET list while the overlay row exists: overlay content wins, artifact envelope wins', async () => {
+    /**
+     * [#21694] The overlay row these cases are about can no longer be written
+     * through the door while the artifact's `_lock` stands: this kernel's L3
+     * gate refuses it now, as an environment kernel's always did. So the row is
+     * written first and the package's lock arrives after it — the order the
+     * envelope graft exists for (an overlay copy that pre-dates the artifact's
+     * protection declaration, ADR-0010 §3.3).
+     */
+    async function overlayRowThenLockedArtifact(lock: 'full' | 'no-overlay'): Promise<void> {
         await protocol.saveMetaItem({ type: 'app', name: 'setup', item: { ...overlayBody } });
+        engine.registry.registerItem('app', artifactApp(lock), 'name', PKG);
+    }
+
+    it('GET list while the overlay row exists: overlay content wins, artifact envelope wins', async () => {
+        await overlayRowThenLockedArtifact('full');
+        // The lock now holds on this kernel too: a further PUT is refused.
+        await expect(protocol.saveMetaItem({ type: 'app', name: 'setup', item: { ...overlayBody, label: 'Again' } }))
+            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         const res = await protocol.getMetaItems({ type: 'app' });
         const setup = findByName((res as any).items, 'setup');
@@ -245,7 +260,7 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
     });
 
     it('the hydrated plain-key shadow itself carries the artifact envelope', async () => {
-        await protocol.saveMetaItem({ type: 'app', name: 'setup', item: { ...overlayBody } });
+        await overlayRowThenLockedArtifact('full');
         await protocol.getMetaItems({ type: 'app' }); // triggers hydration
 
         // Registry-direct read (what nav/UI code does) must not see a
@@ -258,7 +273,9 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
     });
 
     it('DELETE (reset) heals the registry: artifact value and lock are back without a restart', async () => {
-        await protocol.saveMetaItem({ type: 'app', name: 'setup', item: { ...overlayBody } });
+        // `no-overlay`: a lock under which removal passes the L3 gate (`full`
+        // refuses it on every kernel now, #21694).
+        await overlayRowThenLockedArtifact('no-overlay');
         await protocol.getMetaItems({ type: 'app' }); // pollute via hydration
 
         const del = await protocol.deleteMetaItem({ type: 'app', name: 'setup' });
@@ -268,20 +285,22 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         // Registry-direct read resolves the packaged artifact again.
         const direct: any = engine.registry.getItem('app', 'setup');
         expect(direct.label).toBe('Setup');
-        expect(direct._lock).toBe('full');
+        expect(direct._lock).toBe('no-overlay');
         expect(direct._packageId).toBe(PKG);
 
         // And the protocol list surface agrees.
         const res = await protocol.getMetaItems({ type: 'app' });
         const setup = findByName((res as any).items, 'setup');
         expect(setup.label).toBe('Setup');
-        expect(setup._lock).toBe('full');
+        expect(setup._lock).toBe('no-overlay');
         expect(setup._packageId).toBe(PKG);
     });
 
     it('a second DELETE self-heals pre-existing pollution even with no overlay row', async () => {
         // Simulate the pre-fix world: overlay body sits on the plain key
         // with a stripped envelope, and the sys_metadata row is gone.
+        // (`no-overlay`, as in the case above: removal passes the L3 gate.)
+        engine.registry.registerItem('app', artifactApp('no-overlay'), 'name', PKG);
         engine.registry.registerItem('app', { ...overlayBody }, 'name');
 
         const del = await protocol.deleteMetaItem({ type: 'app', name: 'setup' });
@@ -291,7 +310,7 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         // …but the registry shadow is healed anyway.
         const direct: any = engine.registry.getItem('app', 'setup');
         expect(direct.label).toBe('Setup');
-        expect(direct._lock).toBe('full');
+        expect(direct._lock).toBe('no-overlay');
     });
 });
 

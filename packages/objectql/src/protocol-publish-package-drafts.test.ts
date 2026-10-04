@@ -454,7 +454,11 @@ describe('protocol.publishMetaItem — seed self-apply', () => {
   function makePublishable(body: unknown) {
     const protocol = new ObjectStackProtocolImplementation({} as never);
     (protocol as any).ensureOverlayIndex = async () => {};
-    (protocol as any).assertLockAllowsWrite = async () => null;
+    // [#21694] No lock on these items. Stubbed at `lockWriteRefusal`, the
+    // verdict the publish path asks (`promoteDraftForPublish`, since #8594),
+    // which `assertLockAllowsWrite` wraps: since the gate answers on every
+    // topology, this kernel reaches it too, and the double has no store.
+    (protocol as any).lockWriteRefusal = async () => null;
     (protocol as any).isArtifactBacked = () => false;
     (protocol as any).applyObjectRegistryMutation = () => {};
     (protocol as any).ensureObjectStorage = async () => {};
