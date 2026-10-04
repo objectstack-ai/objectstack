@@ -42,6 +42,13 @@
  * `<dist>/.objectstack-injection.json`, and this gate replays them against the
  * restored bundle. Cost: one node process reading files already on disk.
  *
+ * The objectui tree is just as absent here, and the replay does not need it:
+ * the build never chooses — so never stamps — a probe objectui's own source
+ * carries (objectstack#21709, see chooseProbes). A stamped detector is text no
+ * part of a good build writes, so finding it in the restored bundle still means
+ * the published spec, and the replay reaches the build's answer by substring
+ * alone. Battery 14 of the self-test holds the two to one answer.
+ *
  * ## The stamped probes are checked for EXPIRY, not trusted forever
  *
  * A frozen probe is exactly the failure objectstack#8134 was filed about: #7804's
@@ -169,6 +176,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ProbeError,
   STAMP_BASENAME,
+  chooseProbes,
   describeCandidates,
   pickProbe,
   readBundle,
@@ -206,11 +214,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '8. A build that found no skew records it, and this gate says so honestly.': 3,
   '12. ROUND TRIP against the real assert script: whatever it stamps, this gate': 2,
   '13. THE BLIND SPOT (objectstack#20646): the build-time derivation must choose': 6,
+  "14. OBJECTUI'S OWN TEXT IS NOT EVIDENCE: a probe the console's own source carries": 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -557,6 +566,24 @@ function makeDist(dir, assetText, stamp) {
   return dir;
 }
 
+/**
+ * A minimal objectui build tree: a git checkout whose TRACKED files are the
+ * given ones. The assert script reads objectui's own source with `git ls-files`
+ * (never a directory walk, which would also read node_modules and built dists),
+ * so the fixture has to be tracked to be seen; an index entry is enough.
+ */
+function makeHostTree(dir, files) {
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  }
+  for (const argv of [['init', '-q'], ['add', '-A']]) {
+    const run = spawnSync('git', ['-C', dir, ...argv], { encoding: 'utf8' });
+    if (run.status !== 0) throw new Error(`fixture: git ${argv.join(' ')} failed in ${dir}: ${run.stderr || run.error}`);
+  }
+  return dir;
+}
+
 const FRESH = 'Authorable key this tree declares and the registry reads';
 const STALE = 'Published description that only the vendored spec carries';
 
@@ -851,6 +878,12 @@ function selfTest() {
   // 12. ROUND TRIP against the real assert script: whatever it stamps, this gate
   //     must accept. This is the drift the shared module exists to prevent, and
   //     the only assertion here that proves the two halves still agree.
+  // objectui's build tree, which the assert script reads for objectui's own
+  // source (battery 14 says why). This one carries no spec text at all.
+  const plainHost = makeHostTree(path.join(root, 'host-plain'), {
+    'packages/plugin/src/index.tsx': 'export const inputs = [{ name: "title", description: "Unrelated host text" }];\n',
+  });
+
   battery('12. ROUND TRIP against the real assert script: whatever it stamps, this gate');
   {
     const injected = makeSpecPkg(path.join(root, 'rt-injected'), [FRESH, 'Shared text in both specs for the round trip']);
@@ -859,7 +892,7 @@ function selfTest() {
     const assert = path.join(ROOT, 'scripts', 'assert-console-spec-injection.mjs');
     const run = spawnSync(
       process.execPath,
-      [assert, '--injected', injected, '--vendored', vendored, '--assets', path.join(dist, 'assets')],
+      [assert, '--injected', injected, '--vendored', vendored, '--objectui', plainHost, '--assets', path.join(dist, 'assets')],
       { encoding: 'utf8' },
     );
     expect('assert script passes on a good fixture', run.status, 0);
@@ -885,7 +918,7 @@ function selfTest() {
     const runAssert = (injected, vendored, dist) =>
       spawnSync(
         process.execPath,
-        [assert, '--injected', injected, '--vendored', vendored, '--assets', path.join(dist, 'assets')],
+        [assert, '--injected', injected, '--vendored', vendored, '--objectui', plainHost, '--assets', path.join(dist, 'assets')],
         { encoding: 'utf8' },
       );
     const SHARED = 'Shared text in both specs for the blind-spot fixtures';
@@ -931,6 +964,140 @@ function selfTest() {
     if (!neither.stderr.includes('Neither spec appears')) {
       failures.push('the neither-found verdict must still say that neither spec appears');
     }
+  }
+
+  // 14. OBJECTUI'S OWN TEXT IS NOT EVIDENCE (objectstack#21709). The bundle
+  //     carries objectui's code too, and objectui's registry `inputs` mirror spec
+  //     descriptions — as a prefix it extends (object-gantt `markers`, which
+  //     turned every merge-queue build red) or verbatim. Once the spec rewords
+  //     one, the old text is published-only and objectui's literal still holds
+  //     it, so a substring search reads objectui's own registry as "the published
+  //     spec". Every fixture here runs the real assert script and replays what it
+  //     stamped through evaluate(), so the two halves are held to one answer.
+  //
+  //     The mirrored texts sort FIRST on purpose: an unfiltered pick would choose
+  //     them, as the detector of a failing build or as the stamped detector of a
+  //     passing one — and a stamped detector objectui's own code puts in every
+  //     build would fail every cache-hit replay of a good dist.
+  battery("14. OBJECTUI'S OWN TEXT IS NOT EVIDENCE: a probe the console's own source carries");
+  {
+    const assert = path.join(ROOT, 'scripts', 'assert-console-spec-injection.mjs');
+    const runAssert = (injected, vendored, host, dist) =>
+      spawnSync(
+        process.execPath,
+        [assert, '--injected', injected, '--vendored', vendored, '--objectui', host, '--assets', path.join(dist, 'assets')],
+        { encoding: 'utf8' },
+      );
+    const stampOf = (dist) => (fs.existsSync(path.join(dist, STAMP_BASENAME)) ? readStamp(dist) : null);
+    const SHARED = 'Shared text in both specs for the collision fixtures';
+    // Published-only once the spec reworded them; objectui still writes both.
+    const MIRRORED = 'A marker line drawn like the Today marker, as the spec used to say';
+    const MIRRORED_EXACT = "An exact registry description objectui's registry copied from the spec";
+    const OBJECTUI_MARKERS = `${MIRRORED}. The renderer's own clause continues the sentence.`;
+    // objectui's source, as written — the apostrophes escaped inside single
+    // quotes, which is not how the bundler emits them — plus a TEST file quoting
+    // the published-only STALE text, the way objectui's parity tests do.
+    const quoteSingle = (text) => `'${text.replace(/'/g, "\\'")}'`;
+    const host = makeHostTree(path.join(root, 'cl-host'), {
+      'packages/plugin-gantt/src/index.tsx':
+        `export const inputs = [\n` +
+        `  { name: 'markers', description: ${quoteSingle(OBJECTUI_MARKERS)} },\n` +
+        `  { name: 'criticalPath', description: ${quoteSingle(MIRRORED_EXACT)} },\n` +
+        `];\n`,
+      'packages/plugin-gantt/src/__tests__/inputs-parity.test.ts': `expect(describe).toBe(${JSON.stringify(STALE)});\n`,
+    });
+    // What a bundler emits for that registration.
+    const objectuiChunk = `register({inputs:[{name:"markers",description:${JSON.stringify(OBJECTUI_MARKERS)}},{name:"criticalPath",description:${JSON.stringify(MIRRORED_EXACT)}}]})`;
+    const injected = makeSpecPkg(path.join(root, 'cl-injected'), [FRESH, SHARED]);
+    const vendored = makeSpecPkg(path.join(root, 'cl-vendored'), [MIRRORED, MIRRORED_EXACT, STALE, SHARED]);
+
+    // PIN 1 — this tree's spec plus objectui's literal beginning with (and one
+    // equal to) a published-only description PASSES, and stamps a detector
+    // objectui does not write.
+    const good = makeDist(path.join(root, 'cl-good'), `console(${JSON.stringify(FRESH)});${objectuiChunk}`, undefined);
+    const goodRun = runAssert(injected, vendored, host, good);
+    expect('pin 1: injected spec + objectui literals beginning with / equal to published-only text passes', goodRun.status, 0);
+    expect('pin 1: the pass says the host-carried text is not evidence', goodRun.stdout.includes('not evidence of either spec'), true);
+    const goodStamp = stampOf(good);
+    expect('pin 1: the passing build writes its stamp', goodStamp !== null, true);
+    expect('pin 1: the stamp records the FILTERED detector, never objectui\'s text', goodStamp?.packages?.[0]?.staleDetector, STALE);
+    expect('pin 1: the stamp records the witness the bundle carries', goodStamp?.packages?.[0]?.freshWitness, FRESH);
+    expect('pin 3: the replay agrees with the build on bundle 1', evaluate({ distDir: good, specDir: injected, requireStamp: true }).code, 0);
+
+    // PIN 2 — a bundle carrying the PUBLISHED spec itself still FAILS, through a
+    // published-only description objectui does not write. STALE is quoted by
+    // objectui's TEST file only, so this case also pins that tests are not read
+    // as objectui's source: were they, STALE would be excused too and the
+    // verdict would be "cannot judge" (exit 2), not this exit 1.
+    const publishedJs = fs.readFileSync(path.join(vendored, 'dist', 'index.mjs'), 'utf8');
+    const leaked = makeDist(
+      path.join(root, 'cl-leaked'),
+      `${publishedJs};console(${JSON.stringify(FRESH)});${objectuiChunk}`,
+      undefined,
+    );
+    const leakedRun = runAssert(injected, vendored, host, leaked);
+    expect('pin 2: the published spec itself in the bundle still fails', leakedRun.status, 1);
+    expect('pin 2: the failure names a detector objectui does not write', leakedRun.stderr.includes(`"${STALE}"`), true);
+    expect('pin 2: objectui\'s mirrored text is never named as the detector', leakedRun.stderr.includes(`"${MIRRORED}"`), false);
+    expect('pin 2: a failing build writes no stamp', stampOf(leaked), null);
+    // The replay half: the stamp a good build wrote, beside these assets — a cache
+    // entry whose dist no longer matches its proof. (No stamp to copy is pin 1's
+    // failure, already registered above; the wording assertion below fails too.)
+    if (goodStamp) fs.copyFileSync(path.join(good, STAMP_BASENAME), path.join(leaked, STAMP_BASENAME));
+    const leakedReplay = evaluate({ distDir: leaked, specDir: injected, requireStamp: true });
+    expect('pin 3: the replay agrees with the build on bundle 2', leakedReplay.code, 1);
+    expect('pin 3: and says the dist carries the published spec', leakedReplay.err.join('\n').includes('carries the PUBLISHED'), true);
+
+    // The leg with no probe left: the ONLY published-only description is in the
+    // bundle and objectui writes it. Not "no skew" and not "absent", so it is
+    // inconclusive, never a pass — the published spec would look exactly so.
+    const onlyMirrored = makeSpecPkg(path.join(root, 'cl-vendored-mirrored'), [MIRRORED, SHARED]);
+    const blind = makeDist(path.join(root, 'cl-blind'), `console(${JSON.stringify(FRESH)});${objectuiChunk}`, undefined);
+    const blindRun = runAssert(injected, onlyMirrored, host, blind);
+    expect('a stale leg whose every candidate is host-carried and bundled is inconclusive', blindRun.status, 2);
+    expect('and says the leg cannot judge the bundle', blindRun.stderr.includes('cannot judge this bundle'), true);
+    expect('and writes no stamp', stampOf(blind), null);
+
+    // ABSENCE stays evidence: the same host-carried text, NOT in the bundle
+    // (objectui's chunk tree-shaken away), is absent from every source, so it is
+    // still a detector — this rule excuses presence, never absence.
+    const shaken = makeDist(path.join(root, 'cl-shaken'), `console(${JSON.stringify(FRESH)})`, undefined);
+    const shakenRun = runAssert(injected, onlyMirrored, host, shaken);
+    expect('host-carried text absent from the bundle still verifies as absent', shakenRun.status, 0);
+    expect('and is a legitimate stamped detector', stampOf(shaken)?.packages?.[0]?.staleDetector, MIRRORED);
+    expect('and the replay agrees', evaluate({ distDir: shaken, specDir: injected, requireStamp: true }).code, 0);
+
+    // THE FRESH SIDE, same rule: an injected-only description objectui already
+    // writes is no witness. The bundle below holds objectui's literal and no spec
+    // at all — a pass before this rule, "neither spec appears" now.
+    const FRESH_MIRRORED = 'A key this tree declares in the words objectui already wrote';
+    const freshHost = makeHostTree(path.join(root, 'cl-host-fresh'), {
+      'packages/plugin/src/index.tsx': `export const d = ${quoteSingle(FRESH_MIRRORED)};\n`,
+    });
+    const injectedMirror = makeSpecPkg(path.join(root, 'cl-injected-mirror'), [FRESH_MIRRORED, FRESH, SHARED]);
+    const vendoredPlain = makeSpecPkg(path.join(root, 'cl-vendored-plain'), [STALE, SHARED]);
+    const hollow = makeDist(path.join(root, 'cl-hollow'), `register(${JSON.stringify(FRESH_MIRRORED)})`, undefined);
+    const hollowRun = runAssert(injectedMirror, vendoredPlain, freshHost, hollow);
+    expect('a witness objectui writes itself does not prove the injection', hollowRun.status, 2);
+    expect('and the verdict is that neither spec appears', hollowRun.stderr.includes('Neither spec appears'), true);
+
+    // CANNOT RUN: the objectui tree must be a checkout whose tracked files git
+    // can list — a directory walk would read node_modules (the published spec
+    // itself) as objectui's own source.
+    const notGit = fs.mkdtempSync(path.join(root, 'cl-not-git-'));
+    fs.writeFileSync(path.join(notGit, 'index.tsx'), `export const d = ${quoteSingle(MIRRORED)};\n`);
+    const notGitRun = runAssert(injected, vendored, notGit, makeDist(path.join(root, 'cl-not-git-dist'), `console(${JSON.stringify(FRESH)})`, undefined));
+    expect('an objectui tree git cannot list is inconclusive', notGitRun.status, 2);
+    expect('and says it is not a git checkout', notGitRun.stderr.includes('not a git checkout'), true);
+
+    // The shared module refuses to choose probes blind to objectui's source.
+    let blindChoice = null;
+    try {
+      chooseProbes({ injectedBlob: '', vendoredBlob: '', bundle: '' });
+    } catch (error) {
+      blindChoice = error;
+    }
+    expect('chooseProbes without hostBlob throws a TypeError', blindChoice instanceof TypeError, true);
   }
 
   fs.rmSync(root, { recursive: true, force: true });

@@ -7,7 +7,8 @@
  * or the published one", at two different moments:
  *
  *   scripts/assert-console-spec-injection.mjs  — right after a build, with BOTH
- *     specs on disk. Derives the probes and STAMPS them into the dist.
+ *     specs and objectui's build tree on disk. Derives the probes and STAMPS
+ *     them into the dist.
  *   scripts/check-console-injection.mjs        — on every console-job run,
  *     including a cache HIT, where the objectui build tree does not exist and
  *     the published spec is therefore unavailable. Replays the stamped probes.
@@ -22,6 +23,7 @@
  * --self-test drives these functions directly.
  */
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -129,6 +131,62 @@ export function uniqueCandidates(candidates, theirs) {
   return candidates.filter((candidate) => !theirs.includes(candidate));
 }
 
+/** Tracked files whose string literals a console bundle can carry. */
+const HOST_SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+
+/** Tracked test files: source no console bundle carries. */
+const HOST_TEST_FILE = /(?:^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/**
+ * objectui's OWN source at the pin, as one blob: every tracked code file of the
+ * checkout the console was built from, test files excluded.
+ *
+ * A console bundle carries text from two places, the specs and objectui's own
+ * code, and objectui's component registry writes `inputs` descriptions that
+ * mirror spec `.describe()` text — verbatim, or as a prefix it then extends.
+ * Measured at objectui ab1879721595 over its non-test code: 18 literals equal a
+ * spec description and 18 more begin with one. When the spec rewords such a
+ * description, the old text becomes published-only while objectui's literal
+ * still carries it, and a substring search finds "the published spec" in a
+ * bundle built from this tree's spec (objectstack#21709: object-gantt `markers`).
+ * Probe text found here is therefore not evidence of either spec — see
+ * chooseProbes for how it is judged.
+ *
+ * TRACKED files, from `git ls-files`, because the build tree also holds
+ * objectui's node_modules (the published spec itself) and its built dists:
+ * reading those as "objectui's own source" would excuse exactly the text the
+ * stale leg exists to find. Tests are excluded because no bundle carries them,
+ * and objectui's parity tests quote spec descriptions on purpose — two of the 38
+ * published-only descriptions measured at that pin sit in one — so counting
+ * them would only take evidence away from a real leak.
+ *
+ * The one normalisation is a quote's backslash: objectui writes
+ * `'…chart\'s range…'` where the bundler emits `"…chart's range…"`, and probe
+ * text never contains a backslash (describeCandidates drops those). Any other
+ * spelling difference leaves the text unmatched here, which keeps it EVIDENCE —
+ * the loud direction, never a silent pass.
+ */
+export function readHostSourceBlob(hostDir, label) {
+  if (!fs.existsSync(hostDir)) bad(`${label} source tree \`${hostDir}\` does not exist`);
+  const listed = spawnSync('git', ['-C', hostDir, 'ls-files', '-z'], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (listed.error || listed.status !== 0) {
+    const reason = listed.error ? listed.error.message : (listed.stderr || '').trim() || `git exited ${listed.status}`;
+    bad(`${label} source tree \`${hostDir}\` is not a git checkout whose tracked files can be listed (${reason})`);
+  }
+  const chunks = [];
+  for (const file of listed.stdout.split('\0')) {
+    if (!file || !HOST_SOURCE_FILE.test(file) || HOST_TEST_FILE.test(file)) continue;
+    const absolute = path.join(hostDir, file);
+    if (!fs.existsSync(absolute)) continue;
+    chunks.push(fs.readFileSync(absolute, 'utf8'));
+  }
+  if (chunks.length === 0) bad(`${label} source tree \`${hostDir}\` tracks no source files`);
+  return chunks.join('\n').replace(/\\(['"`])/g, '$1');
+}
+
 /**
  * The two probes for ONE built console bundle, chosen with the bundle in view.
  *
@@ -166,19 +224,56 @@ export function uniqueCandidates(candidates, theirs) {
  *
  * `freshPresent` / `stalePresent` are `null` when that side has no unique
  * candidate at all — no skew on that side — matching the caller's old tri-state.
+ *
+ * ## Text objectui's own source carries is not evidence (objectstack#21709)
+ *
+ * A candidate is in the bundle either because a spec put it there or because
+ * objectui's own code did — readHostSourceBlob says why the second is routine.
+ * `hostBlob` is that code, and a candidate it carries is judged by what its
+ * presence can and cannot show:
+ *
+ *   - PRESENT in the bundle and carried by `hostBlob`: proves nothing about
+ *     either spec. It is counted (`counts.hostCarried`) and never decides a
+ *     verdict, and it is never returned as a probe — the stamp replays the
+ *     probes returned here, and a stamped detector that objectui's own text puts
+ *     in every build would fail every cache-hit replay of a good dist.
+ *   - ABSENT from the bundle: still evidence, whoever else carries it. The text
+ *     is not there, from any source.
+ *
+ * So `inBundle` counts EVIDENCE only, and a bundle carrying the published spec
+ * still fails: every published-only description objectui does not write is
+ * still a detector. One state is new, and the caller must refuse it: a side
+ * whose unique candidates are ALL present and host-carried has no probe left
+ * (`freshWitness` / `staleDetector` null) while its pool is non-empty — a
+ * leg that cannot judge this bundle, which is not the same thing as no skew.
  */
-export function chooseProbes({ injectedBlob, vendoredBlob, bundle }) {
-  const freshPool = uniqueCandidates(describeCandidates(injectedBlob), vendoredBlob);
-  const stalePool = uniqueCandidates(describeCandidates(vendoredBlob), injectedBlob);
-  const freshInBundle = freshPool.filter((candidate) => bundle.includes(candidate));
-  const staleInBundle = stalePool.filter((candidate) => bundle.includes(candidate));
+export function chooseProbes({ injectedBlob, vendoredBlob, bundle, hostBlob }) {
+  if (typeof hostBlob !== 'string') {
+    throw new TypeError('chooseProbes needs hostBlob: objectui\'s own source, from readHostSourceBlob');
+  }
+  const judge = (pool) => {
+    const inBundle = pool.filter((candidate) => bundle.includes(candidate));
+    const hostCarried = new Set(inBundle.filter((candidate) => hostBlob.includes(candidate)));
+    const evidence = inBundle.filter((candidate) => !hostCarried.has(candidate));
+    const usable = pool.filter((candidate) => !hostCarried.has(candidate));
+    return {
+      probe: evidence[0] ?? usable[0] ?? null,
+      present: pool.length === 0 ? null : evidence.length > 0,
+      counts: { pool: pool.length, inBundle: evidence.length, hostCarried: hostCarried.size },
+      hostCarried: [...hostCarried],
+    };
+  };
+  const fresh = judge(uniqueCandidates(describeCandidates(injectedBlob), vendoredBlob));
+  const stale = judge(uniqueCandidates(describeCandidates(vendoredBlob), injectedBlob));
   return {
-    freshWitness: freshInBundle[0] ?? freshPool[0] ?? null,
-    freshPresent: freshPool.length === 0 ? null : freshInBundle.length > 0,
-    freshCounts: { pool: freshPool.length, inBundle: freshInBundle.length },
-    staleDetector: staleInBundle[0] ?? stalePool[0] ?? null,
-    stalePresent: stalePool.length === 0 ? null : staleInBundle.length > 0,
-    staleCounts: { pool: stalePool.length, inBundle: staleInBundle.length },
+    freshWitness: fresh.probe,
+    freshPresent: fresh.present,
+    freshCounts: fresh.counts,
+    freshHostCarried: fresh.hostCarried,
+    staleDetector: stale.probe,
+    stalePresent: stale.present,
+    staleCounts: stale.counts,
+    staleHostCarried: stale.hostCarried,
   };
 }
 

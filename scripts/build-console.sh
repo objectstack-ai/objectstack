@@ -376,9 +376,12 @@ fi
 # BOTH directions: the console bundle also holds a second, transitive copy of
 # this tree's spec (pulled in through the injected client above), which makes a
 # one-sided "is the new text present" probe pass even with no injection at all.
+# --objectui is the checkout just built: objectui's own registry mirrors spec
+# descriptions, so text its tracked source carries is not evidence of either spec.
 node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
   --injected "$SPEC_PKG" \
   --vendored "${BUILD_ROOT}/node_modules/@objectstack/spec" \
+  --objectui "$BUILD_ROOT" \
   --assets "${TARGET}/assets"
 
 # ── Ship the TRACKED SDUI manifest (ADR-0080) ────────────────────────

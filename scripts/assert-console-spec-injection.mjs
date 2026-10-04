@@ -35,6 +35,19 @@
 // positive evidence that the published spec is still in the bundle. The fresh
 // witness alone cannot distinguish "injection worked" from "some other copy".
 //
+// ## objectui's own text is not evidence of either spec (objectstack#21709)
+//
+// The bundle also carries objectui's OWN code, and objectui's component
+// registry writes `inputs` descriptions that mirror spec `.describe()` text.
+// When the spec rewords one, the old text is published-only and objectui's
+// literal still carries it, so a pure substring search reads objectui's own
+// registry as "the published spec": object-gantt `markers` turned every
+// merge-queue build red that way. So the third input, --objectui, is the tree
+// the console was built from, and a probe its tracked source carries is never
+// counted as present — nor stamped. Absent text stays evidence; see
+// chooseProbes and readHostSourceBlob for the rule and why it cannot hide a
+// real leak.
+//
 // ## Probe derivation lives in ./console-spec-probes.mjs
 //
 // Not here, because objectstack#9667 added a SECOND consumer: this script can
@@ -56,6 +69,7 @@
 //   node scripts/assert-console-spec-injection.mjs \
 //     --injected <framework packages/spec> \
 //     --vendored <objectui build tree node_modules/@objectstack/spec> \
+//     --objectui <objectui build tree: the git checkout at the pin> \
 //     --assets   <built console dist/assets>
 //
 // Exit: 0 = injection proven (or no skew to prove) · 1 = injection failed
@@ -67,6 +81,7 @@ import {
   ProbeError,
   chooseProbes,
   readBundle,
+  readHostSourceBlob,
   readSpecBlob,
   writeStamp,
 } from './console-spec-probes.mjs';
@@ -84,7 +99,7 @@ function parseArgs(argv) {
     if (argv[i + 1] === undefined) fail(`\`${key}\` has no value`);
     out[key.slice(2)] = argv[i + 1];
   }
-  for (const required of ['injected', 'vendored', 'assets']) {
+  for (const required of ['injected', 'vendored', 'objectui', 'assets']) {
     if (!out[required]) fail(`--${required} is required`);
   }
   return out;
@@ -100,10 +115,12 @@ const distDir = path.dirname(assetsDir);
 let bundle;
 let injectedBlob;
 let vendoredBlob;
+let hostBlob;
 try {
   bundle = readBundle(assetsDir);
   injectedBlob = readSpecBlob(path.resolve(args.injected), 'injected');
   vendoredBlob = readSpecBlob(path.resolve(args.vendored), 'vendored');
+  hostBlob = readHostSourceBlob(path.resolve(args.objectui), 'objectui');
 } catch (error) {
   if (!(error instanceof ProbeError)) throw error;
   fail(error.message);
@@ -112,12 +129,31 @@ try {
 // Chosen with the bundle in view (objectstack#20646): the witness is injected-only
 // text this bundle carries, and the stale leg is judged over EVERY published-only
 // description, not the one that sorts first — see chooseProbes for why the old
-// alphabetical pick read text from entries the console never imports.
-const { freshWitness, freshPresent, freshCounts, staleDetector, stalePresent, staleCounts } = chooseProbes({
-  injectedBlob,
-  vendoredBlob,
-  bundle,
-});
+// alphabetical pick read text from entries the console never imports. And with
+// objectui's own source in view (objectstack#21709): text that source carries is
+// never counted as present, on either leg, and never stamped.
+const {
+  freshWitness,
+  freshPresent,
+  freshCounts,
+  staleDetector,
+  stalePresent,
+  staleCounts,
+  freshHostCarried,
+  staleHostCarried,
+} = chooseProbes({ injectedBlob, vendoredBlob, bundle, hostBlob });
+
+/** One leg's descriptions that this bundle carries only as objectui's own text. */
+function hostCarriedNote(indent, kind, counts, carried) {
+  if (counts.hostCarried === 0) return [];
+  return [
+    `${indent}${counts.hostCarried} ${kind} description(s) ARE in the bundle, and objectui's own`,
+    `${indent}source at the pin carries each of them too, so they are not evidence of either spec:`,
+    `${indent}  "${carried[0]}"`,
+  ];
+}
+const freshNote = (indent) => hostCarriedNote(indent, 'injected-only', freshCounts, freshHostCarried);
+const staleNote = (indent) => hostCarriedNote(indent, 'published-only', staleCounts, staleHostCarried);
 
 /** Record what this build proved, for check:console-injection to replay. */
 function stamp(skew) {
@@ -139,11 +175,27 @@ function stamp(skew) {
   }
 }
 
-if (!freshWitness && !staleDetector) {
+if (freshCounts.pool === 0 && staleCounts.pool === 0) {
   console.log('✓ Injected and vendored @objectstack/spec declare the same descriptions');
   console.log('  — no observable skew, so nothing for this check to assert.');
   stamp(false);
   process.exit(0);
+}
+
+// The stale leg with no probe left: every published-only description is in the
+// bundle AND carried by objectui's own source, so not one of them can say which
+// side put it there. That is a leg that cannot judge this bundle — not "no skew"
+// (the pool is not empty) and not "absent" (the text is right there) — so it is
+// inconclusive, never a pass: a bundle carrying the published spec would look
+// exactly like this.
+if (staleCounts.pool > 0 && staleDetector === null) {
+  console.error("✗ The staleness leg cannot judge this bundle: every published-only description");
+  console.error("  it could look for is in the bundle, and objectui's own source at the pin carries");
+  console.error('  each one too, so none can tell the published spec from objectui\'s own text.');
+  console.error('  The injection is UNVERIFIED by this check.');
+  console.error(`    published-only descriptions: ${staleCounts.pool}, all of them carried by objectui's source`);
+  console.error(`    first of them: "${staleHostCarried[0]}"`);
+  process.exit(2);
 }
 
 // Neither probe anywhere in the bundle means the spec is not in this build at
@@ -153,6 +205,7 @@ if (freshPresent !== true && stalePresent !== true) {
   console.error('  content matched. The injection is UNVERIFIED by this check.');
   console.error(`    injected-only descriptions in the bundle: ${freshCounts.inBundle} of ${freshCounts.pool}`);
   console.error(`    published-only descriptions in the bundle: ${staleCounts.inBundle} of ${staleCounts.pool}`);
+  for (const line of [...freshNote('    '), ...staleNote('    ')]) console.error(line);
   process.exit(2);
 }
 
@@ -165,6 +218,11 @@ if (stalePresent === true) {
   console.error(`  Text found in the bundle that ONLY the vendored spec has (${staleCounts.inBundle} of`);
   console.error(`  ${staleCounts.pool} published-only descriptions), the first of them:`);
   console.error(`    "${staleDetector}"`);
+  if (staleCounts.hostCarried > 0) {
+    console.error('');
+    console.error(`  Not counted: ${staleCounts.hostCarried} more published-only description(s) the bundle`);
+    console.error("  carries that objectui's own source at the pin carries too.");
+  }
   if (freshPresent === true) {
     console.error('');
     console.error('  Note: text unique to this tree\'s spec is ALSO in the bundle —');
@@ -179,15 +237,22 @@ if (freshPresent !== true) {
   console.error("  this tree's spec was found either — the build is in an unexpected");
   console.error('  state and the injection is UNVERIFIED.');
   console.error(`    expected: "${freshWitness}"`);
+  for (const line of freshNote('    ')) console.error(line);
   process.exit(2);
 }
 
 console.log("✓ Console bundle carries THIS tree's @objectstack/spec, and only it.");
 console.log(`    present (injected only): "${freshWitness}"`);
 console.log(`      — ${freshCounts.inBundle} of ${freshCounts.pool} injected-only descriptions are in the bundle`);
+for (const line of freshNote('        ')) console.log(line);
 if (staleDetector) {
   console.log(`    absent  (vendored only): "${staleDetector}"`);
-  console.log(`      — and all ${staleCounts.pool} published-only descriptions are absent`);
+  if (staleCounts.hostCarried === 0) {
+    console.log(`      — and all ${staleCounts.pool} published-only descriptions are absent`);
+  } else {
+    console.log(`      — and ${staleCounts.pool - staleCounts.hostCarried} of ${staleCounts.pool} published-only descriptions are absent;`);
+    for (const line of staleNote('        ')) console.log(line);
+  }
 }
 stamp(true);
 process.exit(0);
