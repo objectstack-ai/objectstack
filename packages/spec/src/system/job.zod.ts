@@ -258,8 +258,9 @@ export const JobSchema = lazySchema(() => strictObject({
     mapping: 'pull', sync: 'pull', connectorSource: 'pull',
     // The organization under the near-miss spellings the scheduled flow's
     // refusal names — on this closed shape they are refused at parse, by name.
-    organizationId: 'organization', organization_id: 'organization', orgId: 'organization', org_id: 'organization',
-    tenantId: 'organization', tenant_id: 'organization', tenant: 'organization',
+    // One spelling per probe: the probe folds case and `_`, so `organization_id`,
+    // `org_id` and `tenant_id` are caught by the camelCase entries.
+    organizationId: 'organization', orgId: 'organization', tenantId: 'organization', tenant: 'organization',
   },
   guidance: { id: JOB_ID_RETIRED },
 }, {

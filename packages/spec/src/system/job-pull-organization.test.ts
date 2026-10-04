@@ -105,7 +105,8 @@ describe('JobSchema.organization — the scheduled flow\'s value shape, reused',
   });
 
   it('a near-miss spelling is refused at parse and pointed at `organization`', () => {
-    for (const key of ['organizationId', 'orgId', 'tenantId']) {
+    // `organization_id` has no entry of its own: the alias probe folds case and `_`.
+    for (const key of ['organizationId', 'organization_id', 'orgId', 'tenantId']) {
       const r = JobSchema.safeParse({ ...base, pull, [key]: 'org_a' });
       expect(r.success, key).toBe(false);
       const issue = r.error!.issues.find((i) => i.code === 'unrecognized_keys');
