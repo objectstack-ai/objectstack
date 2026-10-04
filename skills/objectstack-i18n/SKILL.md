@@ -161,16 +161,17 @@ All translatable content for a single object is aggregated under
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label) per field |
 | `_views.{view_name}` | `label`, `description`, `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
-| `_actions.{action_name}` | `label`, `description`, `confirmText`, `successMessage`, `params.{param_name}`, `resultDialog` |
+| `_actions.{action_name}` | `label`, `description`, `confirmText`, `successMessage`, `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description` |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
-`messages`, `globalActions` (object-less actions), `dashboards`, `datasets`, `pages`,
-`flows`, `metadataForms`, `settingsCommon`. `settings` is **platform-only** — it is
-keyed by a settings manifest's namespace and only the platform declares one, so an
-app bundle carrying it is refused by name.
+`messages`, `globalActions` (actions with no `objectName` — a key naming a bound action is
+an **error** whose message names the `objects.{owner}._actions.{action_name}` key to write
+instead), `dashboards`, `datasets`, `pages`, `flows`, `metadataForms`, `settingsCommon`.
+`settings` is **platform-only** — it is keyed by a settings manifest's namespace and only
+the platform declares one, so an app bundle carrying it is refused by name.
 
 For the exact Zod shape (and any field that may have been added since), read
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
@@ -199,8 +200,14 @@ parse, ship, and resolve to nothing.
 is an **error** and fails the run; `translation-option-key-unknown` is a warning.
 A key naming an object, field, view, tab, action, param, section, validation rule, app,
 nav item, dashboard, widget or flow screen that does not exist is listed alongside the names
-that do. A bundle keyed to something since renamed still parses — the label just renders
-silently in its source locale while every neighbouring one resolves.
+that do. Three more shapes under an action entry are the error: an outcome the action does
+not declare in `outcomeMessages`; a `resultDialog.fields` path it does not declare; and
+`resultDialog` `title` / `description` / `acknowledge` under an action that declares no
+`resultDialog` — a bundle translates a dialog the action declares and cannot add one. A
+param's inline option keys share the option warning with a field's `options`; a param that
+references a `field` and declares no inline `options` is not judged. A bundle keyed to
+something since renamed still parses — the label just renders silently in its source locale
+while every neighbouring one resolves.
 
 ---
 
