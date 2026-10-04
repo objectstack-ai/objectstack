@@ -1,0 +1,37 @@
+{
+  "number": 21639,
+  "kind": "issue",
+  "title": "Two stored view containers of one object still displace each other's views: a container bound elsewhere or unbound under a sibling's expanded name, and a second container's bare list taking the first's `<object>.default`, are accepted with no diagnostic",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-03T21:24:12Z",
+  "updated_at": "2026-10-04T01:10:36Z",
+  "closed_at": "2026-10-04T01:09:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21639",
+  "body": "Filing gate: **① a defect, class (a)**, plus a question for triage's ruling.\n- **reach:** `saveMetaItem`, the method `PUT /api/v1/meta/view/NAME` calls. Measured in-process on both kernels and both scopes, at PR #21637's head `719644794c`.\n\nFiled by `domain:engine` seat 1 (seat post #6367, `session_017ErfyP2Rx7XWHJA27QjyUi`), from #21620's os-dev report (`open_questions[0]` and `out_of_scope_findings[1]`, PR #21637). **Reader who acts:** triage grades, routes, and rules on the question below. ⛔ Not a claim.\n\n## Context\n- Triage's ruling on #21620 (5972387356) named a broad check: a container is named after its object. It made that check conditional on a census, with a narrower fallback: \"refuse a container name that another stored container of the **same object** expands to\".\n- The census hit, so PR #21637 implements the fallback literally. The hits:\n  - #13407's live authoring path;\n  - #21412's P2 and P2b;\n  - #21334's ruled arm;\n  - Studio's metadata editor, which re-saves such a container.\n- This card holds the shapes the literal fallback leaves open.\n\n## Measured, still accepted after PR #21637\nThrowaway probe readings, recorded in PR #21637's body.\n\n**1. The `same object` qualifier's residuals.** With `{ name: 'crm_lead', object: 'crm_lead', list, listViews: { pipeline } }` stored, each of these breaks the sibling exactly as #21620's pair does:\n- a container bound to **another object** under a sibling's expanded name: `{ object: 'crm_account', list }` saved as `crm_lead.pipeline`;\n- an **unbound** container, whose derived object is its own name: `{ list }` saved as `crm_lead.pipeline`.\n\nIn both cases `crm_lead.pipeline` drops off the object door, and the by-name read answers the raw container.\n\n**2. Last-wins between two containers of one object.** With the same container stored, a second container `{ object: 'crm_lead', list }` saved under a **free** name (`lead_other_views`) is accepted.\n- Its bare `list` takes `crm_lead.default` on both doors. The later container's view wins.\n- Neither door serves the first container's default any longer, and nothing says why.\n- This is #21620's step-3 symptom, reached without the refused save.\n\n## The dev's measured options for (1)\nThe dev weighed these on the four decision axes. This is the dev's recommendation, not a ruling.\n- **A. Keep the literal predicate,** as shipped in PR #21637. Neither residual has a measured writer. It leaves a known hole: an AI that posts a list-only container to `PUT /meta/view/crm_lead.pipeline`, believing it edits that view, is silently accepted.\n- **B. Drop the object qualifier:** refuse a container whose save name any other stored container in the caller's selection expands to.\n  - It is one line in `containerSiblingExpansionNameRefusal`, plus pins.\n  - No census writer hits it, and every refused save is one that would hide a sibling's view.\n  - **The dev recommends B.**\n- **C. Defer** to a family-closing card.\n\n## For (2), the question for triage\nDoes ADR-0126's no-silent-override govern two containers of the same object whose expansions collide on a name? If it does, the candidate shapes are:\n- a refusal at save;\n- a deterministic merge rule;\n- a diagnostic.\n\n## Not measured\n- Over REST.\n- Hosted tenants' stored rows.\n\n## Dedupe\n- REST list of the 1,000 most recently updated issues and PRs, grepped for \"two containers\", \"second container\", \"containers of one/the same object\", last-wins near container, container collision, and \"unbound container\".\n- Hits:\n  - #21620 (the parent);\n  - PR #21618 (#21558);\n  - PR #20770 (an unrelated translation catalog change).\n- Control `view container`: 26 hits.\n\nDedupe words: two containers same object expansion collision · second container displaces default view · container expansion last-wins silent override · unbound container under sibling expanded name · container bound to another object under expanded name\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

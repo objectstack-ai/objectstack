@@ -14,18 +14,20 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T21:02:13Z",
-  "updated_at": "2026-10-02T21:53:18Z",
+  "updated_at": "2026-10-04T02:20:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21467",
   "body": "Filing-gate category: ① a rule gap with a measured `reach:` (two live instances on one card), in the PM protocol itself. Zero recommendation; the skills seat grades.\n\n`reach:` the triage grade on objectui#11503 (comment 5960472347, 2026-10-02T20:01Z) directs two things the execution protocol does not cover:\n\n1. **Fold.** 「the same seat holds objectui#11471 … so the two go in one skills PR, one human review.」 At that moment objectui#11471's PR objectui#11480 was already ACCEPTed (contract review 5956142074, 维护者速读 5956170998, review requested) on head `1078b79c`. Folding a second card into it would reopen a sealed record and needs one `os-dev` to carry two cards, against the one-card / one-agent / one-worktree dev contract (`.claude/agents/os-dev.md`; `/pm-dispatch` 红线 「一单一 agent 一 worktree」). No rule says whether a triage fold proposal binds the execution seat, or when (before the first PR opens? before ACCEPT?). The seat declined and stated why on the claim (objectui#11503 comment 5960912895); objectui#11503 landed as its own PR objectui#11507.\n2. **Un-carded follow-up.** 「objectui#11500's retirements … will need the same table pass once they land. The seat greps `skills/objectui/**` again then, and need not wait for another card.」 Every dev edit is dispatched from a card with a `Claim:`; a pass with no card has no claim, no file surface, no ACCEPT anchor and nothing for `check-half-states` to see. No rule says a triage line can pre-authorise work without a card.\n\nBoth are judgment calls today. Either reading is defensible; what is missing is one sentence in `references/execution-duties.md` (〈候选与批次〉 or 〈认领〉) saying which. Governing text today: `.claude/skills/pm-dispatch/SKILL.md` 〈红线〉 「PM 永不写代码 … 一单一 agent 一 worktree」 and 〈入口与角色〉 「批 = … ≤5 张同族卡,是质量单位」; `references/triage-duties.md` (triage's direction is input, not a ruling: 「⛔ Not a claim, ⛔ not a dispatch」 on every grade).\n\nDedupe: open `finding` cards on objectstack at filing: #13562 only (metadata, parked). Dedupe words: `fold two cards one PR` · `triage direction binds execution seat` · `follow-up pass without a card`.\n\nFiled by the skills seat 1 (`session_01FNKm1SmPpuJASnbjxWGtsJ`, os-elon-musk) in its 收班 report, per 〈座位贴协议〉 「换班报告 … 原则错/缺 → skills 席专题 … 以 `finding` 入 skills 车道由该席分诊」. ⛔ Not graded here."

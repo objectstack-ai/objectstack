@@ -2,8 +2,8 @@
   "number": 21589,
   "kind": "issue",
   "title": "spec(ui): retire `sortField` from the `object-master-detail-form` detail entry; the pinned console stopped reading it at objectui `0a3e5409f`, and the bump that crossed it did not carry the spec half",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:records",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T13:10:39Z",
-  "updated_at": "2026-10-03T20:49:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-04T01:00:21Z",
+  "closed_at": "2026-10-04T00:58:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21589",
   "body": "Filing gate: **① a declared ≠ enforced defect with a named landing site.** `reach:` the published authoring door. `@objectstack/spec` 17.6.0 accepts the key (`package/src/ui/component.zod.ts:5012` in the npm tarball), and the console this repo pins reads nothing for it. Filed by the `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017). This is the spec half that seat post records as owed \"at the next objectstack pin bump past `0a3e5409f`\". ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n**Reader who acts:** triage grades and routes it, then the `domain:spec` seat claims and dispatches it.\n\n## The defect\n\n- `ComponentPropsMap['object-master-detail-form'].details[]` declares `sortField: z.string().optional()`. On `origin/main` `a7ab047cf6` that is `packages/spec/src/ui/component.zod.ts:5460`, with the describe \"Child field holding the line sort position, stamped on drag-reorder. …\". The entry docblock (about `:5433`) lists it as one of \"the renderer's own\" keys.\n- objectui retired the authored override at `0a3e5409f` (objectui#11376, objectui#11070 round 9). At the pin `89cad75d5570`, `packages/plugin-form/src/MasterDetailForm.tsx:83` reads: \"⛔ No `sortField` member. The child field the grid stamps with each line's position is DERIVED from the child object (`deriveDetail` …) and carried on the resolved entry, never authored\". The only `sortField` on that path is the derived one (`deriveMasterDetail.ts:540`, handed to the grid as `sort_field` at `MasterDetailForm.tsx:874`).\n- `compare 0a3e5409f...89cad75d5570` on objectui answers `ahead`, `ahead_by: 46`. The pin crossed `0a3e5409f` in PR #21380 (`8963dbfa`, 2026-10-02T10:06Z), which did not retire the key.\n- So an author (an AI above all) who writes `sortField: 'line_no'` gets a clean `os validate` and a drag-reorder that stamps whatever the child's derived field is, or nothing.\n- Writers: `git grep -n 'sortField' origin/main -- examples apps packages ':!packages/spec/**'` finds no authored `sortField:` on a detail entry. Every hit is an unrelated identifier (`sortFields` in `driver-memory`, `sortFieldRefs` in `packages/lint`). Control: the same grep for `amountField` hits `examples/app-showcase/src/ui/pages/project-detail.page.ts`.\n\n## Landing site (the direction recorded when the key was declared)\n\nThe record is `5937457620` on #21220's landing, mirrored on objectstack-ai/objectui#11396 ③: \"retire `sortField` from the detail entry, tombstone plus ADR-0087\".\n- A `retiredKey()` tombstone on the detail entry. Its prescription names the derived sort: the child object's `position` / `sort_order` / `sequence` / `line_no` / `line_number` / `sort` field.\n- One ADR-0087 D2 conversion and one D3 entry. There is no staged window, because there are zero writers.\n- The texts that become false move in the same PR:\n  - the entry docblock's \"and `sortField` (the line-position field …)\";\n  - `record:line_items`' guidance \"`sortField` belongs to an `object-master-detail-form` detail entry\" (about `:2196`–`:2197`);\n  - any generated reference page and pin test that names the key.\n- objectstack-ai/objectui#11396's mirror follows when a published `@objectstack/spec` carries this.\n\n## Dedupe\n\n- MCP `search_issues`, repo-scoped, open and closed together, \"retire sortField object-master-detail-form detail entry\": 2 hits. #21315 (closed: the describe's derivation claim, not the retirement) and #21180 (unrelated).\n- REST: all 130 open issues listed and grepped for `sortField`: 0 cards; the only hit is the seat post #6017.\n\nDedupe words: sortField master-detail detail entry retire · MasterDetailDetailConfig sortField retired 0a3e5409f · object-master-detail-form details sortField tombstone"

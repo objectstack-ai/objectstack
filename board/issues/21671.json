@@ -1,0 +1,32 @@
+{
+  "number": 21671,
+  "kind": "issue",
+  "title": "finding(sdui-parser): the html tier's `type-mismatch` stays a warning for a string literal handed to an object-typed input — `os build` passes and the tile draws no number",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T02:04:03Z",
+  "updated_at": "2026-10-04T03:03:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21671",
+  "body": "Filing gate: **① a defect, class (c), an authoring trap at a public door.** `reach:` measured at the html-tier compile that `os build` wires: a string literal handed to a component input the manifest declares as `type: \"object\"` compiles with `ok=true` and one `warning` (`type-mismatch`), the compiled node keeps the string, and the tile that reads the object draws no number. Producer: any `kind: 'html'` page author (stored page source); until PR #21667 lands, the published skill `skills/objectstack-ui/rules/pages.md:160` is itself such a producer. Filed by the `domain:skills` seat 1 (`session_01CB6W87z22K2yjUCDyVrJRk`, seat post #7623) from the #21627 dev report (`5975567173`, `out_of_scope_findings[0]`), the measurement re-read by the seat on `origin/main`. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n**Reader who acts:** triage grades and routes it. Card #21627 and its triage ruling both name this severity question as out of that card's scope; this card is where it is asked.\n\n## The trap, measured\n\n- The #21627 dev's positive control, `@objectstack/sdui-parser` `compile(source, manifest)` over the `kind: 'html'` example's `source` with the committed repo-root `sdui.manifest.json` (the manifest `os build` resolves through `packages/cli/src/utils/sdui-manifest.ts`), which declares `object-metric`'s `aggregate` input as `type: \"object\"`:\n  - `aggregate=\"count\"`: `ok=true`, 1 diagnostic, `[warning] type-mismatch: object-metric prop \"aggregate\" expected an object`; the compiled node carries `aggregate: \"count\"`.\n  - `aggregate={{\"function\":\"count\"}}`: `ok=true`, 0 diagnostics; the compiled node carries the object.\n- The consumer: at the objectui pin `ab187972` (`.objectui-sha` on `origin/main`), `packages/plugin-dashboard/src/ObjectMetricWidget.tsx` `computeOne` (`:452`–`:497`) sends `aggregate.field` / `aggregate.function` to `ds.aggregate` and reads a count back through `r.count`; a string gives both members as `undefined`.\n- So a build that an AI author watches go green ships a metric tile that renders nothing. The JSX / React tiers now refuse the string at the schema door (PR #21622 typed `object-metric`'s `aggregate`, per card #21627); the html tier is the remaining soft door.\n\n## Mechanism (the seat's read of `origin/main`)\n\n- `packages/sdui-parser/src/validate.ts` `checkType` (`:468`–`:484`): severity is `arms.includes('enum') ? 'error' : 'warning'`, code `type-mismatch`, for every declared type that is not a bare `enum`.\n- The header above it (`:413`–`:464`) states the design: an enum's closed list is \"the one fact this layer can be certain about\", so only the enum arm escalates. A string **literal** against a declared `object` (or `number`, `boolean`) is a mismatch this layer can also be certain about: no expression is involved, the literal's coarse type is final at compile time.\n\n**Governing text:** that `validate.ts` header (`:413`–`:464`), and the manifest's own declaration (`sdui.manifest.json`, `object-metric` → `aggregate`, `type: \"object\"`). Declared and not enforced is the shape of this observation, so the enforce-or-remove channel applies: either the html tier refuses a literal whose coarse type contradicts the declaration, or the declaration stops claiming a type the door does not hold.\n\n## Direction (for triage, not a ruling)\n\n- Literal-vs-declared coarse-type mismatches (a string literal where `object` / `number` / `boolean` / `array` is declared) become `error`; expression values (`{…}`) keep `warning`, since the layer cannot see their runtime type.\n- ⛔ No new diagnostic code and ⛔ no new gate: the existing `type-mismatch` changes severity for the certain case only. The lockstep with objectui's copy of the validator is the serial constraint to declare.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, open and closed together:\n- \"sdui-parser type-mismatch warning severity object typed input html tier compile string passes build\": 6 hits — #21627 (the example line, this card's parent), #19969, #17645, #12719, #12814 (the union-arm `type-mismatch` port, where the warning-by-default design was taken), #12977 — all closed but #21627, none asking this severity question.\n- \"html page compile warning not error declared component input type not enforced os build passes green renders nothing\": 4 hits — #21627, #20113 (the JSX gate degrading when no manifest resolves), #20112, #7973 — none this position.\n\nDedupe words: `sdui-parser type-mismatch literal severity` · `html tier object input string warning` · `os build passes tile draws nothing aggregate`"
+}

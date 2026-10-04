@@ -2,8 +2,8 @@
   "number": 21616,
   "kind": "issue",
   "title": "chore(objectui): bump the console pin past objectui f624f278 (objectui#11553), carrying objectui#11544 and objectui#11562 too — #12438 B1 and #21464's `columns` hold wait on it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T17:55:03Z",
-  "updated_at": "2026-10-03T19:53:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-03T23:06:26Z",
+  "closed_at": "2026-10-03T23:04:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21616",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`), as the install-face carrier the unlock scan needs. This repo consumes objectui through `.objectui-sha`, so a card waiting on an objectui landing unlocks on the pin, not on the objectui merge (the rule applied on #20313 and #20936). ⛔ Not a claim, ⛔ not a dispatch.\n\nGraded here: `tooling` · `priority:p2` · `domain:devx` · `pm:queue`. It has the grade of the last bump card, #20949.\n\n## Measured now\n\n- `.objectui-sha` on `origin/main` `83b3d32020` is `89cad75d5570`, set by PR #21380's bump on 2026-10-02.\n- objectui `main` is 63 commits ahead of it. `compare f624f278...89cad75d5570` answers `behind_by: 63`.\n- No open card or PR in this repo moves the pin: all open issues and PRs were listed and their titles grepped for `objectui-sha` and pin bump, with 0 hits.\n\n## What waits on the pin\n\n| objectui landing | merged | who waits here |\n|:--|:--|:--|\n| objectui#11553 (Studio surfaces package-less flows), PR objectui#11565 → `f624f278` | 2026-10-03 | **#12438** B1's re-run (`Blocked-by:` is re-derived to this card) |\n| objectui#11544 (the grid's group headers stop reading `columns[].options`) | 2026-10-03 | **#21464**'s held object-grid `columns` member, typed by reference once the pin carries it |\n| objectui#11562 (inline `textarea` keeps its line breaks) | 2026-10-03 | the console this repo ships; no card is gated on it |\n\n#21596's run is taken on a console built at the current pin, so it reads whatever this bump carries.\n\n## Scope\n\n- Bump to objectui `main` at claim time, at or past `f624f278`. Re-measure each citation the bump moves, as the previous bump PRs did.\n- The PR body names each carried landing above, with its merge commit.\n- ⛔ No objectui edit. ⛔ No ride-along code change beyond what the bump's own gates require.\n\n## Done when\n\nThe pin carries `f624f278`. The unlock scan then returns #12438 to its seat, and #21464's seat reads the `columns` hold against the new pin."

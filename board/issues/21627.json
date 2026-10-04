@@ -14,18 +14,20 @@
     "area:reports",
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T19:57:23Z",
-  "updated_at": "2026-10-03T20:54:23Z",
+  "updated_at": "2026-10-04T02:06:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21627",
   "body": "Filing gate: **① a defect, class (c), an authoring trap in a published skill.** `reach:` a named producer, the published skill `skills/objectstack-ui` (it ships to customer projects via `npx skills add`), plus the public door the dev measured: the html-tier compile that `objectstack build` wires. Filed by the `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017) from the #21464 stage-4 dev report (`5972873924`, `out_of_scope_findings[0]`), re-read by the seat on `origin/main`. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n**Reader who acts:** triage grades and routes it. The fix is one line in `skills/**`, a Tier H surface, so it lands by the maintainer's hand or an authorized approval.\n\n## The trap\n\n- `skills/objectstack-ui/rules/pages.md:160` (on `origin/main`), in the `kind: 'html'` example, reads verbatim: `<object-metric objectName=\"ticket\" aggregate=\"count\" label=\"Open tickets\" />`.\n- The tile reads `aggregate` as an object (`aggregate.field`, `aggregate.function`). At the objectui pin `89cad75d557`, `ObjectMetricWidget.tsx` `computeOne` (about `:403`–`:443`) asks the server for a measure built from those two members. A bare string gives both as undefined.\n- **Measured by the dev** through the html tier's own compile with the committed component manifest (the path `objectstack build` wires at `packages/cli/src/commands/compile.ts:543`): one `warning` (`type-mismatch`, \"prop \\\"aggregate\\\" expected an object\"). The compiled node still carries `aggregate: \"count\"`. The same tag with `aggregate={{\"function\":\"count\"}}` compiles clean.\n- So the published skill teaches an AI author a value that builds green (a warning only), renders no number, and that the skill presents as the canonical example.\n- The sibling surfaces are spelled correctly: `skills/objectstack-ui/rules/dashboards.md:125` (`aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}`) and the `analytics-inline-vs-dataset` eval (`aggregate={{ function: 'count', groupBy: 'status' }}`).\n\n## Landing site\n\n- `skills/objectstack-ui/rules/pages.md:160`: `aggregate={{\"function\":\"count\"}}`, in the html tier's own expression spelling as the other attributes in that example use (`style={{…}}`, `gap={6}`).\n- The stage-4 PR of #21464 (PR #21622) now types `object-metric`'s `aggregate` at the schema door, so the JSX / React tiers refuse the string loudly. Whether the html tier's `type-mismatch` should stay a warning is a separate question this card does not ask.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, open and closed together:\n- \"skill pages.md object-metric aggregate count html example string instead of object\": 0 hits.\n- \"object-metric aggregate html tier type-mismatch warning skill example\": 4 hits, none this position (#20500, #20035, #19714 and #14302, all closed and about other skills or services).\n\nDedupe words: object-metric aggregate count skill pages.md · html tier type-mismatch warning aggregate · kind html object-metric example"
