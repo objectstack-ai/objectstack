@@ -102,7 +102,7 @@ describe('FlowVariableSchema', () => {
   // as `false` — the whole run stops (hotcrm#643). The engine half of the contract
   // is pinned in `service-automation/src/flow-variable-default.test.ts`; this half
   // is the authorable surface.
-  describe('defaultValue (#4697)', () => {
+  describe('defaultValue — a declared variable is bound on every path', () => {
     it('accepts a declared default, and keeps it as authored', () => {
       const parsed = FlowVariableSchema.parse({
         name: 'createOpportunity', type: 'boolean', isInput: true, defaultValue: false,
@@ -245,7 +245,7 @@ describe('FlowNodeSchema', () => {
     }
   });
 
-  it('should accept node with inputSchema (outputSchema retired, #3896)', () => {
+  it('should accept node with inputSchema (outputSchema retired: declared, never validated)', () => {
     const result = FlowNodeSchema.safeParse({
       id: 'script_1',
       type: 'script',
@@ -367,7 +367,7 @@ describe('FlowSchema', () => {
       });
     });
 
-    it('REJECTS the retired `active` with the status prescription (#3896)', () => {
+    it('REJECTS the retired `active` with the status prescription', () => {
       let message = '';
       try {
         FlowSchema.parse({
@@ -864,7 +864,7 @@ describe('FlowSchema - errorHandling', () => {
    * nobody wrote. A retry re-runs the WHOLE flow, side effects included; that
    * is not a count to guess on the author's behalf.
    */
-  describe('#4247 — one default, and no zero-attempt "retry"', () => {
+  describe('maxRetries — one default, and no zero-attempt "retry"', () => {
     const retryFlow = (errorHandling: unknown) => FlowSchema.safeParse({
       name: 'retry_flow',
       label: 'Retry Flow',
@@ -926,7 +926,7 @@ describe('FlowSchema - errorHandling', () => {
     });
   });
 
-  it('REJECTS the retired errorHandling.fallbackNodeId — faults route via fault edges (#3896)', () => {
+  it('REJECTS the retired errorHandling.fallbackNodeId — faults route via fault edges', () => {
     expect(() => FlowSchema.parse({
       name: 'fallback_flow',
       label: 'Fallback',
@@ -1292,7 +1292,7 @@ describe('BPMN — Wait Event Configuration', () => {
    * (#4158). Retiring the pair is what flipped them, which is the point — the
    * schema now says what `wait` actually does.
    */
-  it('rejects the retired timeout keys instead of stripping them (#4158)', () => {
+  it('rejects the retired timeout keys instead of stripping them', () => {
     for (const retired of [{ timeoutMs: 7_200_000 }, { onTimeout: 'fail' }]) {
       const result = FlowNodeSchema.safeParse({
         id: 'wait_timer',
@@ -1323,7 +1323,7 @@ describe('BPMN — Wait Event Configuration', () => {
    * hard-coded `'60000'` here would go green the moment someone reworded the
    * prose, which is precisely when this needs to be checked.
    */
-  it('every `timerDuration` value the wait-timeout prescriptions print actually parses (#6758)', () => {
+  it('every `timerDuration` value the wait-timeout prescriptions print actually parses', () => {
     const waitNode = (waitEventConfig: Record<string, unknown>) => ({
       id: 'wait_timer', type: 'wait', label: 'Wait', waitEventConfig,
     });
@@ -1705,7 +1705,7 @@ describe('BPMN — Fault Edge Enhancement', () => {
 // surface (cloud#688 / #2419). A node's `config` record deliberately stays
 // OPEN: it is per-node-type, owned by the executor's `configSchema`
 // (#4027/#4040) and the ADR-0087 conversion layer.
-describe('unknown keys are rejected, not stripped (#4001)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
     const result = schema.safeParse(value);
     expect(result.success).toBe(false);
@@ -1863,7 +1863,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         .toContain('`is_input` → `isInput`');
     });
 
-    it('points `default` / `initialValue` at `defaultValue` (#4697)', () => {
+    it('points `default` / `initialValue` at `defaultValue`', () => {
       // The two words an author reaches for — `default` is what a page state
       // slot and an action param already alias, and `initialValue` is what the
       // designer calls it. Still REJECTED; the alias only makes the rejection
@@ -1950,7 +1950,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(issue!.message).toContain('`cancelActivity` → `interrupting`');
     });
 
-    it('errorHandling: `backoffMs` is now ACCEPTED — it is the converged spelling (#4964)', () => {
+    it('errorHandling: `backoffMs` is now ACCEPTED — it is the converged spelling', () => {
       // This assertion used to be its exact inverse: the block demanded
       // `retryDelayMs` and rejected `backoffMs`, so an author who had read
       // `shared/retry-policy.zod.ts` (where `retryDelayMs` is tombstoned and
@@ -1964,7 +1964,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(result.data!.errorHandling!.backoffMs).toBe(5000);
     });
 
-    it('errorHandling: `retryDelayMs` is the tombstone and carries the rename (#4964)', () => {
+    it('errorHandling: `retryDelayMs` is the tombstone and carries the rename', () => {
       const result = FlowSchema.safeParse({
         ...minimalFlow,
         errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 5000 },
@@ -2057,7 +2057,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
   });
 });
 
-describe('FlowSchema — edge ids are unique (#14964)', () => {
+describe('FlowSchema — edge ids are unique', () => {
   // The card's probe, reproduced: two edges differing only in source/target,
   // both `id: 'dup'`, parsed on green through 17.2.0. The control beside it —
   // an invalid edge `type` on the SAME schema instance — is what proves the
@@ -2161,7 +2161,7 @@ describe('FlowSchema — edge ids are unique (#14964)', () => {
   });
 });
 
-describe('FlowSchema — top-level node ids are unique (#15713)', () => {
+describe('FlowSchema — top-level node ids are unique', () => {
   // The card's probe, reproduced: a four-node flow with `nodes[1].id ===
   // nodes[2].id === 'n'`, parsed on green (`origin/main` 1f2a02ba re-measured
   // before this rule landed). The two controls beside it — a node missing its
@@ -2307,7 +2307,7 @@ describe('FlowSchema — top-level node ids are unique (#15713)', () => {
   // would move it rather than drift. Taken: the same shape is now refused, by
   // the same rule, in the same shape. The full region pin set is the #16134
   // describe below; this one is the boundary itself.
-  it('a region node reusing a top-level id is refused — the #15713 boundary, moved by #16134', () => {
+  it('a region node reusing a top-level id is refused — one node-id space now spans every region', () => {
     const result = FlowSchema.safeParse(flowWith([
       { id: 'start', type: 'start', label: 'Start' },
       {
@@ -2330,7 +2330,7 @@ describe('FlowSchema — top-level node ids are unique (#15713)', () => {
   });
 });
 
-describe('FlowSchema — one node-id space across the top-level nodes[] and every region (#16134)', () => {
+describe('FlowSchema — one node-id space across the top-level nodes[] and every region', () => {
   // The ruling (director seat, decision batch #61, 2026-09-07, maintainer
   // 「同意」): top-level `nodes[]` and every region body (`loop` / `try_catch` /
   // `parallel`, at every depth) share ONE id space; a collision is refused at

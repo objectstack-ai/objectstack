@@ -132,7 +132,7 @@ describe('ORG_MEMBERSHIP_LEVELS derives from BUILTIN_MEMBERSHIP_ROLES', () => {
 // record-backed kinds MUST match the engine's resolution semantics
 // (`plugin-approvals` resolveApproverSpec / expand*Users) — these assertions
 // pin the object names and stored fields the engine actually queries.
-describe('APPROVER_VALUE_BINDINGS (#3508)', () => {
+describe('APPROVER_VALUE_BINDINGS — an approver value is picked from the records the engine resolves', () => {
   it('covers every ApproverType member', () => {
     for (const t of ApproverType.options) {
       expect(APPROVER_VALUE_BINDINGS[t]).toBeDefined();
@@ -173,7 +173,7 @@ describe('APPROVER_VALUE_BINDINGS (#3508)', () => {
 // #3508 follow-up: `xRef.map` names a picker KIND but never said where that
 // picker's candidates live — which is how the designer came to query the
 // metadata registry for data records. The data contract now ships on the wire.
-describe('APPROVER_VALUE_SOURCES (#3508 follow-up)', () => {
+describe('APPROVER_VALUE_SOURCES — where each picker finds its candidates, published on the wire', () => {
   it('covers every ApproverType member, exactly like the bindings it projects', () => {
     for (const t of ApproverType.options) {
       expect(APPROVER_VALUE_SOURCES[t], `no source published for '${t}'`).toBeDefined();
@@ -309,7 +309,7 @@ describe('ApprovalNodeConfigSchema', () => {
     expect(() => ApprovalNodeConfigSchema.parse({ ...minimal, behavior: 'weighted' })).toThrow();
   });
 
-  it('accepts quorum / per_group behaviors with minApprovals and grouped approvers (#3266)', () => {
+  it('accepts quorum / per_group behaviors with minApprovals and grouped approvers', () => {
     const quorum = ApprovalNodeConfigSchema.parse({ ...minimal, behavior: 'quorum', minApprovals: 2 });
     expect(quorum.behavior).toBe('quorum');
     expect(quorum.minApprovals).toBe(2);
@@ -486,7 +486,7 @@ describe('ApprovalEscalationSchema', () => {
   // escalation block exists at all; within a block carrying timeoutHours,
   // escalation is ON unless explicitly turned off. Declared in
   // DEFAULT_CHANGES_BY_MAJOR (17) — this pin is what keeps the fingerprint honest.
-  it('defaults enabled to true — a block carrying timeoutHours is live unless explicitly off (#12278)', () => {
+  it('defaults enabled to true — a block carrying timeoutHours is live unless explicitly off', () => {
     const omitted = ApprovalEscalationSchema.parse({ timeoutHours: 24 });
     expect(omitted.enabled).toBe(true);
     const explicit = ApprovalEscalationSchema.parse({ enabled: false, timeoutHours: 24 });
@@ -512,7 +512,7 @@ describe('normalizeDecisionOutputs', () => {
     ]);
   });
 
-  it('carries the widget hints and the required flag through (objectui#2955)', () => {
+  it('carries the widget hints and the required flag through, for the decision dialog to render and enforce', () => {
     expect(normalizeDecisionOutputs([
       { key: 'positions', label: 'Co-signers', type: 'position', multiple: true, required: true },
     ])).toEqual([
@@ -540,7 +540,7 @@ describe('normalizeDecisionOutputs', () => {
 // a v17-new surface, tightened before stored volume exists. The published JSON
 // schema now carries additionalProperties:false into the Studio form AND
 // registerFlow()'s per-node config validation (#4027/#4040) — asserted below.
-describe('unknown keys are rejected, not stripped (#4001)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
     const result = schema.safeParse(value);
     expect(result.success).toBe(false);
@@ -607,7 +607,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
      * cases fail loudly instead, which is what "declared = enforced" needs on
      * the declaring side.
      */
-    it('accepts `required` — the key the runtime enforces (#4525)', () => {
+    it('accepts `required` — the key the runtime enforces', () => {
       expect(DecisionOutputDefSchema.parse({ key: 'next_reviewers', required: true }))
         .toEqual({ key: 'next_reviewers', required: true });
       expect(DecisionOutputDefSchema.parse({ key: 'note', required: false }))

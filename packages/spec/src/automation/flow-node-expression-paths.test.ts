@@ -41,7 +41,7 @@ const TWO_VARIABLE_ASSIGNMENT = {
   },
 };
 
-describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry (#14149)', () => {
+describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry', () => {
   const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === 'assignment');
 
   it('declares exactly one slot for `assignment`: `assignments.*`, role `value`', () => {
@@ -130,7 +130,7 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry (#14149)', (
  * an expression, a `{token}` string keeps its 17.x meaning and is not
  * resolved, and every other literal is data.
  */
-describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries (#19938)', () => {
+describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries', () => {
   const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
 
   it.each(['create_record', 'update_record'] as const)('declares exactly one slot for `%s`: `fields.*`, role `value`', (nodeType) => {
@@ -185,7 +185,7 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries (#199
   });
 });
 
-describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, strings included (#19938)', () => {
+describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, strings included', () => {
   it('hands over every non-absent value of the CRUD `fields` map and the assignment map, by the ledger\'s own walk', () => {
     const envelope = { dialect: 'cel', source: 'price * 2' };
     expect(resolveFlowNodeValueSlots('create_record', {
@@ -231,10 +231,10 @@ describe('isExpressionEnvelopeShaped — the recognizer a value slot discriminat
   });
 });
 
-describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtures, restated)', () => {
+describe('every entry older than the value role resolves byte-identically (the ratchet\'s fixtures, restated)', () => {
   const byKey = (e: FlowNodeExpressionPath) => `${e.nodeType}.${e.path} (${e.role})`;
 
-  it('the entries that existed before are still declared exactly as they were — #19938 added exactly two rows', () => {
+  it('the entries that existed before are still declared exactly as they were — the CRUD `fields.*` value slots added exactly two rows', () => {
     // The census: five rows before #19938, seven after. The two new rows are
     // the CRUD write map's `value` slots and sit at the end; every row above
     // them is byte-identical to what it was.
@@ -315,7 +315,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
    * never parsed against any Zod schema, there is no schema pass, so the value
    * reached the evaluator with no validator having ever seen it.
    */
-  it('emits a non-string in a predicate slot, so a consumer can refuse it (#15572)', () => {
+  it('emits a non-string in a predicate slot, so a consumer can refuse it', () => {
     const envelope = { dialect: 'cel', source: '   ' };
     const decision = resolveFlowNodeExpressions('decision', {
       conditions: [{ label: 'Yes', expression: envelope }],
@@ -339,7 +339,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
    * as "not authored", and the executor then evaluated the branch as a
    * condition with no `source` and failed the run there.
    */
-  describe('a required predicate slot emits its absent value (#19961)', () => {
+  describe('a required predicate slot emits its absent value', () => {
     it('the required set is exactly the decision branch predicate — the absent arm is worded for it', () => {
       // `predicateSlotRefusal`'s absent arm names a decision branch and its
       // prescription; a second `required` entry must re-word it, so its
@@ -378,7 +378,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
     });
   });
 
-  describe('predicateSlotRefusal (#15572)', () => {
+  describe('predicateSlotRefusal — a predicate slot holds bare CEL text', () => {
     it('says nothing about a non-blank string — what it SAYS is validateExpression\'s business', () => {
       expect(predicateSlotRefusal('record.rating >= 4')).toBeUndefined();
       // Including a string that is itself malformed: the shape is right, so
@@ -386,7 +386,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
       expect(predicateSlotRefusal('{record.rating} >= 4')).toBeUndefined();
     });
 
-    it('REFUSES a string that is blank after trimming, under the same sentence (#17493)', () => {
+    it('REFUSES a string that is blank after trimming, under the same sentence', () => {
       // RE-JUDGED IN PLACE (#17493, ruling A 5651023407), not deleted: the
       // test above used to end `expect(predicateSlotRefusal('')).toBeUndefined()`
       // on #15572's ground that the blank was treated the same on both sides.
@@ -423,7 +423,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
      * predicate never evaluated — the run failed at the branch), so the
      * load-bearing clauses are pinned by name.
      */
-    it('REFUSES no value at all — absent and `null` — under the same sentence, with the branch prescription (#19961)', () => {
+    it('REFUSES no value at all — absent and `null` — under the same sentence, with the branch prescription', () => {
       const absent = predicateSlotRefusal(undefined);
       const nulled = predicateSlotRefusal(null);
       for (const [refusal, found] of [[absent, 'Found nothing — the key is absent'], [nulled, 'Found `null`']] as const) {
@@ -455,7 +455,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
    * "unified" them: an expression envelope is legitimate on this arm and must
    * be admitted, while `predicateSlotRefusal` refuses it.
    */
-  describe('structuralConditionRefusal (#15662)', () => {
+  describe('structuralConditionRefusal — a structural condition is CEL text or an expression', () => {
     it('is NOT predicateSlotRefusal — an envelope is legitimate here and refused there', () => {
       const envelope = { dialect: 'cel', source: 'record.rating >= 4' };
       // The measured reason: `FlowEdgeSchema.condition` is
@@ -492,7 +492,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
       expect(structuralConditionRefusal({ dialect: 'cel', source: 'record.rating >= 4', ast: { kind: 'const' } })).toBeUndefined();
     });
 
-    it('REFUSES an `ast`-only envelope — the #15792 admission, revisited by #15807', () => {
+    it('REFUSES an `ast`-only envelope — admitted at first, refused once an evaluated slot required a `source`', () => {
       // FLIPPED. This admitted `{ dialect: 'cel', ast }` because the spec still
       // admitted the shape at `edge.condition` and refusing it here would have
       // decided #15430's question from the consumer side. #15807 decided it at

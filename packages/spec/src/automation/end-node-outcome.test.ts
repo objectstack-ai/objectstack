@@ -40,7 +40,7 @@ const flowEndingWith = (config: Record<string, unknown> | undefined): Flow => ({
 
 const endConfigOf = (flow: { nodes: Array<{ config?: unknown }> }) => flow.nodes[1].config;
 
-describe('EndConfigSchema — the `end` node contract (#14945)', () => {
+describe('EndConfigSchema — the `end` node contract: it may refuse the run with a message', () => {
   it('defaults `outcome` to `completed` on an empty config', () => {
     expect(EndConfigSchema.parse({})).toEqual({ outcome: 'completed' });
     expect(EndConfigSchema.parse({ outcome: 'completed' })).toEqual({ outcome: 'completed' });
@@ -127,7 +127,7 @@ describe('EndConfigSchema — the `end` node contract (#14945)', () => {
   });
 });
 
-describe('FlowSchema applies the `end` contract — the structural node\'s only door (#14945)', () => {
+describe('FlowSchema applies the `end` contract — the structural node\'s only door', () => {
   it('accepts the card-shape probe and writes the parsed config back', () => {
     const result = FlowSchema.safeParse(flowEndingWith({ outcome: 'refused', message: REFUSAL }));
     expect(result.success).toBe(true);
@@ -217,7 +217,7 @@ describe('FlowSchema applies the `end` contract — the structural node\'s only 
     expect(issues?.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 1, 'config', 'message']]]);
   });
 
-  it('a region-nested `end` is refused by the FLOW parse itself (#15646/#18112) — the region-door reading this test used to pin is unreachable, because the shape is gone', () => {
+  it('a region-nested `end` is refused by the FLOW parse itself — the region-door reading this test used to pin is unreachable, because the shape is gone', () => {
     // ⚠️ REPLACED, not re-spelled. This case used to assert that the flow parse
     // was GREEN here and that `validateControlFlow` was the door — a true
     // reading of `parseFlowNodeRegions` leaving a refused region raw (#4389).
@@ -278,7 +278,7 @@ describe('FlowSchema applies the `end` contract — the structural node\'s only 
   });
 });
 
-describe('the run row carries the refusal (#14945)', () => {
+describe('the run row carries the refusal', () => {
   const run = {
     id: 'exec_refused_001',
     flowName: 'lead_conversion',

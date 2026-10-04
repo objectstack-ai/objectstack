@@ -26,13 +26,13 @@ function unknownKeyMessage(schema: { safeParse(v: unknown): { success: boolean; 
   return result.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message;
 }
 
-describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
+describe('NotifyConfigSchema — an unknown key is refused, not stripped', () => {
   // Since #9205 the declared keys split into TWO content paths that cannot
   // coexist on one node (see the mutual-exclusion pins below), so "accepts
   // every declared key" is two configs: the inline path carries every key
   // except `template`/`templateData`; the template path carries those two in
   // place of `title`/`message`.
-  it('accepts every declared key (inline content path — unchanged by #9205)', () => {
+  it('accepts every declared key (inline content path — unchanged by the template path)', () => {
     const full = {
       recipients: ['{record.assignee}'],
       title: 'New task',
@@ -49,7 +49,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
     expect(NotifyConfigSchema.parse(full)).toEqual(full);
   });
 
-  it('accepts every declared key (template content path — #9205)', () => {
+  it('accepts every declared key (template content path)', () => {
     const full = {
       recipients: ['{record.assignee}'],
       template: 'crm.large_deal_won',
@@ -125,7 +125,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
     }
   });
 
-  it('sourceObject/sourceId describes state the documented pair tolerance, not a phantom requirement (#7085)', () => {
+  it('sourceObject/sourceId describes state the documented pair tolerance, not a phantom requirement', () => {
     const shape = (NotifyConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
     for (const [key, partner] of [
       ['sourceObject', 'sourceId'],
@@ -170,7 +170,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
   // downstream `switch`. The three surfaces that already agreed on the closed
   // set: this describe, `Notification['severity']`, and the
   // `sys_inbox_message.severity` select field.
-  describe('severity (#7086)', () => {
+  describe('severity — the closed info | warning | critical vocabulary', () => {
     /** The `severity` issues of a failed parse, or `[]` when it was accepted. */
     function severityIssues(value: unknown): ReadonlyArray<{ code: string; message: string }> {
       const result = NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', severity: value });
@@ -249,7 +249,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
   // wording: a future edit that says "one value for the whole notification"
   // or "not one per recipient" again turns these RED, because the wording an
   // author reads is the whole contract here — declared must equal enforced.
-  describe('template reference (#9205)', () => {
+  describe('template reference — notify content localized through an email template', () => {
     /** Custom (superRefine) issues at exactly `path`, or `[]` when accepted. */
     function customIssuesAt(value: unknown, path: string): ReadonlyArray<{ code: string; message: string }> {
       const result = NotifyConfigSchema.safeParse(value);
@@ -259,7 +259,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
       );
     }
 
-    it('accepts a template-only node (no inline title) — RED on origin/main pre-#9205, where `template` was an unrecognized key', () => {
+    it('accepts a template-only node (no inline title) — RED before the template path existed, when `template` was an unrecognized key', () => {
       expect(NotifyConfigSchema.safeParse({
         recipients: ['u1'],
         template: 'crm.large_deal_won',
@@ -306,7 +306,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
       expect(issues[0]!.message).toContain('`template`');
     });
 
-    it('refuses a node with NEITHER inline title NOR template (at-least-one; a bare missing title refused pre-#9205 too, as invalid_type)', () => {
+    it('refuses a node with NEITHER inline title NOR template (at-least-one; a bare missing title was refused before the template path too, as invalid_type)', () => {
       const issues = customIssuesAt({ recipients: ['u1'] }, 'title');
       expect(issues).toHaveLength(1);
       expect(issues[0]!.message).toContain('`template`');
@@ -360,7 +360,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
   });
 });
 
-describe('HttpConfigSchema — strict as of #4001 批 9', () => {
+describe('HttpConfigSchema — an unknown key is refused, not stripped', () => {
   it('accepts every declared key', () => {
     const full = {
       url: 'https://example.test/hook',

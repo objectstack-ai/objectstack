@@ -101,7 +101,7 @@ const CENSUS: Array<{ type: string; config: Config; key: string }> = [
   { type: 'try_catch', config: { try: region('try'), catch: region('catch') }, key: 'try' },
 ];
 
-describe('FlowSchema.parse refuses a key the node\'s executor contract requires, left out (#20316)', () => {
+describe('FlowSchema.parse refuses a key the node\'s executor contract requires, left out', () => {
   it.each(CENSUS)('$type: the whole config parses — the accept control for `$key`', ({ type, config }) => {
     expect(issuesOf(flowWith(node(type, config)))).toEqual([]);
   });
@@ -187,7 +187,7 @@ describe('FlowSchema.parse refuses a key the node\'s executor contract requires,
 /** A decision whose `config` is written exactly as given. */
 const decision = (config: Config): Node => ({ id: 'check', type: 'decision', label: 'Check', config });
 
-describe('FlowSchema.parse refuses a decision branch list the executor cannot read (#20316)', () => {
+describe('FlowSchema.parse refuses a decision branch list the executor cannot read', () => {
   const AT = (...rest: (string | number)[]) => ['nodes', 1, 'config', ...rest];
 
   it.each([

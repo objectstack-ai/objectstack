@@ -68,7 +68,7 @@ function issuesOf(flow: unknown) {
 const predicateIssues = (flow: unknown) =>
   issuesOf(flow).filter((i) => String(i.message).startsWith(PREDICATE_SLOT_STRING_REFUSAL));
 
-describe('FlowSchema.parse refuses a blank string in a ledger predicate slot (#17493)', () => {
+describe('FlowSchema.parse refuses a blank string in a ledger predicate slot', () => {
   describe.each(BLANKS)('the blank %j', (blank) => {
     it('decision branch `config.conditions[].expression` — code `custom`, anchored at the branch', () => {
       const issues = issuesOf(flowWith(decision(blank)));
@@ -115,7 +115,7 @@ describe('FlowSchema.parse refuses a blank string in a ledger predicate slot (#1
       expect(FlowSchema.safeParse(flowWith({ id: 'branch', type: 'decision', label: 'B', config: {} })).success).toBe(true);
     });
 
-    it('a NON-string in a predicate slot is not this door\'s to refuse — #15572 refuses it at the other two', () => {
+    it('a NON-string in a predicate slot is not this door\'s to refuse — the other two doors refuse it', () => {
       // Scoped to what was ruled: the flow parse's accept set moves for blank
       // STRINGS only — and, since #19961, for the absent / `null` value of a
       // `required` slot (`flow-decision-branch-expression-absent.test.ts`),

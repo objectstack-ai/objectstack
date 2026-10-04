@@ -68,7 +68,7 @@ const loopWith = (body: unknown, id = 'loop') => ({
   id, type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}', iteratorVariable: 'row', body },
 });
 
-describe('#4415 — FlowSchema.parse canonicalizes regions with no second call', () => {
+describe('FlowSchema.parse canonicalizes regions with no second call', () => {
   it('envelopes a loop-body edge condition, matching what the top-level edge got', () => {
     const flow = flowWith(loopWith(gatedRegion()));
 
@@ -209,7 +209,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
   });
 });
 
-describe('#4415 — FlowNodeSchema is the parse seam, at any entry point', () => {
+describe('FlowNodeSchema is the parse seam, at any entry point', () => {
   it('normalizes a region when a node is parsed on its own, not only via FlowSchema', () => {
     // The unwritten rule #4415 removed: a consumer holding a single node — the
     // Studio inspector, a plugin validating one step — used to have no way to
@@ -219,7 +219,7 @@ describe('#4415 — FlowNodeSchema is the parse seam, at any entry point', () =>
   });
 });
 
-describe('#4347 — collectFlowGraphs', () => {
+describe('collectFlowGraphs — every region is walked, not only the top level', () => {
   it('yields the flow graph plus every region, each scoped', () => {
     const flow = flowWith(loopWith(gatedRegion()));
     const graphs = collectFlowGraphs(flow);
@@ -261,7 +261,7 @@ describe('#4347 — collectFlowGraphs', () => {
     ]);
   });
 
-  it('carries each graph\'s key path beside its scope, so a finding can be anchored where the author wrote it (#16134)', () => {
+  it('carries each graph\'s key path beside its scope, so a finding can be anchored where the author wrote it', () => {
     const flow = flowWith(loopWith({
       nodes: [{
         id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
@@ -315,7 +315,7 @@ describe('#4347 — collectFlowGraphs', () => {
    * where the author wrote it, is pinned below to stay indexed over the RAW
    * list.
    */
-  describe('#16752 — a non-record member never reaches a returned graph', () => {
+  describe('a non-record member never reaches a returned graph', () => {
     /**
      * The five shapes a raw node list holds that are not a node. `null` is the
      * one an author writes by accident (an empty YAML list item deserialises to
@@ -366,7 +366,7 @@ describe('#4347 — collectFlowGraphs', () => {
         expect(graphs[graphs.length - 1]!.nodes.map(n => n.id)).toEqual(['gate_in', 'write_in']);
       });
 
-      it('lets `FlowSchema.safeParse` return an envelope rather than throw (#16134)', () => {
+      it('lets `FlowSchema.safeParse` return an envelope rather than throw', () => {
         // This walk runs inside the parse, so the repair has to stay a drop and
         // a skip; a throw here escapes `safeParse` instead of becoming an issue.
         const result = FlowSchema.safeParse({
@@ -432,7 +432,7 @@ describe('#4347 — collectFlowGraphs', () => {
    * argument. ⛔ The repair is a drop, never a looser signature, and never a new
    * refusal — the accept set of every authoring door is unchanged.
    */
-  describe('#18102 — a non-record edge member never reaches a returned graph', () => {
+  describe('a non-record edge member never reaches a returned graph', () => {
     /** The same five shapes the node-side pin sweeps; `null` is the authored one. */
     const NON_EDGES: readonly (readonly [string, unknown])[] = [
       ['null', null],
@@ -490,7 +490,7 @@ describe('#4347 — collectFlowGraphs', () => {
         expect(innermost.nodes.map(n => n.id)).toEqual(['gate_in', 'write_in']);
       });
 
-      it('lets `FlowSchema.safeParse` return an envelope rather than throw (#16134)', () => {
+      it('lets `FlowSchema.safeParse` return an envelope rather than throw', () => {
         // This walk runs inside the parse, so the repair has to stay a drop; a
         // throw here escapes `safeParse` instead of becoming an issue.
         const result = FlowSchema.safeParse({
