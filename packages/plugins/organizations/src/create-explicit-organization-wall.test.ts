@@ -385,6 +385,8 @@ describe('[#21682] droppedFields names only keys the caller sent, so the organiz
   });
 
   it('a readonly key the caller sends beside the fill is reported alone', async () => {
+    // `created_by` is an injected readonly column. No audit hook stamps it in
+    // this composition, so the caller's value is the one the strip takes.
     const b = await boot();
 
     const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', created_by: 'usr_forged' }, MEMBER_CTX);
