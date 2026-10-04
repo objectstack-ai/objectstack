@@ -2635,8 +2635,15 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the six files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the seven files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
+        // [#21733] Joined the population deliberately: the card's acceptance is
+        // a plain `os dev` restart on the BUILT packages, and its production leg
+        // (`os serve` with `NODE_ENV` unset must NOT auto-migrate) is only
+        // reachable in production posture — `bin/run-dev.js` sets
+        // `NODE_ENV=development` before argv is parsed. Every spawn hands its
+        // child `NODE_ENV: undefined`.
+        'packages/cli/test/dev-standalone-self-heal.integration.test.ts',
         // [#12271] Joined the population deliberately, and it is the one member
         // whose subject is the ENTRY rather than `serve`: it spawns `bin/run.js`
         // with an ambient `development` / `test` child to assert that the

@@ -186,15 +186,14 @@ async function stopGroup(child: ChildProcess): Promise<void> {
   });
 }
 
-/** One boot, recorded against its own leg so a failed boot cannot hide the others. */
-async function recordBoot(
-  leg: 'fresh' | 'restart' | 'production',
-  argv: string[],
-  port: string,
-  env: Record<string, string | undefined>,
-): Promise<void> {
+/**
+ * One boot, recorded against its own leg so a failed boot cannot hide the
+ * others. Takes the boot already started, so every `bootUntilReady` call site
+ * hands its child environment over as a literal the env gate can read.
+ */
+async function recordBoot(leg: 'fresh' | 'restart' | 'production', boot: Promise<string>): Promise<void> {
   try {
-    const output = await bootUntilReady(argv, port, env);
+    const output = await boot;
     record[leg] = { indexSql: readIndexSql(), telemetryExists: existsSync(join(dir, 'A.telemetry.db')), output };
   } catch (error) {
     record[leg] = error instanceof Error ? error : new Error(String(error));
@@ -218,21 +217,21 @@ beforeAll(async () => {
 
   // Boot 1: fresh, with the telemetry opt-out.
   let port = randomPort();
-  await recordBoot('fresh', ['dev', '--no-watch', '-d', 'file:A.db', '-p', port], port, { OS_TELEMETRY_DB: '0' });
+  await recordBoot('fresh', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', port], port, { OS_TELEMETRY_DB: '0' }));
 
   // Boot 2: the card's restart, on the restaged bare index, telemetry default-on.
   if (existsSync(db)) stageBareIndex();
   port = randomPort();
-  await recordBoot('restart', ['dev', '--no-watch', '-d', 'file:A.db', '-p', port], port, {});
+  await recordBoot('restart', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', port], port, {}));
 
   // Boot 3: production (`os serve`, NODE_ENV unset) on the restaged bare index.
   if (existsSync(db)) stageBareIndex();
   port = randomPort();
-  await recordBoot('production', ['serve', 'objectstack.config.ts', '-p', port], port, {
+  await recordBoot('production', bootUntilReady(['serve', 'objectstack.config.ts', '-p', port], port, {
     OS_DATABASE_URL: 'file:A.db',
     OS_AUTH_SECRET: 'e2e-21733-production-leg-secret-not-for-real-use',
     OS_LOG_LEVEL: 'warn',
-  });
+  }));
 }, ALL_BOOTS_TIMEOUT_MS);
 
 afterAll(async () => {
