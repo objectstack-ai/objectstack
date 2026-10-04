@@ -95,9 +95,9 @@ ten-stage pipeline, get no error, and get no execution.
 **What to use instead — layer by layer, and one honest gap:**
 
 - **Scheduled pull from an external system** — the target-side binding
-  `mapping.connectorSource` with a `job` for the cadence (pulled when a job drives it;
-  the job stage that schedules it has not landed — see
-  [Data sync is defined on the target](#data-sync-is-defined-on-the-target)).
+  `mapping.connectorSource`, pulled by a `job` whose `pull: { mapping }` names it, on
+  the job's schedule — see
+  [Data sync is defined on the target](#data-sync-is-defined-on-the-target).
 - **Per-field value conversion on import** — `mapping.fieldMapping[].transform`
   (`data/mapping.zod.ts`): a string enum (`none` / `constant` / `map` / `split` /
   `join` / `lookup`) with its settings in `params`, applied row by row by the REST
@@ -229,9 +229,19 @@ Complete, production-grade integration with external systems. Includes authentic
 >   incremental pull over a newest-first paged endpoint moves its starting point past
 >   the pages it never read. Point `connectorSource` at an endpoint that answers the
 >   whole (incremental) set in one response.
-> - ⚠️ **Nothing schedules a pull yet.** A `job` drives it, and that stage has not
->   landed, so the binding alone moves no rows — `connectorSource`'s own description
->   says so. It is not a lint warning: every key of the binding is `live`.
+> - **A `job` drives the pull.** The binding alone moves no rows: a `job` whose
+>   `pull: { mapping }` names the mapping pulls it on the job's `schedule` — no code, a
+>   run form of its own, refused beside `body` or `handler`. `defineStack` (and so
+>   `os validate`) refuses a `pull` naming a mapping the stack does not declare, or one
+>   with no `connectorSource`. Each run calls the `automation` service's
+>   `pullConnectorSource`; a refused pull records the run `failed` (retried per the
+>   job's `retryPolicy`), a pull whose rows the import runner refused records it
+>   `degraded` with the counts.
+> - **The organization it writes as.** The pull runs as the job's declared
+>   `organization` (`{ isSystem: true, tenantId }`), judged at bind by the posture rule
+>   scheduled flows use: required under the `isolated` tenancy posture (a job with none
+>   is not scheduled), optional under `group` (undeclared, a tenant-scoped write is
+>   refused), not required under `single`.
 > Already authored the retired keys? `os migrate meta --from 17` lists the mechanical edits.
 
 ### Use Cases
@@ -373,7 +383,7 @@ mostly answers "which surface", and — for the two questions that used to route
 | Do you need real-time webhooks? | **Outbound:** the stack's top-level `webhooks:` collection (`src/automation/webhook.zod.ts`) — **not** L3: a connector's nested `webhooks` was never delivered and is retired (ADR-0049) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
 | Do you need retry policies and circuit breaking? | **Retry: yes, L3.** `retryConfig` is executed at the platform's one outbound call (ADR-0049 ruled `实现`) — backoff shape, attempt count, retryable statuses, network-error retry and a per-attempt `requestTimeoutMs`. **Circuit breaking: no level provides it** — `health.circuitBreaker` was retired (ADR-0049) because no breaker ever opened; implement it in the connector provider or an upstream gateway. Outbound **rate limiting** is not a reason to pick any level either: no level provides it (#4911); throttle at the provider or gateway |
-| Is it a simple pull from an external system into a local object? | The target-side binding: a `mapping` with `connectorSource` over a `rest` / `openapi` connector, cadence from a `job` — **pulled when a job drives it; the job stage has not landed** ([above](#data-sync-is-defined-on-the-target)) |
+| Is it a simple pull from an external system into a local object? | The target-side binding: a `mapping` with `connectorSource` over a `rest` / `openapi` connector, pulled on a cadence by a `job` whose `pull: { mapping }` names it ([above](#data-sync-is-defined-on-the-target)) |
 | Are you building a data warehouse pipeline? | The extraction half is that same pull binding; the warehouse-side transformation is the warehouse's own tooling. There is no ObjectStack pipeline protocol (#6414) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
 | Do you need client-side offline sync? | Not this layering — and note `ui/offline.zod.ts` was itself retired at #4988 for having no carrier key |
@@ -394,8 +404,8 @@ instance with simple `auth` whose actions flows call.
 External API → L3 Connector → ObjectStack → (warehouse's own ELT)
 ```
 The second arrow used to read `ObjectStack → L2 ETL → Data Warehouse`, and that hop
-never executed. Land the data through a connector (the target-side pull binding, once
-a job drives it), then transform it with a tool that actually runs — the
+never executed. Land the data through a connector (the target-side pull binding, driven
+by a job's `pull`), then transform it with a tool that actually runs — the
 warehouse's own ELT, a `flow`, or a scheduled job.
 
 ---
@@ -425,11 +435,12 @@ const pipeline: ETLPipeline = {
 ```
 
 **After** — split it by which half has a runtime. The extraction half is the
-target-side pull binding (pulled when a job drives it; the job stage has not landed):
+target-side pull binding, pulled on a cadence by a job whose `pull` names it:
 
 ```typescript
 import type { Connector } from '@objectstack/spec/integration';
 import type { Mapping } from '@objectstack/spec/data';
+import type { Job } from '@objectstack/spec/system';
 
 const orders: Connector = {
   name: 'orders',
@@ -452,6 +463,13 @@ const ordersPull: Mapping = {
     recordsPath: 'body.items',
     watermark: { field: 'updated_at', param: 'updated_since' },
   },
+};
+
+// The cadence: a job whose `pull` names the mapping — no code.
+const ordersPullHourly: Job = {
+  name: 'orders_pull_hourly',
+  schedule: { type: 'cron', expression: '0 * * * *', timezone: 'UTC' },
+  pull: { mapping: 'orders_pull' },
 };
 ```
 

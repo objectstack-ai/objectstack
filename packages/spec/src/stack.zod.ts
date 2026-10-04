@@ -2826,6 +2826,51 @@ function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): strin
 }
 
 /**
+ * A job's `pull.mapping` must name a mapping this stack declares, and that
+ * mapping must carry a `connectorSource` (ruling Q1-B on the connector-sync
+ * card: "`os validate` checks the mapping name").
+ *
+ * Both halves are refused here rather than at the first tick, where the
+ * automation service would reject the run (`mapping_not_found` /
+ * `no_connector_source`): a job is package-authored, and a reference its own
+ * stack cannot resolve is an authoring defect the package would otherwise ship.
+ * Resolved against the stack's own `mappings`, like every mapping reference in
+ * this function. A disabled job is judged too — `enabled: false` turns a job
+ * off, it does not make a dangling name correct.
+ */
+function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const jobs = Array.isArray(config.jobs) ? config.jobs : [];
+  if (jobs.length === 0) return errors;
+  const mappings = new Map<string, { connectorSource?: unknown }>();
+  for (const m of Array.isArray(config.mappings) ? config.mappings : []) {
+    if (isRecord(m) && typeof m.name === 'string') mappings.set(m.name, m);
+  }
+  for (const job of jobs) {
+    if (!isRecord(job) || !isRecord(job.pull)) continue;
+    const name = job.pull.mapping;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const mapping = mappings.get(name);
+    if (!mapping) {
+      errors.push(
+        `Job '${String(job.name)}' pulls mapping '${name}' which is not defined in mappings. ` +
+          `Declare the mapping (its targetObject, fieldMapping and a connectorSource naming the ` +
+          `rest or openapi connector it pulls from) or correct the name.`,
+      );
+      continue;
+    }
+    if (mapping.connectorSource === undefined) {
+      errors.push(
+        `Job '${String(job.name)}' pulls mapping '${name}', which declares no connectorSource — ` +
+          `there is nothing to pull. Add connectorSource: { connector, action } to the mapping, ` +
+          `naming the rest or openapi connector it reads from.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  *
@@ -2851,6 +2896,9 @@ function validateCrossReferences(
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
+  // Same placement: a job's `pull` names a MAPPING, resolved against the
+  // stack's mappings, and needs no object to resolve against.
+  errors.push(...collectJobPullMappingErrors(config));
 
   if (objectNames.size === 0) return errors;
 

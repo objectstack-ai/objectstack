@@ -1,14 +1,16 @@
 ---
 title: Scheduled jobs — cron automation metadata
 navTitle: Scheduled Jobs
-description: Run a TypeScript function on a cron, interval, or one-off schedule — and decide when a job is the right tool instead of a schedule-triggered flow.
+description: Run a sandboxed body, a connector pull, or a TypeScript function on a cron, interval, or one-off schedule — and decide when a job is the right tool instead of a schedule-triggered flow.
 ---
 
 A **job** runs work on a schedule. You declare the schedule as metadata; the
 platform's job service owns the timing, the retries, the per-attempt time limit,
-and the run history. The work is either a sandboxed [`body`](#the-job-body)
-that travels with the metadata — the preferred form — or, deprecated, the name of
-a function in your bundle (`handler`).
+and the run history. The work is a sandboxed [`body`](#the-job-body) that travels
+with the metadata — the preferred form for code — a [`pull`](#pulling-a-mapping) of
+a mapping's connector source, which is no code at all, or, deprecated, the name of a
+function in your bundle (`handler`). A job runs as the
+[organization it declares](#the-organization-a-job-runs-as).
 
 {/* os:check */}
 ```typescript
@@ -39,9 +41,9 @@ writes carry*:
 
 | | `job` | `schedule`-type flow |
 |:---|:---|:---|
-| What runs | a sandboxed `body`, or (deprecated) one TypeScript function from `defineStack({ functions })` | a node graph — record operations, `notify`, `http`, approvals, subflows |
+| What runs | a sandboxed `body`, a mapping `pull`, or (deprecated) one TypeScript function from `defineStack({ functions })` | a node graph — record operations, `notify`, `http`, approvals, subflows |
 | Changeable after deploy | **No.** `job` is `allowRuntimeCreate: false` and `allowOrgOverride: false` — there is no "create job" in Studio and no per-tenant fork | Yes — a new flow can be authored through Studio / `PUT /meta` (`allowRuntimeCreate: true`) |
-| Identity of its data writes | whatever the handler does with the engine it is given | declared by [`runAs`](/docs/automation/flows) — and a `user` run that resolves no trigger user has its data operations **refused**, so a scheduled flow normally declares `runAs: 'system'` |
+| Identity of its data writes | system, in the job's declared [`organization`](#the-organization-a-job-runs-as) | declared by [`runAs`](/docs/automation/flows) — and a `user` run that resolves no trigger user has its data operations **refused**, so a scheduled flow normally declares `runAs: 'system'` |
 | Retry / time limit | `retryPolicy` + `timeoutMs` on the job, honoured by the job adapter | the flow's own error handling |
 | Run history | `sys_job` + `sys_job_run` | `sys_automation_run` |
 
@@ -141,7 +143,8 @@ A job's `body` is the same sandboxed JavaScript body hooks and script actions
 carry — `{ language: 'js', source, capabilities }` — so the work travels with the
 metadata instead of living in a runtime module only some boots import. When a job
 declares both, `body` wins; `handler` is deprecated beside it. A job must declare
-at least one of the two.
+one of `body`, `handler` or [`pull`](#pulling-a-mapping), and `pull` is refused
+beside either of the other two.
 
 {/* os:check */}
 ```typescript
@@ -173,6 +176,7 @@ export const CloseStaleTasksJob = defineJob({
   package whose enabled job has no `body`, or a `body` that does not bind (an
   expression body, or one carrying `body.timeoutMs`), with `422 VALIDATION_ERROR`
   and the remedy: give the job a valid `body`, or boot it with `os start --artifact`.
+  A [`pull`](#pulling-a-mapping) job is data too, and is not refused.
   Uninstalling a package stops its scheduled jobs at once, and a reinstall whose
   new version drops a job stops that job.
 </Callout>
@@ -218,6 +222,82 @@ sweep needs. A body also runs under the sandbox's per-run memory cap
 (`body.memoryMb`, at most 256), which is one more reason to page rather than load
 everything at once.
 
+## Pulling a mapping
+
+A job whose work is "copy the records an external system holds into a local
+object" needs no code. Declare the sync on its target — a
+[`mapping`](/docs/references/data/mapping) with a `connectorSource` naming the
+`rest` or `openapi` connector it reads from — and give the job a `pull` naming
+that mapping. The mapping says where the rows come from, how fields map, and how a
+pulled row matches a stored one; the job says when.
+
+{/* os:check */}
+```typescript
+import { defineJob } from '@objectstack/spec';
+
+export const OrdersPullJob = defineJob({
+  name: 'orders_pull_hourly',
+  schedule: { type: 'cron', expression: '0 * * * *', timezone: 'UTC' },
+  pull: { mapping: 'orders_pull' },
+  retryPolicy: { maxRetries: 2, backoffMs: 60000 },
+});
+```
+
+- **A run form of its own.** `pull` is refused beside `body` or `handler`: the
+  platform binds the pull itself, so code beside it would never run. A body
+  cannot call a pull; a pull on a schedule is this declaration.
+- **Checked when you build.** `defineStack` — and so `os validate` — refuses a
+  `pull` that names a mapping the stack does not declare, or one with no
+  `connectorSource`. The binder checks the same reference against the artifact
+  before it schedules the job, on every door.
+- **Each run is one pull.** It calls the connector's read action once, reads one
+  response, and writes the records through the import runner with the mapping's
+  `mode` and `upsertKey` — see
+  [Data sync is defined on the target](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/docs/SYNC_ARCHITECTURE.md#data-sync-is-defined-on-the-target)
+  for the watermark and the one-response limit.
+- **How a run is recorded.** A pull the platform refuses — the mapping is gone,
+  the connector is degraded, the upstream answered `ok: false` — rejects, so the
+  run is `failed` and the `retryPolicy` applies. A pull whose rows the import
+  runner refused completes as `degraded`, with the counts as its reason; retrying
+  would refuse the same rows. Otherwise the run is `success`, including a pull
+  that found nothing new.
+
+## The organization a job runs as
+
+A scheduled run has no session to inherit an organization from. A job declares the
+one it runs in:
+
+{/* os:check */}
+```typescript
+import { defineJob } from '@objectstack/spec';
+
+export const PlantSweepJob = defineJob({
+  name: 'plant_a_nightly_sweep',
+  schedule: { type: 'cron', expression: '0 2 * * *', timezone: 'UTC' },
+  organization: 'org_plant_a',
+  body: {
+    language: 'js',
+    source: "await ctx.api.object('task').find({ where: { status: 'open' }, limit: 100 });",
+    capabilities: ['api.read'],
+  },
+});
+```
+
+Every run form runs as it: a `body`'s `ctx.api`, a `pull`'s reads and writes, and
+the `executionContext` a `handler` is handed are all system access carrying that
+organization, so a tenant-scoped row the job writes is stamped with it. Whether the
+key is required is the same deployment-posture rule
+[time-triggered flows](/docs/automation/flows) use, read when the job is scheduled:
+
+| Tenancy posture (with packaged scheduled work switched on) | `organization` | A job that declares none |
+|:---|:---|:---|
+| `single` | not required | runs with none; the install's one organization is resolved beneath each write |
+| `group` | optional | is scheduled, and a tenant-scoped row it writes is **refused** — the boot names such jobs once, at `warn` |
+| `isolated` | **required** | is **not scheduled**, logged at `error` with the remedy |
+
+No organization is ever chosen for a job that declares none. Work wanted in
+several organizations is one job per organization.
+
 ## The handler, and the ways it can fail to be one
 
 `handler` must match a key of `defineStack({ functions })`. At `kernel:ready`
@@ -248,6 +328,7 @@ At run time the handler is invoked with a `JobHandlerContext`
 | `bundle` | the application's metadata bundle — declarations, not a data handle |
 | `ql` | the live ObjectQL engine — the same handle `defineStack({ onEnable })` receives |
 | `logger` | the platform logger, so a job's diagnostics are not `console` output |
+| `executionContext` | the context the job runs as — `{ isSystem: true, tenantId }` for a job that declares an [`organization`](#the-organization-a-job-runs-as), else `{ isSystem: true }`. `ql` is the raw engine, so pass it as each call's `context` to write as that organization |
 
 ```typescript
 import type { JobHandlerContext } from '@objectstack/runtime';

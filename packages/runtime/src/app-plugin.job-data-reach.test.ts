@@ -92,6 +92,12 @@ const NOTE = {
 const PRE_14094_KEYS = ['bundle', 'data', 'jobId'] as const;
 /** What #14094 added, and nothing else. */
 const ADDED_KEYS = ['logger', 'ql'] as const;
+/**
+ * What #20281 stage ③ added (ruling Q2-O1): the envelope the job RUNS AS —
+ * `{ isSystem: true, tenantId }` from the job's declared `organization`, else
+ * `{ isSystem: true }`. Additive, like #14094's: `ql` stays the raw engine.
+ */
+const ORGANIZATION_KEYS = ['executionContext'] as const;
 
 interface Harness {
     engine: ObjectQL;
@@ -244,7 +250,7 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
         expect(h.errorLogs()).toEqual([]);
     });
 
-    it('the context is the pre-#14094 set PLUS exactly `ql` and `logger`', async () => {
+    it('the context is the pre-#14094 set PLUS exactly `ql` and `logger` — and #20281\'s `executionContext`', async () => {
         // Reads nothing and writes nothing — this one is about the shape.
         const h = await harness();
         const seen: Array<Record<string, unknown>> = [];
@@ -260,7 +266,7 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
 
         expect(seen).toHaveLength(1);
         const keys = Object.keys(seen[0]).sort();
-        expect(keys).toEqual([...PRE_14094_KEYS, ...ADDED_KEYS].sort());
+        expect(keys).toEqual([...PRE_14094_KEYS, ...ADDED_KEYS, ...ORGANIZATION_KEYS].sort());
 
         // The pre-existing members keep their meaning — `jobId` is the job's
         // name, `bundle` is the metadata bundle, `data` is the trigger payload.
@@ -271,6 +277,8 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
         // And the added members are the LIVE handles, not placeholders.
         expect(seen[0].ql).toBe(h.engine);
         expect(seen[0].logger).toBe(h.ctx.logger);
+        // A job that declares no organization runs as plain system.
+        expect(seen[0].executionContext).toEqual({ isSystem: true });
     });
 
     it('`data` from a manual trigger still reaches the handler beside the new members', async () => {

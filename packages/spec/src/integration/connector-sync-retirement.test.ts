@@ -117,15 +117,17 @@ describe('connector sync retirement — the tombstones', () => {
     });
   }
 
-  it('the `syncConfig` prescription is honest about the binding it points at: pulled when a job drives it, scheduled by nothing yet', () => {
+  it('the `syncConfig` prescription is honest about the binding it points at: pulled when a job\'s `pull` names the mapping, never on its own', () => {
     // The pull executor reads the target-side binding (its ledger rows are
-    // `live`), but nothing schedules a pull until the `job` stage lands (the
-    // binding's own description says so), so a prescription that sent the author
-    // there as if it ran on its own would be the defect this retirement
-    // removes, moved one type over.
+    // `live`), and a pull runs only when a `job` whose `pull` names the mapping
+    // drives it (`JobSchema.pull`), so a prescription that sent the author
+    // there as if the binding ran on its own would be the defect this
+    // retirement removes, moved one type over.
     const message = issueAt(ConnectorSchema.safeParse({ ...WELL_FORMED, syncConfig: {} }), 'syncConfig')!.message;
     expect(message).toContain('Its pull runs when a `job` drives it');
-    expect(message).toContain('nothing schedules one yet');
+    expect(message).toContain('`pull: { mapping }`');
+    expect(message).toContain('the binding alone moves no rows');
+    expect(message).not.toContain('nothing schedules');
   });
 
   it('refuses EVERY value — an empty block, an empty list, null and a scalar included', () => {

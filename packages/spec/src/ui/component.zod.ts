@@ -56,7 +56,12 @@ import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
 // `groupBy` union, by reference — the tile routes it exactly as the chart does.
-import { ChartGroupBySchema } from './chart.zod';
+// `object-metric.drillDown`'s five list members are the chart drill-down's own
+// members, by reference — the tile opens the same shared drawer.
+import { ChartDrillDownSchema, ChartGroupBySchema } from './chart.zod';
+// [#21464] `object-metric.compareTo.kind` is the dashboard widget comparison's
+// own `kind` vocabulary, by reference — the executor's two kinds.
+import { DashboardWidgetSchema } from './dashboard.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
@@ -4008,7 +4013,8 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * three a list view also declares take the list view's own members by
  * reference; `fields` and `selectable` have no list-view counterpart and
  * declare the measured shape here; `batchActions` takes `bulkActions`'s def.
- * `columns` stays `z.unknown()`, held for a ruling — see the member.
+ * `columns` was held at `z.unknown()` for a ruling, and takes the list view's
+ * own member by reference since stage 5 — see the member.
  */
 export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid`',
@@ -4063,25 +4069,41 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   emptyState: EmptyStateSchema.optional()
     .describe('What the grid draws instead of an empty table: `{ title, message, icon }` — the list view\'s own empty-state shape'),
   /**
-   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The by-reference
-   * candidate is the list view's own `columns` member
-   * (`ListViewSchema.shape.columns`: all field-name strings, or all strict
-   * `ListColumn` entries), and the draw path matches it: `normalizeColumns`
-   * (`ObjectGrid.tsx:819` at the pin `89cad75d55`, read at `:2158`) decides
-   * by the FIRST entry, and only an entry with a non-empty string `field`
-   * draws a column. But the grid also reads `options` off an authored column:
-   * the group-header formatter (`:2997-3001`) takes the column whose `field`
-   * is the grouping field and draws the group-header labels from
-   * `colOverride?.options || objectDefField?.options`, the column's list
-   * winning — and objectui's own `gridGroupingMembers-8071` test pins that as
-   * behaviour. `ListColumn` declares no `options`, so the by-reference shape
-   * would refuse a value the grid draws. The renderer-side read is carded as
-   * objectstack-ai/objectui#11544; the member is typed once that is ruled.
-   * (A column `editable` key, by contrast, is read nowhere off an authored
-   * column.)
+   * [#21464] The list view's own `columns` member, by reference
+   * (`ListViewSchema.shape.columns` — the union of two array shapes the column
+   * entry is declared in): all field-name strings, or all strict `ListColumn`
+   * entries. Optional here, where the list view requires it: a grid with no
+   * `columns` derives them from `fields` or the object.
+   *
+   * Read at the `.objectui-sha` pin `ab1879721595`
+   * (`plugin-grid/src/ObjectGrid.tsx`): `normalizeColumns` (`:819`) decides
+   * between the two arms by the FIRST entry, and the draw path (`:3367`) keeps
+   * only an entry `resolvesToDataColumn` admits (`:3451` — a non-empty string
+   * `field`, not `hidden`), reading `ListColumn`'s own members off it. So a
+   * mixed array, a column keyed `accessorKey` / `header` / `name`, or a key the
+   * grid never reads off a column (`editable`, `reference`, `options`) drew no
+   * column or was ignored, and passed the component-props gate.
+   *
+   * Stage 2 HELD this member at `z.unknown()` on one read: at the pin
+   * `89cad75d55` the group-header formatter drew the header labels from
+   * `colOverride?.options || objectDefField?.options`, the authored column's
+   * list winning, and `ListColumn` declares no `options`. objectui `b0bf413`
+   * (objectstack-ai/objectui#11544) retired that read: at `ab1879721595`
+   * `groupValueFormatter` (`:2979`) looks the column up typed as `ListColumn`
+   * (`:3004-3007`) for its declared `type` alone, and takes the labels from
+   * `objectDefField?.options` only (`:3010`). The hold's exit condition is
+   * met, so the member takes the reference it was held from.
+   *
+   * ⚠️ One read at that pin still takes keys `ListColumn` does not declare off
+   * an authored column: the footer summary formats a column's total with the
+   * column's `currency`, `defaultCurrency`, `precision` and `scale` ahead of
+   * the field's (`plugin-grid/src/useColumnSummary.ts:558-568`). No measured
+   * writer authors one on an `object-grid` column, and a list view's columns —
+   * the same entry — refuse all four, so this row refuses them too; the read
+   * is reported to the objectui side, as the `options` read was.
    */
-  columns: z.array(z.unknown()).optional()
-    .describe('Columns: field names or column definition objects'),
+  columns: ListViewSchema.shape.columns.optional()
+    .describe('Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view\'s `columns` declares. One spelling per list: an array mixing strings and column objects is refused'),
   /**
    * [#21464] Field NAMES. No list-view schema declares this member, so the
    * shape is the one the grid reads (`ObjectGrid.tsx:1946` at the pin
@@ -4520,8 +4542,8 @@ export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
  * type-alias convention pin's default-free family (the Iso839 line deleted
  * with this alias), on the `RecordAlertPropsParsed` route its comment
  * prescribes. The list view's own members taken by reference since carry
- * their defaults too (#21445, #21464: `navigation`'s four and
- * `selection.type`).
+ * their defaults too (#21445, #21464: `navigation`'s four, `selection.type`
+ * and a column's `prefix.type`).
  */
 export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
 
@@ -4618,6 +4640,140 @@ const ObjectMetricTrendSchema = lazySchema(() => strictObject({
   value: z.number().describe('The change shown on the badge, painted as a percentage (`12` reads `12%`)'),
   label: I18nLabelSchema.optional().describe('Badge caption — a string or an inline locale map. The tile-level `description` outranks it in the one caption slot they share'),
   direction: z.enum(['up', 'down', 'neutral']).optional().describe('Arrow beside the value; omit it for no arrow'),
+}));
+
+/**
+ * [#21464] The `object-metric` tile's `drillDown` — the click-through to the
+ * records behind the number, as the tile reads it at the `.objectui-sha` pin
+ * `ab1879721595` (`plugin-dashboard/src/ObjectMetricWidget.tsx`): `enabled`
+ * decides whether the tile is clickable (`:696`, `isDrillEnabled` — a present
+ * block is on unless `enabled: false`), `title` heads the panel (`:708`,
+ * `resolveDrillTitle` against an EMPTY click event, falling back to the tile's
+ * `title`, then its `label`), and `target`, `columns` and `maxRows` reach the
+ * shared `DrillDownDrawer` the tile opens (`:732-744`; `maxRows` defaults to
+ * the tile's page size of 25). The drilled list is scoped by the metric's own
+ * resolved `filter`.
+ *
+ * Those five are the chart drill-down's own members, by reference
+ * ({@link ChartDrillDownSchema}`.shape` — the same defs; `enabled` and `title`
+ * carry describes of their own, because the chart's speak of a clicked segment
+ * and its `${event.*}` tokens, and a metric tile has no click context for them
+ * to resolve against). The SHAPE is the tile's,
+ * not the chart's, in two places:
+ *
+ * - `filter` and `mode` are REFUSED BY NAME, with the prescriptions objectui's
+ *   own type for this block carries (`ObjectMetricDrillDownConfig`,
+ *   `types/src/data-display.ts:2628`): a drill `filter` is interpolated
+ *   against a click event and the metric has none, and `mode` chooses
+ *   drill-to-record for a clicked row and the metric has no row. The chart's
+ *   drill-down declares `filter`, which is why the chart's shape is not taken
+ *   whole.
+ * - `report` is HELD at `z.unknown()` — see the member.
+ */
+const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
+  surface: 'this `object-metric` drill-down',
+  history:
+    'Until this shape was declared, `drillDown` was `z.unknown()`: a drill `filter`, a `mode`, a misspelled '
+    + 'member or a non-numeric `maxRows` passed, and the tile ignored each — the drilled list stayed scoped by '
+    + 'the metric\'s own filter and a click always listed the records — with no report.',
+  // The chart drill-down's near-misses for the five shared members. Its
+  // `where` / `criteria` / `filters` → `filter` entries are NOT carried: this
+  // shape refuses `filter`, so an alias to it would send the author into a
+  // second refusal.
+  aliases: {
+    enable: 'enabled', on: 'enabled', active: 'enabled',
+    label: 'title', heading: 'title', drawerTitle: 'title',
+    display: 'target', open: 'target', openIn: 'target', presentation: 'target',
+    fields: 'columns', columnList: 'columns', select: 'columns',
+    limit: 'maxRows', pageSize: 'maxRows', rowLimit: 'maxRows', max: 'maxRows',
+  },
+  guidance: {
+    filter:
+      '`filter` is not a member a metric drill-down reads: a drill filter is interpolated against a click event '
+      + '(`${event.*}`), and a metric tile has no click context — no row, column, category or series. The '
+      + 'drilled list is always scoped by the metric\'s own `filter`, which is what keeps the number and the '
+      + 'records behind it in agreement. Delete the key, and scope the metric with its own `filter`, one level '
+      + 'up beside `aggregate`. Drill filters apply on `object-chart` and `object-pivot`.',
+    mode:
+      '`mode` is not a member a metric drill-down reads: it chooses drill-to-record against drill-through for a '
+      + 'clicked ROW, and a metric has no row — it always lists the records behind the number. Delete the key. '
+      + '`mode` applies on `object-data-table`, whose row click reads it.',
+  },
+}, {
+  enabled: ChartDrillDownSchema.shape.enabled
+    .describe('Turn the tile\'s drill on or off; the block being present already means on, so this is only needed to force it off'),
+  title: ChartDrillDownSchema.shape.title
+    .describe('Drill drawer/dialog heading; defaults to the tile\'s own `title`, then its `label`. A metric tile has no click context, so an `${event.*}` token here resolves to nothing'),
+  target: ChartDrillDownSchema.shape.target,
+  columns: ChartDrillDownSchema.shape.columns,
+  maxRows: ChartDrillDownSchema.shape.maxRows,
+  /**
+   * [#21464] HELD at `z.unknown()`, not typed: the spec declares no drill
+   * report yet, and the spec declares each such contract first (the
+   * `objectui-held` stage of the enumeration pin).
+   *
+   * Read at the `.objectui-sha` pin `ab1879721595`: the tile hands `report`
+   * to the shared drawer (`ObjectMetricWidget.tsx:742`), and
+   * `DrillDownDrawer.tsx` draws it as a `report` node when
+   * `isDatasetBoundReport` holds (`:92`, used at `:115`) — a non-empty
+   * `dataset`, or a `joined` report with a block that binds one — joining the
+   * metric's filter into the report's `runtimeFilter`; any other value lists
+   * the records instead. objectui#11506 (`8366acc`) put that predicate in place
+   * of the old "carries `columns` or `objectName`" one, and objectui#11517
+   * (`9ed8d0f`) refuses the named `{ name }` arm on objectui's faces. objectui
+   * types the member as this spec's `ReportSchema` author input
+   * (`types/src/data-display.ts:2592`, `SpecReportInput`), but no spec drill
+   * shape declares a `report` member — the chart's drill-down refuses it — so
+   * the conclusion stage 4 recorded stands: the tile draws a value the
+   * by-reference drill shape refuses, and the member waits for the spec to
+   * declare it.
+   */
+  report: z.unknown().optional()
+    .describe('Drill into a report instead of the record list — not typed on this row yet: the tile draws a dataset-bound report here, but no spec drill shape declares a `report` member yet (the chart\'s drill-down refuses it)'),
+}));
+
+/**
+ * [#21464] The `object-metric` tile's `compareTo` — the period-over-period
+ * comparison, as the tile reads it at the `.objectui-sha` pin `ab1879721595`:
+ * `kind` ALONE. `ObjectMetricWidget.tsx` runs a second aggregate over
+ * `shiftFilterByCompareTo(filter, compareTo)` (`:522-523`) and labels the
+ * derived trend with `compareToTrendLabelKey(compareTo, filter)` (`:675`);
+ * both (objectui `core/src/utils/compare-to.ts:99`, `:124`) dispatch on
+ * `compareTo.kind === 'previousYear'` (`:104`, `:128`) and treat every other
+ * value as `previousPeriod`. The same file's header records `dimension` as
+ * "deliberately never read on this path" (`:28-33`): this inline tile shifts
+ * the date macros in its own `filter`, while a dashboard widget's dataset path
+ * hands `dimension` to the analytics executor, which shifts that time
+ * dimension's window.
+ *
+ * So `kind` is the dashboard widget comparison's own member, by reference
+ * (`DashboardWidgetSchema.shape.compareTo` — the executor's two kinds, the same
+ * def), and `dimension` is REFUSED BY NAME with that prescription, rather than
+ * accepted and ignored: an author who writes `dimension: 'close_date'`
+ * expecting that column's window to shift would get the filter's macro window
+ * instead, with no report.
+ */
+const ObjectMetricCompareToSchema = lazySchema(() => strictObject({
+  surface: 'this `object-metric` comparison window',
+  history:
+    'Until this shape was declared, `compareTo` was `z.unknown()`: a bare kind string, a kind outside the two '
+    + 'or a `dimension` passed, and the tile compared against the previous period, or shifted its own filter\'s '
+    + 'window rather than the dimension named, with no report.',
+  // The dashboard comparison's near-misses for `kind` (#5042 measured authors
+  // reaching for these words on this slot). Its `field` / `dateField` /
+  // `timeDimension` → `dimension` entries are NOT carried: this shape refuses
+  // `dimension`.
+  aliases: { type: 'kind', mode: 'kind' },
+  guidance: {
+    dimension:
+      '`dimension` is not read on a metric tile: it names the dataset time dimension the analytics executor '
+      + 'shifts on a dashboard widget\'s dataset path, while this tile runs its own aggregate and shifts the date '
+      + 'macros in its own `filter` (`{current_quarter_start}` becomes `{last_quarter_start}` for '
+      + '`previousPeriod`; the same window one year back for `previousYear`). Delete the key — the comparison '
+      + 'window is the one the tile\'s `filter` resolves to, so state that window there with date macros.',
+  },
+}, {
+  kind: DashboardWidgetSchema.shape.compareTo.unwrap().shape.kind,
 }));
 
 /**
@@ -4774,31 +4930,20 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   trend: ObjectMetricTrendSchema.optional()
     .describe('Static trend badge `{ value, label?, direction? }` — `value` painted as a percentage, `direction` up / down / neutral. A `compareTo`-derived trend replaces it'),
   /**
-   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The tile reads
-   * `enabled` (`isDrillEnabled`), `title` (`resolveDrillTitle`), `target`,
-   * `columns`, `maxRows` and `report` (`ObjectMetricWidget.tsx:602-651` at the
-   * `.objectui-sha` pin `89cad75d55`; `report` is drawn as a report body when
-   * it carries `columns` or `objectName`, `DrillDownDrawer.tsx:77-114`), and
-   * objectui's own type for this block refuses `filter` and `mode` by name
-   * (`ObjectMetricDrillDownConfig`). The by-reference candidate,
-   * `ChartDrillDownSchema`, disagrees with that read twice: it declares
-   * `filter`, which the tile never reads, and it refuses `report`, which the
-   * tile draws (objectui's `objectMetricDrillDownMembers-8071` test authors one).
-   * So neither the reference nor a copy is shipped; the member is typed once
-   * the fork is ruled.
+   * [#21464] The click-through to the records behind the number — see
+   * {@link ObjectMetricDrillDownSchema}. Its five list members are the chart
+   * drill-down's by reference; `filter` and `mode` are refused by name; its
+   * `report` is held open until the spec declares a drill report.
    */
-  drillDown: z.unknown().optional().describe('Click-through drill config — opens the underlying records'),
+  drillDown: ObjectMetricDrillDownSchema.optional()
+    .describe('Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric\'s own `filter`; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row'),
   /**
-   * [#21464] HELD at `z.unknown()` for a ruling, not typed. The tile reads
-   * `kind` alone (`shiftFilterByCompareTo` and `compareToTrendLabelKey` in
-   * objectui's `core/src/utils/compare-to.ts`, from `ObjectMetricWidget.tsx:468-469`
-   * and `:581` at the `.objectui-sha` pin `89cad75d55`), and objectui records
-   * `dimension` as never read on this path. The by-reference candidate, the
-   * dashboard widget's `compareTo`, declares `dimension` beside `kind` — a key
-   * the tile would accept and ignore. So neither the reference nor a narrower
-   * copy is shipped; the member is typed once the fork is ruled.
+   * [#21464] The period-over-period comparison — see
+   * {@link ObjectMetricCompareToSchema}. `kind` is the dashboard widget
+   * comparison's by reference; `dimension` is refused by name.
    */
-  compareTo: z.unknown().optional().describe("Period-over-period comparison ({ kind: 'previousPeriod' | 'previousYear' })"),
+  compareTo: ObjectMetricCompareToSchema.optional()
+    .describe("Period-over-period comparison `{ kind }` — `previousPeriod` or `previousYear`, shifting the date macros in the tile's own `filter`. `dimension` is refused: this tile never reads a dataset time dimension"),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;

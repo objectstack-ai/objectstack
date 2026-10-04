@@ -27,8 +27,12 @@
  * limit is stated where authors read it (`mapping.zod.ts`'s `watermark`
  * describe and `SYNC_ARCHITECTURE.md`).
  *
- * ⛔ Nothing here schedules a pull. A `job` drives it (stage ③), and the
- * caller hands in the execution context the pull reads and writes under.
+ * ⛔ Nothing here schedules a pull. A `job` whose `pull` names the mapping
+ * drives it (`JobSchema.pull`): the runtime's job binder calls the `automation`
+ * service's `pullConnectorSource` (the `IAutomationService` contract method)
+ * on each run, and hands in the execution context the pull reads and writes
+ * under — `{ isSystem: true, tenantId }` from the job's declared
+ * `organization`, or `{ isSystem: true }` where it declares none.
  *
  * Every refusal is loud and typed ({@link ConnectorPullError}): a pull that
  * cannot honour its binding throws before anything is written, and the
@@ -127,7 +131,7 @@ export interface ConnectorPullDeps {
 export interface ConnectorPullOptions {
     /** Name of the `mapping` whose `connectorSource` is pulled. */
     mapping: string;
-    /** Execution context the target read and the writes run under — the caller's (a `job`, from stage ③). */
+    /** Execution context the target read and the writes run under — the caller's (a `job`'s, built from its `organization`). */
     context?: any;
     environmentId?: string;
     /** Automation context handed to the connector action, as a flow node would hand it. */

@@ -536,6 +536,14 @@ export function judgeJobBody(raw: unknown): JobBodyJudgement {
  * declared `capabilities` and the stored-metadata boundary every body's api
  * carries ({@link buildSandboxApi}).
  *
+ * …as SYSTEM IN the job's organization, when the binder hands one over
+ * (`job.organization` — `JobSchema.organization`, judged at bind by the
+ * scheduled-work posture rule): the envelope is `{ isSystem: true, tenantId }`,
+ * so a tenant-scoped write carries that organization the way a session write
+ * does, and is no longer refused under the `group` / `isolated` postures for
+ * want of one (ruling Q2-O1 on the connector-sync card). With none it stays
+ * `{ isSystem: true }`.
+ *
  * ## The time limit
  *
  * The job's own `timeoutMs` reaches the runner as `opts.timeoutMs` — the ONE
@@ -560,7 +568,7 @@ export function judgeJobBody(raw: unknown): JobBodyJudgement {
 export function jobBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
-): (job: { name: string; body?: unknown; timeoutMs?: number }) => JobHandler | undefined {
+): (job: { name: string; body?: unknown; timeoutMs?: number; organization?: string }) => JobHandler | undefined {
   return (job) => {
     const raw = job.body;
     if (!raw) return undefined;
@@ -580,6 +588,7 @@ export function jobBodyRunnerFactory(
       const sandboxCtx = buildJobSandboxContext(
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'job', name: job.name }),
+        job.organization,
       );
       try {
         opts.logger?.debug?.('[BodyRunner] job fired', { appId: opts.appId, job: job.name });
@@ -1180,11 +1189,17 @@ function buildActionSandboxContext(
  * refuses an owner-scoped write that has neither a `userId` to own it nor
  * `isSystem` to bypass. Fresh per run, never a shared constant, because an
  * execution envelope is a value the engine may extend (a transaction joins it).
+ *
+ * `organization` — the job's declared one, which the binder resolved — joins
+ * the envelope as `tenantId`, the field the tenancy guard reads
+ * (`resolveSystemWriteOrganization`'s remedy: "pass it on the execution
+ * context"). Absent, no `tenantId` key is written at all.
  */
-function buildJobSandboxContext(ql: any, log: ScriptContext['log']): ScriptContext {
+function buildJobSandboxContext(ql: any, log: ScriptContext['log'], organization?: string): ScriptContext {
+  const executionContext = organization ? { isSystem: true, tenantId: organization } : { isSystem: true };
   return {
     input: undefined,
-    api: buildSandboxApi({ executionContext: { isSystem: true } }, ql, 'job body'),
+    api: buildSandboxApi({ executionContext }, ql, 'job body'),
     log,
     crypto: globalThis.crypto,
   };
