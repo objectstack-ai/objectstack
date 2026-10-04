@@ -167,8 +167,10 @@ export { AutomationServicePlugin, createPackageFileLoader } from './plugin.js';
 export type { AutomationServicePluginOptions } from './plugin.js';
 
 // [#20919] The connector sync executor — pull a `mapping`'s `connectorSource`
-// and write the records through the import runner. Nothing schedules it: a
-// `job` drives a pull (`AutomationServicePlugin.pullConnectorSource`).
+// and write the records through the import runner. A `job` whose `pull` names
+// the mapping drives it, through the `automation` service's contract method
+// (`IAutomationService.pullConnectorSource`, which the engine serves from
+// `AutomationServicePlugin.pullConnectorSource`).
 export { pullConnectorSource, ConnectorPullError, CONNECTOR_PULL_PROVIDERS } from './connector-pull.js';
 export type {
     ConnectorPullDeps,

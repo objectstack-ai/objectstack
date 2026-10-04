@@ -18,6 +18,7 @@ import type { ExecutionLog, ExecutionStatus, FlowRunSummary } from '../automatio
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionConflictNotice } from '../conversions/types';
+import type { ExecutionContext } from '../kernel/execution-context.zod';
 
 /**
  * Context passed to a flow/script execution
@@ -643,6 +644,65 @@ export interface RunListResult {
     hasMore: boolean;
 }
 
+/**
+ * What {@link IAutomationService.pullConnectorSource} is asked to pull: one
+ * `mapping` by name, under the caller's execution context.
+ *
+ * The caller is a job (`JobSchema.pull`): the job binder builds the context
+ * from the job's declared `organization` — `{ isSystem: true, tenantId }`, or
+ * `{ isSystem: true }` where it declares none — so the pull's target read and
+ * its writes carry the organization the job runs as (ruling Q2-O1 on the
+ * connector-sync card).
+ */
+export interface ConnectorSourcePullRequest {
+    /** Name of the `mapping` whose `connectorSource` is pulled. */
+    mapping: string;
+    /** The execution context the target read and the writes run under. */
+    context?: ExecutionContext;
+    /** The environment the mapping and the target are read in, when the caller is environment-scoped. */
+    environmentId?: string;
+}
+
+/**
+ * The import runner's tallies for the rows one pull wrote — the counters of
+ * the runner's own run summary, which carries more (per-row results); this is
+ * the part a caller of the contract may read.
+ */
+export interface ConnectorSourcePullSummary {
+    /** Rows handed to the runner. */
+    total: number;
+    /** Rows the runner reached. */
+    processed: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    /** Rows the runner REFUSED (a row verdict, not a refused pull). */
+    errors: number;
+    /** Rows written (`created + updated`). */
+    ok: number;
+    cancelled: boolean;
+}
+
+/**
+ * What one {@link IAutomationService.pullConnectorSource} call did. A refused
+ * pull never answers this — it rejects before anything is written.
+ */
+export interface ConnectorSourcePullResult {
+    mapping: string;
+    targetObject: string;
+    connector: string;
+    action: string;
+    /**
+     * The incremental half, when the mapping's `connectorSource.watermark` is
+     * declared: `from` is the starting point sent as `query[param]` (the
+     * highest value already stored in `target`), `undefined` on a first pull.
+     */
+    watermark?: { field: string; target: string; param: string; from: unknown };
+    /** Records the one action response carried. */
+    pulled: number;
+    summary: ConnectorSourcePullSummary;
+}
+
 export interface IAutomationService {
     /**
      * Execute a named flow or script
@@ -839,6 +899,31 @@ export interface IAutomationService {
      * @returns One entry per registered connector; empty when none are registered
      */
     getConnectorDescriptors?(): ConnectorDescriptor[];
+
+    /**
+     * Pull one `mapping`'s `connectorSource` and write the records through the
+     * import runner — the connector sync executor, on the automation service.
+     *
+     * The door a job's `pull` run form binds through (`JobSchema.pull`, ruling
+     * Q1-B on the connector-sync card): the job binder resolves the
+     * `automation` service and calls this on every run, with the context the
+     * job's `organization` builds. Before it existed the executor was reachable
+     * only as an instance method of the automation PLUGIN, which no other
+     * package holds.
+     *
+     * Rejects — before anything is written — when the binding cannot be
+     * honoured (no such mapping, no `connectorSource`, a connector that is not
+     * a declared `rest` / `openapi` instance, an upstream `ok: false`, …), with
+     * an error carrying an ADR-0112 `code` + `status` and a `reason`
+     * discriminator. A pull whose rows the import runner refused RESOLVES, and
+     * says so in `summary.errors`.
+     *
+     * Optional for the reason {@link getConnectorDescriptors} is: a connector
+     * registry is a capability of the flow-engine implementation, not of every
+     * automation slot. A caller that finds it absent reports that nothing can
+     * pull, rather than calling.
+     */
+    pullConnectorSource?(request: ConnectorSourcePullRequest): Promise<ConnectorSourcePullResult>;
 
     /**
      * Per-flow deployment + binding state, for operator surfaces.

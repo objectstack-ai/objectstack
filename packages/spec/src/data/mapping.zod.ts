@@ -363,17 +363,16 @@ export const MappingSchema = lazySchema(() => strictObject({
    * - **no delete or conflict policy** — a pull writes through this mapping's
    *   `mode` / `upsertKey`, and nothing else is claimed.
    *
-   * EXECUTED WHEN A JOB DRIVES IT: `@objectstack/service-automation`'s
-   * connector sync executor (`pullConnectorSource`) reads every key here and
-   * writes through the import runner, so the liveness ledger grades every key
-   * `live`. Nothing schedules a pull yet — the `job` that drives it is the
-   * next stage — and that is the one caveat an author must read before
-   * writing the binding, so the `.describe()` below carries it. It is not a
-   * ledger warning: a `live` row carries no `authorWarn` (the author-side lint
-   * has no verdict for one, and `check:liveness` refuses it). A pull makes ONE
-   * action call and reads ONE response (see `watermark`). `sourceFormat` keeps
-   * governing the manual import door; a pulled row is the connector's JSON
-   * record.
+   * EXECUTED WHEN A JOB PULLS IT: `@objectstack/service-automation`'s
+   * connector sync executor (`pullConnectorSource`, on the `automation`
+   * service's contract) reads every key here and writes through the import
+   * runner, so the liveness ledger grades every key `live`. A `job` whose
+   * `pull` names this mapping (`JobSchema.pull`) drives it on the job's
+   * schedule, as the organization the job declares; the binding alone moves
+   * no rows, which the `.describe()` below says where an author reads it. A
+   * pull makes ONE action call and reads ONE response (see `watermark`).
+   * `sourceFormat` keeps governing the manual import door; a pulled row is
+   * the connector's JSON record.
    */
   connectorSource: strictObject({
     surface: 'this mapping’s connector source',
@@ -427,8 +426,8 @@ export const MappingSchema = lazySchema(() => strictObject({
     ),
   }).optional().describe(
     'Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or '
-    + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it; nothing schedules it yet, '
-    + 'so the binding alone moves no rows — schedule the pull with a `job` once a job can drive one',
+    + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it — a `job` whose '
+    + '`pull: { mapping }` names this mapping, on the job\'s schedule; the binding alone moves no rows',
   ),
 
   // `extractQuery`, `errorPolicy` and `batchSize` were removed in 17.0.0
