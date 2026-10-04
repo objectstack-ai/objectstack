@@ -97,7 +97,7 @@ interface Row {
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
 
-function makeProtocol() {
+function makeProtocol(opts: { datasets?: readonly unknown[] } = {}) {
     // ⚠️ Keyed BY TABLE. `find`/`findOne` below answer nothing, so this harness
     // cannot serve a `sys_metadata_history` row as a `sys_metadata` row the way
     // #16223 measured — but one flat map still made `rows.size` the total of
@@ -131,7 +131,16 @@ function makeProtocol() {
             assertEngineDeleteDispatch(opts);
             return { deleted: 0 };
         },
-        registry: { registerItem: () => {}, registerObject: () => {} },
+        registry: {
+            registerItem: () => {},
+            registerObject: () => {},
+            // `datasets` (section 5 only) is the registered dataset universe the
+            // author-time gate resolves a report's bindings against; every other
+            // caller passes none, so the registry lists nothing, as before.
+            ...(opts.datasets
+                ? { listItems: (type: string) => (type === 'dataset' ? [...opts.datasets!] : []) }
+                : {}),
+        },
     };
     const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map());
     return { protocol, rows };
@@ -396,10 +405,18 @@ async function saveReport(protocol: any, item: Record<string, unknown>): Promise
 }
 
 describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door', () => {
-    // No `dataset` on the block: this door also runs the author-time lints, and
-    // `chart-dataset-unknown` refuses a dataset this stub engine cannot resolve —
-    // a second refusal the CONTROL below would otherwise be reading instead.
-    const block = { name: 'open_block', type: 'summary', rows: ['status'], values: ['task_count'] };
+    // The block binds a dataset the harness registers: a joined report's block
+    // with no `dataset` is itself refused at `blocks.0.dataset` (#21702), and
+    // this door also runs the author-time lints, where `chart-dataset-unknown`
+    // refuses a dataset the stub engine cannot resolve — either would be a
+    // second refusal the CONTROL below would otherwise be reading instead.
+    const datasets = [{
+        name: 'task_metrics',
+        object: 'task',
+        dimensions: [{ name: 'status', field: 'status' }],
+        measures: [{ name: 'task_count', aggregate: 'count' }],
+    }];
+    const block = { name: 'open_block', type: 'summary', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] };
     const joined = { name: 'task_overview', label: 'Task Overview', type: 'joined', blocks: [block] };
     const chart = { type: 'bar', xAxis: 'status', yAxis: 'task_count' };
 
@@ -408,7 +425,7 @@ describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door'
         ['the container', { ...joined, chart }, 'custom', 'chart', 'a `joined` report draws no chart'],
         ['a block', { ...joined, blocks: [{ ...block, chart }] }, 'unrecognized_keys', 'blocks.0', '`report.blocks[].chart` was removed'],
     ] as const)('`chart` on %s — 422 INVALID_METADATA, located at the key, nothing stored', async (_where, item, code, path, prescription) => {
-        const { protocol, rows } = makeProtocol();
+        const { protocol, rows } = makeProtocol({ datasets });
         const err = await saveReport(protocol, item);
 
         expect(err).toBeInstanceOf(Error);
@@ -421,7 +438,7 @@ describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door'
     });
 
     it('CONTROL — the same joined report without a `chart` is stored (the refusal is the key, not the report)', async () => {
-        const { protocol, rows } = makeProtocol();
+        const { protocol, rows } = makeProtocol({ datasets });
         const result = await saveReport(protocol, joined);
 
         expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
