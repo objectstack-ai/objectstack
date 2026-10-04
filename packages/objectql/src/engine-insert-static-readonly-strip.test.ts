@@ -382,8 +382,12 @@ describe('#14147 — strictReadonlyWrites refuses before any driver dispatch', (
   });
 
   it('strict adds NO second policy — an isSystem write it would not strip is still accepted', async () => {
+    // A well-formed value: since #21663 a system writer's readonly value is
+    // judged for its SHAPE (a placeholder like `'x'` in a datetime is refused
+    // as `invalid_date`), which is a different policy from the one this case
+    // is about — `strictReadonlyWrites` adding nothing to the strip.
     const o = await observeInsert(
-      { title: 'T', completed_at: 'x' },
+      { title: 'T', completed_at: '2019-04-01T00:00:00Z' },
       { strictReadonlyWrites: true, context: { isSystem: true } },
     );
     expect(o.refusedCode).toBeNull();
