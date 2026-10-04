@@ -107,11 +107,15 @@ describe('OrganizationsPlugin', () => {
     expect(opCtx.data.organization_id).toBe('org-1');
   });
 
-  // [#2937] AUTHORITATIVE overwrite (behavior delta). A user-context insert may
-  // not choose its tenant: a supplied — possibly forged — organization_id is
-  // OVERWRITTEN with the caller's active org, closing the cross-tenant insert
-  // gap. (Previously a non-empty value was preserved — the vulnerability.)
-  it('[#2937] OVERWRITES a forged organization_id in user context with the active tenant', async () => {
+  // [#21666] FILL-ONLY in a user context too (ADR-0105 D5). A supplied value —
+  // another tenant's included — is left exactly as sent, for plugin-security's
+  // Layer 0 write wall to judge the way it judges the PATCH that names the same
+  // organization. Rewriting it here answered the create 201 with the row stored
+  // somewhere the caller never named. The refusal half (#2937's forged insert
+  // is still refused, by the wall) is pinned against the real SecurityPlugin in
+  // `create-explicit-organization-wall.test.ts`; this unit pins only that the
+  // stamp no longer touches the value.
+  it('[#21666] leaves a supplied organization_id naming another tenant untouched in a user context', async () => {
     const plugin = new OrganizationsPlugin();
     const { ctx, middlewares } = makeCtx();
     await plugin.init(ctx);
@@ -119,16 +123,30 @@ describe('OrganizationsPlugin', () => {
     const opCtx: any = {
       object: 'task',
       operation: 'insert',
-      // 'org-2' is another tenant — the attacker's forged value.
+      // 'org-2' is another tenant.
       data: { name: 'A', organization_id: 'org-2' },
       context: { userId: 'u1', tenantId: 'org-1' },
     };
     await middlewares[0](opCtx, async () => {});
-    // Normalized to the caller's active org — NOT the forged value.
+    expect(opCtx.data.organization_id).toBe('org-2');
+  });
+
+  it('[#21666] fills an EMPTY-string organization_id in a user context, as it fills an absent one', async () => {
+    const plugin = new OrganizationsPlugin();
+    const { ctx, middlewares } = makeCtx();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const opCtx: any = {
+      object: 'task',
+      operation: 'insert',
+      data: { name: 'A', organization_id: '' },
+      context: { userId: 'u1', tenantId: 'org-1' },
+    };
+    await middlewares[0](opCtx, async () => {});
     expect(opCtx.data.organization_id).toBe('org-1');
   });
 
-  it('[#2937] a same-tenant explicit organization_id is preserved (idempotent overwrite)', async () => {
+  it('[#2937] a same-tenant explicit organization_id is preserved', async () => {
     const plugin = new OrganizationsPlugin();
     const { ctx, middlewares } = makeCtx();
     await plugin.init(ctx);
@@ -159,8 +177,8 @@ describe('OrganizationsPlugin', () => {
   });
 
   // [#2937] The legitimate "set org_id on behalf" path (per-org seed replay /
-  // clone / orphan-claim, imports, migrations) runs under SYSTEM_CTX — it must
-  // keep an explicit cross-org value verbatim, NOT be overwritten.
+  // orphan-claim, migrations) runs under SYSTEM_CTX — it must keep an explicit
+  // cross-org value verbatim, and it meets neither the stamp nor the wall.
   it('[#2937] system context preserves an explicit cross-org organization_id (on-behalf writes unaffected)', async () => {
     const plugin = new OrganizationsPlugin();
     const { ctx, middlewares } = makeCtx();
@@ -177,8 +195,8 @@ describe('OrganizationsPlugin', () => {
   });
 
   // A non-`isSystem` context that carries a tenant but NO principal (a service
-  // acting with an org scope) keeps the prior FILL-ONLY semantics — it may still
-  // set an explicit value; only USER-context inserts are overwritten.
+  // acting with an org scope) gets the same FILL-ONLY stamp a user context gets
+  // — one rule for every non-system context since #21666.
   it('[#2937] principal-less (non-system) context keeps fill-only semantics', async () => {
     const plugin = new OrganizationsPlugin();
     const { ctx, middlewares } = makeCtx();

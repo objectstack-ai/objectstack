@@ -68,6 +68,26 @@ export default defineConfig({
         find: /^@objectstack\/metadata-core$/,
         replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
       },
+      // Test-only, all three: `create-explicit-organization-wall.test.ts` boots
+      // THIS package's Middleware A beside the real `SecurityPlugin` on a real
+      // `ObjectQL` engine over a real SQLite driver, because its subject is
+      // what the two middlewares answer TOGETHER — the stamp here fills an
+      // absent `organization_id`, the Layer 0 write wall there judges a
+      // supplied one. Resolved from `dist/`, the wall's half of every verdict
+      // would be about the last build of `plugin-security`, and a dist merely
+      // BEHIND runs green against the old wall while saying nothing.
+      {
+        find: /^@objectstack\/objectql$/,
+        replacement: path.resolve(__dirname, '../../objectql/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/plugin-security$/,
+        replacement: path.resolve(__dirname, '../plugin-security/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/driver-sqlite-wasm$/,
+        replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
+      },
     ],
   },
   test: {
