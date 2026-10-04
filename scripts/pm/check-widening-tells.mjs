@@ -47,7 +47,8 @@
  *       accept set gains a spelling an author may now write.
  *   T2  a new member of a closed set: `z.enum([…])`, `z.union([…])`,
  *       `z.discriminatedUnion(…)`, or a `CORE_PLUGIN_TYPES`-shaped `as const`
- *       array — the accept set gains a VALUE.
+ *       array — the accept set gains a VALUE. Since #21465 a bare element is
+ *       read as a member only by the construct the hunk shows ENCLOSING it.
  *   T3  a new row in a published entry point's export listing
  *       (`packages/spec/api-surface/*.json` and its signatures sibling) — the
  *       PUBLIC SURFACE grows, which ADR-0059's backward-compatibility gate
@@ -1101,6 +1102,109 @@
  * whose only tell is a new tombstone through a transparent wrapper closes the
  * first by reading through the wrapper on the ADDED side as #17955's decline.
  *
+ * ## The fourteenth accidental variable #21465 removed — the construct that
+ * ENCLOSES a member
+ *
+ * T2's sentence is "the accept set gains a VALUE", and its member reading never
+ * asked what the value sat IN: a bare string or a bare `…Schema,` line anywhere
+ * on the contract source surface was "a new member of a closed set". PR #21463
+ * measured the cost (head `52c4c42d72`, `--declaration no`): three T2 rows at
+ * `ui/component.zod.ts:34-36`, `RowHeightSchema,` / `RowColorConfigSchema,` /
+ * `ListViewSchema,` — specifiers added to a multi-line
+ * `import { … } from './view.zod'`, members of nothing. A true T1 forced `yes`
+ * on that PR anyway; a by-reference narrowing whose only other change is an
+ * import meets exit 4 under a truthful `no (narrowing)`. #19541 had named the
+ * same defect for the whole bare-element shape; it was closed `not_planned`.
+ *
+ * ⭐ The reading is {@link enclosingConstruct}; its verdicts are ONE table,
+ * {@link T2_CONSTRUCT_VERDICTS}, pinned one fixture per construct by
+ * {@link T2_CONSTRUCT_FIXTURES} — the triage ruling's enumeration:
+ *
+ *   construct        named by                                  T2
+ *   z.enum           `z.enum([`, or `z.literal(`               fires
+ *   z.union          `z.union([`, `discriminatedUnion(…, [`, `.or(`  fires
+ *   as const array   `const X = [` … `] as const`              fires, or NARROWING
+ *   import list      `import {`                                silent
+ *   export list      `export {`                                silent
+ *   argument list    any other callee's `(`                    silent
+ *   object literal   any other `{`                             silent
+ *
+ * …plus the two readings a CLOSER carries alone, when the hunk shows no opener:
+ * `} from '…'` (an import or a re-export — silent) and `]` / `] as const` (an
+ * array — fires). A plain array fires exactly as it did. A new false-positive
+ * shape is a red fixture there, ⛔ never a new card.
+ *
+ * ⛔ The silences are a STRUCTURAL fact, not a tolerance: every closed set T2
+ * names keeps its members directly inside a `[`, so a bare element whose
+ * innermost open delimiter is a brace or a non-constructor paren is no member
+ * of one. The two constructors whose operand DOES sit directly in a paren,
+ * `z.literal(` and `.or(`, keep firing. A `.merge(` / `.extend(` operand is no
+ * member either, but it WIDENS and T2 caught it by accident — the accident is
+ * kept rather than traded for a silence (0 such lines in `packages/spec/src`).
+ *
+ * ⛔ Positive evidence only, read from the hunk the way #17618 and #18721 read
+ * it: the innermost opener the hunk SHOWS — #18721's suffix argument makes
+ * that the real innermost — named by its own line's text, and only when the
+ * hunk shows none, the first closer it shows AHEAD of the line
+ * ({@link closerAhead}, the walk's mirror). A hunk showing neither, or only a
+ * `)` (whose callee may be `.or(`), fires. ⛔ Never the hunk header's
+ * function-context text (`@@ … @@ import {`): that is git's guess at a
+ * declaration line, not a bracket. ⛔ And it reads the innermost frame's OWN
+ * head and nothing deeper — no nesting state, so it is not the depth-aware
+ * `z.object({ … })` reader T1's comment refuses to grow.
+ *
+ * ⭐ THE FIRST READER THAT DECLINES ON THE WALK'S FRAMES, so #19099's
+ * obligation is discharged at both ends: it refuses when either walk is
+ * unreadable, and {@link enclosingConstruct} names every trigger in both
+ * directions. Its own rate, re-measured on the corpus below: of **7,338** added
+ * member-shaped lines, **196 (2.7%)** sit where a walk is unreadable, and each
+ * of them keeps firing.
+ *
+ * Both SIDES are read, as #17618's parameter decline and #16822's fragment rule
+ * are, and BEFORE the #16943 budget for #17955's reason: a removed line that
+ * was no member buys no T2 unit, and an added one neither fires nor spends a
+ * unit a real member beside it is owed.
+ *
+ * **An `as const` array whose only reader is a refusal predicate is a
+ * NARROWING tell** — the ruling's third line, and the one reading that needs
+ * the FILE: who reads a set is never in the lines that add to it.
+ * {@link refusalOnlyReaders} reads the head BLOB, content-addressed exactly as
+ * #18702 reads it, and requires the POLARITY, because a refusal predicate has
+ * two: `SINGLE_SERIES_CHART_TYPES` (`if (!SET.includes(t)) return;` before the
+ * refusal — only members reach it) narrows when it grows, and
+ * `VIEW_FILTER_VALUELESS_OPERATORS` (`if (SET.includes(op)) return;` — members
+ * skip it) WIDENS. A narrowing member is printed beside the rows
+ * ({@link narrowingLines}) and moves no exit code, because this file does not
+ * judge narrowings; ⛔ it is T2's own verdict, not a new tell.
+ *
+ * CORPUS — this clone is shallow with ONE boundary (`ce13bb8dc7`), excluded:
+ * 2,054 non-merge commits touching `packages/spec/src` are reachable from
+ * `fea67065a3`, 2,007 of them with non-test `.ts` diffs, **6,111 file diffs**,
+ * each judged through `wideningTells` with `headBlobSource` live by the version
+ * of this file at that base and by this one, row for row. T1 2,197 → 2,197 and
+ * T4 496 → 496, unmoved; T2 2,025 → 1,742:
+ *
+ *   • **285 rows decline**, every one read and every one a non-member: 105
+ *     call arguments (77 of them `.describe(` prose), 93 object-literal values
+ *     (84 by opener, 9 by closer), 57 import specifiers, 17 export specifiers,
+ *     8 specifiers read off `} from` (PR #21463's three among them), and the 5
+ *     members of `SINGLE_SERIES_CHART_TYPES` (PR #21425), now the narrowing
+ *     reading. Every declined argument and property value is a STRING: 0 are
+ *     schema-shaped.
+ *   • **2 rows begin firing.** One is a sensitivity GAIN: a removed `.describe(`
+ *     argument used to buy the unit that paid for `'ROUTE_NOT_FOUND'`, a value
+ *     newly admitted to `DispatcherErrorCode` (`03d26f75ab`). ⚠️ The other is
+ *     THE PRICE, pinned in `--self-test` rather than discovered: a replaced
+ *     `.describe(` argument whose OLD side the walk reads (so it buys nothing)
+ *     and whose NEW side it cannot (two slashes on a JSDoc line above it)
+ *     fires (`dd0f681a30`, `ui/component.zod.ts:626`). Loud, and one row.
+ *
+ * ⚠️ THE QUIET DIRECTION this buys, stated rather than left to be found: a
+ * helper that turns its ARGUMENTS into a closed set (`closedSet('a', 'b')`)
+ * would go unreported, as would a set spelled as an object's shorthand keys.
+ * Neither shape is among the 285 declined rows. The narrowing reading's own
+ * residual is named at {@link refusalOnlyReaders}.
+ *
  * ## #19099 — NOT a variable removed: a walk that says when it stopped reading
  *
  * ⛔ This section removes no accidental variable and moves no row, and that is
@@ -1153,11 +1257,14 @@
  * quiet. #18488 had already named that blindness for `readToCloser`, which
  * carries a type check AND an `unreadable` flag; this walker had neither.
  *
- * ⛔ THE FLAG HAS NO SUPPRESSING READER TODAY, and that is stated rather than
- * left to be discovered. The reader that would have had one — a decline for a
- * member bounded inside a re-declared universal-acceptor bag — was dropped by
- * ruling D′ (below). What lands is the READING; the obligation on the next
- * author who declines anything on these frames is written at the definition.
+ * ⛔ WHEN THIS LANDED THE FLAG HAD NO SUPPRESSING READER, and that was stated
+ * rather than left to be discovered. The reader that would have had one — a
+ * decline for a member bounded inside a re-declared universal-acceptor bag —
+ * was dropped by ruling D′ (below). What landed was the READING; the obligation
+ * on the next author who declines anything on these frames is written at the
+ * definition. ⭐ #21465's `enclosingConstruct` is that next author: it declines
+ * T2 on the frames, refuses whenever the flag is up, and re-measured the rate
+ * on its own population (its section above).
  *
  * ⭐ Two cheap SOUND discriminations are taken, and both are the difference
  * between a flag that is informative and one that is noise:
@@ -1206,10 +1313,10 @@
  *   • a closer whose type does not match the opener it popped — **0 rows**.
  *   • a `*\/` this walk cannot explain — **0 rows**.
  *
- * ⇒ Nothing is silenced by any of them today: no reader suppresses on the flag.
- * The number a future suppressing reader needs is the 0.7%, and it should be
- * re-measured on that day rather than quoted from here — on the gate's own read
- * path, with its blob resolution asserted first.
+ * ⇒ Nothing is silenced by any of them: the one reader that suppresses on the
+ * frames (#21465) REFUSES on the flag, so a trigger keeps its row firing. The
+ * 0.7% above is T1's population; #21465 re-measured its own, on the gate's own
+ * read path with blob resolution asserted first, rather than quoting this one.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
@@ -1501,7 +1608,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the local path composed: an unread diff is not a narrow diff': 7,
   'the surfaces, imported rather than restated': 11,
   'T1 — a new key on a Zod object schema': 14,
-  'T2 — a new member of a closed set': 13,
+  'T2 — a new member of a closed set': 63,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
@@ -2414,9 +2521,11 @@ function topLevelMembers(s, open, close) {
  *     already up. ⛔ The FIRST `*\/` on a clean walk is not a trigger at all: it
  *     says the hunk began inside a comment (see the reset below).
  *
- * ⛔ NO READER SUPPRESSES ON THIS FLAG TODAY, and saying so is the point. The
- * one that did — #19099's bag-internal decline — was dropped by ruling D′, so
- * what lands here is the READING and not a consumer of it: the obligation is
+ * ⛔ ONE READER DECLINES ON THESE FRAMES — #21465's {@link enclosingConstruct},
+ * which silences T2 on a member whose innermost frame is a brace or a
+ * non-constructor paren — and it REFUSES whenever this flag is up. The one
+ * before it — #19099's bag-internal decline — was dropped by ruling D′, so what
+ * landed here first was the READING and not a consumer of it: the obligation is
  * stated at the definition rather than left for the next author to infer.
  * ⇒ any future reader that DECLINES a tell on these frames refuses when the
  * flag is set, and states every trigger above wherever it describes itself. A
@@ -5076,6 +5185,120 @@ const FILE_REGISTRY = {
   patch: patchOf(140, "+    'WORKFLOW_STEP_FAILED',"),
 };
 
+// #21465 — a module-private `as const` set whose ONE acceptance reader is a
+// guard leaving only its members to a refusal, and whose other two readers are
+// that refusal's prose and a `.describe()` — `SINGLE_SERIES_CHART_TYPES` in
+// `ui/dashboard.zod.ts`, reduced to its shape. Line 1 is the declaration, so a
+// hunk at `@@ … +1,… @@` adds to it.
+const DENY_SET_SOURCE = [
+  'const SINGLE_SERIES_TYPES = [',
+  "  'pie',",
+  "  'donut',",
+  "  'sankey',",
+  '] as const satisfies readonly ChartType[];',
+  '',
+  'export function checkArity(widget, ctx) {',
+  '  const type = widget.type;',
+  '  if (widget.dimensions !== undefined) {',
+  '    if (!(SINGLE_SERIES_TYPES as readonly string[]).includes(type)) return;',
+  "    const names = SINGLE_SERIES_TYPES.map((t) => '`' + t + '`').join(' / ');",
+  "    ctx.addIssue({ code: 'custom', message: 'one measure on ' + names });",
+  '    return;',
+  '  }',
+  '}',
+  '',
+  'export const WidgetSchema = z.object({',
+  '  values: z.array(z.string()).describe(',
+  "    'Measures — exactly one on ' + SINGLE_SERIES_TYPES.join('/'),",
+  '  ),',
+  '});',
+  '',
+].join('\n');
+
+/**
+ * #21465 — THE ENUMERATION PIN: one fixture per construct the triage ruling
+ * names, each with the T2 verdict it must produce. ⭐ A new false-positive shape
+ * is a red fixture HERE, never a new card: add its construct, its fixture and
+ * its verdict, and the reader that classifies it, in one edit.
+ *
+ * `member` is the added line the verdict is about; `source` is the head blob,
+ * read only by the one verdict that needs it.
+ */
+export const T2_CONSTRUCT_FIXTURES = Object.freeze([
+  {
+    construct: 'z.enum',
+    expect: 'fires',
+    member: "  'workflow',",
+    patch: "@@ -10,3 +10,4 @@\n export const KindSchema = z.enum([\n   'page',\n+  'workflow',\n ]);",
+  },
+  {
+    construct: 'z.union',
+    expect: 'fires',
+    member: '  WorkflowNodeSchema,',
+    patch: '@@ -20,3 +20,4 @@\n export const NodeSchema = z.union([\n   PageNodeSchema,\n+  WorkflowNodeSchema,\n ]);',
+  },
+  {
+    construct: 'as-const-array',
+    expect: 'narrowing',
+    member: "  'sankey',",
+    patch: "@@ -1,4 +1,5 @@\n const SINGLE_SERIES_TYPES = [\n   'pie',\n   'donut',\n+  'sankey',\n ] as const satisfies readonly ChartType[];",
+    source: DENY_SET_SOURCE,
+  },
+  {
+    construct: 'import-list',
+    expect: 'silent',
+    member: '  RowHeightSchema,',
+    patch: "@@ -1,3 +1,4 @@\n import {\n   EmptyStateSchema,\n+  RowHeightSchema,\n } from './view.zod';",
+  },
+  {
+    construct: 'export-list',
+    expect: 'silent',
+    member: '  RowHeightSchema,',
+    patch: "@@ -40,3 +40,4 @@\n export {\n   EmptyStateSchema,\n+  RowHeightSchema,\n } from './view.zod';",
+  },
+  {
+    construct: 'argument-list',
+    expect: 'silent',
+    member: "    'The label an author sees in the form header',",
+    patch: "@@ -50,2 +50,3 @@\n   label: I18nLabelSchema.describe(\n+    'The label an author sees in the form header',\n   ),",
+  },
+  {
+    construct: 'object-literal',
+    expect: 'silent',
+    member: "      'A required label was left empty',",
+    patch: "@@ -60,3 +60,4 @@\n   ctx.addIssue({\n     code: 'custom',\n     message:\n+      'A required label was left empty',\n   });",
+  },
+]);
+
+// #21465 — the LIVE instance: PR #21463's first hunk of `ui/component.zod.ts`,
+// byte for byte at head 52c4c42d72. It BEGINS inside a multi-line import list,
+// so the walk up shows no opener; the `} from './view.zod';` below the three
+// specifiers is the evidence.
+const PR_21463_HUNK = [
+  '@@ -26,7 +26,21 @@ import {',
+  '   // by reference: the grid draws the same key through the same shared',
+  '   // component `ListView` does, so one declaration judges both doors.',
+  '   EmptyStateSchema,',
+  "+  // [#21445] `object-grid.rowHeight` / `.rowColor` are the list view's own row",
+  '+  // height and row colour schemas, and `.conditionalFormatting` is the list',
+  "+  // view's own member (read off `ListViewSchema.shape`, the one place that",
+  '+  // declares the rule shape): the grid reads each with exactly that shape, so',
+  '+  // one declaration judges both doors.',
+  '+  RowHeightSchema,',
+  '+  RowColorConfigSchema,',
+  '+  ListViewSchema,',
+  " } from './view.zod';",
+  "+// [#21445] `object-grid.bulkActionDefs` is the list view's bulk-action def,",
+  '+// by identity — the element `ListViewSchema.bulkActionDefs` declares.',
+  "+import { BulkActionDefSchema } from './bulk-action.zod';",
+  "+// [#21445] `object-grid.aggregations[].type` is the query AST's own aggregation",
+  '+// vocabulary — the six functions the grid computes are exactly its members.',
+  "+import { AggregationFunction } from '../data/query.zod';",
+  " // [#21229] `object-grid.exportOptions` is the list view's export options OBJECT,",
+  " // by identity — not the list view's union, whose legacy bare-array arm lifts to",
+  ' // `{ formats }` while the grid reads `.formats` and lifts nothing. Declared',
+].join('\n');
+
 // The two live instances of #17618, in the bytes the PRs actually pushed.
 //
 // ⭐ `FILE_REFINEMENT_SIGNATURE` is the `#16489` convention itself — the
@@ -5292,6 +5515,105 @@ export function selfTest() {
   t('⛔ a REMOVED member is not a tell — the ruling is directional', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -3,1 +3,0 @@\n-  'legacy'," }).length === 0);
   t('T1 wins over T2 on a line that could read as both, so one line is never two rows', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  kind: z.enum(['a']),") }).length === 1);
   t('…and the row it produces is the key reading', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  kind: z.enum(['a']),") })[0]?.tell === 'T1');
+
+  // -- #21465: the construct that ENCLOSES a member -------------------------
+  //
+  // ⭐ THE ENUMERATION PIN first — one fixture per construct the triage ruling
+  // names, each read as that construct AND producing its T2 verdict through
+  // `tellsInFile`, the path the gate takes. Then the live instance, the
+  // evidence each reading refuses to invent, the budget in both directions, and
+  // the narrowing reading's polarity.
+  const CONSTRUCT_FILE = 'packages/spec/src/ui/a.zod.ts';
+  const constructRun = (patch, source = null, filename = CONSTRUCT_FILE) => {
+    const narrowing = [];
+    const rows = tellsInFile({ filename, status: 'modified', patch }, { readSource: () => source, narrowing });
+    return { rows, narrowing };
+  };
+  const verdictOf = ({ rows, narrowing }) => {
+    if (rows.length === 1 && rows[0]?.tell === 'T2' && narrowing.length === 0) return 'fires';
+    if (rows.length === 0 && narrowing.length === 1) return 'narrowing';
+    if (rows.length === 0 && narrowing.length === 0) return 'silent';
+    return `rows ${rows.length} / narrowing ${narrowing.length}`;
+  };
+  const sideAt = (patch, text) => {
+    const side = [];
+    let at = null;
+    for (const r of patchLines(patch)) {
+      if (r.kind === 'removed') continue;
+      if (r.kind === 'added' && r.text === text && at === null) at = side.length;
+      side.push(r);
+    }
+    return { side, at };
+  };
+  const constructOf = (patch, text) => {
+    const { side, at } = sideAt(patch, text);
+    return at === null ? undefined : enclosingConstruct(side, at);
+  };
+  t('the enumeration names exactly the seven constructs the ruling lists, each ONCE and in its order', JSON.stringify(T2_CONSTRUCT_FIXTURES.map((f) => f.construct)) === JSON.stringify(['z.enum', 'z.union', 'as-const-array', 'import-list', 'export-list', 'argument-list', 'object-literal']));
+  for (const fx of T2_CONSTRUCT_FIXTURES) {
+    const said = { fires: 'T2 FIRES', silent: 'T2 is SILENT', narrowing: 'T2 reads it as NARROWING' }[fx.expect];
+    t(`⭐ ENUMERATION — ${fx.construct}: read as that construct, and ${said}`, constructOf(fx.patch, fx.member)?.construct === fx.construct && verdictOf(constructRun(fx.patch, fx.source ?? null)) === fx.expect);
+  }
+  t('the verdict TABLE agrees with every fixture — narrowing is read off the head blob, so its table row is `fires`', T2_CONSTRUCT_FIXTURES.every((f) => T2_CONSTRUCT_VERDICTS[f.construct] === (f.expect === 'narrowing' ? 'fires' : f.expect)));
+
+  // the live instance
+  const LIVE_21463 = { filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: PR_21463_HUNK };
+  t('⭐ THE LIVE INSTANCE — PR #21463\'s three import specifiers are members of nothing: the hunk yields 0 rows', tellsInFile(LIVE_21463).length === 0);
+  t('…and the reading is the CLOSER\'s, because the hunk begins inside the list and shows no opener', ['  RowHeightSchema,', '  RowColorConfigSchema,', '  ListViewSchema,'].every((m) => constructOf(PR_21463_HUNK, m)?.construct === 'import-or-export-list' && constructOf(PR_21463_HUNK, m)?.evidence === 'closer'));
+  const CUT_BEFORE_CLOSER = PR_21463_HUNK.split('\n').slice(0, 12).join('\n');
+  t('⛔ CONTROL — the same hunk CUT before its closer fires all three: absence of evidence is not evidence', tellsInFile({ ...LIVE_21463, patch: CUT_BEFORE_CLOSER }).filter((r) => r.tell === 'T2').length === 3);
+  t('⛔ …and the hunk header\'s `import {` context text is never read as one — it is git\'s guess at a declaration, not a bracket', CUT_BEFORE_CLOSER.startsWith('@@ -26,7 +26,21 @@ import {') && constructOf(CUT_BEFORE_CLOSER, '  RowHeightSchema,')?.construct === null);
+
+  // the constructors whose operand sits directly in a paren, and the heads that open no argument list
+  t('⛔ `.or(` is a UNION — an arm handed to it on its own line still fires', verdictOf(constructRun('@@ -5,1 +5,3 @@\n export const X = BaseSchema.or(\n+  ExtraSchema,\n );')) === 'fires' && constructOf('@@ -5,1 +5,3 @@\n export const X = BaseSchema.or(\n+  ExtraSchema,\n );', '  ExtraSchema,')?.construct === 'z.union');
+  t('⛔ …and `z.literal(` is a closed set of one, read as `z.enum`', constructOf("@@ -5,1 +5,3 @@\n export const X = z.literal(\n+  'only',\n );", "  'only',")?.construct === 'z.enum');
+  t('⛔ …and a `[` alone on its line takes the constructor from the paren AROUND it', constructOf("@@ -5,2 +5,4 @@\n export const K = z.enum(\n   [\n+    'a',\n   ],", "    'a',")?.construct === 'z.enum' && constructOf("@@ -5,1 +5,2 @@\n export const D = z.discriminatedUnion('type', [\n+  ArmSchema,", '  ArmSchema,')?.construct === 'z.union');
+  t('⛔ `.merge(` / `.extend(` are schema combinators whose operand WIDENS — kept firing, never read as an argument list', verdictOf(constructRun('@@ -5,1 +5,3 @@\n export const X = BaseSchema.merge(\n+  ExtraSchema,\n );')) === 'fires' && verdictOf(constructRun('@@ -5,1 +5,3 @@\n export const X = BaseSchema.extend(\n+  ExtraSchema,\n );')) === 'fires');
+  t('⛔ a KEYWORD\'s paren opens no argument list — `if (` reads as nothing and fires', constructOf("@@ -5,1 +5,2 @@\n if (\n+  'a',", "  'a',")?.construct === null && verdictOf(constructRun("@@ -5,1 +5,2 @@\n if (\n+  'a',")) === 'fires');
+  t('a KEY named `import` is an object literal, and `export const X = {` is not an export list', constructOf('@@ -5,1 +5,2 @@\n   import: {\n+    ASchema,', '    ASchema,')?.construct === 'object-literal' && constructOf('@@ -5,1 +5,2 @@\n export const X = {\n+  ASchema,', '  ASchema,')?.construct === 'object-literal');
+  t('`import type {` and `import Default, {` are import lists; `export type {` is an export list', constructOf('@@ -5,1 +5,2 @@\n import type {\n+  ASchema,', '  ASchema,')?.construct === 'import-list' && constructOf('@@ -5,1 +5,2 @@\n import Base, {\n+  ASchema,', '  ASchema,')?.construct === 'import-list' && constructOf('@@ -5,1 +5,2 @@\n export type {\n+  ASchema,', '  ASchema,')?.construct === 'export-list');
+  t('⛔ a closer-only `)` fires — the callee sits above the hunk, and it may be `.or(`', verdictOf(constructRun('@@ -5,1 +5,2 @@\n+  ExtraSchema,\n );')) === 'fires' && constructOf('@@ -5,1 +5,2 @@\n+  ExtraSchema,\n );', '  ExtraSchema,')?.construct === null);
+  t('a closer-only `}` that is NOT followed by `from` is a brace: an object literal, silent', constructOf("@@ -5,1 +5,2 @@\n+  'A required label was left empty',\n   };", "  'A required label was left empty',")?.construct === 'object-literal' && verdictOf(constructRun("@@ -5,1 +5,2 @@\n+  'A required label was left empty',\n   };")) === 'silent');
+  t('a closer-only `] as const` is an `as const` array, and a closer-only `]` a plain array — both still fire', verdictOf(constructRun("@@ -5,1 +5,2 @@\n+  'sankey',\n ] as const;")) === 'fires' && constructOf("@@ -5,1 +5,2 @@\n+  'sankey',\n ] as const;", "  'sankey',")?.construct === 'as-const-array' && constructOf("@@ -5,1 +5,2 @@\n+  'sankey',\n ];", "  'sankey',")?.construct === 'array');
+
+  // the walk's triggers: the reader REFUSES on every one, in both directions
+  t('⛔ UP: a possible REGEX literal above the member makes the walk a guess — no construct, and it fires', constructOf("@@ -5,2 +5,4 @@\n export const X = {\n   slug: z.string().regex(/^x/),\n+  'value',\n };", "  'value',")?.unreadable === true && verdictOf(constructRun("@@ -5,2 +5,4 @@\n export const X = {\n   slug: z.string().regex(/^x/),\n+  'value',\n };")) === 'fires');
+  t('⭐ UP: a hunk that BEGINS inside a JSDoc is read, not guessed at — the leading `*/` resets the walk and the list below it declines', verdictOf(constructRun('@@ -5,3 +5,4 @@\n  * the re-exported auth surface\n  */\n export {\n+  ASchema,\n };')) === 'silent');
+  const DOWN = (between) => `@@ -5,2 +5,3 @@\n   EmptyStateSchema,\n+  RowHeightSchema,\n${between}\n } from './view.zod';`;
+  t('⛔ DOWN: a possible regex literal between the member and its closer — fires', closerAhead(['  x: z.string().regex(/^a/),', "} from './a';"], 0).unreadable === true && verdictOf(constructRun(DOWN('   x: z.string().regex(/^a/),'))) === 'fires');
+  t('⛔ DOWN: a closer that does not match the opener it pops — fires', closerAhead(['  ( ]', "} from './a';"], 0).unreadable === true && verdictOf(constructRun(DOWN('   ( ]'))) === 'fires');
+  t('⛔ DOWN: a string that never closes on its line — fires', closerAhead(["  'opens here", "} from './a';"], 0).unreadable === true && verdictOf(constructRun(DOWN("   'opens here"))) === 'fires');
+  t('⛔ DOWN: a `*/` no comment of this walk opened — fires', closerAhead(['  */', "} from './a';"], 0).unreadable === true && verdictOf(constructRun(DOWN('   */'))) === 'fires');
+  t('…while a LONE `/` is a division, a `//` comment is skipped and a balanced pair is popped — the closer is still read', closerAhead(['  half / 2,', '  // a } in a comment', '  f(x[0]),', "} from './a';"], 0).closer === '}' && closerAhead(['  half / 2,', '  // a } in a comment', '  f(x[0]),', "} from './a';"], 0).line === 3 && verdictOf(constructRun(DOWN('   half / 2,'))) === 'silent');
+  t('`closerAhead` answers `null` and READABLE when nothing closes — no evidence, never an unreadable', closerAhead(["  'a',", "  'b',"], 0).closer === null && closerAhead(["  'a',", "  'b',"], 0).unreadable === false);
+
+  // the budget, in both directions — the reading is taken BEFORE it
+  t('⭐ a REMOVED import specifier buys NO T2 unit — a real member added in the same block still fires', constructRun("@@ -1,3 +1,4 @@\n import {\n-  ASchema,\n+} from './a';\n+export const K = z.enum([\n+  'x',").rows.filter((r) => r.tell === 'T2' && r.line === 4).length === 1);
+  t('⭐ …and an ADDED one spends none: the unit a removed member bought still pays the real member beside it', constructRun("@@ -1,5 +1,6 @@\n import {\n   ASchema,\n-} from './a';\n-const K = z.enum([\n-  'a',\n+  BSchema,\n+} from './a';\n+const K = z.enum([\n+  'b',").rows.length === 0);
+  t('⭐ the coin a removed `.describe()` argument paid with is gone — a value newly admitted to the enum beside it FIRES', constructRun("@@ -5,3 +5,3 @@\n-export const Code = z.enum(['404']).describe(\n-  '404 = route not found',\n-);\n+export const Code = z.enum([\n+  'ROUTE_NOT_FOUND',\n+]);").rows.some((r) => r.tell === 'T2' && r.text === "'ROUTE_NOT_FOUND',"));
+  t('⚠️ THE PRICE, pinned rather than discovered — the old side reads a `.describe()` argument and buys nothing, the NEW side\'s walk is a guess (two slashes in the JSDoc above it), so the replaced prose fires', verdictOf(constructRun("@@ -10,5 +10,5 @@\n   * one / two\n-  * three\n+  * three / four / five\n   */\n   visibleWhen: ExpressionInputSchema.optional().describe(\n-    'Old prose',\n+    'New prose',\n   ),")) === 'fires');
+
+  // the narrowing reading: module-private, `as const`, and every reader a refusal or its prose
+  const ASC = T2_CONSTRUCT_FIXTURES.find((f) => f.construct === 'as-const-array');
+  const ascWith = (source) => verdictOf(constructRun(ASC.patch, source));
+  t('`refusalOnlyReaders` names the guard it read — the negated membership test with an early `return;`', JSON.stringify(refusalOnlyReaders(DENY_SET_SOURCE, 'SINGLE_SERIES_TYPES').guards) === '[10]');
+  t('⛔ POLARITY — the same set EXEMPTED from the refusal (`if (SET.includes(x)) return;`) widens when it grows, so it FIRES', ascWith(DENY_SET_SOURCE.replace('if (!(SINGLE_SERIES_TYPES', 'if ((SINGLE_SERIES_TYPES')) === 'fires');
+  t('⛔ …and so does a guard whose consequent refuses directly (`if (!SET.includes(x)) ctx.addIssue(…)`) — an ALLOW-list', ascWith(DENY_SET_SOURCE.replace('return;\n    const names', "ctx.addIssue({ code: 'custom' });\n    return;\n    const names")) === 'fires');
+  t('⛔ a reader that DECIDES acceptance — `z.enum(SET)` — fires', ascWith(`${DENY_SET_SOURCE}export const TypeSchema = z.enum(SINGLE_SERIES_TYPES);\n`) === 'fires');
+  t('⛔ a `.join` render outside the members-only region and outside a `.describe()` is an unclassified reader — fires', ascWith(`${DENY_SET_SOURCE}const PATTERN = SINGLE_SERIES_TYPES.join('|');\n`) === 'fires');
+  t('⛔ an EXPORTED set fires — on its own declaration, or re-exported anywhere in the file', verdictOf(constructRun(ASC.patch.replace(' const SINGLE_SERIES_TYPES', ' export const SINGLE_SERIES_TYPES'), DENY_SET_SOURCE.replace('const SINGLE_SERIES_TYPES', 'export const SINGLE_SERIES_TYPES'))) === 'fires' && ascWith(`${DENY_SET_SOURCE}export { SINGLE_SERIES_TYPES };\n`) === 'fires');
+  t('⛔ NO head blob, no reading — fires', ascWith(null) === 'fires');
+  t('⛔ a members-only region that never refuses is no refusal — fires', ascWith(DENY_SET_SOURCE.replace("ctx.addIssue({ code: 'custom', message: 'one measure on ' + names });", 'console.log(names);')) === 'fires');
+  t('⛔ a members-only region the walk cannot LEX is no reading — fires', ascWith(DENY_SET_SOURCE.replace('    return;\n  }', '    const re = /^x/;\n    return;\n  }')) === 'fires');
+  t('⛔ the name inside a STRING still counts as a reader — a mis-lexed name is never an invisible one', ascWith(`${DENY_SET_SOURCE}const LABEL = 'SINGLE_SERIES_TYPES';\n`) === 'fires');
+  t('⛔ two declarations of the name are ambiguous — fires', ascWith(`${DENY_SET_SOURCE}function shadow() {\n  const SINGLE_SERIES_TYPES = ['x'] as const;\n  return SINGLE_SERIES_TYPES;\n}\n`) === 'fires');
+  t('⛔ a plain array, not `as const`, fires whatever reads it', ascWith(DENY_SET_SOURCE.replace('] as const satisfies readonly ChartType[];', '];')) === 'fires');
+  t('⭐ the head blob\'s own closer stands in for a hunk that stops before `] as const` — the blob is the same commit', verdictOf(constructRun("@@ -1,3 +1,4 @@\n const SINGLE_SERIES_TYPES = [\n   'pie',\n   'donut',\n+  'sankey',", DENY_SET_SOURCE)) === 'narrowing');
+  t('⭐ a narrowing member moves NO exit code — the verdict is clean, and the reader is told', (() => {
+    const v = wideningRefusal({ declaration: 'no', files: [{ filename: CONSTRUCT_FILE, status: 'modified', patch: ASC.patch }], readSource: () => DENY_SET_SOURCE });
+    return v.state === 'clean' && exitForRefusal(v) === EXIT_OK && v.narrowing.length === 1 && v.narrowing[0]?.binding === 'SINGLE_SERIES_TYPES' && narrowingLines(v.narrowing).some((l) => l.includes(`${CONSTRUCT_FILE}:4`));
+  })());
+  t('⛔ …while an empty list prints NOTHING — a heading with no rows would read as a finding', narrowingLines([]).length === 0 && narrowingLines(null).length === 0);
 
   // -- #16822: the accidental variables ------------------------------------
   //
@@ -6927,6 +7249,7 @@ export function selfTest() {
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
       "#20969's tombstone RE-DECLARED through a transparent wrapper — PR #20961's own hunk paid in a second currency only a removed tombstone of the SAME key mints, bracketed by the dark control with nothing removed, the three triage pins (un-retiring through the wrapper, a new key inside a wrapper at its own line, a renamed key), every way a wrapper can hand a live arm back, and the one-for-one, block-scoped and never-spends arithmetic, " +
+      "#21465's construct that ENCLOSES a member — the ruling's seven constructs pinned one fixture each with its verdict, PR #21463's import specifiers silent off their closer with the cut-hunk control that fires, both walks refusing on every trigger, the budget read before it on both sides with the gain and the price pinned, and the narrowing reading's polarity bracketed by the allow-list, acceptance-reader, exported, blob-less, refusal-less, unlexable, string-named, shadowed and plain-array controls that fire, " +
       "#19099's walk saying when it STOPPED READING —the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
