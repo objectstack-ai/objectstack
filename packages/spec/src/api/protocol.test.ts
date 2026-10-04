@@ -1805,7 +1805,7 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
   // `@objectstack/metadata-protocol` — `{ type, name, organizationId?,
   // actor?, message?, packageId? }` — and the REST door's actual reads;
   // nothing else is declared because nothing else is enforced.
-  // As in the #9726/#9741 blocks above, accept-pins assert the parsed VALUE:
+  // As in the #9726 / commit 2a29caa53 blocks above, accept-pins assert the parsed VALUE:
   // this is a non-strict object, so `success` alone is exactly the
   // silent-strip state this family of cards closes.
 
@@ -1935,9 +1935,9 @@ describe('AuditMetaItemRequestSchema mirrors the implementation parameter type (
   // implementation's parameter type in `@objectstack/metadata-protocol` —
   // `{ type, name, organizationId?: string | null, limit?: number }` — and the
   // REST door's actual sends; nothing else is declared because nothing else is
-  // enforced. As in the #9726/#9741/#11006 blocks above, accept-pins assert
-  // the parsed VALUE: this is a non-strict object, so `success` alone is
-  // exactly the silent-strip state this family of cards closes.
+  // enforced. As in the #9726 / commit 2a29caa53 / commit cccbe51bf blocks above,
+  // accept-pins assert the parsed VALUE: this is a non-strict object, so
+  // `success` alone is exactly the silent-strip state this family of cards closes.
 
   const base = { type: 'view', name: 'account_list' } as const;
 

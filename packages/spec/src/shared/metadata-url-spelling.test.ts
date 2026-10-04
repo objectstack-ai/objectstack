@@ -48,7 +48,7 @@ describe('#7894 INVARIANT 1 — no spelling that worked before may stop working'
     // the `/meta` boundary before this change, so quantifying over it IS the
     // non-breaking proof. It includes five that name PLUGIN kinds with no static
     // registry entry (`webhooks`, `connectors`, `sharingRules`,
-    // `ragPipelines`, `analyticsCubes`; `themes` was the sixth until #10485
+    // `ragPipelines`, `analyticsCubes`; `themes` was the sixth until commit 35ad101bc
     // retired its carrier out of the map) — a purely registry-derived map would
     // have dropped those, which is why the derived limb is unioned rather than
     // substituted.
@@ -69,7 +69,7 @@ describe('#7894 INVARIANT 1 — no spelling that worked before may stop working'
     // see the population rather than infer it.
     const registryTypes = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
     const pluginOnly = Object.entries(PLURAL_TO_SINGULAR).filter(([, s]) => !registryTypes.has(s));
-    // `themes` left this list at #10485 (ADR-0049 — the carrier retired, so
+    // `themes` left this list at commit 35ad101bc (ADR-0049 — the carrier retired, so
     // `/meta/theme` now earns `unrecognisedMetaTypeRefusal`'s verdict; pinned
     // in the #8421 block at the bottom of this file).
     expect(pluginOnly.map(([p]) => p).sort()).toEqual(
@@ -165,7 +165,7 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     // which the five mapped kinds below stay writable and the six unmapped
     // names no longer are. That narrowing is pinned, deliberately visible, in
     // the `#8421` block at the bottom of this file. (`theme` moved from this
-    // list to the refused side at #10485 — its carrier retired out of the map,
+    // list to the refused side at commit 35ad101bc — its carrier retired out of the map,
     // so it is no longer "a spelling that worked before" for this verdict:
     // `metaUrlSpellingRefusal` still answers null for it, but the #8421
     // verdict now refuses it, pinned below.)
@@ -254,7 +254,7 @@ describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
   it('[#10485] `theme` left the contract with its carrier — refused by name', () => {
     // The retired kind's whole exit path: the `themes: 'theme'` fold left
     // `PLURAL_TO_SINGULAR`, so both spellings now earn the #8421 verdict
-    // instead of the pre-#10194 store-anything branch.
+    // instead of the store-anything branch commit 2306a765c closed.
     for (const spelling of ['theme', 'themes']) {
       const verdict = unrecognisedMetaTypeRefusal(spelling);
       expect(verdict, `${spelling} must be refused`).not.toBeNull();

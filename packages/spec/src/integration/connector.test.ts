@@ -42,7 +42,7 @@ import {
 } from './connector.zod';
 
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
-// [#14676] the retirement pins at the bottom of this file
+// [commit 13c48c2a5] the retirement pins at the bottom of this file
 import {
   MIGRATIONS_BY_MAJOR,
   RETIRED_DEFS_BY_MAJOR,
@@ -793,7 +793,7 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
 
 // ============================================================================
 // ADR-0010 protection envelope — PRESERVED on round-trip, not merely tolerated
-// (#6362, split out of #6245)
+// (commit b5404f496, the connector half #6245 left)
 // ============================================================================
 
 /**
@@ -927,7 +927,7 @@ describe('ADR-0010 protection envelope (#6362)', () => {
   // and is pinned beside it in `automation/`.)
 });
 
-// ─── [#14676] `connector.errorMapping` RETIRED, with the three defs it carried ──
+// ─── [commit 13c48c2a5] `connector.errorMapping` RETIRED, with the three defs it carried ──
 //
 // ADR-0049 enforce-or-remove; triage ruling 2026-09-02 (route: removal via the
 // `spec-property-retirement` playbook; the split condition — a downstream
@@ -1089,7 +1089,7 @@ describe('[#14676] connector.errorMapping retirement', () => {
     const connector: Connector = {
       ...ERROR_MAPPING_WELL_FORMED,
       // @ts-expect-error — `errorMapping` is a retiredKey() tombstone: its
-      // input type is `never`, so a typed literal cannot carry it (#14676).
+      // input type is `never`, so a typed literal cannot carry it (commit 13c48c2a5).
       errorMapping: AUTHORED_ERROR_MAPPING,
     };
     // The parse channel agrees with the type channel on the same literal.
