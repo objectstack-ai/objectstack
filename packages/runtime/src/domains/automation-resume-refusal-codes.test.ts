@@ -21,9 +21,10 @@
  *     without registering its code reds here by name, before any wire test
  *     has to discover it.
  *  2. **The wire.** Each row, returned by a scripted engine, reaches the REST
- *     resume door as that same code with the row's status, the body parses
- *     under the published `ApiErrorSchema`, and `details` stays empty (the
- *     code is promoted out of it, never duplicated). The MCP `resume_run` door
+ *     resume door as that same code and the body parses under the published
+ *     `ApiErrorSchema`. A separate case per row holds the row's status, the
+ *     engine's message and an empty `details` (the code is promoted out of
+ *     it, never duplicated), so the two halves fail apart. The MCP `resume_run` door
  *     shares the classifier; `mcp-resume-run.test.ts` holds it equal to this
  *     door row by row and names the code on each.
  *
@@ -75,7 +76,21 @@ describe('#21724 — the resume-refusal rows', () => {
             .toBe(true);
     });
 
-    it.each(ROWS)('row %s reaches the REST resume door as its own code, status %i', async (code, status) => {
+    it.each(ROWS)('row %s reaches the REST resume door as its own code', async (code) => {
+        const { dispatcher } = makeDispatcher({ success: false, code, error: `${code}: refused` } as AutomationResult);
+
+        const result = await dispatcher.handleAutomation(RESUME, 'POST', { inputs: {} }, CTX);
+
+        const error = result.response?.body?.error;
+        expect(error?.code).toBe(code);
+        const parsed = ApiErrorSchema.safeParse(error);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+
+    // The status half, kept apart from the code half so a regression in one
+    // cannot hide behind the other: no status moved under #21724, and the
+    // code rides out of `details` rather than being duplicated in it.
+    it.each(ROWS)('row %s keeps its status %i, its message, and empty details', async (code, status) => {
         const { dispatcher, resume } = makeDispatcher({ success: false, code, error: `${code}: refused` } as AutomationResult);
 
         const result = await dispatcher.handleAutomation(RESUME, 'POST', { inputs: {} }, CTX);
@@ -83,11 +98,8 @@ describe('#21724 — the resume-refusal rows', () => {
         expect(resume).toHaveBeenCalledTimes(1);
         expect(result.response?.status).toBe(status);
         const error = result.response?.body?.error;
-        expect(error?.code).toBe(code);
         expect(error?.httpStatus).toBe(status);
         expect(error?.message).toBe(`${code}: refused`);
         expect(error?.details).toBeUndefined();
-        const parsed = ApiErrorSchema.safeParse(error);
-        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     });
 });

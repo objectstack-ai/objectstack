@@ -29,17 +29,19 @@
  * of this file, and before trusting an ablated one above all: a stale `dist`
  * runs the pre-mutation door and stays green.
  *
- * What each case pins:
+ * Each of the four refusals is pinned twice, as separate cases, so a
+ * regression in one half cannot hide behind the other:
  *
- *  1. the code and the status, read off the rejected `err` (the SDK surface)
- *     AND off the raw wire body, which must parse under the published
- *     `ApiErrorSchema`. That parse is the ledger half: `ApiErrorSchema.code`
- *     admits only the standard catalog and the ADR-0112 ledger, so a code the
- *     ledger does not register fails here by name;
- *  2. the suspension is untouched: the run still reads `paused` after the
- *     refusal, and, where the flow still exists, a corrected resume completes
- *     it. The statuses and the suspension were right before this card; these
- *     legs hold them right.
+ *  1. **the code** — read off the rejected `err` (the SDK surface) AND off the
+ *     raw wire body, which must parse under the published `ApiErrorSchema`.
+ *     That parse is the ledger half: `ApiErrorSchema.code` admits only the
+ *     standard catalog and the ADR-0112 ledger, so a code the ledger does not
+ *     register fails here by name;
+ *  2. **the status and the suspension** — the same status on `err` and on
+ *     the wire, the run still reads `paused` after the refusal, and, where the
+ *     flow still exists, a corrected resume completes it. The statuses and the
+ *     suspension were right before this card; these cases hold them right,
+ *     and they stay green when only the code regresses.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -138,65 +140,102 @@ async function startPaused(h: Harness): Promise<string> {
     return started.runId;
 }
 
+
 async function rejectionOf(p: Promise<unknown>): Promise<any> {
     return p.then(() => { throw new Error('expected the resume to reject'); }, (e) => e);
 }
 
-/** Both halves of pin 1: the SDK's `err` and the wire body it was built from. */
-function expectRefusal(h: Harness, err: any, code: string, status: number): void {
-    expect(err.code).toBe(code);
-    expect(err.httpStatus).toBe(status);
-    expect(h.wire.last?.success).toBe(false);
-    expect(h.wire.last?.error?.code).toBe(code);
-    expect(h.wire.last?.error?.httpStatus).toBe(status);
-    const parsed = ApiErrorSchema.safeParse(h.wire.last?.error);
-    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+/** What is left of the suspension after the refusal, per row. */
+type Afterwards = 'no run' | 'paused' | 'paused, and a corrected resume completes it';
+
+interface Refusal {
+    name: string;
+    code: string;
+    status: number;
+    afterwards: Afterwards;
+    /** Drive the refused resume through the client; answer the rejection and the run it addressed. */
+    act: (h: Harness) => Promise<{ err: any; runId?: string }>;
 }
 
-describe('#21724 — every refused resume answers the engine\'s own code', () => {
-    it('an incomplete screen input → 400 INVALID_SCREEN_INPUT; the run stays paused and a corrected resume completes it', async () => {
+/** The card's four refusals, driven exactly as it reproduced them. */
+const REFUSALS: Refusal[] = [
+    {
+        name: 'an incomplete screen input',
+        code: 'INVALID_SCREEN_INPUT',
+        status: 400,
+        afterwards: 'paused, and a corrected resume completes it',
+        act: async (h) => {
+            const runId = await startPaused(h);
+            return { runId, err: await rejectionOf(h.client.automation.resume(FLOW, runId, { inputs: {} })) };
+        },
+    },
+    {
+        name: 'a signal writing an engine-reserved name',
+        code: 'INVALID_SIGNAL',
+        status: 400,
+        afterwards: 'paused, and a corrected resume completes it',
+        act: async (h) => {
+            const runId = await startPaused(h);
+            const err = await rejectionOf(h.client.automation.resume(FLOW, runId, {
+                inputs: { new_assignee: 'x' },
+                output: { $User: {} },
+            }));
+            return { runId, err };
+        },
+    },
+    {
+        name: 'an unknown run',
+        code: 'RUN_NOT_FOUND',
+        status: 404,
+        afterwards: 'no run',
+        act: async (h) => ({
+            err: await rejectionOf(h.client.automation.resume(FLOW, 'run_nope', { inputs: { new_assignee: 'x' } })),
+        }),
+    },
+    {
+        name: 'a run whose flow was deleted',
+        code: 'RUN_NOT_FOUND',
+        status: 404,
+        afterwards: 'paused',
+        act: async (h) => {
+            const runId = await startPaused(h);
+            await h.client.automation.delete(FLOW);
+            return { runId, err: await rejectionOf(h.client.automation.resume(FLOW, runId, { inputs: { new_assignee: 'x' } })) };
+        },
+    },
+];
+
+describe('#21724 — the code: every refused resume answers the engine\'s own code', () => {
+    it.each(REFUSALS)('$name → $code, on err.code and on the wire, and the ledger registers it', async ({ code, act }) => {
         const h = producerBackedClient();
-        const runId = await startPaused(h);
 
-        const err = await rejectionOf(h.client.automation.resume(FLOW, runId, { inputs: {} }));
+        const { err } = await act(h);
 
-        expectRefusal(h, err, 'INVALID_SCREEN_INPUT', 400);
-        expect((await h.client.automation.runs.get(FLOW, runId)).status).toBe('paused');
-        const done: any = await h.client.automation.resume(FLOW, runId, { inputs: { new_assignee: 'ada' } });
-        expect(done.success).toBe(true);
+        expect(err.code).toBe(code);
+        expect(h.wire.last?.error?.code).toBe(code);
+        const parsed = ApiErrorSchema.safeParse(h.wire.last?.error);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     });
+});
 
-    it('a signal writing an engine-reserved name → 400 INVALID_SIGNAL; the run stays paused and a corrected resume completes it', async () => {
-        const h = producerBackedClient();
-        const runId = await startPaused(h);
-
-        const err = await rejectionOf(h.client.automation.resume(FLOW, runId, {
-            inputs: { new_assignee: 'x' },
-            output: { $User: {} },
-        }));
-
-        expectRefusal(h, err, 'INVALID_SIGNAL', 400);
-        expect((await h.client.automation.runs.get(FLOW, runId)).status).toBe('paused');
-        const done: any = await h.client.automation.resume(FLOW, runId, { inputs: { new_assignee: 'ada' } });
-        expect(done.success).toBe(true);
-    });
-
-    it('an unknown run → 404 RUN_NOT_FOUND', async () => {
+describe('#21724 — the status and the suspension are unchanged', () => {
+    it.each(REFUSALS)('$name → $status; afterwards: $afterwards', async ({ status, afterwards, act }) => {
         const h = producerBackedClient();
 
-        const err = await rejectionOf(h.client.automation.resume(FLOW, 'run_nope', { inputs: { new_assignee: 'x' } }));
+        const { err, runId } = await act(h);
 
-        expectRefusal(h, err, 'RUN_NOT_FOUND', 404);
-    });
-
-    it('a run whose flow was deleted → 404 RUN_NOT_FOUND, and the run still reads paused', async () => {
-        const h = producerBackedClient();
-        const runId = await startPaused(h);
-        await h.client.automation.delete(FLOW);
-
-        const err = await rejectionOf(h.client.automation.resume(FLOW, runId, { inputs: { new_assignee: 'x' } }));
-
-        expectRefusal(h, err, 'RUN_NOT_FOUND', 404);
-        expect((await h.engine.getRun(runId))?.status).toBe('paused');
+        expect(err.httpStatus).toBe(status);
+        expect(h.wire.last?.success).toBe(false);
+        expect(h.wire.last?.error?.httpStatus).toBe(status);
+        if (afterwards === 'no run') {
+            expect(runId).toBeUndefined();
+            return;
+        }
+        expect((await h.engine.getRun(runId!))?.status).toBe('paused');
+        if (afterwards === 'paused, and a corrected resume completes it') {
+            const done: any = await h.client.automation.resume(FLOW, runId!, { inputs: { new_assignee: 'ada' } });
+            expect(done.success).toBe(true);
+            expect((await h.engine.getRun(runId!))?.status).toBe('completed');
+        }
     });
 });
