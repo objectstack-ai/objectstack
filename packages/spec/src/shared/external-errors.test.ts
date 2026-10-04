@@ -29,7 +29,7 @@ describe('External error codes (ADR-0015)', () => {
 // REACHABLE by a client.
 // ---------------------------------------------------------------------------
 
-describe('[#7739] EXTERNAL_ERROR_HTTP_STATUS', () => {
+describe('EXTERNAL_ERROR_HTTP_STATUS — each external error carries an HTTP status', () => {
   it('covers every code in the family — no gate can leak as a bare 500', () => {
     // The `satisfies Record<ExternalErrorCode, number>` makes a missing entry a
     // compile error; this is the runtime twin, so a code added to the map but
@@ -112,7 +112,7 @@ describe('renderDiffMessage', () => {
    * schema fact) and renders like every other kind: the raw kind name plus the
    * carried error text, so an unknown-to-a-consumer entry is still loud.
    */
-  it('renders the `unreachable` kind with the carried error text (#11166)', () => {
+  it('renders the `unreachable` kind with the carried error text', () => {
     const diffs: SchemaDiffEntry[] = [
       {
         kind: 'unreachable',

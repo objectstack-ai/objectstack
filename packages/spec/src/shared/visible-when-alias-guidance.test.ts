@@ -76,14 +76,14 @@ const FORM_FIELD = { field: 'probe' } as const;
 // ===========================================================================
 // 1. The surfaces this card CHANGED
 // ===========================================================================
-describe('#7832 — the curation added here', () => {
+describe('the reverse-direction alias curation added here', () => {
   describe('`RowCrudActionOverrideSchema` — was a bare zod message, surface unnamed', () => {
     it('names the surface at all (it did not before — `Unrecognized key: "visible"` was the whole message)', () => {
       const m = unknownKeyMessage(RowCrudActionOverrideSchema, { visible: true });
       expect(m).toContain('this row CRUD override');
     });
 
-    it('`visible` names BOTH landing keys — the boolean one first, per #7816', () => {
+    it('`visible` names BOTH landing keys — the boolean `enabled: false` first', () => {
       const m = unknownKeyMessage(RowCrudActionOverrideSchema, { visible: true });
       expect(m).toMatch(/`enabled: false`/);
       expect(m).toMatch(/`visibleWhen/);
@@ -144,7 +144,7 @@ describe('#7832 — the curation added here', () => {
 // 2. The surfaces that were ALREADY compliant — pinned so a sweep can tell
 //    "already answered" from "nobody got to it"
 // ===========================================================================
-describe('#7832 — already curated before this card, and why no row was added', () => {
+describe('already curated before the reverse-direction sweep, and why no row was added', () => {
   it('`SelectOptionSchema` already renames `visible` and `showWhen` onto `visibleWhen`', () => {
     expect(unknownKeyMessage(SelectOptionSchema, { ...OPTION, visible: true }))
       .toContain('Did you mean `visible` → `visibleWhen`?');
@@ -171,7 +171,7 @@ describe('#7832 — already curated before this card, and why no row was added',
 // ===========================================================================
 // 3. Where NO row was added, because the target key does not exist
 // ===========================================================================
-describe('#7832 — the deliberate gaps (an alias here would name a key the shape rejects)', () => {
+describe('the deliberate gaps (an alias here would name a key the shape rejects)', () => {
   it.each([
     ['SelectOptionSchema', SelectOptionSchema, OPTION],
     ['FormSectionSchema', FormSectionSchema, SECTION],
@@ -213,7 +213,7 @@ describe('#7832 — the deliberate gaps (an alias here would name a key the shap
 // ===========================================================================
 // 4. Acceptance is byte-identical — the constraint this card was scoped under
 // ===========================================================================
-describe('#7832 — no acceptance change', () => {
+describe('no acceptance change', () => {
   it('`RowCrudActionOverrideSchema` still accepts exactly its three declared keys', () => {
     expect(RowCrudActionOverrideSchema.safeParse({}).success).toBe(true);
     expect(
@@ -265,7 +265,7 @@ describe('#7832 — no acceptance change', () => {
 const TAB_ITEM = { label: 'Tab', children: [] } as const;
 const SCREEN_FIELD = { name: 'f' } as const;
 
-describe('#8382 — the two shapes #7832 never enumerated', () => {
+describe('the two `visibleWhen` shapes the first sweep never enumerated', () => {
   describe('`page:tabs` item (`PageTabsProps.items`) — `visibleWhen` declared, no alias for the action-side spellings', () => {
     it('`visible` renames onto `visibleWhen`', () => {
       const m = unknownKeyMessage(PageTabsProps, { items: [{ ...TAB_ITEM, visible: true }] });
@@ -302,7 +302,7 @@ describe('#8382 — the two shapes #7832 never enumerated', () => {
     // the rejection at `visibleWhen` for these two as well, on the same
     // one-landing-key rule as `visible` / `showWhen`. Pinned here so a future
     // edit cannot silently drop the pointer OR silently start accepting them.
-    it('`visibility` / `visibleOn` are POINTED at `visibleWhen` but stay rejected (the #8382 judgment call)', () => {
+    it('`visibility` / `visibleOn` are POINTED at `visibleWhen` but stay rejected', () => {
       const mVisibility = unknownKeyMessage(PageTabsProps, { items: [{ ...TAB_ITEM, visibility: true }] });
       expect(mVisibility).toContain('Did you mean `visibility` → `visibleWhen`?');
       expect(PageTabsProps.safeParse({ items: [{ ...TAB_ITEM, visibility: true }] }).success).toBe(false);

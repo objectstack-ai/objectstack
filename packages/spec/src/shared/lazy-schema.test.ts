@@ -127,7 +127,7 @@ describe('lazySchema × z.toJSONSchema identity', () => {
  * real instance, so before the facade aliased it every lazy reference lost its
  * `description` while `OS_EAGER_SCHEMAS=1` (no Proxy at all) kept it.
  */
-describe('lazySchema × z.toJSONSchema metadata (#19101)', () => {
+describe('lazySchema × z.toJSONSchema — a lazy reference keeps its metadata', () => {
   it('a lazy reference converts exactly like the eager instance — nested and as the root', () => {
     const factory = () => z.record(z.string(), z.unknown()).describe('lazy-described record');
     const lazy = lazySchema(factory);
@@ -168,7 +168,7 @@ describe('lazySchema × z.toJSONSchema metadata (#19101)', () => {
  * components gain 2 descriptions, the
  * `os generate` IDE schema 445; description is the only key that moved.
  */
-describe('lazy == eager on the real contract (#19101)', () => {
+describe('lazy == eager on the real contract', () => {
   const PKG_ROOT = fileURLToPath(new URL('../..', import.meta.url));
   const CONTRACT = new URL('../api/contract.zod.ts', import.meta.url).href;
   const METADATA_TYPES = new URL('../kernel/metadata-type-schemas.ts', import.meta.url).href;

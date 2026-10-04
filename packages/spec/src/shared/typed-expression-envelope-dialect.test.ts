@@ -64,7 +64,7 @@ const TYPED: ReadonlyArray<{
   { dialect: 'template', schema: TemplateExpressionInputSchema, good: '{{record.name}}', unjudged: 'not a template {{{', foreign: ['cel', 'cron'] },
 ];
 
-describe.each(TYPED)('$dialect-typed slot — the dialect is fixed on both arms, and blank is refused (#15028 / #15035)', ({ dialect, schema, good, unjudged, foreign }) => {
+describe.each(TYPED)('$dialect-typed slot — the dialect is fixed on both arms, and blank is refused', ({ dialect, schema, good, unjudged, foreign }) => {
   const dialectOnly = TYPED_EXPRESSION_DIALECT_ONLY[dialect];
   const sourceRequired = TYPED_EXPRESSION_SOURCE_REQUIRED[dialect];
 
@@ -199,7 +199,7 @@ describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed sl
     ]);
   });
 
-  it('[#16320] `connectors[].syncConfig.schedule` is no longer a typed slot — every shape draws the CONTAINER\'s retirement verdict at `connectors.0.syncConfig`, never a dialect verdict', () => {
+  it('`connectors[].syncConfig.schedule` is no longer a typed slot — every shape draws the CONTAINER\'s retirement verdict at `connectors.0.syncConfig`, never a dialect verdict', () => {
     // The foreign envelope this case used to narrow on, the cron envelope the
     // slot used to normalize TO, and the bare string it used to accept. They
     // were silently stripped from 2026-09-10 (the key deleted with no

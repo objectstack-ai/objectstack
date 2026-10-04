@@ -72,7 +72,7 @@ describe('FieldMappingSchema', () => {
 // so without the tombstone an authored `transform` is either accepted or
 // silently stripped — never named).
 
-describe('[#5552] FieldMapping.transform is retired, and says so', () => {
+describe('FieldMapping.transform is retired, and says so', () => {
   const RETIRED = {
     source: 'order_value',
     target: 'order_total',

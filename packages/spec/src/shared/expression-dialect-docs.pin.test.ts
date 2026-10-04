@@ -64,7 +64,7 @@ function dialectRowsInDocTable(): string[] {
   return names;
 }
 
-describe('[#6085] expression.zod.ts dialect table === ExpressionDialect', () => {
+describe('expression.zod.ts dialect table === ExpressionDialect', () => {
   const rows = dialectRowsInDocTable();
 
   it('finds the table at all (anti-vacuity)', () => {
@@ -79,7 +79,7 @@ describe('[#6085] expression.zod.ts dialect table === ExpressionDialect', () => 
     expect([...rows].sort()).toEqual([...ExpressionDialect.options].sort());
   });
 
-  it('never re-advertises `js`, retired at #3278', () => {
+  it('never re-advertises `js`, retired in favour of ScriptBody', () => {
     // The specific regression this pin was written for. `js` is not an
     // expression dialect at all — procedural JavaScript is the L2 authoring
     // surface (`ScriptBody { language: 'js' }`), so a row here would send an

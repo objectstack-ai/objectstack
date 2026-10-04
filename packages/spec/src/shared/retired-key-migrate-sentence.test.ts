@@ -267,7 +267,7 @@ function claimTree(): Array<{ file: string; line: number; excerpt: string }> {
   return all;
 }
 
-describe('`os migrate meta` sentences are the house sentence, across corpora (#6856 route D, widened #7030)', () => {
+describe('`os migrate meta` sentences are the house sentence, across corpora', () => {
   it('every prescription sentence in packages/spec/src and packages/lint/src is house-form or MIXED two-clause', () => {
     const judged = judgeTree();
     const violations = judged.filter((j) => !j.ok);
@@ -303,7 +303,7 @@ describe('`os migrate meta` sentences are the house sentence, across corpora (#6
     expect(lintSites.every((j) => j.ok)).toBe(true);
   });
 
-  it('[#9529] the withdrawn automatic-rewrite claim is absent from every prescription', () => {
+  it('the withdrawn automatic-rewrite claim is absent from every prescription', () => {
     // The other direction of the same ruling: requiring the new sentence where
     // `--from <N>` appears would still let the claim survive in a prescription
     // that spells the bare command (`CHATTER_POSITION_RETIRED` does) or names
@@ -315,7 +315,7 @@ describe('`os migrate meta` sentences are the house sentence, across corpora (#6
     ).toEqual([]);
   });
 
-  it('[#9529] the withdrawn-claim scan is not vacuous — every retired spelling trips it', () => {
+  it('the withdrawn-claim scan is not vacuous — every retired spelling trips it', () => {
     const withdrawn = [
       "const a = 'Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically.';",
       "const b = 'Delete the key. Run `os migrate meta --from 16` to rewrite it automatically.';",
@@ -339,7 +339,7 @@ describe('`os migrate meta` sentences are the house sentence, across corpora (#6
   it('goes RED on the retired "rewrite it" spelling, naming the site', () => {
     const planted = [
       "const X = retiredKey(",
-      "  '`x.y` was removed in @objectstack/spec 17.0.0 (#0000) — nothing read it. Delete the key. '",
+      "  '`x.y` was removed in @objectstack/spec 17.0.0 — nothing read it. Delete the key. '",
       "  + 'Run `os migrate meta --from 16` to rewrite it automatically.',",
       ');',
     ].join('\n');
@@ -508,10 +508,10 @@ function judgeMarkdownSentences({ file, flat }: MarkdownFile): MarkdownSite[] {
   });
 }
 
-describe('the retirement playbook and the published skill catalog agree with this pin (#10848, corpus widened #13859)', () => {
+describe('the retirement playbook and the published skill catalog agree with this pin', () => {
   const corpus = markdownCorpus();
 
-  it('[#13859] anti-vacuity for the DISCOVERY: the playbook and at least one published skill', () => {
+  it('anti-vacuity for the DISCOVERY: the playbook and at least one published skill', () => {
     // The corpus is this suite's input, so a walk that reached zero published
     // files would restore the exact one-file blindness #13859 is about — and
     // every assertion below would stay green while it did. Assert the shape of
@@ -550,7 +550,7 @@ describe('the retirement playbook and the published skill catalog agree with thi
     expect(rests.some((r) => SKILL_MIXED_TEMPLATE.test(r))).toBe(true);
   });
 
-  it('[#9529] the withdrawn automatic-rewrite claim is absent from the corpus, in every spelling', () => {
+  it('the withdrawn automatic-rewrite claim is absent from the corpus, in every spelling', () => {
     // Judged over the raw text rather than reconstruct(): a markdown line
     // opening with an asterisk would be dropped as a comment line, hiding a
     // claim. WITHDRAWN_CLAIM is English-only BY DESIGN — the playbook's
@@ -566,7 +566,7 @@ describe('the retirement playbook and the published skill catalog agree with thi
     expect(claims, claims.join('\n')).toEqual([]);
   });
 
-  it('[#13859] the markdown judge is not vacuous — template and prose anchors each hold', () => {
+  it('the markdown judge is not vacuous — template and prose anchors each hold', () => {
     const judge = (flat: string): MarkdownSite[] => judgeMarkdownSentences({ file: 'synthetic.md', flat });
     const house = 'Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.';
     const mixed = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; the rest are reported.';
