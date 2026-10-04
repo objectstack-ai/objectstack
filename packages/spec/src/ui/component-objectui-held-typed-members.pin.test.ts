@@ -91,13 +91,13 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     ['a title and date mapping', 'object-timeline', { mapping: { title: 'code', date: 'finish' } }],
     ['a description mapping', 'object-timeline', { mapping: { description: 'code' } }],
     ['a variant mapping', 'object-timeline', { mapping: { variant: 'kind' } }],
-    // This package's own `component-element-navigation-17987.test.ts:220`.
+    // This package's own navigation test (`packages/spec/src/ui/component-element-navigation-17987.test.ts`).
     ['a title and variant mapping', 'object-timeline', { mapping: { title: 'subject', variant: 'status' } }],
     ['an empty mapping', 'object-timeline', { mapping: {} }],
     // objectui's page-builder guide at `main` (`skills/objectui/guides/page-builder.md`).
     ['form field names', 'object-form', { fields: ['name', 'email'] }],
     ['no form fields', 'object-form', { fields: [] }],
-    // The showcase's project workspace (`examples/app-showcase/src/ui/pages/project-workspace.page.ts:47`).
+    // The showcase's project workspace (`examples/app-showcase/src/ui/pages/project-workspace.page.ts`).
     ['master-detail parent field names', 'object-master-detail-form', {
       fields: ['name', 'account', 'status', 'health', 'budget', 'end_date'],
     }],
