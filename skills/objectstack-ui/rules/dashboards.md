@@ -318,14 +318,14 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
 | `dateGranularity` | Rendered bucket label |
 |:--|:--|
 | `'day'` | `YYYY-MM-DD` |
-| `'week'` | ISO date of the bucket (`YYYY-MM-DD`) |
+| `'week'` | ISO week `YYYY-Www` |
 | `'month'` | `YYYY-MM` |
 | `'quarter'` | `YYYY-Qn` |
 | `'year'` | `YYYY` |
 
-* **Engine support** — Postgres `date_trunc`, MySQL `date_format`, SQLite
-  `strftime`, MongoDB `$dateTrunc`, in-memory fallback. All emitted by the
-  analytics service, not the client.
+* **Engine support** — drivers emit the bucket as a label (`2026-01`), not
+  an instant: Postgres `to_char`, MySQL `date_format`, SQLite `strftime`,
+  MongoDB `$dateToString`, in-memory `bucketDateKey`.
 * **Human labels are automatic** — the analytics layer formats the bucket value
   to the label above, and resolves `select`/`lookup` dimension values to their
   option label / related-record name. Measures carry their `label` + `format`

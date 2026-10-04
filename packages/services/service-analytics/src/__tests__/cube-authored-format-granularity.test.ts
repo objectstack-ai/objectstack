@@ -86,8 +86,15 @@ const dataset = DatasetSchema.parse({
 
 type GroupByItem = string | { field: string; dateGranularity?: string };
 
-/** An ObjectQL-only host that records the `groupBy` every aggregate ran with. */
-function objectqlService(cubes: Cube[] = [authored]) {
+/**
+ * An ObjectQL-only host that records the `groupBy` every aggregate ran with.
+ * [#21647] `dateBucketSql` is the host's driver-expression hook, unwired by
+ * default.
+ */
+function objectqlService(
+  cubes: Cube[] = [authored],
+  dateBucketSql?: (object: string, field: string, granularity: string) => string | undefined,
+) {
   const groupBys: GroupByItem[][] = [];
   const service = new AnalyticsService({
     logger: silentLogger,
@@ -97,6 +104,7 @@ function objectqlService(cubes: Cube[] = [authored]) {
       groupBys.push((options.groupBy ?? []) as GroupByItem[]);
       return [{ status: 'open', count: 2, revenue: 10, margin: 0.25, placed_at: '2026-07' }];
     },
+    dateBucketSql,
   });
   return { service, groupBys };
 }
@@ -238,14 +246,34 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
     expect(groupBys).toEqual([[]]);
   });
 
+  // [#21647] This case asserted `date_trunc('month'` on a host that wires no
+  // `dateBucketSql` hook: a representative bucket no driver groups by. The
+  // echo now prints the driver's own expression or refuses, so the declared
+  // default is asserted as the granularity the hook is asked for and the
+  // expression it answers, and the no-hook host as the refusal, which only a
+  // bucketed dimension draws.
   it('`generateSql()` dry-runs the bucketed statement `query()` runs', async () => {
-    const { service } = objectqlService();
+    const asked: string[] = [];
+    const { service } = objectqlService([authored], (_object, field, granularity) => {
+      asked.push(`${field}:${granularity}`);
+      return `driver_bucket('${granularity}', ${field})`;
+    });
 
     const declared = await service.generateSql({ cube: 'orders', measures: ['count'], dimensions: ['placed_at'] });
     const undeclared = await service.generateSql({ cube: 'orders', measures: ['count'], dimensions: ['created_at'] });
 
-    expect(declared.sql).toMatch(/date_trunc\('month'/i);
-    expect(undeclared.sql).not.toMatch(/date_trunc/i);
+    expect(asked).toEqual(['placed_at:month']);
+    expect(declared.sql).toContain(`GROUP BY driver_bucket('month', placed_at)`);
+    expect(undeclared.sql).not.toContain('driver_bucket');
+
+    const { service: noHook } = objectqlService();
+    const refused = await noHook.generateSql({ cube: 'orders', measures: ['count'], dimensions: ['placed_at'] }).then(
+      () => { throw new Error('expected the echo to refuse'); },
+      (e) => e as Error & { code?: string; status?: number; refusal?: unknown },
+    );
+    expect([refused.code, refused.status, refused.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
+    expect((await noHook.generateSql({ cube: 'orders', measures: ['count'], dimensions: ['created_at'] })).sql)
+      .toBe(undeclared.sql);
   });
 
   it('native SQL declines a bucketed query, so a declared default routes to the engine path as a dataset does', async () => {

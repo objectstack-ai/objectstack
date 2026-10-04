@@ -46,9 +46,12 @@
  * on SQLite and PostgreSQL, and the dialect matrix below pins it on SQLite,
  * PostgreSQL and MySQL through each driver's own hooks, with no server.
  *
- * At UTC, where the hook answers nothing (a host that wires no hook), the
- * bucket keeps the representative `date_trunc`. [#21595] Except on SQLite,
- * which has no `date_trunc`: there the echo refuses too.
+ * [#21647] At UTC, where the hook answers nothing (a host that wires no hook,
+ * or a driver that renders no expression), the echo refuses too, on every
+ * dialect. It used to print a representative `date_trunc` there, except on
+ * SQLite (#21595). The block at the end pins the no-hook host, and
+ * `objectql-echo-bucket-enumeration.test.ts` pins every builtin driver,
+ * timezone class and granularity against the engine's own bucketing.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -247,6 +250,11 @@ for (const cell of CELLS) {
         });
       }
 
+      // [#21647] One of the two cells where the engine buckets in memory and
+      // the echo still prints, because the hook answers and the expression,
+      // run here, answers the face's rows (the last assertion). The other is
+      // `driver-turso`'s remote face, pinned by code path in
+      // `objectql-echo-bucket-enumeration.test.ts`.
       it('a measure filter, which the engine aggregates in memory: the echo keeps the driver expression and runs with its params', async () => {
         const query = { cube: FILTERED.name, measures: ['big_sum'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }], order: { closed_on: 'asc' } };
         const { res, ran } = await ask(query);
@@ -349,12 +357,23 @@ describe('[#21630] the echo of a date bucket, per dialect: a non-UTC timezone re
   }
 });
 
-describe('[#21441] FALLBACK: a host that wires no dateBucketSql hook', () => {
-  it('echoes the bucket as `date_trunc`', async () => {
-    const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
-    const { sql } = await new ObjectQLStrategy().generateSql(bucketed('closed_on', 'month') as any, ctx);
-    expect(selectedBucket(sql, 'closed_on')).toBe("date_trunc('month', closed_on)");
-  });
+/**
+ * [#21647] A host that wires no `dateBucketSql` hook. This block was the
+ * FALLBACK: at UTC it echoed the bucket as `date_trunc('month', closed_on)`, an
+ * expression no driver groups by. It now refuses at every timezone and on
+ * every dialect, as the declared refusal the other two arms answer.
+ */
+describe('[#21647] REFUSAL: a host that wires no dateBucketSql hook', () => {
+  it.each([['UTC', 'UTC'], ['unset', undefined]] as const)(
+    '[#21647] timezone %s: refuses, where it used to echo the bucket as `date_trunc`',
+    async (_label, timezone) => {
+      const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
+      const query = bucketed('closed_on', 'month', timezone === undefined ? {} : { timezone });
+      const err = await refusalOf(new ObjectQLStrategy().generateSql(query as any, ctx));
+      expect([err.code, err.status, err.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
+      expect(declaredRefusalMessage(err)).toBe(err.message);
+    },
+  );
 
   it('[#21630] REFUSAL: with a non-UTC timezone, it refuses: the engine buckets that in memory whatever the host wires', async () => {
     const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
@@ -363,7 +382,7 @@ describe('[#21441] FALLBACK: a host that wires no dateBucketSql hook', () => {
     expect(declaredRefusalMessage(err)).toBe(err.message);
   });
 
-  it('[#21595] REFUSAL: on a SQLite datasource, it refuses rather than echo `date_trunc`', async () => {
+  it('[#21595] REFUSAL: on a SQLite datasource, it refuses (the first case of the one rule)', async () => {
     const ctx = {
       getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined),
       sqlDialect: () => 'sqlite',
