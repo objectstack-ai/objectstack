@@ -144,7 +144,19 @@ describe('an authored time dimension\'s single declared granularity is its defau
         expect(res.body.data.rows).toEqual([{ placed_at: '2026-07', count: 2 }]);
     });
 
-    it('POST /analytics/sql dry-runs the bucketed statement, and a stated granularity still wins', async () => {
+    // [#21647] This case asserted 200 and `date_trunc('month'` / `date_trunc('year'`:
+    // the representative bucket the SQL echo printed for a host with no
+    // `dateBucketSql` hook, which no driver groups by. This host composes the
+    // service directly, with no hook and no driver behind it, so the dry run now
+    // answers the service's declared refusal (`NOT_IMPLEMENTED` / 501,
+    // `refusal: true` at throw time). This exit reads that declaration to keep
+    // the producer's message instead of withholding a 5xx as a fault, so the
+    // message reaching the wire IS the declaration's effect: it names the bucket
+    // it refused and the cause, the declared default for the first request and
+    // the stated granularity for the second. Where a hook answers, the
+    // service-level pin (`service-analytics` `cube-authored-format-granularity.test.ts`)
+    // asserts the driver's expression.
+    it('POST /analytics/sql dry-runs the bucket at the declared granularity, and a stated granularity still wins (no dateBucketSql hook: the declared refusal)', async () => {
         const declared = await post(analytics().service, 'sql', { cube: 'orders', measures: ['count'], dimensions: ['placed_at'] });
         const stated = await post(analytics().service, 'sql', {
             cube: 'orders',
@@ -153,9 +165,12 @@ describe('an authored time dimension\'s single declared granularity is its defau
             timeDimensions: [{ dimension: 'placed_at', granularity: 'year' }],
         });
 
-        expect(declared.statusCode).toBe(200);
-        expect(declared.body.data.sql).toMatch(/date_trunc\('month'/i);
-        expect(stated.statusCode).toBe(200);
-        expect(stated.body.data.sql).toMatch(/date_trunc\('year'/i);
+        for (const [res, granularity] of [[declared, 'month'], [stated, 'year']] as const) {
+            expect(res.statusCode, granularity).toBe(501);
+            expect(res.body.success, granularity).toBe(false);
+            expect(res.body.error.code, granularity).toBe('NOT_IMPLEMENTED');
+            expect(res.body.error.message, granularity).toContain(`"${granularity}" bucket of "placed_at"`);
+            expect(res.body.error.message, granularity).toContain('dateBucketSql');
+        }
     });
 });
