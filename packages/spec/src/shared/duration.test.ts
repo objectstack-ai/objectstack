@@ -42,7 +42,7 @@ export type IsoDurationSeconds = Assert<
   Eq<z.input<typeof DurationSeconds>, z.infer<typeof DurationSeconds>>
 >;
 
-describe('the closed duration vocabulary — exactly two units (#18122)', () => {
+describe('the closed duration vocabulary — exactly two units', () => {
   it('declares milliseconds and seconds, and no speculative third unit', async () => {
     // ⛔ `DurationMinutes` / `DurationHours` / `DurationDays` are added when a
     // real row needs one, in the PR that converts it — the unit set is derived

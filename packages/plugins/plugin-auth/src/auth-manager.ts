@@ -768,8 +768,10 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   };
 
   /**
-   * Display name used by built-in auth email templates (`{{appName}}`
-   * placeholder). Defaults to `'ObjectStack'` when omitted.
+   * The deployment's product name: the `{{appName}}` placeholder of the
+   * built-in auth email templates, and the issuer and label prefix of the
+   * otpauth URI a TOTP enrollment hands to the user's authenticator app.
+   * Defaults to `'ObjectStack'` when omitted.
    */
   appName?: string;
 
@@ -1463,6 +1465,21 @@ export class AuthManager {
       // better-auth derives from baseURL are always clickable links.
       baseURL: this.getCanonicalOrigin(),
       basePath: this.configuredBasePath(),
+      // The deployment's product name, from the one authority every auth
+      // email already reads (`getAppName()`: the `branding.workspace_name`
+      // override, else the configured `appName`, else 'ObjectStack').
+      // better-auth 1.7.3 reads this key once, into its context's `appName`
+      // (unset ⇒ "Better Auth"), and reads that in exactly two places: the
+      // issuer and label prefix of the otpauth URI that `/two-factor/enable`
+      // and `/two-factor/get-totp-uri` answer. No cookie name derives from it
+      // (the prefix is the literal "better-auth") and nothing stores it, so an
+      // authenticator enrolled under the old label keeps producing codes that
+      // verify: the issuer is a display label beside an unchanged secret.
+      //
+      // Read when this instance is built. A later branding rename reaches the
+      // issuer only when the instance is rebuilt (a config patch or a
+      // restart), while auth emails call `getAppName()` on every send.
+      appName: this.getAppName(),
 
       // Database adapter configuration
       database: await this.createDatabaseConfig(),
@@ -5652,13 +5669,20 @@ export class AuthManager {
    * value only reflects an *explicitly set* setting — when the operator has
    * not customised it, AuthPlugin passes `undefined` so a deployment's
    * configured `appName` (e.g. `OS_APP_NAME`) keeps precedence.
+   *
+   * The TOTP issuer reads the same value, but when the better-auth instance
+   * is BUILT (see `createAuthInstance`), not per enrollment: an override set
+   * after the build reaches it at the next rebuild.
    */
   setAppName(name: string | undefined): void {
     this.appNameOverride = name?.trim() || undefined;
   }
   private appNameOverride?: string;
 
-  /** @internal `{{appName}}` placeholder value for built-in templates. */
+  /**
+   * @internal The deployment's product name: `{{appName}}` in built-in
+   * templates, and the TOTP issuer handed to better-auth as its `appName`.
+   */
   private getAppName(): string {
     return this.appNameOverride ?? this.config.appName ?? 'ObjectStack';
   }

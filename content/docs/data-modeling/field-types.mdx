@@ -362,7 +362,7 @@ Self-referential hierarchy (e.g., categories, org chart).
 
 ## Media Types
 
-Media fields store a reference to an uploaded file. They take the universal field properties (`multiple` is honored for `file` and `image`); there is no per-field file-attachment config object in the field schema — file constraints and storage are configured at the storage-provider layer, not on the field.
+Media fields store a reference to an uploaded file. They take the universal field properties (`multiple` is honored for `file` and `image`). Two more field properties apply to the media family (`file`, `image`, `avatar`, `video` and `audio`) and constrain the referenced file: `accept`, the permitted upload types as MIME types or extensions (e.g. `["image/*", ".pdf"]`), offered to the file picker and enforced on write; and `maxSize`, the maximum permitted file size in bytes, enforced on write against the stored file size, not just checked in the browser. A create or update whose referenced file violates either is refused with `400 ERR_FILE_CONSTRAINT`, and the error message names the field and the constraint. Storage itself is configured at the storage-provider layer, not on the field.
 
 ### `image`
 Image file with optional validation.

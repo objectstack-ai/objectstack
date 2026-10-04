@@ -42,7 +42,7 @@ function expectedRestPlural(type: string): string {
   return `${type}s`;
 }
 
-describe('#7894 INVARIANT 1 — no spelling that worked before may stop working', () => {
+describe('INVARIANT 1 — no spelling that worked before may stop working', () => {
   it('folds every manifest spelling to exactly the singular it folded to before', () => {
     // The manifest map is the complete population of spellings that resolved at
     // the `/meta` boundary before this change, so quantifying over it IS the
@@ -81,7 +81,7 @@ describe('#7894 INVARIANT 1 — no spelling that worked before may stop working'
   });
 });
 
-describe('#7894 INVARIANT 2 — no unmapped spelling of a DECLARED type may answer 200', () => {
+describe('INVARIANT 2 — no unmapped spelling of a DECLARED type may answer 200', () => {
   it('maps the REST plural of every declared registry type', () => {
     // This is the limb that makes the defect non-recurring: it is quantified
     // over the registry, so a newly declared type arrives already mapped and
@@ -140,7 +140,7 @@ describe('#7894 INVARIANT 2 — no unmapped spelling of a DECLARED type may answ
   });
 });
 
-describe('#7894 — the refusal limb is narrow by construction', () => {
+describe('the refusal limb is narrow by construction', () => {
   it('refuses an unrecognised plural of a declared type, naming that type and its spelling', () => {
     expect(metaUrlSpellingRefusal('capabilitys')).toEqual({ declared: 'capability', hint: 'capabilities' });
     expect(metaUrlSpellingRefusal('objectes')).toEqual({ declared: 'object', hint: 'objects' });
@@ -178,7 +178,7 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     }
   });
 
-  it('hands its residue to the OTHER verdict rather than widening (#8421 flipped this)', () => {
+  it('hands its residue to the OTHER verdict rather than widening (flipped once unknown type names were refused)', () => {
     // FLIPPED, not deleted (#8421 closed what #7894 left open, the way #7894
     // flipped what #7743 left behind).
     //
@@ -194,7 +194,7 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     expect(unrecognisedMetaTypeRefusal('fieldz')).toEqual({ type: 'fieldz' });
   });
 
-  it('refuses a wrong plural of EVERY declared type, naming that type (#8424)', () => {
+  it('refuses a wrong plural of EVERY declared type, naming that type', () => {
     // Registry-quantified successor to the retired `DECLARED_META_TYPES`
     // membership pin: a type is refusable-when-misspelled iff it is in the
     // declared set, so quantifying the refusal over the registry pins the
@@ -214,7 +214,7 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
   });
 });
 
-describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
+describe('the second verdict: not a metadata type AT ALL', () => {
   it('accepts every declared type, canonical and REST-plural alike', () => {
     for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
       expect(unrecognisedMetaTypeRefusal(entry.type), `${entry.type} is declared`).toBeNull();
@@ -251,7 +251,7 @@ describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
     }
   });
 
-  it('[#10485] `theme` left the contract with its carrier — refused by name', () => {
+  it('`theme` left the contract with its carrier — refused by name', () => {
     // The retired kind's whole exit path: the `themes: 'theme'` fold left
     // `PLURAL_TO_SINGULAR`, so both spellings now earn the #8421 verdict
     // instead of the store-anything branch commit 2306a765c closed.
@@ -305,7 +305,7 @@ describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
   });
 });
 
-describe('#7894 — the manifest map keeps its own job', () => {
+describe('the manifest map keeps its own job', () => {
   it('gains no `fields` collection, so the authoring lint advertises none', () => {
     // `kernel/metadata-authoring-lint.ts` iterates `PLURAL_TO_SINGULAR` to
     // decide which stack-level collections exist and which "did you mean" hints
@@ -319,7 +319,7 @@ describe('#7894 — the manifest map keeps its own job', () => {
   });
 });
 
-describe('#10096 — the fine-grained entry is the SAME contract, re-exported', () => {
+describe('the fine-grained entry is the SAME contract, re-exported', () => {
   it('`meta-spelling` and `/shared` hand out identical bindings (one declaration, two entries)', async () => {
     // The schema-free entry is additive: `/shared` keeps the four symbols, and
     // both must resolve to the one declaration in

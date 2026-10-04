@@ -3057,6 +3057,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/ownership-floor-alternates.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
       "verb": "delete",
       "pinned": 1

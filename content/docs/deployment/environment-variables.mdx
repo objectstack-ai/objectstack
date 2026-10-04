@@ -123,7 +123,7 @@ Auth settings precedence:
 |:---|:---|:---|:---|
 | `OS_PRODUCT_NAME` | string | `ObjectStack` | Product name shown in the UI chrome and emails. |
 | `OS_PRODUCT_SHORT_NAME` | string | `OS` | Short name used in compact UI surfaces (favicons, mobile titles). |
-| `OS_APP_NAME` | string | — | Application name surfaced to auth providers (used as the OAuth app display name). |
+| `OS_APP_NAME` | string | — | The deployment's product name under `objectstack serve`: `{{appName}}` in every email template (auth emails included), the issuer an authenticator app lists a TOTP enrollment under, and the MCP OAuth resource name. Wins over `config.email.appName`, `config.email.defaultTemplateContext.appName` and `config.appName`; with none of them set the name is `ObjectStack`. An explicitly set `branding.workspace_name` setting outranks it in auth. |
 
 ---
 

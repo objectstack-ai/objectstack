@@ -70,7 +70,19 @@ editable by design). A multi-delete requires *every* matched row to pass.
 
 | Code | Status | When |
 | --- | --- | --- |
-| `ATTACHMENT_DELETE_DENIED` | 403 | The caller is neither the uploader nor able to edit the parent record |
+| `ATTACHMENT_DELETE_DENIED` | 403 | The caller can read the attachment, but is neither the uploader nor able to edit the parent record |
+| `PERMISSION_DENIED` | 403 | The caller cannot read the parent record, so the attachment is not visible to them; the delete is refused before the attachment gate runs, and the parent is not named |
+
+The platform baseline also ships a parent-blind row-level delete floor
+(`owner_only_deletes`: you may delete only the rows you created, for members
+holding `org_member`). It would refuse a parent editor before this gate is
+asked, so the storage service contributes a delete-only alternate match beside
+the floor when it installs the gate, and the gate decides. The alternate match
+exists only where the gate does: a deployment that registers `sys_attachment`
+without `@objectstack/service-storage` keeps the floor, and there only the row's
+creator may delete it. The floor's edit limb is not relieved: a member the
+floor binds still cannot edit another user's attachment row
+(`PERMISSION_DENIED`), even as a parent editor.
 
 <Callout type="info">
 The platform baseline permission set (`member_default`, the `everyone`
@@ -151,7 +163,7 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
 | Attach (create) | parent object opts in (`enable.files`) | `FILES_DISABLED` (403) |
 | Attach (create) | can edit the parent record | `ATTACHMENT_PARENT_ACCESS` (403) |
 | List / read | inherits parent read visibility | *(filtered out)* |
-| Delete | uploader or parent editor (+ RBAC delete grant) | `ATTACHMENT_DELETE_DENIED` / `PERMISSION_DENIED` (403) |
+| Delete | uploader or parent editor (+ RBAC delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |
 | Download | session + owner-or-parent-read (attachments scope) | `AUTH_REQUIRED` (401) / `ATTACHMENT_DOWNLOAD_DENIED` (403) |
 
 ## See also

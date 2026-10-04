@@ -36,7 +36,7 @@ function issuesOf(value: unknown) {
   return result.success ? [] : result.error.issues.map((i) => ({ code: i.code, path: i.path.map(String).join('.'), message: i.message }));
 }
 
-describe('EvaluatedExpressionSchema — an evaluated slot requires a non-blank `source` (#15430)', () => {
+describe('EvaluatedExpressionSchema — an evaluated slot requires a non-blank `source`', () => {
   it('REFUSES an `ast`-only envelope: one issue, at `source`, the published sentence', () => {
     expect(issuesOf(AST_ONLY)).toEqual([
       { code: 'invalid_type', path: 'source', message: EVALUATED_EXPRESSION_SOURCE_REQUIRED },

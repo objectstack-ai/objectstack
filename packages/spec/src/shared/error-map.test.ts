@@ -187,7 +187,7 @@ describe('formatZodError', () => {
 // mistake = the same key reported N times, which is why `view.zod.ts`'s
 // `submitBehavior` reached for `discriminatedUnion` in the first place. Both
 // directions are pinned below.
-describe('[#4971] formatZodError expands invalid_union branches', () => {
+describe('formatZodError expands invalid_union branches', () => {
   // The campaign's shape: a string form OR a closed object form.
   //
   // [#19581] The closed arm is a REAL PRODUCT DOOR — `NormalizedFilterSchema`,
@@ -402,7 +402,7 @@ describe('safeParsePretty', () => {
 // `z.record` key schema there is `z.string()` or an enum — #5389's dormancy
 // table), which is why these fixtures are local schemas: the defect is in the
 // CONSUMER, and the consumer is reachable from any caller's schema.
-describe('[#5389] formatZodError descends invalid_key / invalid_element', () => {
+describe('formatZodError descends invalid_key / invalid_element', () => {
   const SnakeKey = z
     .string()
     .regex(/^[a-z][a-z0-9_]*$/, "Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').");

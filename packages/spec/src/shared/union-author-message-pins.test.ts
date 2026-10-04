@@ -406,7 +406,7 @@ function render(site: UnionMessageSite, body: unknown): string {
   return formatZodError(result.error as Parameters<typeof formatZodError>[0]);
 }
 
-describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site', () => {
+describe('the AUTHOR-VISIBLE message at a string-or-object union site', () => {
   // ── Pin 1 ─────────────────────────────────────────────────────────────────
   describe('pin 1 — the rendered message names the key, the surface and the rename', () => {
     it.each(SITES)('%s', (_name, site) => {

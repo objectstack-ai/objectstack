@@ -499,6 +499,66 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     expect(middlewares).toEqual([{ object: 'sys_attachment' }]);
   });
 
+  // [#21729] The ruling's pairing: the alternate match that relieves the
+  // platform's delete floor is contributed TOGETHER with the gate that judges
+  // it — where the gate is installed, and nowhere else.
+  it('contributes the delete-floor alternate exactly once, beside the gate it defers to', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-floor-alt-'));
+    const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
+    const ctx = makeCtx();
+    const order: string[] = [];
+    ctx.registerService('objectql', {
+      registerHook: (event: string, _fn: unknown, opts: any) => {
+        if (opts?.object === 'sys_attachment' && event === 'beforeDelete') order.push('gate');
+      },
+      getObject: () => undefined,
+      registerMiddleware: () => {},
+      find: async () => [],
+      findOne: async () => null,
+      update: async () => ({}),
+    });
+    const contributions: unknown[][] = [];
+    ctx.registerService('security', {
+      contributeOwnershipFloorAlternates: (...args: unknown[]) => {
+        order.push('alternate');
+        contributions.push(args);
+      },
+    });
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._flushReady();
+
+    expect(contributions).toEqual([
+      [
+        'com.objectstack.service.storage',
+        [{ name: 'sys_attachment_parent_editor_delete', object: 'sys_attachment', operation: 'delete', using: 'id != null' }],
+      ],
+    ]);
+    // The gate is installed first; the relief never exists without it.
+    expect(order).toEqual(['gate', 'alternate']);
+  });
+
+  it('contributes nothing where the gate is not installed (an engine with no hook seam)', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-floor-alt-nogate-'));
+    const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
+    const ctx = makeCtx();
+    // An engine the gate cannot be installed on — no `registerHook`.
+    ctx.registerService('objectql', { find: async () => [], findOne: async () => null });
+    const contribute = { calls: 0 };
+    ctx.registerService('security', {
+      contributeOwnershipFloorAlternates: () => {
+        contribute.calls += 1;
+      },
+    });
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._flushReady();
+
+    expect(contribute.calls).toBe(0);
+  });
+
   it('degrades silently on a bare kernel (no engine, no lifecycle service)', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'oss-bare-'));
     const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });

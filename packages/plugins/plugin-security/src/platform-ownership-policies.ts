@@ -87,14 +87,105 @@ const PLATFORM_OWNERSHIP_FLOOR_KEYS: ReadonlySet<string> = (() => {
 })();
 
 /**
+ * [#21729] The policy objects {@link withOwnershipFloorAlternates} materialized
+ * — an alternate match contributed BESIDE the floor carries the floor's
+ * provenance. Identity, not a key: a contributed alternate has no shipped
+ * declaration to key on, and an authored policy must never be able to claim
+ * this provenance by spelling (ADR-0105 F1, the reasoning in the header).
+ */
+const FLOOR_ALTERNATE_INSTANCES = new WeakSet<object>();
+
+/**
  * True iff this policy is one the PLATFORM ships as its row-level write
  * ownership floor — the only policies the pre-image gate may let a declared
- * write authority replace.
+ * write authority replace — or an alternate match a plugin contributed to that
+ * floor (see {@link withOwnershipFloorAlternates}).
+ *
+ * The alternate shares the floor's provenance because it exists ONLY to relieve
+ * the floor: every composition that takes the floor out (a declared write
+ * authority's `allow`, a `public_read_write` OWD, a covering master gate) must
+ * take its relief out with it, or the relief would be left standing as a write
+ * policy of its own — and a lone `using` in a write class is exactly what
+ * switches the derive-from-select floor off. Read as the floor, the alternate
+ * is also never mistaken for an APP-AUTHORED widener by
+ * `checkAuthoredRowWrite`.
  */
 export function isPlatformOwnershipFloorPolicy(
   policy: Pick<RowLevelSecurityPolicy, 'object' | 'name' | 'using'>,
 ): boolean {
-  return PLATFORM_OWNERSHIP_FLOOR_KEYS.has(provenanceKey(policy));
+  return FLOOR_ALTERNATE_INSTANCES.has(policy) || PLATFORM_OWNERSHIP_FLOOR_KEYS.has(provenanceKey(policy));
+}
+
+/**
+ * The floor limbs an alternate match may relieve: one of the two write classes
+ * the floor ships (`owner_only_writes` is `update`, `owner_only_deletes` is
+ * `delete`).
+ */
+export type OwnershipFloorLimb = 'update' | 'delete';
+
+/**
+ * [#21729] One alternate match to the platform's ownership floor, as a plugin
+ * contributes it — see `ownership-floor-alternates.ts` for the seam and the
+ * rules a contribution is held to.
+ *
+ * It carries no `positions`: the domain is the FLOOR's, copied from the floor
+ * policy it is materialized beside. That is what keeps every principal the
+ * floor does not bind byte-identical — the alternate can only ever land in a
+ * write class the floor's own `using` already occupies, so it ORs a second
+ * match into that class and can never be the reason the class stops being
+ * empty (the trigger of the derive-from-select rule in
+ * `computeLayeredRlsFilter`).
+ */
+export interface OwnershipFloorAlternate {
+  /** Policy name (snake_case), as `explain` and the denial logs will show it. */
+  readonly name: string;
+  /** The ONE object the floor is relieved on — never `'*'`. */
+  readonly object: string;
+  /** The ONE limb relieved. */
+  readonly operation: OwnershipFloorLimb;
+  /** The rows of `object` the floor stops answering for on that limb. */
+  readonly using: string;
+}
+
+/**
+ * [#21729] A permission set's policies, with each contributed alternate placed
+ * beside every ENABLED floor policy of the same limb, in the floor's domain.
+ *
+ * Where no floor policy of that limb is present in the set (it was switched
+ * off, the set is not the one that ships the floor, or a deployment edited it
+ * out), nothing is added: no floor, nothing to relieve. Returns the input array
+ * itself when there is nothing to add, so a deployment with no contribution
+ * composes exactly as it did before this seam existed.
+ */
+export function withOwnershipFloorAlternates(
+  policies: RowLevelSecurityPolicy[],
+  alternates: readonly OwnershipFloorAlternate[],
+): RowLevelSecurityPolicy[] {
+  if (alternates.length === 0) return policies;
+  const out: RowLevelSecurityPolicy[] = [];
+  let added = false;
+  for (const policy of policies) {
+    out.push(policy);
+    // A floor switched off is not evaluated, so there is nothing to relieve.
+    if ((policy as { enabled?: boolean }).enabled === false) continue;
+    // The SHIPPED floor only — never a materialized alternate (no chaining),
+    // never an authored policy that happens to spell the same predicate.
+    if (FLOOR_ALTERNATE_INSTANCES.has(policy) || !PLATFORM_OWNERSHIP_FLOOR_KEYS.has(provenanceKey(policy))) continue;
+    for (const alternate of alternates) {
+      if (alternate.operation !== policy.operation) continue;
+      const materialized: RowLevelSecurityPolicy = {
+        name: alternate.name,
+        object: alternate.object,
+        operation: alternate.operation,
+        using: alternate.using,
+        ...(Array.isArray(policy.positions) ? { positions: [...policy.positions] } : {}),
+      };
+      FLOOR_ALTERNATE_INSTANCES.add(materialized);
+      out.push(materialized);
+      added = true;
+    }
+  }
+  return added ? out : policies;
 }
 
 /** Test/diagnostic accessor — the number of shipped floor policies recognized. */

@@ -33,7 +33,7 @@ import * as Automation from '../automation';
 import * as System from '../system';
 import { RetryPolicySchema } from './retry-policy.zod';
 
-describe('RetryPolicy is a single declaration across entries (#4661)', () => {
+describe('RetryPolicy is a single declaration across entries', () => {
   it('./automation and ./system export the SAME RetryPolicySchema object', () => {
     expect(Automation.RetryPolicySchema).toBe(System.RetryPolicySchema);
   });
@@ -92,7 +92,7 @@ describe('RetryPolicy is a single declaration across entries (#4661)', () => {
   // to assert here. `retiredKey()` is a Zod `never` whose issue carries the
   // guidance as its `message`, so for this rejection class the wording IS the
   // whole contract (#5240) and the message is the only thing worth asserting.
-  it('the tombstone enumerates exactly the surfaces that still carry the policy (#6630)', () => {
+  it('the tombstone enumerates exactly the surfaces that still carry the policy', () => {
     const result = RetryPolicySchema.safeParse({ retryDelayMs: 500 });
     expect(result.success).toBe(false);
     const message = result.error!.issues.map((issue) => issue.message).join('\n');
@@ -110,7 +110,7 @@ describe('RetryPolicy is a single declaration across entries (#4661)', () => {
     // compile error.
     expect(
       message,
-      'the prescription must not point at a surface #6414 retired',
+      'the prescription must not point at the retired ETL layer',
     ).not.toMatch(/\bETL\b/i);
 
     // None of the above may be bought by weakening the prescription itself.
@@ -173,7 +173,7 @@ describe('RetryPolicySchema — converged shape', () => {
  *
  * Adding a fifth retry surface without wiring `retryPolicyShape()` fails here.
  */
-describe('every retry surface carries ONE contract (#4661, #4964, #4962)', () => {
+describe('every retry surface carries ONE contract', () => {
   const POLICY_KEYS = ['maxRetries', 'backoffMs', 'backoffMultiplier', 'maxRetryDelayMs', 'jitter'];
   const POLICY_DEFAULTS = {
     maxRetries: 0, backoffMs: 1000, backoffMultiplier: 1, maxRetryDelayMs: 30000, jitter: false,

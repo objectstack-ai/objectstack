@@ -99,7 +99,7 @@ const EDITABILITY_KEYS = ['disabled', 'disabledWhen', 'readonly', 'readOnly', 'r
 // ===========================================================================
 // 1. The guidance reaches an author — on the real parse error
 // ===========================================================================
-describe('#7887 — the boundary prescription an author actually sees', () => {
+describe('editability lives on fields — the boundary prescription an author actually sees', () => {
   it.each(VISIBILITY_ONLY)('%s answers `disabled` with the boundary, not a bare refusal', (_n, schema, base) => {
     const m = unknownKeyMessage(schema, { ...base, disabled: true });
     expect(m).toContain('Editability is a FIELD-level concern');
@@ -128,7 +128,7 @@ describe('#7887 — the boundary prescription an author actually sees', () => {
     for (const key of ['disabled', 'readonly', 'editable']) expect(m).toContain(`\`${key}\``);
   });
 
-  it.each(VISIBILITY_ONLY)('%s still puts the history sentence last (the #5955 order survives the new set)', (_n, schema, base) => {
+  it.each(VISIBILITY_ONLY)('%s still puts the history sentence last (the fix-first order survives the new set)', (_n, schema, base) => {
     const m = unknownKeyMessage(schema, { ...base, disabled: true });
     const history = 'Before ADR-0089 D3a these were dropped silently';
     expect(m.indexOf('Editability is a FIELD-level concern')).toBeLessThan(m.indexOf(history));
@@ -138,7 +138,7 @@ describe('#7887 — the boundary prescription an author actually sees', () => {
 // ===========================================================================
 // 2. It names `readonlyWhen` — and must never name `disabledWhen`
 // ===========================================================================
-describe('#7887 — the prescription points at a key that exists', () => {
+describe('the prescription points at a key that exists', () => {
   it.each(VISIBILITY_ONLY)('%s names the field-level `readonly` / `readonlyWhen` pair', (_n, schema, base) => {
     const m = unknownKeyMessage(schema, { ...base, disabled: true });
     expect(m).toContain('`readonly: true`');
@@ -168,7 +168,7 @@ describe('#7887 — the prescription points at a key that exists', () => {
 // ===========================================================================
 // 3. The field surface is UNCHANGED — the shared-table trap
 // ===========================================================================
-describe('#7887 — `FormFieldSchema` sees exactly what it saw before', () => {
+describe('`FormFieldSchema` sees exactly what it saw before', () => {
   it('`disabled` on a form field still renames onto `readonly`, with no boundary text', () => {
     const m = unknownKeyMessage(FormFieldSchema, { ...FORM_FIELD, disabled: true });
     expect(m).toContain('Did you mean `disabled` → `readonly`?');
@@ -217,7 +217,7 @@ describe('#7887 — `FormFieldSchema` sees exactly what it saw before', () => {
 // ===========================================================================
 // 4. Acceptance is byte-identical — a guidance string is not a key
 // ===========================================================================
-describe('#7887 — no acceptance change', () => {
+describe('no acceptance change', () => {
   it.each(VISIBILITY_ONLY)('%s still REJECTS every editability spelling', (_n, schema, base) => {
     for (const key of EDITABILITY_KEYS) {
       expect(
@@ -277,7 +277,7 @@ describe('#7887 — no acceptance change', () => {
 // ===========================================================================
 // 5. #8202 — every shape names ITSELF, so the two answers cannot be swapped
 // ===========================================================================
-describe('#8202 — the rejection says WHICH shape refused the key', () => {
+describe('the rejection says WHICH shape refused the key', () => {
   /** Each shape, a probe body, and the name its rejection must give itself. */
   const NAMED: ReadonlyArray<[string, { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, object, string]> = [
     ['FormFieldSchema', FormFieldSchema, FORM_FIELD, 'this form field'],
@@ -341,7 +341,7 @@ describe('#8202 — the rejection says WHICH shape refused the key', () => {
 // ===========================================================================
 // 6. #8201 — `SelectOptionSchema` inherits the ruling, with its OWN answer
 // ===========================================================================
-describe('#8201 — an option is offered or withheld, never shown-but-unselectable', () => {
+describe('an option is offered or withheld, never shown-but-unselectable', () => {
   const OPTION_TEXT = 'Editability is not a per-OPTION concern';
 
   it('`disabled` on an option reaches the boundary, rendered as the template bullet', () => {
