@@ -1,0 +1,34 @@
+{
+  "number": 21738,
+  "kind": "issue",
+  "title": "[finding] lock family, artifact-layer axis: an explicit artifact `_lock: 'none'` reads editable while the door refuses, and the layered read takes the code layer's lock over a stored row's",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T12:46:16Z",
+  "updated_at": "2026-10-04T14:01:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21738",
+  "body": "Filing gate: **① a product defect, class (b).** One item's lock is reported one way by a read and enforced another way by the write door. These are the family's remaining positions, on the artifact-layer axis.\n- **reach:** the real `ObjectStackProtocolImplementation` reads (`getMetaItem`, `getMetaItemLayered`, which serves `GET /api/v1/meta/:type/:name/layers`) and the `_lock` gate, over an engine double at `c43a8ae612`. Measured by #21716's dev (PR #21737, `out_of_scope_findings[0]` and `[1]`). Not measured over HTTP.\n\nFiled by `domain:engine` seat 1 (seat post #6367, `session_017ErfyP2Rx7XWHJA27QjyUi`). It is ONE card for the family's remaining positions (`同族只开一张`), named in the seat's review of PR #21737 (5980059935). **Reader who acts:** triage grades and routes. ⛔ Not a claim.\n\n## The family so far\n1. #21670: the layered read reported lock `none` while the doors refused (PR #21693).\n2. #21694: the topology axis (PR #21715).\n3. #21716: the organization axis, the closing card for the axes triage enumerated. It carries the 64-row enumeration pin over topology × row scope × request scope × lock level × operation (PR #21737, landing).\n\n**This card covers the axis that pin does not enumerate: the artifact (code) layer against the stored row.**\n\n## Measured, position 1: an explicit artifact `'none'`\n- A packaged view's artifact declares `_lock: 'none'` explicitly (`protection.lock: 'none'` through `applyProtection`). A stored env-wide row declares `_lock: 'full'`.\n- `getMetaItem` and `getMetaItemLayered` both answer `lock: 'none'`, `editable: true`. `mergeArtifactProtection` copies any defined artifact `_lock` over the row's, `'none'` included.\n- `getEffectiveLock` answers `full` / `source=overlay`, because its artifact limb skips `'none'`. So the save door refuses with `ITEM_LOCKED`.\n- The door is stricter than the read, against `servedLockState`'s contract that the flags report the doors' verdict.\n- Seam: `MetadataProtectionFields._lock` (spec) → `getEffectiveLock`'s artifact limb versus `mergeArtifactProtection`.\n\n## Measured, position 2: the layered read's lock source\n- A packaged view declares no `_lock`. A stored env-wide row declares `_lock: 'full'`.\n- `getMetaItem` answers `full` / `editable: false`, which agrees with the door (it refuses `ITEM_LOCKED`).\n- `getMetaItemLayered` answers `none` / `editable: true`: its lock source is `code ?? overlay`, which takes the code layer whenever one exists. The comment at that line says \"matching getEffectiveLock\", which it does not.\n- So two reads of one item disagree, and the layered one is looser than the door.\n\n## Position 3: the spelling residue (option C from PR #21737)\n- Since PR #21737, the `_lock` gate addresses the canonical type spelling only (#4432's write-side rule).\n- Both reads still fall back to a row stored under the type's other (plural) spelling when there is no canonical row in that scope.\n- For pre-#4432 at-rest residue, the read can report a lock the door does not see. No live writer mints such a row.\n- Contract-first direction: retire the reads' tolerant other-spelling fallback, after which the read and the door resolve identically.\n\n## Direction (triage's call)\n- The family rule, as ruled on #21670 (5976009143) and #21694 / #21716: the read envelope reports the doors' verdict, from one resolution.\n- Position 1 needs a judgment on what an explicit artifact `'none'` means against a stored row's lock (ADR-0010 §3.3), applied to the read and the door alike. That may make it a fork.\n- Extend the enumeration pin with the artifact-layer axis (no artifact, artifact without `_lock`, artifact with an explicit lock, including `'none'`) × the stored row's lock, for both reads and the door.\n\n## Related\n#21670 · #21694 · #21716 · PR #21693 · PR #21715 · PR #21737 · ADR-0010 §3.3 · #4432.\n\nDedupe words: mergeArtifactProtection explicit none, artifact _lock none overlay full, getEffectiveLock artifact limb skips none, getMetaItemLayered lockSource code ?? overlay, layered editable vs by-name editable, other-spelling fallback lock. MCP `search_issues` scoped to this repo found 8 hits: #21716 (the org axis, in flight) and 7 closed predecessors (#21670, #20680, #7682, #5707, #21059, #21002, #7743). None names these positions.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 21749,
+  "kind": "pull_request",
+  "title": "docs(qa): record A1 of crud-permission-matrix as a known v18 gap",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T14:04:39Z",
+  "updated_at": "2026-10-04T14:36:00Z",
+  "closed_at": "2026-10-04T14:35:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-04T14:35:59Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21749",
+  "body": "Fixes #21747\n\nClause-②: no\n\n## What\n\nIn `docs/qa/platform-checklist/areas/access-security.json`, item `access-security.crud-permission-matrix` only: one `knownGaps` entry, revision 4 to 5, one `history` entry (revision 5, citing #21747 and the maintainer ruling, #21057 comment 5980557328). A1's assertion, the item's priority (P0) and every other item are unchanged. No product change, no run record.\n\nA1 stays a FAIL in the run table, read as known (#21057), and goes green when the v18 ADR-0131 C1 business-unit leg lands.\n\n## The knownGaps entry (verbatim)\n\n> A1 (acceptance[0], every allowed cell succeeds) is a KNOWN FAIL on 17.x until the v18 ADR-0131 C1 business-unit leg lands (#21057, target:v18, gated by #15193): the seeded sys_business_unit rows carry organization_id null, so the showcase_field_ops_delegate × sys_user_position in-subtree create (bu_west_coast under bu_field_ops) answers 403 PERMISSION_DENIED \"outside the delegated subtree\" and the delegate's scope resolves to an empty subtree (the gate fails closed: over-refusal, never exposure). Measured discriminator (#21057 comments 5927366808 and 5979438043): once the organization is stamped on the seeded units, the in-subtree create flips to 201 while the out-of-subtree create (bu_hq_finance) stays 403 — so the cause is the unstamped seed, not the gate. Score A1 FAIL in the run table and read it as known (#21057), not new; do NOT re-derive it, do NOT weaken the clause, do NOT stamp the units to make it pass (that would hide the very gap this entry tracks). It turns green when the v18 C1 leg lands — that flip is the signal the gap closes, and this entry is then removed (ruling: #21057 comment 5980557328, ADR-0131 D3/D14)\n\n## Discriminator source\n\nRead from #21057 itself, not copied from the card: the dev report comment 5927366808 (boot 2: admin PATCH of organization_id onto bu_field_ops, bu_west_coast and bu_east_coast, then the delegate's in-subtree create answers 201 and the out-of-subtree create on bu_hq_finance stays 403) and comment 5979438043 (reproduced again at 251a7dd4, run #21720). The ruling is comment 5980557328.\n\n## Validators\n\n- `pnpm check:platform-checklist`: exit 0, \"check-platform-checklist: OK - 15 areas, 270 items\".\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`: derived 13 commands for the one changed path. All exit 0: check-ci-filter-parity, check-closing-keyword-parity (and --self-test), check-comment-mask-corpus, check:doc-formula-expressions (after building the lint and formula packages), check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:platform-checklist, check:refd-timer-probe, check:watch-hint-literal.\n- NOT MEASURED: the shard-attestation and test-completeness steps (they need CI-only variables), the type-check lanes (no TypeScript touched) and the pending-changeset families (no changeset; docs/qa is not published).\n\n## Acceptance notes\n\n- `skip-changeset` is not applied here (no labels were in scope for this run); nothing published changes.\n- PR assignee is left to the seat.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

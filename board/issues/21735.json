@@ -1,0 +1,37 @@
+{
+  "number": 21735,
+  "kind": "issue",
+  "title": "qa(checklist): re-point 17 clauses on 16 items that the 17.7 pre-release runs (#21720 / #21721 / #21722) proved stale or mis-asserted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T11:22:27Z",
+  "updated_at": "2026-10-04T13:58:34Z",
+  "closed_at": "2026-10-04T13:57:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21735",
+  "body": "QA-source: #21720 · #21721 · #21722 (17.7 pre-release, subject `251a7dd4`)\n\nEvery row below is a `fail` whose disposition is **stale clause** (a deliberate change after the clause was written) or **assertion defect** (the clause was wrong when written). Each was re-derived by an independent verifier (RUNNER rule 7). The product is right in every row; only the item text needs a revision + `history` entry citing the source. Owning repo: this one (`docs/qa/platform-checklist/areas/*.json`).\n\n| item · clause | disposition | revise to | source |\n|---|---|---|---|\n| access-security.share-link-capability-tokens A5 (record-gone leg), step 7 | stale | a deleted record's link answers 404 `INVALID_OR_EXPIRED`, byte-identical to an unknown token; never the record | share-link-service fail-closed (#5190) |\n| ai.agent-tool-skill-metadata-roundtrip A4 / step 7 | assertion | draft against a runtime-created skill/tool name (200, readable via `?state=draft`); a package-shipped one is 403 `NOT_OVERRIDABLE` | `ee58392e1` (#6608) |\n| api-backend.batch-transactional-discovery A5 / step 6 | assertion | name `options.continueOnError: true` for \"neither blocks the other\", or expect the default stop + `NOT_ATTEMPTED` tail | `batch.zod.ts` `continueOnError`, `744b8f5f5` (#7581) |\n| api-backend.server-timing-admin-gated A2 / A3, steps 1 and 4 | assertion | swap the modes: env off + `X-OS-Debug-Timing` is the admin-only gate; `OS_SERVER_TIMING=true` sends spans to everyone, `X-OS-Debug-Timing-Detail` admin-only | `hono-plugin.ts:83-104,300-353`, #3163 / #3169 |\n| identity-auth.two-factor-enrollment-reveal A6 | stale | `sys_user.enable_two_factor` declares a `resultDialog` (QR + code list); reword the \"no navigable surface renders the QR\" knownGap | `266654d82e` (#11110) |\n| identity-auth.two-factor-backup-codes A6 | stale | `generate_backup_codes` declares a `resultDialog` | `266654d82e` (#11110) |\n| integration-system.external-schema-introspection A1 | assertion | `columnCount` 7 per table (fixture `initObjects` adds the audit timestamps) | `external-fixture.ts:36-45` |\n| integration-system.external-schema-introspection A3 / step 6 | stale | remote PK rendered as a `// Remote primary key:` comment, `ObjectSchema` imported as a value | `4257e4e4e3` (#11073) |\n| platform-core.activation-ledger-registration-home A5 | assertion | 46 names (or drop the count; the one-owner assertion is the point) | `platform-object-names.ts` |\n| platform-core.marketplace-install-local-lifecycle A7 | stale | uninstall hot-withdraws from the running kernel, no restart | `901e7cf13` (#21581) |\n| records-forms.field-unique-enforcement A1 / step 1 / fixtures | stale | live legs on SQLite: 409 `UNIQUE_VIOLATION`, \"No record was written\", the object named; the `object.field` wording stays a memory-pin assertion; drop \"memory driver (the stock default)\" and invert the SQL knownGap | `9a4182a75` (#21598); `duplicate-record-error.ts` |\n| cli.migrate-plan-apply-json A5 | stale | an in-sync showcase answers `in_sync_partial` (federated objects unexamined); also \"nine subcommands\" → 13 | `6c6157af05` (#13057) |\n| cli.migrate-meta-codemod A4 / step 8 | stale | an empty range prints \"⚠ No migration step exists for protocol N → N …\"; replay a canonical source; default `--to` is 18 | `fb39b385f1` (#17462, fixes #17134) |\n| cli.migrate-duplicates-inventory A3 | assertion | judge rows + `_objectstack_sequences` (+ `sqlite_master`) byte-identical, not the whole-file md5 (product side: #21734) | `duplicates.ts:61-66` |\n| cli.datasource-introspect-codegen A6 | assertion | limit the unknown-name probe to `list-tables` / `introspect`; `validate` answers a vacuous ok by design | `e634ecf6a` (#10537 / #10960) |\n| cli.plugin-manifest-build-contract A2 | stale | `id: \"\"` is a located Zod error (reverse-domain rule); the build.ts post-parse guard is unreachable | `097d26859` (#18319) |\n| api-backend.enforce-or-remove-authoring-gates A1 / step 2 | assertion | the retired-filter-operator registry is green at parse/build and refused at runtime with `INVALID_FILTER` + the prescription (and listed by `os migrate meta`) | `filter.zod.ts` `RETIRED_FILTER_OPERATORS`, `85d95e7d92` (#5701 / #5752) |\n\n(17 rows on 16 items: external-schema-introspection carries two.)\n\nThe full checklist-accuracy findings (wrong paths, keys, counts, fixture recipes — no fail attached) are in each record's close-out comment.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

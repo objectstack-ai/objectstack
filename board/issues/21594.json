@@ -2,8 +2,8 @@
   "number": 21594,
   "kind": "issue",
   "title": "[Decision] security(runtime): may an app-authored body still READ the stored-metadata family's tables, served projected, or is that refused too (#21454 option C)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:cli",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-03T14:11:55Z",
-  "updated_at": "2026-10-04T09:50:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-04T11:36:03Z",
+  "closed_at": "2026-10-04T11:34:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21594",
   "body": "Ruled: 5978653398 · question 1 letter A — host handlers keep the projected read; ruling B covers sandboxed bodies only · 2026-10-04T09:48Z\n\nRuled: 5974479930 · letter B · 2026-10-03T23:14Z\n\nFiling gate: **② a decision only the maintainer can make.** It is a security boundary, and the existing rules do not decide it. Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It carries option C of #21454 (`5963137791`, `5963161540`). Triage named C as the maintainer's option and did not rule it (`5963299937`). #21454 closed `completed` on disposition A, so C had no carrier. ⛔ Not a claim, ⛔ not a dispatch. ⛔ Classes, doors and roles only.\n\n**Reader who acts:** the maintainer, or the director seat. If the letter is B, the `domain:cli` seat dispatches it on this card.\n\n## 维护者速读\n\n- **问题：** 应用自己写的代码（动作、自动化的代码体）现在还能**读**那组存放元数据的系统表，只是读出来的敏感内容已经遮蔽。写入和挂钩子已经按 #21520 的 A 彻底禁止。要不要把「读」也一并禁止，让应用代码完全碰不到这组表？\n- **选项：**\n  - **A：** 维持现状，读仍然允许。每次读都先遮蔽，危险的查询形状一律拒绝，这已在 PR #21513 和 PR #21539 落地。不新增门。\n  - **B：** 读也直接拒绝，并给出提示：「元数据请走元数据接口」。拒绝放在已落地的同一接缝处。\n- **分诊推荐：** B，理由只看①。回退项为 A。\n- **你要做的：** 回一个字母。\n\n## Measured, read now (`origin/main` `901e7cf13a`)\n\n- **What has landed:** the reader-context seam (`packages/runtime/src/stored-metadata-reader-seam.ts`).\n  - `serveStoredMetadataReadsThrough` serves the family's reads projected and keyed, at the three author contexts: a body's object API, a handler's scoped API and a handler's engine handle.\n  - The evaluate shapes are refused through the door's own predicates.\n  - `refuseStoredMetadataBodyWrites` carries #21520's A, which refuses writes and hook binding.\n- **Pull for reads from app bodies: zero.**\n  - objectstack `examples/**` at `901e7cf13a`: the family's table names appear in changelog prose and comments only, never in a body.\n  - hotcrm at `94668373`: no hit in `src/**` or `packages/**`.\n  - Every engine reader of the family in `packages/**` is a platform internal, which #21454's dev measured (`5963137791`).\n- **No leak remains under A.** Every read is served projected and keyed. So B is boundary hardening, not a leak fix. That is why this card is p2, not the family's p1.\n\n## Governing text\n\n- **The family's rule** (#21120, #21207 ruling B, and #21454's A): every door that serves, copies or evaluates the family's stored content projects it and serves it keyed. It governs what a reader is **served**. It does not say whether an app body may read at all.\n- **#21520's ruling A** (`5965059068`, maintainer 「同意」): app bodies may not bind to the family or write it. Metadata changes go through the metadata API. It ruled writes and hooks only, not reads.\n- **AGENTS.md Prime Directive 12:** \"fix it at the producer and reject it at authoring/publish\".\n- No ADR names the metadata API as the family's only **reader**. Searched `docs/adr` for `only reader`, `sole reader` and `metadata API` together with `body`: 0 hits.\n\n## 一句话问题\n\n应用代码现在能读到「元数据存储表」的遮蔽版内容。要保留这个读法，还是让应用代码彻底碰不到这组表、只能走元数据接口？\n\n## 选项 × 真实代价\n\n| 选项 | 做什么 | 客户可感知的后果 |\n|:--|:--|:--|\n| **A** 维持 | 什么都不做。读照常遮蔽，危险查询照常拒绝 | 无变化。平台继续维护接缝上的遮蔽、按列判定和搜索收窄，作为长期义务 |\n| **B** 读也拒绝 | 在同一接缝处，应用代码读这组表直接返回明确的拒绝，提示走元数据接口 | 实测零个应用代码读这组表，所以今天谁也不受影响。以后有人这么写，会立刻收到清楚的报错，而不是拿到半遮蔽的数据 |\n\n## 业务含义直译\n\n- **A** 等于允许外包装修队进机房看配线图，但敏感的地方都打了马赛克。马赛克要一直有人维护。\n- **B** 等于机房不对外包开放，要看图纸去档案室（元数据接口）申请。和 #21520 已定的「不许动机房」是同一条规矩。\n\n## 四轴（业务立场）\n\n- **实际业务需求：** 实测零拉动，示例应用和 HotCRM 里都没有应用代码读这组表。A 维护的是一个没人用的能力；B 拒绝的也是没人用的读法，今天不伤任何人。\n- **项目长远合理性：** B 让「应用代码与元数据存储表」只剩一条规矩：完全不碰，元数据走元数据接口。它和 #21520 的 A 对齐。A 留下「写不能、读可以但要遮蔽」的双轨，每新增一种查询形状，都要再判一次。\n- **防 AI 犯错：** 出错时谁看到什么？A 下，AI 写的代码去读这组表，会拿到遮蔽后的数据并继续运行，作者以为拿到了真实内容，这是静默的。B 下，作者立刻看到一条点名元数据接口的拒绝，这是响亮的。\n- **创业阶段不扩散：** B 是移除一个能力，A 是声明并长期维护一个能力。按「移除优于声明并维护」，B 更省。\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：B 收缩特例。应用代码与元数据存储表只剩「不碰」一条规矩，与 #21520 A 同形。A 保留读侧的遮蔽和查询判定特例。\n- ② 实际业务拉动：今天零个应用代码读这组表（examples、hotcrm 实测）。零拉动默认 remove，偏 B。\n- ③ 防 AI 犯错：B 响亮拒绝，并点名元数据接口；A 静默给出遮蔽数据。偏 B。\n- ④ 创业阶段不扩散：B 移除一个读能力；A 是声明并长期维护。偏 B。\n\nPrior rulings read: `21454 option C`, `outright`, `refuse family reads`, `[Decision] stored-metadata` → 2 hits (#21454 `5963299937`, which named C the maintainer's; #21520 `5965059068`, letter A, writes and hooks only); ADR none; thread: #21454.\n\n**推荐：B。** 两年后的样子：应用代码通过元数据接口读到有类型、已遮蔽的定义，从不直接查原始存储表。参照 Salesforce：定义经 Schema describe 和 Metadata API 提供。但它的 Tooling 对象也能被查询，所以这只是方向参照，不是全封闭的先例。\n**回退：A。** 已落地的遮蔽接缝原样保留，不加门，读侧零风险。\n**自检：** 只看①选 B；②③④ 是否翻转：否。三轴同向，只影响时序：B 可以在 #21520 的认领之后单独一个 PR。\n**置信缺口：** 我看不到私有客户的应用包，零拉动只覆盖 objectstack examples 和 hotcrm。常设规则「新门默认否」偏向 A。B 是新增的拒绝，所以维护者不回字时按 A 处理。\n\n## 裁后执行\n\n- **A：** 本卡以 `not planned` 关闭，并在 #21454 记录一行。已落地的接缝不动。\n- **B：** 本卡转 `pm:queue`（`domain:cli`）。认领先对 examples、hotcrm 和 cloud 的应用代码体做一次读侧普查，再动手。\n  - 在 `serveStoredMetadataReadsThrough` 处，把读改为拒绝，提示点名元数据接口。\n  - 已失效的读侧投影与收窄代码随之删除，不保留两套。\n  - 平台内部读者不受影响，并钉住。\n  - 按收窄发版（`!`、`Clause-②: yes (narrowing)`、ADR-0087 标记、`minor`），与 PR #21539 同形。\n  - ⛔ 不碰 #21520 的写与钩子拒绝。\n\n"
