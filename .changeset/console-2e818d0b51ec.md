@@ -35,6 +35,30 @@ Derived from the changesets objectui declared over the range — 17 releasing of
 - _(no changeset)_ docs(skills): the page-builder guide's object-form example names its fields; a per-form override goes on a section entry (objectui#11550) (#11561) (objectui `0a53c67f9`)
 - _(no changeset)_ docs(skills): type three marked fences' schema as SchemaRendererProps['schema'] (objectui#11543) (#11558) (objectui `5cde2c6fe`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, `scripts/sdui-manifest.record.json` (the regenerated `sdui.manifest.json` is
+     byte-identical: 107 components, sha256 `0ead67c1111d…` at both pins), the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json` and the re-measured pin citations in
+     `packages/spec/src`, which carry their own `@objectstack/spec` patch changeset. It adds,
+     removes or renames no ObjectStack-authorable key: no Zod schema, no spec declaration and
+     no stored `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here
+     to rewrite, and this body carries no FROM/TO prescription of its own.
+     The 2 declared-breaking entries listed above are both objectui#11466 (`83e3f8377`, the
+     range's one `!` commit, measured with `git log ab1879721595..2e818d0b51ec`) and both are
+     objectui's OWN package surfaces, each already carrying its upstream record: (1) a node
+     slot and `SchemaRenderer`'s `schema` prop take objectui's `DeclaredNode` union, a
+     TypeScript type of `@object-ui/types` / `@object-ui/react` that no ObjectStack schema
+     declares or references; (2) an `object-metric` node inside a dashboard widget's legacy
+     `component` envelope draws objectui's retired-format prompt instead of its number. That
+     envelope is not ObjectStack-authorable: `ui/dashboard.zod.ts` refuses a widget's
+     `component` key by name as an objectui-internal renderer capability, so no stored
+     ObjectStack dashboard can carry the form being retired, and no example in this repo
+     authors one (the showcase's `object-metric` tiles are page blocks, which this entry
+     leaves drawing). Where an entry mirrors an ObjectStack key, the ledger entry belongs to
+     the `packages/spec` PR that lands the retirement, never to the pin bump.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the 2 upstream declared-breaking entries.
+-->
 
 objectui range: `ab1879721595...2e818d0b51ec`
