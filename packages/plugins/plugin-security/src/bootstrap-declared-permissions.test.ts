@@ -500,3 +500,156 @@ describe('[#18571] the unowned permission-set refusal moves a counter', () => {
     expect(ql.rows.some((r) => r.name === 'crm_orphan')).toBe(false);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#21669] An ENVIRONMENT-owned set in the registry walk is not an unowned
+// declaration. The engine registry the boot loop walks also holds every
+// env-wide `sys_metadata` `permission` row `loadMetaFromDb` hydrates — a set
+// made by Setup's Clone action among them — and such an item carries no
+// package id because it has none. The loop judged "unowned" before it read
+// the row, so a set whose `managed_by:'admin'` row Setup lists and edits was
+// reported, on every boot, as one Setup "cannot see".
+//
+// The item below is the shape measured on a real showcase cold boot after a
+// Clone (the boot-level pin is
+// `packages/qa/dogfood/test/permission-set-clone-boot-unowned-warning.dogfood.test.ts`):
+// no `_packageId`, no `packageId`, `_provenance: 'org'`.
+// ───────────────────────────────────────────────────────────────────────────
+
+const CLONE_NAME = 'crm_sales_rep_local';
+
+/** The registry item a hydrated clone is — measured, not invented. */
+const clonedItem = () => ({
+  name: CLONE_NAME,
+  label: 'Sales Rep (local)',
+  objects: { crm_lead: { allowRead: true, allowCreate: true } },
+  fields: {},
+  systemPermissions: [],
+  rowLevelSecurity: [],
+  tabPermissions: {},
+  _provenance: 'org',
+});
+
+/** The row the Clone action leaves: the environment's own set. */
+const clonedRow = (over: Record<string, any> = {}) => ({
+  id: 'ps_clone', name: CLONE_NAME, managed_by: 'admin', package_id: null, active: true,
+  object_permissions: '{"crm_lead":{"allowRead":true,"allowCreate":true}}',
+  ...over,
+});
+
+/** The unowned refusal's first sentence — the text an operator reads, unchanged by this card. */
+const unownedFirstSentence = (name: string) =>
+  `declared permission set "${name}" has no owning package — not materialized.`;
+
+describe('[#21669] an environment-owned set is told apart from an unowned declaration', () => {
+  it('a CLONED set (row managed_by admin) boots with no warning on any channel, and its row is untouched', async () => {
+    const ql = makeQl([clonedItem()]);
+    ql.rows.push(clonedRow());
+    const before = JSON.stringify(ql.rows);
+
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof bootstrapDeclaredPermissions>>;
+    try {
+      r = await bootstrapDeclaredPermissions(ql, undefined);
+    } finally {
+      cap.restore();
+    }
+
+    expect(cap.seen.filter((l) => l.includes(PERMISSION_SET_DECLARATION_UNOWNED))).toEqual([]);
+    expect(cap.seen).toEqual([]);
+    // Where a package declaration over an environment row already lands —
+    // never clobbered, and counted, so CONSERVATION still holds.
+    expect(r).toMatchObject({ skippedEnvAuthored: 1, skippedUnowned: 0, seeded: 0, updated: 0, unchanged: 0 });
+    expect(JSON.stringify(ql.rows)).toBe(before);
+  });
+
+  it('the same, on a per-organization pass: the environment door\'s organization-less row is the environment\'s', async () => {
+    // `permission-set-projection.ts` (the ENVIRONMENT door) is deliberately not
+    // per-organization, so a clone's row carries no organization_id and a
+    // walled pass sees it only beside its own rows.
+    const ql = makeQl([clonedItem()]);
+    ql.rows.push(clonedRow());
+
+    const warn = vi.fn();
+    const r = await bootstrapDeclaredPermissions(ql, undefined, {
+      logger: { info: () => {}, warn }, organizationId: 'org_a', platformBucketNames: [],
+    });
+
+    const events = warn.mock.calls.map((c) => (c[1] as any)?.event).filter(Boolean);
+    expect(events).not.toContain(PERMISSION_SET_DECLARATION_UNOWNED);
+    expect(r).toMatchObject({ skippedEnvAuthored: 1, skippedUnowned: 0, seeded: 0 });
+    expect(ql.rows).toHaveLength(1);
+  });
+
+  it('⛔ a TRULY unowned declaration — no package id, no row — still warns, with the same code and text', async () => {
+    const ql = makeQl([declaredSet({ name: 'crm_orphan', _packageId: undefined })]);
+
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof bootstrapDeclaredPermissions>>;
+    try {
+      r = await bootstrapDeclaredPermissions(ql, undefined);
+    } finally {
+      cap.restore();
+    }
+
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]).toContain(`[${PERMISSION_SET_DECLARATION_UNOWNED}]`);
+    expect(cap.seen[0]).toContain(unownedFirstSentence('crm_orphan'));
+    expect(r).toMatchObject({ skippedUnowned: 1, skippedEnvAuthored: 0 });
+    expect(ql.rows).toHaveLength(0);
+  });
+
+  it('⛔ the same on a per-organization pass with no row at all', async () => {
+    const ql = makeQl([declaredSet({ name: 'crm_orphan', _packageId: undefined })]);
+    const warn = vi.fn();
+
+    const r = await bootstrapDeclaredPermissions(ql, undefined, {
+      logger: { info: () => {}, warn }, organizationId: 'org_a', platformBucketNames: [],
+    });
+
+    const unowned = warn.mock.calls.filter((c) => (c[1] as any)?.event === PERMISSION_SET_DECLARATION_UNOWNED);
+    expect(unowned).toHaveLength(1);
+    expect(String(unowned[0]![0])).toContain(unownedFirstSentence('crm_orphan'));
+    expect(r).toMatchObject({ skippedUnowned: 1, skippedEnvAuthored: 0 });
+  });
+
+  it('⛔ a row the PACKAGE door owns is not the environment\'s: an unowned item over it still warns', async () => {
+    // The guard asks who owns the ROW. A `managed_by:'package'` row under the
+    // name is a package's record, so it proves nothing about an item that
+    // carries no owner of its own.
+    const ql = makeQl([declaredSet({ _packageId: undefined })]);
+    ql.rows.push({ id: 'ps_pkg', name: 'crm_sales_rep', managed_by: 'package', package_id: 'com.example.crm' });
+
+    const warn = vi.fn();
+    const r = await bootstrapDeclaredPermissions(ql, undefined, { logger: { info: () => {}, warn } });
+
+    const events = warn.mock.calls.map((c) => (c[1] as any)?.event).filter(Boolean);
+    expect(events).toEqual([PERMISSION_SET_DECLARATION_UNOWNED]);
+    expect(r).toMatchObject({ skippedUnowned: 1, skippedEnvAuthored: 0 });
+  });
+
+  it('⛔ a read that cannot answer proves nothing: the unowned refusal stands, exactly as before', async () => {
+    const ql = unreadableQl([clonedItem()]);
+    const warn = vi.fn();
+
+    const r = await bootstrapDeclaredPermissions(ql, undefined, { logger: { info: () => {}, warn } });
+
+    const events = warn.mock.calls.map((c) => (c[1] as any)?.event).filter(Boolean);
+    expect(events).toContain(PERMISSION_SET_DECLARATION_UNOWNED);
+    expect(r).toMatchObject({ skippedUnowned: 1, skippedEnvAuthored: 0 });
+  });
+
+  it('⭐ CONSERVATION, with a clone in the walk: every named item lands in exactly one counter', async () => {
+    const owned = declaredSet({ name: 'crm_new', _packageId: 'com.a' });
+    const orphan = declaredSet({ name: 'crm_orphan', _packageId: undefined });
+    const ql = makeQl([owned, clonedItem(), orphan]);
+    ql.rows.push(clonedRow());
+
+    const out = await bootstrapDeclaredPermissions(ql, undefined, { logger: mute() });
+
+    expect(out).toMatchObject({ seeded: 1, skippedEnvAuthored: 1, skippedUnowned: 1, unreadable: 0 });
+    const counted = out.seeded + out.updated + out.unchanged
+      + out.skippedEnvAuthored + out.skippedForeign + out.skippedUnowned + out.unreadable;
+    expect(counted).toBe(3);
+  });
+});
