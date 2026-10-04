@@ -1,0 +1,36 @@
+{
+  "number": 21691,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): triage closes a report-only instrument fix card not_planned at first grade, citing ruling 208",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T06:12:04Z",
+  "updated_at": "2026-10-04T07:05:06Z",
+  "closed_at": "2026-10-04T07:05:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-04T07:05:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21691",
+  "body": "Fixes #21681\n\nClause-②: no\n\nTier S (`.claude/**` only). Draft; this run does not flip it ready, queue it or arm auto-merge — the owning seat lands it after its at-tier contract review.\n\n## What changed\n\nOne protocol sentence in the grading block of `.claude/skills/pm-dispatch/references/triage-duties.md`, as the triage ruling on the card (comment 5976725561) specifies: a card whose fix lands in a report-only instrument (the widening tell, the half-state patrols — the judge-intent class `instrument-discipline.md` names) is closed `not_planned` at first touch, citing ruling 208, and the instrument's only in-flight work is deletion. No new gate, label or script.\n\nIt is paid in place: one restated line of the same file is deleted, so the file stays at 120 lines under its 120 ceiling. No other line is touched (no re-wrap), and `SKILL.md`, `instrument-discipline.md` and `scripts/pm/check-skill-line-ratchet.mjs` are untouched.\n\nThe enumeration pin — the two instances where the rule was not read — is named in the commit message: #20969 / PR #21016 (landed) and #21465 / PR #21679 (held). A third such card is a red reading of this sentence, not a new card.\n\n## Reading 1 (读数一): placement and payment\n\nTree: `objectstack-ai/objectstack` at `bc85776a87` (branch head), base `251a7dd4b4`.\n\n- **New sentence, line 64** (120 bytes; the line cap is 120), directly under the two existing close-at-grade lines (the 「无则关」 line and the open-P0/P1 `tooling` line), so the grading block now carries all three close-at-grade cases together:\n\n```text\n- 只报告仪器(放宽 tell、半状态巡查)的修复卡首触即关 not_planned,引裁决 208;在途只有删除。\n```\n\n- **Deleted line, was line 40** — the triage-side restatement of the filing door's four classes:\n\n```text\n- 立卡门四类:① 缺陷 / ② 维护者决定 / ③ 直派任务 / ④ 协调节点,⛔ 其余一律不立卡。\n```\n\n- **Its owning copy, kept on the reading path:** `references/filing-gate.md` line 11, the same rule (four classes only, everything else refused), with the four class heads on lines 12 / 16 / 17 / 18:\n\n```text\n- 立卡只为四类,正文首行写立卡门类别 ①–④;⛔ 其余一律不立卡,不论它叫什么。\n- ① 有具名落点或复现的产品缺陷,即 `pm:queue` 的定义;其内的 `finding` 限三类且带 `reach:`。\n- ② 只有维护者能做的决定,落卡即带「维护者速读」与四棱块。\n- ③ 维护者直派的任务,正文引其原话。\n- ④ 协调节点:跨仓/跨层父单与它的逐层子单。\n```\n\n  The triage reader reaches it through the pointer line kept right under the deleted one (now line 40): `首行写立卡门类别 ①–④;四类定义、⛔ 清单、三答与配额见 references/filing-gate.md`. The deleted line entered the protocol as the summary of that file, in the same commit that created `filing-gate.md` (`37ed9ae04b`), and moved here verbatim with the principle-only cut; it is a restatement rather than a ruled clause: the ruled clause, with its provenance quotation, lives in `filing-gate.md` and is unchanged.\n\n- **Line count:** 120 → 120 (ceiling 120, headroom 0, unchanged). Diff: 1 file, +1 / −1.\n\n## Reading 2 (读数二): gate output\n\nRun at `bc85776a87`, after the final commit, exit codes captured before any pipe:\n\n```text\npnpm check:pm-skill-ratchet   exit 0\n✓ check-skill-line-ratchet self-test: 157 cases pass.\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/triage-duties.md: widest table row is 0 bytes (pin 0; headroom 0).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/triage-duties.md is 120 lines (ceiling 120; headroom 0).\n✓ check-skill-line-ratchet: declared cross-file moves: 2, total ceilings down 477 lines.\n\npnpm check:pm-skill-id-lint   exit 0\n✓ check-skill-id-lint self-test: 14 cases pass.\n✓ check-skill-id-lint: 34 file(s) clean (pattern /#[0-9]{3,}/g).\n```\n\n`ruling 208` is spelled without a hash prefix, the way `instrument-discipline.md` records it; the issue and PR numbers of the pin are in the commit message only.\n\nThe full derived set (`node scripts/pm/dispatch-gates.mjs --commands`, no paths, change set read from the merge base) is the same 18 commands the dispatch listed, all exit 0. `--ran` reconciliation: `18 derived, 18 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero — every line carried its exit code). One first-run `exit 3` is not a measurement: `check:doc-formula-expressions` refused with PREREQUISITE NOT MET (unbuilt `@objectstack/formula` / `@objectstack/lint`); after the build it names (run under the shared verify lock, `VERDICT command-exit 0`) it exited 0. `check:nul-bytes` exit 0, plus a control-byte self-scan of the edited file: zero hits.\n\nNo changeset: `.claude/**` publishes nothing.\n\n## Acceptance notes\n\n- **Wording differs from the seat's suggested line, meaning unchanged.** The suggestion measured 152 bytes against the 120-byte line cap. The landed line drops the explicit `instrument-discipline.md` pointer; both of its key terms still lead there (「只报告的仪器」 is that file's rule line, and 「裁决 208」 its ruling record), and `reading-discipline.md` keeps its pointer to it. 「在途只有删除」 echoes that file's own 「它的在途工作只有删除」.\n- **The class is the instrument's role, not the path.** The sentence covers a fix to a report-only, judge-intent instrument. A fix to a hard-gate face that happens to share a file with a patrol is outside it, and the sentence does not widen the class beyond the two instruments the ruling names. Observation only, nothing filed. carrier: the triage seat, applying the sentence at grade time.\n- **Not decided here, as the ruling lists it:** whether the code PR #21016 landed is deleted under the report-only rule is the maintainer's question; this PR does not touch `scripts/pm/check-widening-tells.mjs`.\n\n## 维护者速读(草稿)\n\n**改了什么:** 分诊职责文件 `triage-duties.md` 的定级段加了一句:修复落在「只报告仪器」(放宽 tell、半状态巡查)上的卡,首次定级就以 not_planned 关闭,并引裁决 208;这类仪器的在途工作只有删除。同时删掉同一文件里一行重复的「立卡门四类」摘要(完整原文仍在 `filing-gate.md`),文件仍是 120 行,行数上限不动。\n\n**为什么改:** 裁决 208 早就规定只报告的仪器不立卡、不派开发、不开 PR,但分诊定级时并不读这条,于是两张这类卡被定级入队、派了开发,一张已经合并,一张被扣住,白花两轮开发。把规则写进分诊每次都读的定级段,首次定级就能拦住。\n\n**风险与代价(含回滚):** 只改内部协议的一行文字,不新增门禁、标签或脚本。风险是分诊把与巡查同文件的硬门禁修复也误关,句子按「只报告」身份判断而不按文件路径,可以避免。已经合并的那份代码要不要删,不在本 PR 范围,留给您另行决定。回滚就是撤销这一个 commit。\n\n**席位意见:**\n\n**你要做的:** 无需操作:本 PR 是 Tier S(只改 `.claude/**`),席位复核通过后经合并队列落地;不同意请回一句。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CB6W87z22K2yjUCDyVrJRk)_\n"
+}

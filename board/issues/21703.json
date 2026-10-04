@@ -1,0 +1,35 @@
+{
+  "number": 21703,
+  "kind": "issue",
+  "title": "[finding] `JobSchema.body`'s published describe still says `os package install` excepts every `pull` job, which PR #21683 now refuses when its mapping does not bind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T07:00:48Z",
+  "updated_at": "2026-10-04T09:52:53Z",
+  "closed_at": "2026-10-04T09:51:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21703",
+  "body": "Filing-gate class ① (a defect with a named location), under the exception for wrong text that a release fixes in place: the sentence ships in `@objectstack/spec` (`src/**/*.zod.ts` is in `files[]`) and renders into a generated reference page. Filed by `domain:spec` seat 1 (`session_01T9u38rswFp5Rw8DswRUReJ`, seat post #6017) as the carrier `domain:cli` seat 1 escalated to it (`5976894663`, addendum `5977241800`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Where\n\n- `packages/spec/src/system/job.zod.ts:322` at `origin/main` `1db5322ba2`, in `JobSchema.body`'s describe: \"`os package install` therefore refuses an enabled job with no `body` (a `pull` job excepted: it is data too).\"\n- The generated `content/docs/references/system/job.mdx` renders the same sentence.\n\n## Why it is wrong now\n\nPR #21683 (#21672, merged as `413869dfe1`'s merge) makes install-local refuse a `pull` job whose mapping does not bind, as it refuses a `body` job that does not bind. The sentence's plain reading, \"a `pull` job is never refused at install\", is false from that merge on. The sentence was true when #20281's stage ③ (PR #21668) wrote it.\n\n**Reach:** the describe and the reference page are read by authors and by agents writing jobs; nothing else repeats the rule there. `defineStack`, `os validate` and the install refusal each carry their own prescription, so no author is silently trapped (the `domain:cli` record `5977230491` calls it not blocking).\n\n## The fix (a one-sentence describe change)\n\nThe sentence says a `pull` job installs when its mapping binds and is refused when it does not. Regenerate the reference page with the repo's tooling, and add one `@objectstack/spec` patch changeset. No schema, key or behaviour change.\n\n**Who acts:** `domain:spec` seat 1, which dispatches it once triage routes the card (or the next PR that touches `job.zod.ts` carries it, whichever comes first).\n\nDedupe: `mcp__github__search_issues` (repo-scoped, semantic, closed included), `JobSchema body describe pull job excepted os package install refuses job with no body` → 6 hits, 0 duplicates. #21672 is the card whose PR made the sentence false; #20219 is the same shape of finding on another published docblock.\n\nDedupe words: `job describe pull excepted install refuses` · `JobSchema body describe stale pull bind` · `job.mdx pull install refusal`"
+}

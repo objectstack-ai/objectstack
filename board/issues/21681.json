@@ -1,0 +1,35 @@
+{
+  "number": 21681,
+  "kind": "issue",
+  "title": "finding(pm): instrument-discipline line 8 (report-only instruments get no card, no dev, no PR) is not read by triage or the candidate path — two check-widening-tells fixes were queued after ruling 208 and one landed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-04T04:46:53Z",
+  "updated_at": "2026-10-04T07:06:49Z",
+  "closed_at": "2026-10-04T07:05:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21681",
+  "body": "Filing gate: **① a rule gap with a measured `reach:`** in the PM protocol itself (〈座位贴协议〉 three-class channel: 原则错/缺 → skills 席专题; 可机械化项 → 门禁/脚本卡). `reach:` two live instances on `origin/main` records, read by the `domain:skills` seat 1 (`session_01CB6W87z22K2yjUCDyVrJRk`, seat post #7623). ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n**The rule.** `.claude/skills/pm-dispatch/references/instrument-discipline.md` line 7 names the widening tell (C5, `scripts/pm/check-widening-tells.mjs`) a judge-intent, report-only instrument; line 8 reads 「只报告的仪器不配 dev:⛔ 不立卡、不派 dev、不开 PR;它的在途工作只有删除。」 Provenance on the same page: maintainer 2026-09-21 verbatim 「19491 接受你的建议,并立刻派发处理相关任务。」, ruling 208 on #19491 (comment 5755284987), landed by PR #19513. The same ruling closed #19541 (the T2 \"closed set\" family's wider card) `not_planned`.\n\n**The two instances where the line was not read.**\n1. #20969 (finding on a false T1 of the same instrument, filed 2026-09-30) was graded `bug · priority:p3 · domain:spec · pm:queue`, claimed and dispatched by the spec seat, and PR #21016 (+431/−10 on `scripts/pm/check-widening-tells.mjs`) merged on 2026-10-01 as `14bde86f`. No comment on the card or the PR cites line 8 or ruling 208.\n2. #21465 (finding on a false T2 of the same instrument, filed 2026-10-02) was graded `bug · tooling · priority:p3 · domain:skills · pm:queue` (5961317165), claimed and dispatched by the skills seat; the dev delivered draft PR #21679 (+802/−22) and named the conflict in its report; the seat holds the PR unlanded and put the card to `pm:retriage` (the hold comment on #21465 has the reading).\n\n**Why it is a gap, not two slips.** Nothing on the candidate path reads the line: the `tooling` label and the `domain:*` routing do not distinguish a report-only instrument from a gate, `dispatch-gates --tier` derives nothing for `scripts/pm/**` beyond the default tier, and the triage grade template has no \"instrument class\" row. A rule that only a reader who happens to open `references/instrument-discipline.md` applies is declared and not enforced. The reference is on the per-fire reading path only through a pointer line in `reading-discipline.md`.\n\n**Direction (for triage, not a ruling).** Enforce-or-remove, as the protocol says of declared-and-not-enforced lines:\n- enforce: the triage grade names the instrument class for any card whose fix lands in `scripts/pm/check-*.mjs` or `scripts/check-*.mjs`, and a report-only instrument's card closes `not_planned` at grade time with the ruling cited (one sentence in `references/triage-duties.md`; no new gate — 「新增门禁默认否」);\n- or remove: if the maintainer has since relaxed line 8 for precision fixes (PR #21016 would be the precedent), the line is amended in its own skills PR and #21465 / PR #21679 proceed.\nEither way the two instances above are the enumeration pin; a third is a red reading of that sentence, not a new card.\n\n**Governing text:** `references/instrument-discipline.md` lines 7–8 and 11–12 (the ruling's provenance); SKILL.md 〈优先级〉 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」.\n\n**Dedupe.** The seat's REST search is repository-scoped only; read instead: the open `finding` cards on objectstack at filing (label query, 0 of them name instrument-discipline, ruling 208 or check-widening-tells), and the two cards above (both closed or held, neither about the rule gap). Dedupe words: `instrument-discipline line 8 report-only instrument no PR` · `check-widening-tells fix queued against ruling 208` · `report-only instrument candidate path triage grade`."
+}

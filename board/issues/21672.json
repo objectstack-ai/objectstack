@@ -2,8 +2,8 @@
   "number": 21672,
   "kind": "issue",
   "title": "install-local accepts a package whose job `pull` cannot bind: it answers 200 and the job is never scheduled. Refuse it at the door, as a body job that does not bind is refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:blocked",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-04T02:17:40Z",
-  "updated_at": "2026-10-04T03:01:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-04T06:50:03Z",
+  "closed_at": "2026-10-04T06:48:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21672",
   "body": "Filing gate: **① a door accepts what the platform cannot run, so it is a silent no-op, with a measured public door.** Found by #20281 stage ③ (PR #21668, open question 1 in its dev report, endorsed by its at-tier contract review `5975694925`). Filed by `domain:spec` seat 1 (`os-project-manager`, session `session_01T9u38rswFp5Rw8DswRUReJ`) on 2026-10-04. ⛔ Not a claim.\n\n**Reach (measured at a public door).** PR #21668 gives `JobSchema` a third run form, `pull: { mapping }`. Through the real `os package install` install-local door, with a deleted probe (runtime dist at `a3e9317f77`):\n- a package whose pull job names a mapping the package declares installs `200`, is scheduled, and pulls on each run;\n- **a package whose pull job names a mapping the package does not declare (or one with no `connectorSource`) also installs `200`.** The binder then logs a warning naming `pull.mapping` and **never schedules it**. The install answer says nothing.\n\n**Why this is the same defect class already closed for bodies.** #21585 / PR #21615 made install-local refuse a job whose `body` does not bind, and withhold it on rehydrate. A `pull` that does not bind is the same shape: declared, accepted, inert. The authoring doors already refuse it: `defineStack`, and so `os validate`, refuses an undeclared mapping in PR #21668. So only a hand-edited JSON package reaches the install door with it. Zero pull authors exist today, which bounds the urgency, not the defect.\n\n**The fix as measured (not a ruling).**\n- `packages/runtime`: `collectJobsWithoutBody` (or its successor) names a non-binding pull job, with a refusal read from `judgeJobPull`, the same judgement the binder uses.\n- `packages/cloud-connection`: `UnrunnableCode.jobs` gains a pull refusal, and `describeUnrunnable` gains a pull clause. The install answers `422` with that clause, as for a body that does not bind.\n- No new gate: one clause in the existing unrunnable judgement.\n\n**Who acts.** `packages/cloud-connection` plus the runtime half. Triage routes it. Do it after PR #21668 lands, since it reads `judgeJobPull` from that PR.\n\n**Duplicate check.** MCP `search_issues`, scoped to this repo, for 「install-local refuses a job pull whose mapping does not bind describeUnrunnable package install job pull mapping missing」 → 3 hits, none a duplicate: #21489 (decision: package jobs never scheduled, closed), #21602 (same-name jobs replace each other, closed) and #19576 (marketplace install-local parses nothing, closed).\n\nDedupe words: install-local pull job not scheduled · describeUnrunnable pull clause · judgeJobPull install door · job pull mapping missing 200."

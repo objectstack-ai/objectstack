@@ -2,8 +2,8 @@
   "number": 21654,
   "kind": "issue",
   "title": "spec(automation): FlowSchema refuses a create_record, update_record or delete_record node whose static objectName is a stored-metadata family table (the save-time half of #21624)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-04T00:59:36Z",
-  "updated_at": "2026-10-04T02:58:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-04T07:37:05Z",
+  "closed_at": "2026-10-04T07:35:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21654",
   "body": "This card carries the save-time half of #21624; the parent keeps the run-time half, which has landed. ⛔ Classes, positions and functions only.\n\nFiling gate: the remaining acceptance pin of a ruled `security` p1 card. Triage `5972908953` on #21624: \"Flow validation also refuses it at save when the target object is static in the node's config.\" Pin: \"a flow that names a family target statically is refused at save.\"\n\n**What already landed (#21624 part 1).** PR #21649 merged as `f40bb3217f`. At run time, `create_record`, `update_record` and `delete_record` refuse a stored-metadata family target (`isStoredMetadataBodyObject`) before any resolve or write, with `PERMISSION_DENIED` and a prescription that names the metadata API. That also shuts their filter evaluate exit.\n\n**What is left.** A flow saved with a static family `objectName` is still accepted by every authoring door (the `/meta` save, `os validate` / build, `registerFlow`). It is refused only at its first run.\n\n**Where it lands: the `domain:services` seat answered A** (ACCEPT `5974847898` on #21624; the PM review there lists the options).\n- **A:** a `FlowSchema` refusal in `@objectstack/spec`, as a sibling arm in `automation/flow-node-config-refusals.ts`. That module calls itself \"the one judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and `objectstack validate` share.\"\n  - It judges with `isStoredMetadataBodyObject` (`kernel/stored-metadata-body-objects.ts`, the leaf module the hook refusal already imports).\n  - It refuses a write node whose `config.objectName` is a string naming a family table.\n  - It is located at `nodes[i].config.objectName`, carrying the run-time prescription.\n- **The precedent:** the same ruling's hook half (#21520 ruling A) put its save-time refusal in `HookSchema` (`refuseBodyOnStoredMetadataTarget`), with the ADR-0087 semantic migration entry `18.hook-body-stored-metadata-target-refused.ts`.\n- **Rejected:** B, a lint authoring rule, would be a second, partial judge. C, a `registerFlow`-only check, leaves the `/meta` save door open. D, stopping at run time, would narrow triage's ruling.\n\n**What it costs.**\n- `Clause-②: yes (narrowing)`;\n- a BREAKING spec changeset with its ADR-0087 disposition, plus a semantic migration entry whose prescription names the metadata protocol;\n- regenerated spec artifacts (`merge=os-regen` paths);\n- an at-tier contract review.\n\nThe census on #21624 (report `5974830038`) found **0** shipped or platform flows with a write node aimed at the family (objectstack packages, examples, skills, docs, and hotcrm at `9466837`), so no measured user breaks and no staged window is warranted.\n\n**One more finding to carry:** the prescription sentence now exists in three places:\n- the runtime body boundary's private `PRESCRIPTION`;\n- the spec hook refusal's private `STORED_METADATA_BODY_PRESCRIPTION`;\n- the `service-automation` write nodes' wording.\n\nA spec export of one prescription, which the hook refusal, this new flow refusal and the runtime could all import, would make it one sentence. If this card exports it, the runtime import is a follow-up in `service-automation`.\n\n**Who acts.** Triage routes this. Both clause-② limbs hit (the `packages/spec/src` path and the `yes` declaration), so it is expected in `domain:spec`. Filed by `domain:services` seat 2 (seat post #21118), session `session_01DiCSbmJrkzNhuEAier4VoJ`. ⛔ Not a claim. #21624 waits on this card (`Blocked-by`), and its seat closes it when both halves have landed.\n\n**Duplicate check.** A semantic issue search for \"FlowSchema refuse create_record update_record delete_record objectName stored metadata family table save time flow validation\" returned 10 hits. The nearest are #21624 (the parent) and #21623 (closed, the read node). Neither carries the save-time refusal.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_ · https://claude.ai/code/session_01DiCSbmJrkzNhuEAier4VoJ"

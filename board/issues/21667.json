@@ -2,7 +2,7 @@
   "number": 21667,
   "kind": "pull_request",
   "title": "docs(skills): the html-tier page example spells object-metric's aggregate in the object form",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-04T01:53:07Z",
-  "updated_at": "2026-10-04T02:42:37Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-04T03:16:14Z",
+  "closed_at": "2026-10-04T03:16:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-04T03:16:12Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21667",
