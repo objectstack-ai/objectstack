@@ -81,6 +81,10 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 // `subforms[].columns` take, referenced rather than copied: all three carriers
 // feed one objectui grid.
 import { InlineGridColumnSchema } from '../data/field.zod';
+// [#21589] The child field names the renderer derives a detail's line-position
+// field from — the one list the retired detail-entry `sortField`'s
+// prescriptions print (reached by relative import only, never the barrel).
+import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 
 // ---------------------------------------------------------------------------
 // CLOSED AGAINST UNKNOWN KEYS as of #4001 batch A -- all 31 object sites.
@@ -2209,10 +2213,15 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
     // author moving a child collection over from `object-master-detail-form`
     // carries along. Measured at the pin: the panel hands the grid no
     // `add_label` / `sort_field` and no `onRowExpand` (`:694-710`, `:806-817`).
+    // `sortField` has since left the detail entry too (#21589, a tombstone
+    // there): the line-position field is derived from the child object and
+    // never authored, so its answer names no block that takes it.
     addLabel: '`record:line_items` does not read `addLabel`: its grid draws the built-in, localized '
       + 'Add button. `addLabel` belongs to an `object-master-detail-form` detail entry.',
     sortField: '`record:line_items` does not read `sortField`: its grid stamps no line position, so a '
-      + 'drag-reorder is not saved. `sortField` belongs to an `object-master-detail-form` detail entry.',
+      + 'drag-reorder is not saved. No block takes an authored `sortField`: an '
+      + '`object-master-detail-form` detail entry derives the line-position field from the child '
+      + `object's ${INLINE_GRID_SORT_FIELD_LIST} field.`,
     formFields: '`record:line_items` draws an editable grid only, with no per-row expand form, so it '
       + 'does not read `formFields`. It belongs to an `object-master-detail-form` detail entry.',
     inlineMode: '`record:line_items` draws an editable grid only, so it does not read `inlineMode`. It '
@@ -5815,10 +5824,12 @@ const MASTER_DETAIL_DETAIL_HISTORY =
 
 /**
  * One `object-master-detail-form` detail collection (#20928) — STRICT, and
- * exactly the twelve keys objectui's `MasterDetailForm` reads off an entry
+ * exactly the eleven keys objectui's `MasterDetailForm` reads off an entry
  * (`packages/plugin-form/src/MasterDetailForm.tsx`, its
- * `MasterDetailDetailConfig` and every `d.<key>` read in the file, read at the
- * `.objectui-sha` pin `31971ff1e28f`). A key nobody reads is not declared.
+ * `MasterDetailDetailConfig` and every `d.<key>` read in the file; read at the
+ * `.objectui-sha` pin `31971ff1e28f`, re-read at `89cad75d5570` for #21589),
+ * plus the `sortField` tombstone ({@link MASTER_DETAIL_DETAIL_SORT_FIELD_RETIRED}).
+ * A key nobody reads is not declared.
  *
  * `columns` IS {@link InlineGridColumnSchema}, the same object a relationship
  * field's `inlineColumns` and a form view's `subforms[].columns` take: the
@@ -5831,14 +5842,16 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  *
  * The keys the entry shares with a form view's `subforms[]` entry take that
  * entry's types and alias table, so one concept is spelled one way on both
- * child-collection surfaces. The three it adds are the renderer's own:
- * `formFields` (the per-row expand form), `inlineMode` (the two form factors
- * a relationship field's `inlineEdit` names; absence takes the relationship's
- * own resolution only on an entry the renderer derives, and its describe
- * states both paths) and `sortField` (the line-position field the grid stamps on
- * drag-reorder). `title` and `addLabel` are plain strings because the
- * renderer draws them as a React child and a button label without resolving a
- * locale map.
+ * child-collection surfaces. The two it adds are the renderer's own:
+ * `formFields` (the per-row expand form) and `inlineMode` (the two form
+ * factors a relationship field's `inlineEdit` names; absence takes the
+ * relationship's own resolution only on an entry the renderer derives, and its
+ * describe states both paths). The line-position field the grid stamps on
+ * drag-reorder is NOT a key: the renderer derives it from the child object
+ * ({@link INLINE_GRID_SORT_FIELD_LIST}), and `sortField`, the authored override
+ * it used to take, is a tombstone. `title` and `addLabel` are plain strings
+ * because the renderer draws them as a React child and a button label without
+ * resolving a locale map.
  *
  * A factory called inside {@link ObjectMasterDetailFormPropsSchema}'s own lazy
  * body, the way a form view's `subforms[]` entry is built inline in its
@@ -5846,6 +5859,41 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  * nothing exports, which the schema-graph walks (`alias-integrity.test.ts`)
  * never descend into, so its alias table would go unjudged.
  */
+/**
+ * REMOVED (#21589 — ADR-0049 enforce-or-remove through the ADR-0087 D2 route;
+ * the spec half of objectui#11070 round 9, the direction recorded on #21220's
+ * landing and mirrored on objectui#11396 ③).
+ *
+ * An authored override the console no longer reads. At the `.objectui-sha` pin
+ * `89cad75d5570`, `MasterDetailDetailConfig` has no `sortField` member
+ * (`plugin-form/src/MasterDetailForm.tsx:83`): the field the line grid stamps
+ * with each line's position is DERIVED from the child object (`deriveDetail`,
+ * `deriveMasterDetail.ts:540`), carried on the resolved entry and handed to
+ * the grid as `sort_field` (`:874`). The pin crossed that change without the
+ * spec half, so an authored `sortField` published green, and a drag-reorder
+ * stamped the derived field, or none.
+ *
+ * The live mechanism is the child object's own field: its first field named
+ * one of {@link INLINE_GRID_SORT_FIELD_LIST}, on an entry the renderer
+ * resolves. An entry that names `relationshipField` and at least one column
+ * and gives every column a `type` is kept exactly as authored: the renderer
+ * loads no child schema for it, so it stamps no line position (`:977-979`).
+ *
+ * Stored and built pages that carry the key are stripped by the D2 conversion
+ * `object-master-detail-form-detail-sort-field-removed`, with a notice; its D3
+ * record is `object-master-detail-form-detail-sort-field-retired`.
+ */
+const MASTER_DETAIL_DETAIL_SORT_FIELD_RETIRED =
+  '`object-master-detail-form` property `details[].sortField` was removed in @objectstack/spec 17 '
+  + '(ADR-0087 D2) — the console reads no authored value: the field the line grid stamps with each '
+  + 'line\'s position on drag-reorder is derived from the child object, so an authored `sortField` was '
+  + 'accepted and dropped. Delete the key. For a drag-reorder to be saved, give the child object a '
+  + `field named ${INLINE_GRID_SORT_FIELD_LIST}: the renderer stamps the child's first field with one `
+  + 'of those names — except on an entry that names `relationshipField` and at least one column and '
+  + 'gives every column a `type`, which the renderer keeps exactly as authored and stamps no line '
+  + 'position on. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 function masterDetailDetailEntry() {
   return strictObject({
     surface: 'this `object-master-detail-form` detail entry',
@@ -5862,7 +5910,9 @@ function masterDetailDetailEntry() {
     formFields: z.array(z.string()).optional().describe("Child field names for the per-row expand form. When omitted they are derived from the child object's fields — except on an entry that names both `relationshipField` and at least one column, which is kept as authored: nothing is derived, and the per-row form is offered only when `inlineMode` is 'form', where it draws the child object's full field list"),
     inlineMode: z.enum(['grid', 'form']).optional().describe("Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. When omitted it is resolved from the relationship field's `inlineEdit`, else from the child object's shape — except on an entry that names both `relationshipField` and at least one column, which is kept as authored: nothing is resolved, the collection renders as a grid, and the per-row form is offered only when `formFields` lists more fields than `columns`"),
     amountField: z.string().optional().describe("Numeric child column summed for the running total and the `totalField` rollup. When omitted it is picked from the grid's number and currency columns: a computed one, else one named `amount`, `total`, `subtotal`, `line_total`, `line_amount` or `net_amount`, else the last currency column, else the last numeric one — except on an entry that names `relationshipField` and at least one column and gives every column a `type`. The renderer keeps that entry exactly as authored, so nothing is picked. With no `amountField` authored or picked, the sums read a child column named `amount`, and the grid shows a running total only when `totalField` is set"),
-    sortField: z.string().optional().describe("Child field holding the line sort position, stamped on drag-reorder. When omitted it is the child object's first field named `position`, `sort_order`, `sequence`, `line_no`, `line_number` or `sort`, if it has one — except on an entry that names `relationshipField` and at least one column and gives every column a `type`. The renderer keeps that entry exactly as authored: nothing is derived, the grid stamps no line position, and a drag-reorder is not saved"),
+    // A tombstone: the line-position field is derived from the child object,
+    // never authored — see MASTER_DETAIL_DETAIL_SORT_FIELD_RETIRED above.
+    sortField: retiredKey(MASTER_DETAIL_DETAIL_SORT_FIELD_RETIRED),
     totalField: z.string().optional().describe('Parent field to receive the rolled-up sum'),
     title: z.string().optional().describe('Section title'),
     minRows: z.number().optional().describe('Minimum number of rows'),

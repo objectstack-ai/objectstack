@@ -360,10 +360,14 @@ export interface NodeExecutionResult {
      * "the row is already there" apart from "the store is down" or any other
      * reason the same string-shaped `error` could otherwise describe.
      * Optional, and deliberately narrow per executor rather than "any
-     * platform envelope, forwarded wholesale": `create_record` (commit c5a7448d5) is
-     * the only executor that sets it today, and only for the one code its
-     * repair was scoped to — `DUPLICATE_RECORD` — not any code a driver
-     * error might someday carry unaudited. An executor that never classifies
+     * platform envelope, forwarded wholesale": the CRUD executors are the only
+     * ones that set it today, each only for a code it classifies itself —
+     * `create_record` for `DUPLICATE_RECORD` (commit c5a7448d5), `get_record`
+     * for the data door's own code on a filter that evaluates the
+     * stored-metadata family (#21623), and `create_record` / `update_record` /
+     * `delete_record` for `PERMISSION_DENIED` on a stored-metadata family
+     * target (#21624) — never a code a driver error might someday carry
+     * unaudited. An executor that never classifies
      * a failure leaves it unset, exactly as before this field existed. See
      * {@link AutomationEngine.executeNode}, which copies it onto `$error`
      * beside `message`, and `try_catch`'s executor, which preserves it
