@@ -6300,7 +6300,7 @@ function objectFormSectionColumnsRefusal(input: unknown): string | undefined {
  */
 function buildObjectFormSection() {
   return strictObject({
-    surface: 'this form section',
+    surface: 'this `object-form` section',
     history:
       'Until this shape was declared, a form section was `z.unknown()`: a misspelled key passed, and the '
       + 'form drew the section without it.',
@@ -6329,7 +6329,7 @@ function buildObjectFormSection() {
       objectFormRuntimeField(),
     ])).optional().describe('The section\'s fields, in order — each a field name, the form view\'s `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members'),
   }).superRefine(sectionGroupReferenceRefinement({
-    surface: 'this form section',
+    surface: 'this `object-form` section',
     // The form view section's own lists: the keys `deriveFieldGroupLayout`
     // fills from the group, and the two booleans only a `true` of declares.
     derivedKeys: ['name', 'label', 'description', 'visibleWhen'],
