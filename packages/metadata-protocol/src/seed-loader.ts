@@ -12,6 +12,7 @@ import type {
   ReferenceResolutionError,
   SeedLoadResultParsed,
   Seed,
+  EngineQueryOptions,
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
@@ -2914,12 +2915,13 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private async isRowIdHeld(objectName: string, id: string): Promise<boolean> {
     try {
-      const rows = await this.engine.find(objectName, {
+      const probe: EngineQueryOptions = {
         where: { id },
         fields: ['id'],
         limit: 1,
         context: { isSystem: true },
-      } as any);
+      };
+      const rows = await this.engine.find(objectName, probe);
       return Array.isArray(rows) && rows.length > 0;
     } catch (error) {
       if (!isMissingTableError(error, objectName)) throw error;
