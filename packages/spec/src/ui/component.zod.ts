@@ -30,7 +30,8 @@ import {
   // height and row colour schemas, and `.conditionalFormatting` is the list
   // view's own member (read off `ListViewSchema.shape`, the one place that
   // declares the rule shape): the grid reads each with exactly that shape, so
-  // one declaration judges both doors.
+  // one declaration judges both doors. [#21464] `object-kanban`'s
+  // `.conditionalFormatting` is the same member, for the same reason.
   RowHeightSchema,
   RowColorConfigSchema,
   ListViewSchema,
@@ -5452,7 +5453,48 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
-  conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
+  /**
+   * [#21464] The list view's own `conditionalFormatting` member, by reference,
+   * as on `object-grid` (#21445): an ordered array of `{ condition, style }`,
+   * the first rule whose CEL predicate holds styling the card. Until this
+   * stage it was `z.unknown()`, so `42`, a bare string or a rule with no
+   * `style` passed the component-props gate and the board painted nothing.
+   *
+   * Read at the `.objectui-sha` pin `ab1879721595` (`KanbanBoardCore.tsx`,
+   * `KanbanImpl.tsx`, `listConditional.ts` and `ObjectGrid.tsx` are
+   * byte-identical at objectui `main` `2e818d0b51`, where the two
+   * `@object-ui/types` files cited below changed only around `grouping`):
+   * `KanbanBoardCore.tsx:114` hands
+   * `schema.conditionalFormatting` to the board, whose `getCardStyles`
+   * (`KanbanImpl.tsx:182`) evaluates it through the shared
+   * `resolveConditionalFormatting` (`core/src/evaluator/listConditional.ts:532`)
+   * — the evaluator the grid's rows use (`ObjectGrid.tsx:2970`), so one
+   * declaration judges both doors. objectui's own authoring declaration is this
+   * rule, by reference, since objectui#11522 (landed by objectui#11532,
+   * `c73cdb5695`, an ancestor of the pin): `KanbanConditionalFormattingRuleSchema`
+   * extends the list view's rule element (`types/src/zod/objectql.zod.ts:3074`)
+   * and refuses the native `{ field, operator, value, … }` and top-level colour
+   * keys by name, and its TS twin extends `SpecConditionalFormattingRule`
+   * (`types/src/objectql.ts:5166`).
+   *
+   * ⚠️ Two differences, neither a working rule. The shared evaluator still reads
+   * the native, `expression` and top-level colour arms for a rule a relay hands
+   * the board in a stored dialect (`KanbanImpl.tsx:160-166`), as on the grid; no
+   * authored `object-kanban` writer uses them (census below). And objectui's
+   * `condition` takes a blank string, which the evaluator answers with its
+   * no-match fallback (`listConditional.ts:252-260`, `fallback: false` at
+   * `:546`); the list view's member refuses it, as it does on the grid.
+   *
+   * Census of authored `object-kanban` writers (objectstack `16d241a6af`,
+   * objectui at the pin and at `main`, hotcrm `4054ec2680`, cloud
+   * `2205b53010`): every working writer is a `{ condition, style }` rule and
+   * parses here. The refused values are objectui's own refusal probes and one
+   * no-predicate fixture in this package (`{ field, value }` with no
+   * `operator`, which the evaluator skips; respelled by this stage); hotcrm and
+   * cloud author none.
+   */
+  conditionalFormatting: ListViewSchema.shape.conditionalFormatting
+    .describe('Card conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to that card'),
   /**
    * Card-click navigation (commit e233db9db — the spec half of the objectui#8652
    * maintainer ruling, verbatim `B`: declare `navigation` on the platform

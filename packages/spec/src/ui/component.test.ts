@@ -3940,11 +3940,13 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
     // `conditionalFormatting` travel the same forward and ARE read
     // (`KanbanRenderer` / `bucketCardsIntoColumns` at the same pin), so a
     // sweep that took the whole forwarded list would be over-wide — this is
-    // the pin that would catch it.
+    // the pin that would catch it. The rule is the `{ condition, style }` the
+    // member takes since #21464 (respelled from a `{ field, value }` entry with
+    // no `operator`, which the board's evaluator skipped as no predicate).
     const parsed = kanban.safeParse({
       objectName: 'showcase_task',
       coverImageField: 'cover',
-      conditionalFormatting: [{ field: 'priority', value: 'high' }],
+      conditionalFormatting: [{ condition: "record.priority == 'high'", style: { backgroundColor: '#fee2e2' } }],
     });
     expect(parsed.success).toBe(true);
   });

@@ -6319,6 +6319,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'is registered. Its D3 record is the semantic entry `ui-object-grid-row-members-typed`.',
   },
   {
+    id: 'ui-object-kanban-conditional-formatting-typed',
+    order: 77,
+    text:
+      'It also types the `object-kanban` page block\'s `conditionalFormatting`, the one member the '
+      + '`ComponentPropsMap` `z.unknown()` close-out held for a ruling: it was `z.unknown()` while objectui\'s '
+      + 'kanban also authored a native rule dialect the list view refuses, so `42` or a rule with no `style` '
+      + 'passed every door and the board painted no card for it. objectui has since made the list view\'s '
+      + '`{ condition, style }` rule the member\'s only authoring dialect, and the board evaluates it with the '
+      + 'grid\'s evaluator, so the row takes the list view\'s own member by reference, as `object-grid` does. '
+      + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'registered. Its D3 record is the semantic entry `ui-object-kanban-conditional-formatting-typed`.',
+  },
+  {
     id: 'ui-object-map-gantt-tree-navigation-typed',
     order: 64,
     text:
@@ -20192,6 +20205,40 @@ const step18: MigrationStep = {
         + 'paths. Each grid that set one of them now shows it: the declared row height, the row colours '
         + 'its `colors` map names, the navigation mode on a row click, the conditional styles, the bulk '
         + 'actions, the group-header numbers and the affordances `operations` names.',
+    },
+    // #21464 — the `object-kanban` page block's `conditionalFormatting` was
+    // `z.unknown()`, held while objectui's kanban authored a second rule dialect
+    // the list view's member refuses. objectstack-ai/objectui#11522 retired that
+    // dialect from objectui's authoring faces, so the row now takes the list view's
+    // own member, by reference, as `object-grid` does. D3 only: page-component
+    // `properties` is not parsed on the metadata save or load path, so a stored page
+    // is never refused; and the authored census found no working rule to respell —
+    // the refused values are objectui's own refusal probes and one no-predicate
+    // fixture in this package, respelled in the same change.
+    {
+      id: 'ui-object-kanban-conditional-formatting-typed',
+      surface: 'page `object-kanban` components — `properties.conditionalFormatting` (which used to accept any '
+        + 'value)',
+      replacement: 'the list view\'s own rules, `[{ condition, style }]`: a non-blank CEL `condition` over the '
+        + 'card\'s `record.*` and a CSS `style` map of string values. Rewrite a native rule `{ field, operator, '
+        + 'value, backgroundColor }` as `{ condition: "record.FIELD == VALUE", style: { backgroundColor } }`, an '
+        + '`expression` as `condition`, and move a colour written beside `condition` into `style`.',
+      reason: 'The board reads `conditionalFormatting` as an ordered list of `{ condition, style }` rules, through '
+        + 'the evaluator the grid\'s rows use, and paints a card with the `style` of the first rule whose condition '
+        + 'holds; objectui declares exactly the list view\'s rule as the member\'s only dialect. The page-component '
+        + 'row declared it `z.unknown()`, so `42`, a bare string or a rule with no `style` passed the '
+        + 'component-props gate and the board painted no card for it. The row now takes the list view\'s own '
+        + 'member, by reference, as `object-grid` does, so one rule is judged the same way on every door. It is '
+        + 'read where every page component\'s props are: the component-props gate reports a refused value as an '
+        + 'advisory `component-props-invalid` / `component-props-unknown-key` finding on `objectstack validate`, '
+        + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a page '
+        + 'component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
+        + 'registered: nothing on the load path refuses the shape, and the authored census found no working rule '
+        + 'to respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-kanban` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under '
+        + '`properties.conditionalFormatting`. Each board that sets rules paints the card each rule names with '
+        + 'its `style`.',
     },
     // #21464 — `navigation` on the `object-map`, `object-gantt` and `object-tree`
     // page blocks was `z.unknown()` although each renderer hands it to the shared

@@ -29,6 +29,9 @@
  *   `object-gantt` and `object-tree` is the list view's
  *   `NavigationConfigSchema`, by identity, and refuses an off-shape value with
  *   the code AND the path; its ADR-0087 D3 entry is registered.
+ * - §5 THE HOLD THIS FILE RECORDED, EXITED: `object-kanban`
+ *   `conditionalFormatting` is the list view's own member, by identity, the
+ *   same way (the S-kanban-cf stage).
  *
  * Later stages pin the members they type in their own file, beside this one:
  * the list family (`object-grid` `columns` / `fields` / `selection` /
@@ -47,7 +50,10 @@
  * `component-objectui-held-typed-members.pin.test.ts`; the rest of them are
  * held below as forks — the drill-down's `report`, the form's `customFields`
  * and both forms' `sections`, the timeline's `items` and the action
- * containers' members.
+ * containers' members. The one member this ledger held for a ruling,
+ * `object-kanban` `conditionalFormatting`, exited its hold once objectui's
+ * kanban declared the list view's rule as its only dialect, and is pinned
+ * in §5 below, where its hold was recorded.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -71,11 +77,12 @@ import { z } from 'zod';
 import {
   ComponentPropsMap,
   ObjectGanttPropsSchema,
+  ObjectKanbanPropsSchema,
   ObjectMapPropsSchema,
   ObjectTreePropsSchema,
   pageComponentSlotPositions,
 } from './component.zod';
-import { NavigationConfigSchema } from './view.zod';
+import { ListViewSchema, NavigationConfigSchema } from './view.zod';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -141,7 +148,6 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  */
 const STAGES = {
   'fork': 'element contracts whose declaration is still objectui\'s (the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`, which a form section\'s inline entry is too) and the metric drill-down\'s `report`: the S-objectui-held stage, the last of #21464, measured each and found two or more viable spec shapes that no ruling decides, so under the stop valve each is held and its fork reported on the card with its census; the member is typed once a ruling picks a shape',
-  'held-for-decision': 'a typed shape exists (by reference, or the renderer\'s own declared type), but measured writers author values it refuses that the renderer draws — the narrowing waits for a ruling',
 } as const;
 type Stage = keyof typeof STAGES;
 
@@ -188,7 +194,6 @@ const BULK_OPTION_ENTRY: Reason = {
 const RECORDS: Reason = { kind: 'records' };
 const SLOT: Reason = { kind: 'slot' };
 const RUNNER: Reason = { kind: 'runner' };
-const staged = (stage: Stage, reader: string): Reason => ({ kind: 'staged', stage, reader });
 const fork = (reader: string, shapes: readonly string[]): Reason => ({ kind: 'staged', stage: 'fork', reader, shapes });
 
 /**
@@ -216,6 +221,7 @@ on(['action:button', 'action:icon'], ['visible.ast', 'disabled.ast'], EXPRESSION
 on(['record:line_items'], ['columns[].readonlyWhen.ast', 'columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'details[].columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-grid'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
+on(['object-kanban'], ['conditionalFormatting[].condition.ast'], EXPRESSION_AST);
 
 // The action blocks' runner-forwarded members.
 on(['action:button', 'action:icon'], ACTION_RUNNER_PATHS, RUNNER);
@@ -247,7 +253,7 @@ on(['object-grid'], ['pagination.*'], {
 });
 
 // Read with a fixed shape at the pin — the forks the S-objectui-held stage
-// reported, and the one member still held for a ruling.
+// reported.
 //
 // The metric tile's four members are typed (stages 4 and 5); the drill-down's
 // `report` is not. The tile hands it to the shared drawer, which draws a
@@ -313,13 +319,6 @@ on(['action:menu'], ['actions[]{}'], fork(
     'the read set with `outcomeMessages`, a member `className` and the member `properties.params` bag declared',
   ],
 ));
-// The list view's own `conditionalFormatting` is the by-reference shape, as on
-// `object-grid` (#21445) — but objectui's own kanban fixtures author both rule
-// dialects it refuses (`plugin-kanban/src/__tests__/ObjectKanban.
-// structuredMembersReachTheirSinks-8313.test.tsx:463-485`,
-// `types/src/__tests__/kanban-conditional-formatting.test.ts:29-52`), so the
-// narrowing is reported for a ruling instead of shipped.
-on(['object-kanban'], ['conditionalFormatting'], staged('held-for-decision', 'plugin-kanban/src/KanbanBoardCore.tsx:114, evaluated at KanbanImpl.tsx:179 (`resolveConditionalFormatting`)'));
 
 /** Every `z.unknown()` member of every row, keyed as the ledger keys it. */
 function census(): Map<string, UnknownMember> {
@@ -503,5 +502,75 @@ describe('§4 `navigation` on object-map / object-gantt / object-tree is the lis
 
   it('is registered as the ADR-0087 D3 entry step 18 carries', () => {
     expect(MIGRATIONS_BY_MAJOR[18]!.semantic.map((s) => s.id)).toContain('ui-object-map-gantt-tree-navigation-typed');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// §5 the hold this ledger recorded, exited
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('§5 `conditionalFormatting` on object-kanban is the list view\'s own member', () => {
+  const row = () => ComponentPropsMap['object-kanban'];
+  const BASE = { objectName: 'deal' } as const;
+  const RULE = { condition: "record.priority == 'high'", style: { backgroundColor: '#fee2e2' } } as const;
+
+  /** The issue codes and paths a refusal carries, so a refusal for the WRONG reason reds. */
+  const issues = (result: z.ZodSafeParseResult<unknown>): { code: string; path: string }[] =>
+    result.success ? [] : result.error.issues.map((i) => ({ code: i.code, path: i.path.join('.') }));
+
+  it('unwraps to the list view\'s member — the same array def', () => {
+    expect(ObjectKanbanPropsSchema.shape.conditionalFormatting.unwrap()._zod.def)
+      .toBe(ListViewSchema.shape.conditionalFormatting.unwrap()._zod.def);
+  });
+
+  // The census writers' two spellings of a condition — the bare CEL string and
+  // the `{ dialect, source }` envelope — and an empty list.
+  const ACCEPTED: ReadonlyArray<readonly [label: string, rules: unknown]> = [
+    ['a string condition', [RULE]],
+    ['an envelope condition', [{ condition: { dialect: 'cel', source: "record.owner == 'ann'" }, style: { color: 'red' } }]],
+    ['an empty list', []],
+  ];
+  for (const [label, rules] of ACCEPTED) {
+    it(`parses ${label} to exactly what the list view's member answers`, () => {
+      const r = row().safeParse({ ...BASE, conditionalFormatting: rules });
+      expect(issues(r)).toEqual([]);
+      expect(r.success && (r.data as { conditionalFormatting?: unknown }).conditionalFormatting)
+        .toStrictEqual(ListViewSchema.shape.conditionalFormatting.parse(rules));
+    });
+  }
+
+  const REFUSED: ReadonlyArray<readonly [label: string, rules: unknown, found: ReadonlyArray<{ code: string; path: string }>]> = [
+    ['a number', 42, [{ code: 'invalid_type', path: 'conditionalFormatting' }]],
+    ['one rule not in a list', RULE, [{ code: 'invalid_type', path: 'conditionalFormatting' }]],
+    ['a rule with no `style`', [{ condition: RULE.condition }], [{ code: 'invalid_type', path: 'conditionalFormatting.0.style' }]],
+    ['a blank condition', [{ ...RULE, condition: '' }], [{ code: 'invalid_union', path: 'conditionalFormatting.0.condition' }]],
+    ['a non-string style value', [{ ...RULE, style: { width: 5 } }], [{ code: 'invalid_type', path: 'conditionalFormatting.0.style.width' }]],
+    ['the native rule', [{ field: 'priority', operator: 'equals', value: 'high', backgroundColor: '#fee2e2' }], [
+      { code: 'invalid_union', path: 'conditionalFormatting.0.condition' },
+      { code: 'invalid_type', path: 'conditionalFormatting.0.style' },
+      { code: 'unrecognized_keys', path: 'conditionalFormatting.0' },
+    ]],
+    ['a colour beside `condition`', [{ condition: RULE.condition, backgroundColor: '#fee2e2' }], [
+      { code: 'invalid_type', path: 'conditionalFormatting.0.style' },
+      { code: 'unrecognized_keys', path: 'conditionalFormatting.0' },
+    ]],
+    ['a colour beside `style`', [{ ...RULE, textColor: 'red' }], [{ code: 'unrecognized_keys', path: 'conditionalFormatting.0' }]],
+  ];
+  for (const [label, rules, found] of REFUSED) {
+    it(`refuses ${label}`, () => {
+      const r = row().safeParse({ ...BASE, conditionalFormatting: rules });
+      expect(r.success).toBe(false);
+      expect(issues(r)).toEqual(found);
+    });
+  }
+
+  it('an absent conditionalFormatting stays absent', () => {
+    const r = row().safeParse(BASE);
+    expect(issues(r)).toEqual([]);
+    expect(r.success && r.data).not.toHaveProperty('conditionalFormatting');
+  });
+
+  it('is registered as the ADR-0087 D3 entry step 18 carries', () => {
+    expect(MIGRATIONS_BY_MAJOR[18]!.semantic.map((s) => s.id)).toContain('ui-object-kanban-conditional-formatting-typed');
   });
 });
