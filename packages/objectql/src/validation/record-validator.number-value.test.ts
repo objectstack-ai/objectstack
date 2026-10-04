@@ -271,7 +271,7 @@ describe('normalizeNumericStringValues: an admitted string is written as its num
     }
   });
 
-  it('rewrites only what the arm judges: not a text field, not summary, not a system or readonly field, not id, not a non-string', () => {
+  it('rewrites only what the arm judges: not a text field, not summary, not a non-readonly system field, not id, not a non-string', () => {
     const schema = {
       fields: {
         id: { name: 'id', type: 'number' },
@@ -285,12 +285,16 @@ describe('normalizeNumericStringValues: an admitted string is written as its num
       },
     } as any;
     const row = {
-      id: '12', created_at: '12', f_text: '12', f_summary: '12', f_formula: '12', f_system: '12', f_readonly: '12',
+      id: '12', created_at: '12', f_text: '12', f_summary: '12', f_formula: '12', f_system: '12',
       f_undeclared: '12', f_number: 12,
     };
     expect(normalizeNumericStringValues(schema, row)).toBe(row);
     // CONTROL: the same schema does rewrite its judged field when it is a string.
     expect(normalizeNumericStringValues(schema, { ...row, f_number: '12' }).f_number).toBe(12);
+    // [#21663] …and a READONLY number field is judged now — its shape, on the
+    // value a system writer keeps — so its numeric string is written as its
+    // number too: what the arm judges is what the driver stores.
+    expect(normalizeNumericStringValues(schema, { ...row, f_readonly: '12' }).f_readonly).toBe(12);
   });
 
   it('is pure: the caller\'s record is never mutated; one record or an array of them, copied only where changed', () => {

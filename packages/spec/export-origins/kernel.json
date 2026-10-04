@@ -373,6 +373,7 @@
     "SEMVER_2_0_0_VERSION_PATTERN": "src/kernel/version-grammar.ts#SEMVER_2_0_0_VERSION_PATTERN (const)",
     "STORED_METADATA_BODY_COLUMN": "src/kernel/metadata-type-redaction.ts#STORED_METADATA_BODY_COLUMN (const)",
     "STORED_METADATA_BODY_OBJECTS": "src/kernel/stored-metadata-body-objects.ts#STORED_METADATA_BODY_OBJECTS (const)",
+    "STORED_METADATA_BODY_PRESCRIPTION": "src/kernel/stored-metadata-body-objects.ts#STORED_METADATA_BODY_PRESCRIPTION (const)",
     "STORED_METADATA_TYPE_COLUMN": "src/kernel/metadata-type-redaction.ts#STORED_METADATA_TYPE_COLUMN (const)",
     "SandboxConfig": "src/kernel/plugin-security-advanced.zod.ts#SandboxConfig (type)",
     "SandboxConfigParsed": "src/kernel/plugin-security-advanced.zod.ts#SandboxConfigParsed (type)",

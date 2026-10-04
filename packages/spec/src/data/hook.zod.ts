@@ -12,7 +12,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // its table list here. Imported from the import-free leaf, not from
 // `metadata-type-redaction.ts`, whose closure (the credential derivation and the
 // conversion chain) has no business in this schema's import graph.
-import { isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
+import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { HookBodySchema } from './hook-body.zod';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
 // (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
@@ -103,14 +103,10 @@ const hookTargetError =
  * wildcard `'*'`, which names no family table: it binds, and the runtime never
  * runs its body for a family table's event.
  *
- * The prescription repeats the runtime's sentence word for word: the runtime
- * keeps it in a module-private constant `packages/spec` cannot import, and no
- * shared constant exists.
+ * The prescription repeats the runtime's sentence word for word: it is the
+ * leaf's exported `STORED_METADATA_BODY_PRESCRIPTION`, imported above, which
+ * the flow write-node refusal ends on as well.
  */
-const STORED_METADATA_BODY_PRESCRIPTION =
-  'Change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), '
-  + 'where it is validated and its provenance is recorded. Elevation (`runAs`, a system context) does not '
-  + 'change this.';
 
 /**
  * The object-level check that refuses a hook `body` bound to a stored-metadata

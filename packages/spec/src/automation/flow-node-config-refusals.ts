@@ -3,12 +3,13 @@
 /**
  * @module automation/flow-node-config-refusals
  *
- * **What a node's executor needs its `config` to carry** (#20316) — the one
- * judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses
+ * **What a node's executor needs its `config` to carry** (#20316), and
+ * (#21654) **the one target a write node's executor refuses to write** — the
+ * one judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses
  * first) and `objectstack validate` share, beside the expression ledger's
  * `predicateSlotRefusal` and closing the same gap: a node's `config` is an
- * open `z.record`, so what its executor requires was checked by nobody until
- * the run.
+ * open `z.record`, so what its executor requires, or refuses, was checked by
+ * nobody until the run.
  *
  * Its refusal codes join the closed flow slot table
  * (`FLOW_SLOT_REFUSAL_CODES`, `flow-node-expression-paths.ts`); the
@@ -18,6 +19,10 @@
  */
 
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
+// [#21654] The stored-metadata family's ONE membership predicate and the ONE
+// prescription a refusal of its reach ends on — both from the import-free leaf,
+// so this module's import graph gains nothing. ⛔ Never restate either here.
+import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
 import { FLOW_NODE_EXPRESSION_PATHS } from './flow-node-expression-paths';
 import type { FlowNodeConfigRefusal, FlowSlotRefusalParams, NodeConfigValueKind } from './flow-node-expression-paths';
@@ -179,6 +184,53 @@ function insideValueSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): bo
   });
 }
 
+/**
+ * [#21654] The write nodes, each with the verb its refusal names — the same
+ * three, in the same words, as the run-time refusal in `service-automation`
+ * (`storedMetadataWriteRefusal`, `builtin/crud-nodes.ts`). ⛔ Never `get_record`:
+ * a read is not a write, and its family reach is refused at the run.
+ */
+const STORED_METADATA_WRITE_VERB = {
+  create_record: 'create a record in',
+  update_record: 'update',
+  delete_record: 'delete from',
+} as const;
+
+/** A node type in {@link STORED_METADATA_WRITE_VERB}. */
+function isStoredMetadataWriteNodeType(nodeType: string): nodeType is keyof typeof STORED_METADATA_WRITE_VERB {
+  return Object.prototype.hasOwnProperty.call(STORED_METADATA_WRITE_VERB, nodeType);
+}
+
+/**
+ * The write-target arm of {@link flowNodeConfigRefusals} (#21654): a
+ * `create_record`, `update_record` or `delete_record` node whose `objectName`
+ * is a STATIC string naming a stored-metadata table, judged by the family's
+ * own predicate, by exact name — the set the run-time refusal refuses, read
+ * where the flow is built instead of where it first runs. `undefined` for
+ * anything else.
+ *
+ * A static name only. A value the parse cannot read as a name is the run's to
+ * judge: an expression envelope is not a string, and a `{token}` template is
+ * never a family name by exact match — the run-time half judges the name the
+ * node hands the data engine.
+ */
+function storedMetadataWriteTargetRefusal(nodeType: string, config: unknown): FlowNodeConfigRefusal | undefined {
+  if (!isStoredMetadataWriteNodeType(nodeType) || !isRecord(config)) return undefined;
+  const objectName = config.objectName;
+  if (typeof objectName !== 'string' || !isStoredMetadataBodyObject(objectName)) return undefined;
+  return {
+    code: 'write-node-stored-metadata-target',
+    params: { nodeType, objectName },
+    message:
+      `This \`${nodeType}\` node's \`objectName\` is '${objectName}', so it would `
+      + `${STORED_METADATA_WRITE_VERB[nodeType]} a table that holds stored metadata, and a flow may not write it `
+      + 'directly: every run that reaches the node refuses it before anything is written, and re-running '
+      + `changes nothing. ${STORED_METADATA_BODY_PRESCRIPTION}`,
+    source: '',
+    path: 'objectName',
+  };
+}
+
 /** The refusal for a key a node's executor contract requires. */
 function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
   return (
@@ -190,11 +242,12 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
 }
 
 /**
- * Every reason a node's `config` is refused on SHAPE or PRESENCE — the ONE
- * judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses
- * first) and `objectstack validate` share (#20316).
+ * Every reason a node's `config` is refused on SHAPE or PRESENCE, and (#21654)
+ * a write node's static TARGET in the stored-metadata family — the ONE judge
+ * `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and
+ * `objectstack validate` share (#20316).
  *
- * Two arms.
+ * Three arms.
  *
  * ## The executor contract — a key it requires, absent
  *
@@ -240,6 +293,25 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
  * The branch's `expression` is not judged here: it is a ledger `predicate`
  * slot, refused absent / blank / non-text by `predicateSlotRefusal`.
  *
+ * ## A write node aimed at the stored-metadata family
+ *
+ * The family (`sys_metadata`, `sys_metadata_history`) has one writer for
+ * app-authored work: the metadata protocol, where a change is validated and
+ * its provenance recorded (#21520, ruling A, applied to flows by #21624). The
+ * `create_record`, `update_record` and `delete_record` executors refuse a
+ * family target at run time, before any write; a flow naming one statically
+ * used to save, register and validate clean, and failed at its first run.
+ *
+ *  - A write node whose `objectName` is a string naming a family table →
+ *    `write-node-stored-metadata-target`, anchored at `objectName`, whose
+ *    message names the node type and the table and ends on the leaf's
+ *    `STORED_METADATA_BODY_PRESCRIPTION`.
+ *
+ * Judged whatever else the config carries: the run refuses such a node either
+ * way — by its contract parse when that fails, by the target right after it
+ * when it holds. A dynamic target is the run's: see
+ * {@link storedMetadataWriteTargetRefusal}.
+ *
  * Every refusal carries `source: ''`: none of these values is CEL text.
  */
 export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowNodeConfigRefusal[] {
@@ -248,6 +320,8 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
     decisionShapeRefusals(config, out);
     return out;
   }
+  const writeTarget = storedMetadataWriteTargetRefusal(nodeType, config);
+  if (writeTarget) out.push(writeTarget);
   const contract = getBuiltinNodeConfigContracts().get(nodeType);
   if (!contract) return out;
   const authored = config ?? {};

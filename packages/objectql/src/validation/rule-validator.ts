@@ -1818,7 +1818,7 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  * Strip CALLER-SUPPLIED writes to read-only fields from an UPDATE payload
  * (#2948). Unlike `readonlyWhen` (conditional, handled above), a
  * static `readonly` field was never enforced on the server write path: the
- * record validator only SKIPS it from validation, so a user-context update
+ * record validator only SKIPPED it from validation, so a user-context update
  * could overwrite audit stamps, provenance, or any other read-only column. We
  * STRIP the change (symmetric with `readonlyWhen`) rather than reject it, for
  * compatibility.
@@ -1845,6 +1845,11 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  *  - system context — the caller passes this strip only for NON-system writes;
  *    system-context writes (import, seed replay, approvals, lifecycle hooks —
  *    all `isSystem: true`) legitimately set read-only columns and skip it.
+ *    [#21663] They skip THIS strip and nothing else: the value they keep is
+ *    stored, so the engine judges its SHAPE after the strip point on every
+ *    path (`validateRecordInScope` in `record-validator.ts`, `ReadonlyValueScope`). A
+ *    malformed readonly value from a system writer is refused with the same
+ *    sentence a non-readonly field gets, never stored.
  *
  * ### Why `supplied` carries VALUES, not just keys (#5591)
  *
