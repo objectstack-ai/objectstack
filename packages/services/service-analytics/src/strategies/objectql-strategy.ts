@@ -37,7 +37,7 @@ import { projectedDimensions } from '../order-key-door.js';
 // dataset door's post-pass (#3588) — this face orders by it, never by a copy.
 import { applyOrdering, applyWindow } from '../dataset-executor.js';
 import { type LikeShape } from '../like-pattern.js';
-import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
+import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import {
@@ -142,17 +142,41 @@ interface CrossObjectPlan {
 }
 
 /**
- * [#21595] The echo has no bucket expression SQLite runs, so it refuses rather
- * than print a statement SQLite refuses.
+ * Why the echo of a date bucket refuses: the in-memory zone, or no driver
+ * expression for the bucket (with the dialect the host names, `'unknown'` when
+ * it names none).
+ */
+type BucketEchoRefusalCause = { zone: string } | { dialect: AnalyticsSqlDialect };
+
+/**
+ * The echo of a date bucket that no driver expression stands for: it refuses
+ * rather than print one.
  *
- * `generateSql` prints a date-bucketed dimension in the expression the driver
- * groups by (the `dateBucketSql` hook). Where nothing answers, it prints the
- * representative `date_trunc('<granularity>', col)`, and SQLite has no
- * `date_trunc`. On the shipped composition one case reaches that on SQLite: a
- * non-UTC `timezone`. The engine then buckets in memory on that zone's
- * calendar (ADR-0053 Phase 2, D2), and SQLite has no time-zone database, so no
- * SQLite expression produces those keys. The other branch is a host whose hook
- * answers nothing for a SQLite datasource.
+ * [#21647] One rule. `generateSql` prints a date-bucketed dimension only in
+ * the expression the driver itself renders for it (the `dateBucketSql` hook),
+ * at a UTC or unset `timezone`. Everything else refuses here, and the
+ * refusal names its cause:
+ *
+ * - [#21630] **A non-UTC `timezone`, on every driver.** The engine then
+ *   buckets in memory on that zone's calendar (ADR-0053 Phase 2, D2;
+ *   `tzRequiresInMemory` in objectql's `engine.ts`): the driver only fetches
+ *   the rows, and no statement the database runs groups by those keys. The
+ *   `date_trunc('<granularity>', col)` this used to print groups on the
+ *   database SESSION's calendar where it runs at all. Measured on PostgreSQL
+ *   16.14 with the server at `Asia/Shanghai`, it answered timestamp keys such
+ *   as `2025-12-31T16:00:00.000Z` where the face answers `2026-01`, and at
+ *   `America/New_York` it grouped 20 and 8 where the face groups 27 and 1.
+ * - [#21647] **No driver expression for the bucket, on every driver.** The
+ *   hook answers nothing: a driver that runs no SQL (`driver-memory`, whose
+ *   bucket the engine computes in memory; `driver-mongodb`, which buckets in
+ *   its own aggregation pipeline), a SQL driver with no expression for the
+ *   granularity (the engine buckets it in memory), or a host that wires no
+ *   hook. The echo used to print `date_trunc` there and call it
+ *   representative. Measured on `driver-memory` at UTC, the face answered
+ *   `2026-01` and `2026-W02` from rows the driver only fetched, while both
+ *   faces printed `date_trunc('month', closed_at)`, a statement nothing ran.
+ *   [#21595] SQLite, which has no `date_trunc` at all, was the first case of
+ *   this arm.
  *
  * `NOT_IMPLEMENTED` / 501, for the reason `driver-sql`'s own bucket refusal
  * gives: the query is spelled correctly and served, and the gap is the
@@ -166,18 +190,26 @@ interface CrossObjectPlan {
  * declared response contracts: `sql` is optional on the query answer, and the
  * dry run answers in the error envelope.
  */
-function sqliteBucketEchoRefused(dimension: string, granularity: string, zone: string | undefined): Error {
-  const zoned = !!zone && zone !== 'UTC';
+function bucketEchoRefused(dimension: string, granularity: string, cause: BucketEchoRefusalCause): Error {
   const err = new Error(
-    `[analytics] cannot render display SQL for the "${granularity}" bucket of "${dimension}" on SQLite` +
-      (zoned ? ` with timezone "${zone}". ` : '. ') +
-      (zoned
-        ? `The query itself is SERVED: the engine buckets it in memory on that zone's calendar, and SQLite has ` +
-          `no time-zone database, so no SQLite expression produces those bucket keys. `
-        : `The query itself is SERVED, but the driver behind this datasource renders no bucket expression for it. `) +
-      `Refusing rather than printing date_trunc(...), which is not a SQLite function. ` +
-      `Run the query itself (/analytics/query) to get its rows` +
-      (zoned ? `; with timezone "UTC" or none, this dry run renders the expression the driver groups by.` : '.'),
+    `[analytics] cannot render display SQL for the "${granularity}" bucket of "${dimension}"` +
+      ('zone' in cause
+        ? ` with timezone "${cause.zone}". The query itself is SERVED: the engine buckets it in memory on that ` +
+          `zone's calendar, so no statement the database runs groups by those bucket keys. Refusing rather than ` +
+          `printing one that groups on another calendar. Run the query itself (/analytics/query) to get its rows; ` +
+          `with timezone "UTC" or none, this dry run renders the expression the driver groups the bucket by, ` +
+          `where the driver has one.`
+        : (cause.dialect === 'unknown'
+            ? `: the driver behind this datasource names no SQL dialect and renders no expression for it. A ` +
+              `driver that runs no SQL, such as the in-memory or MongoDB driver, buckets it without one: the ` +
+              `engine in memory, MongoDB in its own aggregation pipeline. A host that wires no dateBucketSql hook ` +
+              `cannot ask its driver at all.`
+            : `: no SQL expression for it is known on this "${cause.dialect}" datasource. Either its driver ` +
+              `renders none for this granularity, and the engine buckets it in memory, or this host wires no ` +
+              `dateBucketSql hook to ask the driver.`) +
+          ` The query itself is SERVED. Refusing rather than printing a bucket expression nothing here ran: ` +
+          `this dry run prints only the expression the driver itself groups the bucket by. Run the query itself ` +
+          `(/analytics/query) to get its rows.`),
   ) as Error & { code?: string; status?: number; refusal?: true };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -400,7 +432,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     });
 
     const fields = this.buildFieldMeta(query, cube);
-    // Echo a representative SQL alongside the rows (#3588). `NativeSQLStrategy`
+    // Echo the SQL the query stands for alongside the rows (#3588). `NativeSQLStrategy`
     // returns the statement it actually ran, and dataset responses surface that
     // string — it is how an author checks what their widget compiled to. This
     // path builds an AST, so it had nothing to echo, and the `sql` field simply
@@ -465,13 +497,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    *
    * [#21441] A date bucket renders the expression the driver itself groups by
    * for its dialect, through the `dateBucketSql` hook, so the echo runs there
-   * and answers the face's bucket keys. The bucket stays REPRESENTATIVE where
-   * the hook answers nothing: no hook, a driver with no bucket expression (a
-   * non-SQL driver), or a non-UTC `timezone`, which the engine buckets in
-   * memory on that zone's calendar. There it prints
-   * `date_trunc('<granularity>', col)`. [#21595] Except on SQLite, which has no
-   * `date_trunc`: there the echo refuses ({@link sqliteBucketEchoRefused}), so
-   * it never prints a statement SQLite refuses.
+   * and answers the face's bucket keys. [#21647] That expression is the only
+   * thing a bucket is ever printed as. Where there is none, the echo refuses
+   * ({@link bucketEchoRefused}), on every driver and every dialect: a non-UTC
+   * `timezone`, which the engine buckets in memory on that zone's calendar
+   * (#21630), and a hook that answers nothing at UTC, which is a driver that
+   * runs no SQL, a granularity the driver leaves to the engine, or a host that
+   * wires no hook (#21595 was SQLite's case of it). No bucket expression is
+   * written here.
    *
    * Filter VALUES are rendered as `$n` placeholders and returned in `params`,
    * never inlined: the echoed statement travels to the browser, and a filter
@@ -583,15 +616,32 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // answers `2026-01`.
     //
     // Asked only for a UTC or unset `timezone`. The driver's expression is a
-    // UTC bucket, and a non-UTC zone makes the engine bucket in memory on that
-    // zone's calendar instead (ADR-0053 Phase 2, D2; `tzRequiresInMemory` in
-    // objectql's `engine.ts`), which no driver expression describes. Where
-    // nothing answers, the bucket keeps the representative `date_trunc`, except
-    // on SQLite, which has no `date_trunc`: there the echo refuses
-    // ({@link sqliteBucketEchoRefused}, #21595).
+    // UTC bucket. [#21630] A non-UTC zone makes the engine bucket in memory on
+    // that zone's calendar instead, on every driver (ADR-0053 Phase 2, D2;
+    // `tzRequiresInMemory` in objectql's `engine.ts`, the same test on the same
+    // `timezone`), so no statement the database runs groups by those keys, and
+    // the echo refuses on every dialect before the hook is asked
+    // ({@link bucketEchoRefused}).
+    //
+    // [#21647] Where the hook answers nothing at UTC, the echo refuses too, on
+    // every dialect. That is the engine's other in-memory condition, read off
+    // the driver rather than restated here: every `driver-sql` dialect answers
+    // `null` exactly where its `supports.queryDateGranularity` is false (both
+    // read `dateGranularityCapabilities`), which is where the engine buckets in
+    // memory. A driver that runs no SQL has no hook to answer: `driver-memory`
+    // advertises no granularity, so the engine buckets in memory, and
+    // `driver-mongodb` buckets in its own pipeline, which no SQL stands for
+    // either. The engine's predicate itself is not reachable from here.
+    //
+    // Two cells print the driver's expression while the engine buckets in
+    // memory, because the hook answers there and the expression, run on that
+    // dialect, answers the face's keys: a measure carrying its own `filter`
+    // (the engine aggregates every such query in memory, #10576), and
+    // `driver-turso`'s remote face (it advertises no granularity, and inherits
+    // the SQLite expression, which libSQL runs).
     const zone = query.timezone;
+    const inMemoryZone = zone && zone !== 'UTC' ? zone : undefined;
     const driverBucketSql = (col: string, granularity: string): string | undefined => {
-      if (zone && zone !== 'UTC') return undefined;
       const answered = (ctx as DatasetScopedStrategyContext).dateBucketSql?.(tableName, col, granularity);
       return typeof answered === 'string' && answered !== '' ? answered : undefined;
     };
@@ -606,10 +656,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
       if (!gran) return col;
+      if (inMemoryZone !== undefined) throw bucketEchoRefused(dim, gran, { zone: inMemoryZone });
       const bucket = driverBucketSql(col, gran);
-      if (bucket !== undefined) return bucket;
-      if (sqlDialectFor(ctx, tableName) === 'sqlite') throw sqliteBucketEchoRefused(dim, gran, zone);
-      return `date_trunc('${gran}', ${col})`;
+      if (bucket === undefined) throw bucketEchoRefused(dim, gran, { dialect: sqlDialectFor(ctx, tableName) });
+      return bucket;
     };
 
     if (query.dimensions) {

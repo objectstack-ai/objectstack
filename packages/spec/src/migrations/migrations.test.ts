@@ -237,9 +237,10 @@ describe('migration chain (ADR-0087 D3)', () => {
       expect(rationale17()).toMatch(/was CLOSED by/);
     });
 
-    it('names #4722 and the two trees an item gate is now enforced in', () => {
+    it('names the server-side fix in words and the two trees an item gate is now enforced in', () => {
       const r = rationale17();
-      expect(r).toMatch(/#4722/);
+      expect(r).toMatch(/was CLOSED by a server-side fix inside this same 17\.0\.0 window/);
+      expect(r).toMatch(/`filterAppForUser` now runs the SAME `filterNav` over every/);
       expect(r).toMatch(/BOTH trees/);
       expect(r).toMatch(/areas\[\]\.navigation/);
     });

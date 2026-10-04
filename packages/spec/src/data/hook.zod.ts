@@ -12,7 +12,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // its table list here. Imported from the import-free leaf, not from
 // `metadata-type-redaction.ts`, whose closure (the credential derivation and the
 // conversion chain) has no business in this schema's import graph.
-import { isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
+import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { HookBodySchema } from './hook-body.zod';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
 // (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
@@ -103,14 +103,10 @@ const hookTargetError =
  * wildcard `'*'`, which names no family table: it binds, and the runtime never
  * runs its body for a family table's event.
  *
- * The prescription repeats the runtime's sentence word for word: the runtime
- * keeps it in a module-private constant `packages/spec` cannot import, and no
- * shared constant exists.
+ * The prescription repeats the runtime's sentence word for word: it is the
+ * leaf's exported `STORED_METADATA_BODY_PRESCRIPTION`, imported above, which
+ * the flow write-node refusal ends on as well.
  */
-const STORED_METADATA_BODY_PRESCRIPTION =
-  'Change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), '
-  + 'where it is validated and its provenance is recorded. Elevation (`runAs`, a system context) does not '
-  + 'change this.';
 
 /**
  * The object-level check that refuses a hook `body` bound to a stored-metadata
@@ -313,9 +309,18 @@ export const HookSchema = lazySchema(() => strictObject(
    *
    *   - **Inline function** (authoring): `handler: async (ctx) => { ... }`.
    *     Convenient in `defineStack({ hooks: [...] })` source files.
-   *   - **String reference** (build artifact / Studio): `handler: 'my_fn'`.
-   *     Resolved at runtime against the bundle's `functions` map +
-   *     anything `engine.registerFunction(name, fn)` added.
+   *   - **String reference** (build artifact): `handler: 'my_fn'`.
+   *     Resolved at bind time inside the hook's OWN package only: the
+   *     package's `functions` map (on the artifact path, its runtime module
+   *     supplies it) and the functions that same package registered on the
+   *     engine. A function another package registered is never reached by
+   *     name. A name the package does not hold — a typo, or another
+   *     package's function — is refused at registration
+   *     (`INVALID_REFERENCE`, 400) and the hook is not bound.
+   *     A hook authored at runtime through the metadata API ships with no
+   *     code package and holds no functions: give it a `body`. To reuse
+   *     another package's function, import it from the package that owns
+   *     it and declare it in this package's own `functions`.
    *
    * `objectstack build` automatically lowers inline functions to the
    * string form (using `Hook.name` as the ref) and emits the originals

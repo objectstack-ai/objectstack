@@ -67,8 +67,16 @@
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
- * columns such as an injected `organization_id`) are never validated
- * here — the engine and the audit plugin manage them.
+ * columns such as an injected `organization_id`) are never REQUIRED here —
+ * the engine and the audit plugin supply them.
+ *
+ * [#21663] A `readonly` field's VALUE is still judged for its SHAPE when the
+ * engine's write path calls {@link validateRecordInScope} with `'include'` or
+ * `'only'` — see {@link ReadonlyValueScope} for which arms that is and why the
+ * engine does so only where the payload is final (after the readonly strip).
+ * The public {@link validateRecord} is unchanged. A `system`
+ * column that is NOT `readonly` (`owner_id`) and a lifecycle name with no
+ * `readonly` flag keep the full skip.
  *
  * On failure, a `ValidationError` is thrown with `.fields[]` holding
  * one entry per offending field. REST translates this into a
@@ -600,20 +608,93 @@ function valueMayBeAnObject(def: FieldDef): boolean {
  * nested garbage) is left untouched so that `validateRecord` can reject it with
  * `invalid_type`. WHICH columns it is applied to is this door's: a declared
  * multi-valued field (`isMultiValueField`), never a lifecycle column or one the
- * engine owns (`system` / `readonly`).
+ * engine owns (`system` / `readonly`) — except that [#21663] a `readonly`
+ * field is reached under the same {@link ReadonlyValueScope} the validator is
+ * handed, so a readonly value is judged in the form a non-readonly one is.
+ * ⛔ Pass `'include'` / `'only'` only AFTER the readonly strip: the strip keeps
+ * a key whose value is no longer the caller's, and a wrap here changes the
+ * value's identity.
  */
 export function normalizeMultiValueFields(
   objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
+  readonlyValues: ReadonlyValueScope = 'skip',
 ): void {
   if (!objectSchema?.fields || !data) return;
   for (const [name, value] of Object.entries(data)) {
-    if (SKIP_FIELDS.has(name)) continue;
     const def = objectSchema.fields[name];
-    if (!def || def.system || def.readonly || !isMultiValueField(def)) continue;
+    if (!def || !isMultiValueField(def) || !isInReadonlyScope(name, def, readonlyValues)) continue;
     const stored = multiValueStorageForm(value);
     if (stored !== value) data[name] = stored;
   }
+}
+
+/**
+ * [#21663] Which `readonly` field values a write-door call reaches, beside the
+ * fields a caller may write.
+ *
+ * ## Why the split exists
+ *
+ * The static readonly strip ({@link stripReadonlyFields} in
+ * `rule-validator.ts`) takes a NON-system caller's value off a readonly field,
+ * and a system write is exempt from it (seed replay, migration, a hook-owned
+ * stamp). The record validator skipped every readonly field outright, on the
+ * premise that the strip had already removed anything a caller sent. That
+ * premise is false for exactly the writers the strip exempts: under
+ * `isSystem` a readonly value went to the driver unjudged, so a seed's
+ * `'yesterday'` on a readonly `datetime` — or an unresolved `cel` envelope —
+ * was stored verbatim, while the same value on a non-readonly field was
+ * refused. Triage's ruling on #21663: the strip keeps its system exemption,
+ * and the value-shape check runs for every write.
+ *
+ * ## The three scopes
+ *
+ *  - `'skip'` — today's walk: a readonly field is not reached. The engine
+ *    passes it where the strip has NOT yet run (the update path's first
+ *    validation), because a caller's readonly value there is about to be
+ *    dropped, not stored: judging it would turn a whole-record write-back that
+ *    echoes a legacy stored value into a refusal.
+ *  - `'include'` — the caller-writable fields AND each readonly field's value,
+ *    for a payload that is FINAL (the insert path and the dry run, both after
+ *    their strips).
+ *  - `'only'` — readonly fields alone, for the update path's second pass after
+ *    its strip, whose caller-writable fields the first pass already judged.
+ *
+ * ## Which arms a readonly value reaches — its SHAPE, never its constraints
+ *
+ * A readonly value is judged by the per-type arms that ask "is this a value of
+ * the declared type at all", with the same wire code and the same sentence a
+ * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
+ * a number for a number-typed field, a boolean, an array for a multi-value
+ * field, no filter-operator object, and the ADR-0104 reference / media /
+ * structured-JSON shape under the object's own posture (warn-first until the
+ * deployment's evidence says otherwise). It is never REQUIRED.
+ *
+ * ⛔ It does NOT reach the author-declared constraints on top of the type:
+ * option membership (`invalid_option`), `maxLength` / `minLength`,
+ * `valueDomain`, `min` / `max` / `scale` / `precision`, or the email / url /
+ * phone formats (the spec's stored shape for those types is a plain string).
+ * Option membership is the load-bearing exclusion: `sys_activity.type` is a
+ * readonly `select` whose declared options are the BUILT-IN set of an open
+ * vocabulary, and the maintainer ruling recorded at commit 88b9d749a binds that
+ * an author-contributed value is stored, not refused — enforcing the enum on a
+ * system-owned write is a direction that ruling did not take.
+ *
+ * A `system` column that is not `readonly` (`owner_id`) and a lifecycle name
+ * with no `readonly` flag are not reached in any scope: neither is the
+ * system-exempt half of the strip this split repairs.
+ */
+export type ReadonlyValueScope = 'skip' | 'include' | 'only';
+
+/** A field the caller writes and `validateRecord` has always walked. */
+function isCallerWritableField(name: string, def: FieldDef): boolean {
+  return !SKIP_FIELDS.has(name) && !def.system && !def.readonly;
+}
+
+/** Is `def` reached under `scope`? See {@link ReadonlyValueScope}. */
+function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScope): boolean {
+  if (def.readonly === true) return scope !== 'skip';
+  return scope !== 'only' && isCallerWritableField(name, def);
 }
 
 /**
@@ -716,8 +797,13 @@ function isJudgedNumberType(type: string): boolean {
  * every other form, and this function pre-decides none of them.
  *
  * "Number-typed" is exactly what the arm judges ({@link isJudgedNumberType}),
- * on exactly the fields `validateRecord` walks: never a `SKIP_FIELDS` name, a
- * `system` or a `readonly` field. A value nobody judges is not rewritten.
+ * on exactly the fields `validateRecord` walks: never a `SKIP_FIELDS` name or a
+ * `system` field, unless [#21663] it is `readonly` — whose value's shape is
+ * judged on every write ({@link ReadonlyValueScope}), so its numeric string is
+ * written as its number like any other. A value nobody judges is not
+ * rewritten. Safe ahead of the readonly strip, where this runs: it runs before
+ * the caller-value snapshot too, so the strip compares the rewritten value with
+ * itself and still drops a non-system caller's readonly key.
  *
  * ## Why the door has to say it
  *
@@ -773,10 +859,10 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
-    if (typeof value !== 'string' || SKIP_FIELDS.has(name)) continue;
+    if (typeof value !== 'string') continue;
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def || def.system || def.readonly || !isJudgedNumberType(def.type)) continue;
+    if (!def || !isJudgedNumberType(def.type) || !isInReadonlyScope(name, def, 'include')) continue;
     const n = parseNumericString(value);
     if (n === undefined) continue;
     (out ??= { ...row })[name] = n;
@@ -902,6 +988,10 @@ function validateOne(
   ctx?: ValidationMessageContext,
   valueStrict = false,
   onAdmitted?: AdmittedValueShapeViolationSink,
+  // [#21663] A `readonly` field's value: its type's SHAPE arms only, never a
+  // constraint — see {@link ReadonlyValueScope}. Each `if (shapeOnly) return
+  // null` below sits where an arm's shape test ends and its constraints begin.
+  shapeOnly = false,
 ): FieldValidationError | null {
   const fail = (
     code: FieldErrorCode,
@@ -995,6 +1085,9 @@ function validateOne(
   // in driver-sql (the #11794 invariant). The email/url/phone format checks
   // below stay per-type conditions inside the branch.
   if (BOUNDED_STRING_FIELD_TYPES.has(t)) {
+    // A string type's stored shape is a string; everything below is a bound,
+    // a domain or a format the author declared on top of it.
+    if (shapeOnly) return null;
     const s = typeof value === 'string' ? value : String(value);
     if (def.maxLength !== undefined && s.length > def.maxLength) {
       return fail('max_length', { maxLength: def.maxLength, actual: s.length });
@@ -1107,6 +1200,7 @@ function validateOne(
     if (n === undefined || !Number.isFinite(n)) {
       return fail('invalid_number');
     }
+    if (shapeOnly) return null;
     // `min` / `max` bind on every type through this door, `progress` included.
     // [#20386] `progress` joined the TYPE check above in #20308 and, with this
     // change, the bounds: `FieldSchema.min` / `max` declare 「Checked on the
@@ -1397,6 +1491,9 @@ function validateOne(
   // question from two authorities that happen to agree today, which is the
   // drift the one-definition ruling (#17469) closes.
   if ((t === 'select' || t === 'radio') && !isMultiValueField(def)) {
+    // Option membership is the whole arm, and it is a constraint: ⛔ never on
+    // a readonly value (the open-vocabulary ruling, see ReadonlyValueScope).
+    if (shapeOnly) return null;
     const allowed = optionValues(def.options);
     if (picklist !== undefined && allowed.length === 0) return picklistUnresolved();
     if (allowed.length > 0 && !allowed.includes(String(value))) {
@@ -1420,6 +1517,7 @@ function validateOne(
     if (!Array.isArray(value)) {
       return fail('invalid_type', undefined, 'invalid_type_array');
     }
+    if (shapeOnly) return null;
     // Reference / attachment types carry IDs or storage keys, not options —
     // reference integrity is handled elsewhere.
     if (t === 'lookup' || t === 'user' || t === 'file' || t === 'image') return null;
@@ -1633,10 +1731,20 @@ export function valueShapeViolation(def: FieldDef, value: unknown): string | nul
 
 /**
  * Is this field one the value-shape scan covers, and one a client may write?
- * `system` / `readonly` / lifecycle columns are skipped for the same reason
- * `validateRecord` skips them — the engine owns them, so they are never
- * validated on a write and must never be counted as blocking a gate that
- * governs writes.
+ * `system` / `readonly` / lifecycle columns are skipped: the engine owns them,
+ * so a client never writes them and they must never be counted as blocking a
+ * gate that governs client writes.
+ *
+ * [#21663] That is no longer the same thing as "never validated on a write".
+ * A `readonly` reference / structured-JSON value IS judged on every write now
+ * ({@link ReadonlyValueScope}) — under the posture its object resolves, and
+ * this predicate is also what the engine's dormancy test counts, so an object
+ * whose only covered fields are readonly stays warn-first for them: the value
+ * is admitted, logged and reported to `onAdmittedValueShapeViolation`, never
+ * stored silently. ⛔ Widening this predicate to readonly columns is NOT the
+ * fix for that: every object carries injected readonly lookups (`created_by`,
+ * `updated_by`, `organization_id`), so it would make every object non-dormant
+ * — the defect the dormancy test was written to close.
  */
 export function isScannableValueShapeField(name: string, def: FieldDef | undefined): boolean {
   if (!def || SKIP_FIELDS.has(name) || def.system || def.readonly) return false;
@@ -1761,11 +1869,38 @@ export interface ValidateRecordOptions {
  * `fields` map of `{ [fieldName]: FieldDef }`.
  *
  * Returns void on success; throws `ValidationError` on failure.
+ *
+ * A `readonly` field is not reached here, exactly as before #21663: this
+ * public helper has no readonly strip to stand before or after, so it cannot
+ * say whether a readonly value on `data` is one a write would store. The
+ * engine's write path asks {@link validateRecordInScope}, which can.
  */
 export function validateRecord(
   objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   mode: Mode,
+  options: ValidateRecordOptions = {},
+): void {
+  validateRecordInScope(objectSchema, data, mode, 'skip', options);
+}
+
+/**
+ * [#21663] {@link validateRecord}, told where its payload stands relative to
+ * the readonly strip — see {@link ReadonlyValueScope} for the three scopes,
+ * the arms a readonly value reaches, and why it is never one of its
+ * constraints.
+ *
+ * Module-internal on purpose: re-exported from neither package entry, so the
+ * published `validateRecord` signature is unchanged. The scope is a fact only
+ * the engine's write path knows. ⛔ It passes `'include'` / `'only'` only
+ * where the payload is FINAL; a readonly value judged ahead of the strip may
+ * be one the strip is about to drop.
+ */
+export function validateRecordInScope(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  mode: Mode,
+  scope: ReadonlyValueScope,
   options: ValidateRecordOptions = {},
 ): void {
   if (!objectSchema?.fields || !data) return;
@@ -1781,18 +1916,26 @@ export function validateRecord(
     // Walk all declared fields — required check applies even when
     // the caller didn't supply the field at all.
     for (const [name, def] of Object.entries(fields)) {
-      if (SKIP_FIELDS.has(name)) continue;
-      if (def.system || def.readonly) continue;
-      const err = validateOne(name, def, data[name], false, mediaStrict, messages, valueStrict, onAdmitted);
+      if (!isInReadonlyScope(name, def, scope)) continue;
+      // [#21663] A readonly value: its SHAPE, never required (the engine owns
+      // its presence) and never a constraint — see ReadonlyValueScope.
+      const shapeOnly = def.readonly === true;
+      const err = validateOne(name, def, data[name], shapeOnly, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly);
       if (err) errors.push(err);
     }
   } else {
     // Update — validate only supplied fields; an OMITTED field never 400s.
     for (const [name, value] of Object.entries(data)) {
-      if (SKIP_FIELDS.has(name)) continue;
       const def = fields[name];
       if (!def) continue;
-      if (def.system || def.readonly) continue;
+      if (!isInReadonlyScope(name, def, scope)) continue;
+      if (def.readonly === true) {
+        // [#21663] Same as the insert walk: shape only, so no `required_cleared`
+        // either — clearing a readonly column is the engine's business.
+        const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict, onAdmitted, true);
+        if (err) errors.push(err);
+        continue;
+      }
       // ADR-0113 non-regression: a PATCH may not null OUT a required field.
       // The key is in the payload (we are iterating it), so a missing value
       // is an explicit clear, not an omission — the write would take the

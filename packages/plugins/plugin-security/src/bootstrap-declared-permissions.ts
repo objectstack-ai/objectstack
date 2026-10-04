@@ -183,6 +183,48 @@ export function readDeclared(engine: any, type: string): any[] {
 }
 
 /**
+ * ADR-0086 two-doors — is this `sys_permission_set` row ENVIRONMENT-owned?
+ *
+ * The one spelling of the fact this seeder already acted on: a row the PACKAGE
+ * door does not own — `managed_by` `admin`/`platform`, the legacy `user`, or
+ * absent (pre-provenance rows, including `bootstrapPlatformAdmin`'s platform
+ * defaults) — is environment-authored config that package materialization
+ * never clobbers. {@link upsertPackagePermissionSet}'s last branch and the boot
+ * loop's unowned-vs-environment split both ask THIS predicate, so the two can
+ * never disagree about which rows are the environment's.
+ */
+function isEnvironmentOwnedRow(row: any): boolean {
+  return !!row && typeof row === 'object' && row.managed_by !== 'package';
+}
+
+/**
+ * [#21669] Does the environment already own a row under this name?
+ *
+ * The engine registry the boot loop walks holds MORE than package
+ * declarations: `loadMetaFromDb` hydrates every env-wide `sys_metadata`
+ * `permission` row into the same collection, and a set an environment
+ * authored itself — the Setup Clone action, a Setup "New", a metadata-door
+ * save — carries no package id there, because none exists. Read as a
+ * declaration, such an item is "unowned"; it is not a declaration at all. Its
+ * row stands, the environment door owns it, and Setup lists it.
+ *
+ * Answered from the batched oracle the loop already holds — no extra read.
+ * The row is this pass's own, or — on a per-organization pass — the
+ * organization-less row the ENVIRONMENT door writes (`permission-set-
+ * projection.ts` is deliberately not per-organization; see this file's
+ * header). `unknown` is NOT an answer: a read that failed cannot prove the
+ * environment owns the name, so the caller falls through to the unowned
+ * refusal exactly as before.
+ */
+async function environmentOwnsName(existingByName: ExistingByNameIndex, name: string): Promise<boolean> {
+  const lookup = await existingByName.get(name);
+  const row = lookup.status === 'present'
+    ? lookup.row
+    : lookup.status === 'absent' ? lookup.organizationLessResidue : undefined;
+  return isEnvironmentOwnedRow(row);
+}
+
+/**
  * Upsert ONE declared/published PermissionSet body into `sys_permission_set`
  * under the owning `packageId`, applying the ADR-0086 provenance rules
  * (own-row re-seed, foreign-package refuse, env-authored never clobbered).
@@ -297,7 +339,7 @@ export async function upsertPackagePermissionSet(
     return out;
   }
 
-  if (existing.managed_by === 'package') {
+  if (!isEnvironmentOwnedRow(existing)) {
     if (!permissionSetNameIsForeign(existing.package_id, packageId)) {
       // Our own row — re-seed so the record always reflects the shipped/published
       // declaration (idempotent; covers version bumps without bookkeeping).
@@ -359,8 +401,9 @@ export async function upsertPackagePermissionSet(
     return out;
   }
 
-  // `platform`/`user` — or absent (legacy rows, incl. bootstrapPlatformAdmin
-  // defaults): env-authored config. Never clobbered by package materialization.
+  // {@link isEnvironmentOwnedRow}: `admin`/`platform`/`user` — or absent
+  // (legacy rows, incl. bootstrapPlatformAdmin defaults): env-authored config.
+  // Never clobbered by package materialization.
   out.skippedEnvAuthored += 1;
   return out;
 }
@@ -417,6 +460,20 @@ export async function bootstrapDeclaredPermissions(
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = ps._packageId ?? ps.packageId ?? undefined;
+    // [#21669] Tell an ENVIRONMENT-owned set apart from a package declaration
+    // BEFORE judging ownership. A registry item with no package id whose row
+    // the environment already owns (a Setup clone: `managed_by:'admin'`, no
+    // `package_id`) is not an unowned declaration — it is not a declaration —
+    // and the `permission_set_declaration_unowned` warning told the operator,
+    // on every boot and every `metadata:reloaded`, that Setup could not see a
+    // set Setup lists and edits. It lands where every package declaration
+    // over an environment row lands: `skippedEnvAuthored`, never clobbered.
+    // ⛔ A declaration with no owner AND no environment row still reaches the
+    // unowned refusal below, unchanged — that warning is true.
+    if (!packageId && await environmentOwnsName(existingByName, String(ps.name))) {
+      out.skippedEnvAuthored += 1;
+      continue;
+    }
     const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName, organizationId, residue, refusals, collisions });
     out.seeded += r.seeded;
     out.updated += r.updated;

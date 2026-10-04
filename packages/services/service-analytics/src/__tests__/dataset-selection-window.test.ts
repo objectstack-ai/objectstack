@@ -48,11 +48,14 @@ type AggCall = { object: string; options: Record<string, unknown> };
  * development. Only the tests that read `result.sql` — the block asserting the
  * echo tells the truth — need it on; the rest of this file measures the CALL
  * the executor made, which the gate does not touch.
+ *
+ * [#21647] `dateBucketSql` is the host's driver-expression hook; the echo
+ * prints a date bucket in nothing else.
  */
 function aggService(
   rows: Record<string, unknown>[],
   calls: AggCall[] = [],
-  options: { debugSql?: boolean } = {},
+  options: { debugSql?: boolean; dateBucketSql?: (object: string, field: string, granularity: string) => string | undefined } = {},
 ) {
   const svc = new AnalyticsService({
     queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -61,6 +64,7 @@ function aggService(
       return rows;
     },
     debugSql: options.debugSql,
+    dateBucketSql: options.dateBucketSql,
   });
   return { svc, calls };
 }
@@ -347,16 +351,35 @@ describe('#3588 — ordering never corrupts a multi-query selection', () => {
  * state it rather than inherit whatever `NODE_ENV` the runner happens to have.
  */
 describe('#3588 — the echoed SQL tells the truth on the ObjectQL path', () => {
-  it('renders date_trunc for a bucketed dimension instead of the bare column', async () => {
-    const { svc } = aggService([{ created_at: '2026-06', account_count: 4 }], [], { debugSql: true });
-    const result = await svc.queryDataset(
-      accounts,
-      { dimensions: ['created_at'], measures: ['account_count'], dateGranularity: 'month' },
-      CTX,
-    );
-    expect(result.sql).toContain(`date_trunc('month', created_at)`);
-    expect(result.sql).toContain('GROUP BY');
+  // [#21647] This case asserted `date_trunc('month', created_at)`, which its
+  // host, wiring no `dateBucketSql` hook, got as a representative bucket no
+  // driver groups by. The echo now prints the driver's own expression or
+  // nothing, so the case runs both hosts: with the hook (a stub standing for
+  // the driver's answer; which driver answers what is pinned in
+  // `objectql-echo-date-bucket.test.ts`), and without it.
+  it('renders the driver\'s bucket expression for a bucketed dimension instead of the bare column, or no sql where the host has none', async () => {
+    const DRIVER_BUCKET = `driver_bucket('month', created_at)`;
+    const asked: string[] = [];
+    const { svc } = aggService([{ created_at: '2026-06', account_count: 4 }], [], {
+      debugSql: true,
+      dateBucketSql: (_object, field, granularity) => {
+        asked.push(`${field}:${granularity}`);
+        return `driver_bucket('${granularity}', ${field})`;
+      },
+    });
+    const selection = { dimensions: ['created_at'], measures: ['account_count'], dateGranularity: 'month' as const };
+    const result = await svc.queryDataset(accounts, selection, CTX);
+    expect(asked).toContain('created_at:month');
+    expect(result.sql).toContain(`${DRIVER_BUCKET} AS "created_at"`);
+    expect(result.sql).toContain(`GROUP BY ${DRIVER_BUCKET}`);
     expect(result.sql).toContain('COUNT(*) AS "account_count"');
+
+    // No hook: the echo refuses the bucket, so the answer carries its rows
+    // and no `sql`, never one grouping by the bare column.
+    const { svc: noHook } = aggService([{ created_at: '2026-06', account_count: 4 }], [], { debugSql: true });
+    const bare = await noHook.queryDataset(accounts, selection, CTX);
+    expect(bare.rows).toEqual([{ created_at: '2026-06', account_count: 4 }]);
+    expect(bare.sql).toBeUndefined();
   });
 
   it('renders the ordering and window that the response rows actually reflect', async () => {

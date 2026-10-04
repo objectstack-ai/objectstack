@@ -1585,8 +1585,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // sync binding) went `live` and, since #21127, carries no `authorWarn` — a
     // warned `live` row made this rule throw instead of warn, so a `mapping`
     // write authoring it got an `authoring-rule-threw` advisory and `os
-    // validate` / `os lint` exited 1. The scheduling caveat (nothing schedules
-    // a pull until the `job` stage lands) is on the key's description, and
+    // validate` / `os lint` exited 1. The scheduling caveat (a pull runs only
+    // when a `job`'s `pull` names the mapping) is on the key's description, and
     // `check:liveness` refuses a warned `live` row. That is the ruled end
     // state, not a half-landing: the ruling dispatched the wiring and ⛔ no
     // ledger population («the empty warn maps stay empty until a real property needs a row — zero pull, the wiring is

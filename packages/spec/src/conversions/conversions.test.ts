@@ -571,7 +571,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
 
     /**
-     * The jurisdiction pin for `retiredFromLoadPath` (#16864).
+     * The jurisdiction pin for `retiredFromLoadPath` (commit 29dd1a6dd).
      *
      * `apply.ts` and `types.ts` now declare that retirement is an AUTHORING
      * surface event: the flag keeps an entry off `normalizeStackInput`, while
@@ -895,7 +895,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  // #6345 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
+  // Commit e2798fab7 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
   // together, and only together: the stored value CONVERGES, and a deployment
   // that never runs the conversion is NOT broken. Either alone would be the
   // wrong shape — a rename that breaks old rows, or a rename that leaves one
@@ -974,7 +974,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
 
     it('still lands for a row whose driver id is ITSELF being renamed (#6345)', () => {
-      // The pairs are keyed by CANONICAL driver id, and #6345 renamed mongo's.
+      // The pairs are keyed by CANONICAL driver id, and commit e2798fab7 renamed mongo's.
       // A stored `driver: 'mongo'` must therefore still find the mongo pairs
       // (through the alias) even as the sibling conversion rewrites its id —
       // otherwise the rename would quietly un-convert every legacy mongo config.

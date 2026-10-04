@@ -151,7 +151,7 @@ Inside one package the contrast is sharper still. service-analytics keeps the #5
 
 ### 2.3 How often the tax is paid
 
-`node scripts/pm/git-history.mjs log --since=2026-08-14 --ref=3711e0b763` gave 5,364 first-parent commits. The receipt reads "complete clone (no fetch)". Of those commits:
+`node scripts/pm/git-history.mjs log --since=2026-08-14 --ref=3711e0b763` gave 5,364 first-parent commits. The receipt reads "complete clone (no fetch)". Note (#21601): the tool then passed the bare date to git verbatim, and git read it at the time of day of the run. Re-taken with the fixed tool, the window holds 5,455 commits (receipt `since 2026-08-14T00:00:00Z · floor 2026-08-07 · tip 2026-09-29 · floor already predates the window (no fetch)`), and the old tool gives exactly 5,364 with git's clock set to 23:00Z, so the counts below miss the 91 commits of 2026-08-14 before about that hour. Of those 5,364 commits:
 
 | edited face files | commits |
 |---|---|
@@ -681,7 +681,7 @@ This is a proposal. The build decision is the maintainer's.
 **Counts.**
 
 - **Face files per commit:** `git show --name-only` against the 15-file list of §1.1.
-- **The window:** `node scripts/pm/git-history.mjs log --since=2026-08-14 --ref=3711e0b763`. Its receipt reads "complete clone (no fetch)".
+- **The window:** `node scripts/pm/git-history.mjs log --since=2026-08-14 --ref=3711e0b763`. Its receipt reads "complete clone (no fetch)". Note (#21601): that run read the bare date at the time of day it ran; the fixed tool answers 5,455 commits for this window, not §2.3's 5,364.
 - **Polarity copies:** non-comment lines from `nullValueSatisfiesOperator` to the next top-level declaration after `nullSafeNegationOperand`.
 - **Whole-day call sites:** `git grep -c -E "nextUtcCalendarDay\(|isUnboundedAbove\("` over non-test `src`.
 - **Case-set wiring:** `git grep -l` over non-spec test files.

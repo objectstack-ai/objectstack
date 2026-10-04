@@ -270,9 +270,13 @@ describe('#21489: scheduleAppArtifactJobs — handler jobs and the door-wide gat
         const out = await h.schedule(pkg([
             { name: 'off_body', schedule: INTERVAL, body: WRITE_BODY, enabled: false },
             { name: 'off_handler', schedule: INTERVAL, handler: 'tick', enabled: false },
+            // #20281 stage ③: the pull run form, disabled, is skipped before it is judged.
+            { name: 'off_pull', schedule: INTERVAL, pull: { mapping: 'nope' }, enabled: false },
         ]));
 
-        expect(out).toEqual({ bodies: [], handlers: [], notScheduled: [], failed: [], cancelled: [] });
+        expect(out).toEqual({
+            bodies: [], handlers: [], pulls: [], notScheduled: [], missingOrganization: [], failed: [], cancelled: [],
+        });
         expect(h.jobs.scheduled.size).toBe(0);
     });
 

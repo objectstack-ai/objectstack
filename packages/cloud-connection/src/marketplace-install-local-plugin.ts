@@ -166,21 +166,22 @@ const INSTALL_LOCAL_CAPABILITY = 'manage_metadata';
 
 /**
  * [#21489, #21585] The refusal of a package that declares code this door cannot
- * run — an enabled job with no `body` or with a `body` the declaration refuses,
- * a hook with no `body`: `VALIDATION_ERROR` / 422.
+ * run — an enabled job with no `body`, with a `body` the declaration refuses or
+ * with a `pull` that does not bind, a hook with no `body`: `VALIDATION_ERROR` /
+ * 422.
  *
  * The code is the standard catalog's input-validation member. The condition is
  * that the install payload fails this door's acceptance rule — every enabled
- * job carries a `body` that binds, and every hook carries a `body` — and the
- * ledger's admission rule sends a generic validation condition to the standard
- * member rather than to a registered synonym (`error-code-ledger.zod.ts`,
+ * job carries a `body` or a `pull` that binds, and every hook carries a `body`
+ * — and the ledger's admission rule sends a generic validation condition to the
+ * standard member rather than to a registered synonym (`error-code-ledger.zod.ts`,
  * "Registering a new code"). What the author does instead is the prescription
  * the message carries. `PLUGIN_MANIFEST_INVALID` is deliberately not it: that
  * code answers the manifest's identity at this door, and a handler-form job or
  * hook is a valid manifest — `os validate` passes it and `os start --artifact`
- * runs it. One acceptance rule answers one code, so the off-spec job `body`
- * (which `os validate` does refuse) is answered by the same refusal as the rest
- * of the rule rather than splitting it.
+ * runs it. One acceptance rule answers one code, so the off-spec job `body` and
+ * the unbindable `pull` (which `os validate` does refuse) are answered by the
+ * same refusal as the rest of the rule rather than splitting it.
  *
  * The status is 422, not the 400 / 502 split this door uses for an invalid
  * manifest id: the package is well-formed JSON this door cannot process, which
@@ -193,7 +194,7 @@ const UNRUNNABLE_REFUSAL_STATUS = 422;
 
 /** What this door cannot run in a package, as the runtime binder judges it. */
 interface UnrunnableCode {
-    jobs: ReadonlyArray<{ name: string; handler?: string; bodyRefusal?: string }>;
+    jobs: ReadonlyArray<{ name: string; handler?: string; bodyRefusal?: string; pullRefusal?: string }>;
     hooks: ReadonlyArray<{ name: string; handler?: string }>;
 }
 
@@ -207,14 +208,16 @@ const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1
 /**
  * The refusal sentence: everything the door cannot run, why, and the remedies,
  * one clause per kind — a job with no `body`, a job whose `body` the
- * declaration refuses, a hook with no `body` — in one answer, so the author
- * fixes them all in one pass. Each names the item and the function its
- * `handler` declares (or the declaration's refusal of its `body`).
+ * declaration refuses, a job whose `pull` does not bind, a hook with no `body`
+ * — in one answer, so the author fixes them all in one pass. Each names the
+ * item and the function its `handler` declares (or the refusal of its `body` or
+ * its `pull`).
  */
 function describeUnrunnable(manifestId: string, what: UnrunnableCode): string {
     const clauses: string[] = [];
-    const jobsWithoutBody = what.jobs.filter((j) => j.bodyRefusal === undefined);
-    const jobsWithBadBody = what.jobs.filter((j) => j.bodyRefusal !== undefined);
+    const jobsWithBadPull = what.jobs.filter((j) => j.pullRefusal !== undefined);
+    const jobsWithoutBody = what.jobs.filter((j) => j.pullRefusal === undefined && j.bodyRefusal === undefined);
+    const jobsWithBadBody = what.jobs.filter((j) => j.pullRefusal === undefined && j.bodyRefusal !== undefined);
     if (jobsWithoutBody.length > 0) {
         const one = jobsWithoutBody.length === 1;
         clauses.push(
@@ -234,6 +237,16 @@ function describeUnrunnable(manifestId: string, what: UnrunnableCode): string {
             + `${one ? 'has' : 'have'} a \`body\` the declaration refuses, so this install door cannot run ${one ? 'it' : 'them'}: `
             + 'the job would be installed and never scheduled. Correct the `body` to the declared shape (a sandboxed JS '
             + "body; the job's time limit is the job's own `timeoutMs`) — `os validate` reports the same refusal.",
+        );
+    }
+    if (jobsWithBadPull.length > 0) {
+        const one = jobsWithBadPull.length === 1;
+        const list = jobsWithBadPull.map((j) => `'${j.name}' (${j.pullRefusal})`).join('; ');
+        clauses.push(
+            `${one ? 'its enabled job' : `${jobsWithBadPull.length} of its enabled jobs`} ${list} `
+            + `${one ? 'has' : 'have'} a \`pull\` that does not bind, so this install door cannot run ${one ? 'it' : 'them'}: `
+            + 'the job would be installed and never scheduled. Declare the mapping the `pull` names in the package, with '
+            + 'a `connectorSource`, or correct the `pull` as the refusal says — `os validate` refuses the same `pull`.',
         );
     }
     if (what.hooks.length > 0) {
@@ -971,7 +984,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //       - a hook with no `body`: its function-name `handler` can never
         //         name the package's own code on this door, so it installed and
         //         either never fired or bound by name to code the package does
-        //         not ship.
+        //         not ship;
+        //       - a job whose `pull` does not bind (a mapping the package does
+        //         not declare, one with no `connectorSource`): judged by the
+        //         binder's own `judgeJobPull` — it used to install and never be
+        //         scheduled.
         //     The judgements are the runtime binder's own, so the door and the
         //     binder cannot disagree about what this door can run.
         //
@@ -982,8 +999,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     a disabled one is never scheduled on any door; every hook is
         //     judged, since a hook has no on/off switch. ⛔ Rehydrate is not
         //     gated, for the id gate's reason: an entry an older build installed
-        //     still rehydrates — its unrunnable job is reported, not run, and its
-        //     hook with no `body` is warned and NOT bound
+        //     still rehydrates — its unrunnable job is reported, not run (an
+        //     unbindable `pull` is warned by the binder and NOT scheduled), and
+        //     its hook with no `body` is warned and NOT bound
         //     ({@link bindArtifactHandlers}).
         const unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
         if (unrunnable.jobs.length > 0 || unrunnable.hooks.length > 0) {
@@ -1834,9 +1852,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * [#21489, #21585] The code in `manifest` this door cannot run, which the
      * install route refuses:
      *
-     *   - the enabled jobs with no `body`, or with a `body` the declaration
-     *     refuses (`collectJobsWithoutBody`, which reads the jobs the
-     *     binder schedules and judges a body by the parse the binder binds by);
+     *   - the enabled jobs with no `body`, with a `body` the declaration
+     *     refuses, or with a `pull` that does not bind
+     *     (`collectJobsWithoutBody`, which reads the jobs the binder schedules,
+     *     judges a body by the parse the binder binds by and a pull by the
+     *     binder's own `judgeJobPull`);
      *   - the hooks with no `body` (`collectHooksWithoutBody`, the judgement the
      *     binder withholds by on this door's rehydrate).
      *
@@ -1860,7 +1880,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!collectJobs) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] this runtime has no collectJobsWithoutBody — the jobs of ${manifestId} are not judged, `
-                + 'so a job with no runnable `body` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+                + 'so a job with no runnable `body` or `pull` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
         }
         if (!collectHooks) {

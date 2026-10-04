@@ -412,7 +412,7 @@ describe('TryCatchErrorValueSchema', () => {
     expect(TryCatchErrorValueSchema.safeParse({ nodeId: 'guard', message: 'x', iteration: 1.5 }).success).toBe(false);
   });
 
-  // #14954 — `code` (#14419): the engine binds the failing node's
+  // #14954 — `code` (commit c5a7448d5): the engine binds the failing node's
   // platform-classified error code beside `nodeId` / `message`, so a catch
   // region can DISCRIMINATE ("the row is already there" vs "the store is
   // down") by branching on `$error.code` instead of parsing `message`. This

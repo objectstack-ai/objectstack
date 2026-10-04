@@ -21,6 +21,7 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { isNarrowedRun, narrowedFlagNote, refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 import {
   describeFileColumnMoveRefusal,
   runFileColumnMove,
@@ -41,6 +42,7 @@ import type { MediaColumnMoveScan, SqlDialectName } from '@objectstack/driver-sq
 interface ColumnStepOutcome {
   skipped:
     | 'gate_not_passed'
+    | 'narrowed_run'
     | 'no_sql_driver'
     | 'no_sql_seam'
     | 'driver_cannot_plan'
@@ -96,11 +98,19 @@ async function confirm(question: string): Promise<boolean> {
  * Dry run by default, and a dry run writes NOTHING — not conversions, not the
  * flag. Not run / not passed → files keep being retained forever: storage
  * cost, zero data loss.
+ *
+ * [#21644] Only a run over every object records the flag or moves the
+ * columns. A run narrowed by `--object` converts the named objects' values and
+ * stops there: the producer records no flag for it, and the column step, which
+ * retypes every media column in the database on the strength of the gate,
+ * does not run. A name the deployment does not declare is refused
+ * (`OBJECT_NOT_FOUND`) rather than scanned as nothing.
  */
 export default class MigrateFilesToReferences extends Command {
   static override description =
     'Migrate legacy file-field values to sys_file references and verify the ownership ledger (ADR-0104). ' +
-    'Dry-run by default; --apply also records the deployment-level migration flag when the self-check passes.';
+    'Dry-run by default; --apply also records the deployment-level migration flag when the self-check of every ' +
+    'object passes.';
 
   static override examples = [
     '$ os migrate files-to-references',
@@ -117,7 +127,8 @@ export default class MigrateFilesToReferences extends Command {
     }),
     apply: Flags.boolean({
       description:
-        'Write the conversions and record the deployment migration flag (default is a read-only dry run)',
+        'Write the conversions and record the deployment migration flag (default is a read-only dry run). ' +
+        'Only a run without --object records the flag',
       default: false,
     }),
     yes: Flags.boolean({ char: 'y', description: 'Skip the --apply confirmation prompt', default: false }),
@@ -126,7 +137,9 @@ export default class MigrateFilesToReferences extends Command {
       default: false,
     }),
     object: Flags.string({
-      description: 'Restrict to this object (repeatable; default: every object with a file field)',
+      description:
+        'Restrict to this object (repeatable; default: every object with a file field). A narrowed run converts ' +
+        'but records no deployment flag and moves no column, and a name the deployment does not declare is refused',
       multiple: true,
     }),
     'max-records': Flags.integer({
@@ -144,6 +157,7 @@ export default class MigrateFilesToReferences extends Command {
     const { flags } = await this.parse(MigrateFilesToReferences);
     const timer = createTimer();
     const apply = flags.apply;
+    const narrowed = isNarrowedRun(flags.object);
 
     if (!flags.json) {
       printHeader('Migrate · files-to-references');
@@ -197,7 +211,12 @@ export default class MigrateFilesToReferences extends Command {
         return;
       }
       const ok = await confirm(
-        chalk.bold('\nConvert legacy file values and record the migration flag on this database? [y/N] '),
+        chalk.bold(
+          narrowed
+            ? '\nConvert legacy file values of the named object(s) on this database? ' +
+                'A run narrowed by --object records no deployment flag. [y/N] '
+            : '\nConvert legacy file values and record the migration flag on this database? [y/N] ',
+        ),
       );
       if (!ok) {
         printInfo('Aborted — no changes made.');
@@ -248,6 +267,13 @@ export default class MigrateFilesToReferences extends Command {
             'Run "os build" in your project root first (the migration reads dist/objectstack.json), then re-run.',
         );
       }
+      // [#21644] Before anything is converted: the scan keeps only the
+      // candidates it covers, so a name this registry does not declare would
+      // be dropped without a word, and the run would read as clean.
+      refuseUndeclaredObjects(flags.object, loadedObjects);
+      const narrowedNote = isNarrowedRun(flags.object)
+        ? narrowedFlagNote('files-to-references', flags.object, apply)
+        : null;
       const getStorage = () => {
         try {
           // Canonical slot since #9683 (service-storage also registers the
@@ -293,13 +319,18 @@ export default class MigrateFilesToReferences extends Command {
         engine,
         apply,
         gatePassed: result.gatePassed,
+        narrowed,
         json: flags.json,
       });
 
       if (flags.json) {
+        if (narrowedNote) logger.info(narrowedNote);
         await emitJson({
           database: stack.dbLabel,
           apply,
+          // [#21644] Recorded in the document, so a narrowed run cannot be
+          // mistaken for a full one (the shape `os migrate duplicates` keeps).
+          filter: narrowed ? { objects: flags.object } : null,
           backfill: {
             scannedObjects: result.backfill.scannedObjects,
             scannedRecords: result.backfill.scannedRecords,
@@ -341,7 +372,23 @@ export default class MigrateFilesToReferences extends Command {
       console.log(formatFileReferenceReport(result.verify));
       console.log('');
 
-      if (result.gatePassed) {
+      if (narrowedNote) {
+        // [#21644] Every sentence below would promise the flag or the
+        // enforcement it turns on, and a narrowed run records neither.
+        if (!result.gatePassed) {
+          for (const failure of result.gateFailures) printError(`Gate not passed: ${failure}`);
+          printWarning('Fix the records listed above, then re-run.');
+        } else if (apply) {
+          printSuccess('Self-check passed over the named object(s); their conversions are written.');
+        } else if (result.backfill.converted > 0) {
+          printInfo(
+            `Dry run only — ${result.backfill.converted} value(s) would be converted. Re-run with --apply to convert.`,
+          );
+        } else {
+          printInfo('Data in the named object(s) is already in reference form.');
+        }
+        printInfo(narrowedNote);
+      } else if (result.gatePassed) {
         if (apply) {
           printSuccess(
             'Self-check passed — deployment flag recorded (adr-0104-file-references). ' +
@@ -398,14 +445,22 @@ export default class MigrateFilesToReferences extends Command {
     engine: unknown;
     apply: boolean;
     gatePassed: boolean;
+    narrowed: boolean;
     json: boolean;
   }): Promise<ColumnStepOutcome> {
-    const { stack, apply, gatePassed, json } = args;
+    const { stack, apply, gatePassed, narrowed, json } = args;
 
     if (!gatePassed) {
       // ⛔ The ruling's "abort unless backfill + verify report zero blocking".
       // Not an error of this step's own — the gate already reported why.
       return { skipped: 'gate_not_passed', failed: false, stampedAt: null, report: null };
+    }
+    if (narrowed) {
+      // [#21644] ⛔ The move retypes EVERY single-value media column in the
+      // database, and a narrowed gate vouched for the named objects only. Its
+      // stamp also requires the verified flag a narrowed run does not record,
+      // so running it here would move columns it then could not record.
+      return { skipped: 'narrowed_run', failed: false, stampedAt: null, report: null };
     }
     if (!stack.driver || typeof stack.driver.planMediaColumnMove !== 'function') {
       return { skipped: 'no_sql_driver', failed: false, stampedAt: null, report: null };
@@ -503,7 +558,12 @@ export default class MigrateFilesToReferences extends Command {
   /** The human-mode half of {@link runColumnStep}. JSON mode reports the same facts. */
   private renderColumnStep(outcome: ColumnStepOutcome): void {
     if (outcome.skipped === 'gate_not_passed' || outcome.report === null) {
-      if (outcome.skipped === 'no_sql_driver') {
+      if (outcome.skipped === 'narrowed_run') {
+        printInfo(
+          'Column step: not run — it moves every media column in the database, so only a run without ' +
+            '--object authorises it.',
+        );
+      } else if (outcome.skipped === 'no_sql_driver') {
         printInfo(
           'Column step: not applicable — the ADR-0104 file-family column move is a SQL-driver step ' +
             'and no SQL driver is active here.',

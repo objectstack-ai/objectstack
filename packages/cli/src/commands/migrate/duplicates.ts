@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { emitJson, isExitSignal } from '../../utils/format.js';
+import { emitJson, errorCodeFields, isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // The `objectql` slot's contract (#4251) — read the registry through it rather
 // than erasing the lookup to `any`, so a rename breaks this at compile time
 // instead of silently reporting zero objects.
@@ -874,7 +875,9 @@ export default class MigrateDuplicates extends Command {
       env: 'OS_DATABASE_URL',
     }),
     object: Flags.string({
-      description: 'Restrict the scan to one object (recorded in the report, so a narrowed run cannot be mistaken for a full one)',
+      description:
+        'Restrict the scan to one object (recorded in the report, so a narrowed run cannot be mistaken for a full ' +
+        'one). A name the deployment does not declare is refused',
     }),
   };
 
@@ -906,6 +909,18 @@ export default class MigrateDuplicates extends Command {
     }
 
     try {
+      // [#21644] `collectScanTargets` keeps only the objects it would probe, so
+      // a name this registry does not declare would be dropped without a word
+      // and the report would read "no duplicates" over a scan of nothing.
+      // Refused before any probe, against the set the scan draws from.
+      refuseUndeclaredObjects(
+        flags.object === undefined ? undefined : [flags.object],
+        stack
+          .allObjects()
+          .map((o) => (o as { name?: unknown } | null)?.name)
+          .filter((name): name is string => typeof name === 'string'),
+      );
+
       const {
         resolveSeedTenancyExec,
         normalizeRows,
@@ -973,7 +988,11 @@ export default class MigrateDuplicates extends Command {
       await emitJson(report);
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
-      await emitJson({ error: 'report_failed', detail: messageOf(error) }, 1, { compact: true });
+      await emitJson(
+        { error: 'report_failed', detail: messageOf(error), ...errorCodeFields(error) },
+        1,
+        { compact: true },
+      );
     } finally {
       await stack.shutdown();
     }

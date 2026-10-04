@@ -143,12 +143,17 @@ const FIXTURES: Record<string, Fixture> = {
         invalidatedField: 'type',
     },
     hook: {
+        // [#21689] Both carry a `body`: the save door refuses a hook with no
+        // `body` (it could never run), so a body-less `valid` would measure
+        // that refusal, and `invalid` stays `valid` minus the one field the
+        // schema must name.
         valid: {
             name: 'sweep_hook',
             object: 'sweep_account',
             events: ['beforeInsert'],
+            body: { language: 'js', source: 'return;' },
         },
-        invalid: { name: 'sweep_hook', object: 'sweep_account' },
+        invalid: { name: 'sweep_hook', object: 'sweep_account', body: { language: 'js', source: 'return;' } },
         invalidatedField: 'events',
     },
     validation: {

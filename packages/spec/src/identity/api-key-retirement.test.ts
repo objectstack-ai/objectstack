@@ -8,7 +8,7 @@ import {
   holdersOf,
 } from '../../scripts/lib/export-origins-testkit';
 
-// ─── [#8715] `ApiKeySchema` is RETIRED ──────────────────────────────────────
+// ─── [commit 2c86fe3ea] `ApiKeySchema` is RETIRED ───────────────────────────
 //
 // ADR-0049 enforce-or-remove; maintainer ruling 2026-08-15 (disposition B:
 // delete). `identity/identity.zod.ts` no longer declares `ApiKeySchema` /
@@ -16,7 +16,7 @@ import {
 // names, 19 authorable-surface keys, the reference page's `ApiKey` section
 // with them.
 //
-// The measurement that decided it (issue #8715, dev report 2026-08-14;
+// The measurement that decided it (commit 2c86fe3ea's card, dev report 2026-08-14;
 // re-verified at this retirement's base commit, 7901b2d):
 //
 //   1. STATIC — zero imports of any of the three names outside
@@ -115,6 +115,6 @@ describe('[#8715] identity/ ApiKeySchema retirement', () => {
     }
     // Anti-vacuity: the explanatory block this retirement left behind is
     // present, so "false" above cannot mean "wrong file".
-    expect(src).toContain('are NOT declared here (#8715');
+    expect(src).toContain('are NOT declared here (commit 2c86fe3ea');
   });
 });

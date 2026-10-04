@@ -12,7 +12,8 @@
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
  * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
  * carried from the pin this repo builds against (`.objectui-sha` =
- * `ab1879721`; `ActionRunner.composeSuccessMessage`), where the ledger row
+ * `2e818d0b5`; `ActionRunner.composeSuccessMessage`, in
+ * `core/src/actions/ActionRunner.ts`, byte-identical to `ab1879721`), where the ledger row
  * turned `live`. Its behaviour is pinned on objectui's side, so the "a handler returning
  * `{ outcome: 'archived', … }` resolves to the archived copy, interpolated"
  * acceptance splits in two. HERE: the key is accepted on exactly the two types

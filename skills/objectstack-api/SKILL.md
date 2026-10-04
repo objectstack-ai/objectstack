@@ -74,8 +74,10 @@ are **client** contracts — nothing in a stack declares them.
 
 ### Public (anonymous) Form Endpoints
 
-Any `FormView` declared with `sharing.allowAnonymous: true` and a
-`publicLink` slug is auto-mounted at:
+A `FormView` is served by the anonymous form endpoints only when its
+`sharing` declares all three: `enabled: true` (the schema default is
+`false`), `allowAnonymous: true` and a `publicLink` slug. Miss any one and
+both endpoints answer `404 FORM_NOT_FOUND`. The form is then mounted at:
 
 ```
 GET  /api/v1/forms/:slug         # returns form spec + restricted objectSchema
@@ -88,10 +90,14 @@ are intended for Web-to-Lead / Web-to-Case style flows. The framework
 strips fields outside the form's `sections[].fields[]` list; a
 `beforeInsert` hook on the target object should stamp safe defaults
 (`status='new'`, `lead_source='web'`, …) and `delete` privileged keys
-(`owner`, `internal_notes`, …). For the full contract, read
+(`owner`, `internal_notes`, …). On a walled posture (`group`/`isolated`), a
+form on an object walled by an organization column is withheld too — both
+endpoints `404`, and save / publish warn `public-form-intake-unavailable`;
+declare `tenancy: { enabled: false }` on an object whose rows belong to no
+organization to offer it again. For the full contract, read
 `node_modules/@objectstack/spec/src/ui/view.zod.ts` (`FormViewSchema`) and
 `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` (`SharingConfigSchema`
-with `allowAnonymous` / `publicLink`).
+with `enabled` / `allowAnonymous` / `publicLink`).
 
 ---
 

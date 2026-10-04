@@ -287,7 +287,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `ab1879721`, re-read 2026-10-03: on the hop off
+ *   (`.objectui-sha` = `2e818d0b5`, re-read 2026-10-04: `ObjectCalendar.tsx`
+ *   and `ListView.tsx` are byte-identical across the hop off `ab1879721`
+ *   (`git diff --quiet`), so every anchor held unmoved; re-read at
+ *   `ab1879721` 2026-10-03: on the hop off
  *   `89cad75d5` `ObjectCalendar.tsx` changed in one comment line only, line
  *   for line (`:1250`, objectui#11438 re-citing the installed spec as
  *   17.6.0), so `getCalendarConfig` `:294`, the `if (!calendarConfig)` arm
@@ -344,8 +347,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `ab1879721`, re-read
- *   2026-10-03; on the hop off `89cad75d5` `ObjectGantt.tsx` changed (8
+ *   this repo builds against (`.objectui-sha` = `2e818d0b5`, re-read
+ *   2026-10-04: `ObjectGantt.tsx` and `ListView.tsx` are byte-identical across
+ *   the hop off `ab1879721`, so every anchor held unmoved; re-read at
+ *   `ab1879721` 2026-10-03; on the hop off `89cad75d5` `ObjectGantt.tsx` changed (8
  *   insertions, 0 deletions: one import line and objectui#11475's storage
  *   argument on the tooltip's `percent` row), none of it in `getGanttConfig`
  *   or the refusal arm, which are byte-identical and moved `:608` → `:609`
@@ -398,7 +403,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `ab1879721`; on the hop off `89cad75d5` `ObjectTimeline.tsx` is
+ *   `2e818d0b5`; `ObjectTimeline.tsx` and `ListView.tsx` are byte-identical
+ *   across the hop off `ab1879721`, so every anchor held unmoved; on the hop
+ *   off `89cad75d5` `ObjectTimeline.tsx` is
  *   byte-identical, so the start-date chain `:574-576` and the refusal arm
  *   `:911` did not move, and `ListView.tsx`'s `case 'timeline'` and
  *   `resolveTimelineDateBinding` are byte-identical, moved by 14 and by 9
@@ -444,7 +451,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `ab1879721`; on the hop off `89cad75d5`
+ *   pin (`.objectui-sha` = `2e818d0b5`; `ObjectMap.tsx` and `ListView.tsx`
+ *   are byte-identical across the hop off `ab1879721`, so every anchor held
+ *   unmoved; on the hop off `89cad75d5`
  *   `ObjectMap.tsx` is byte-identical, so `getMapConfig` `:387`,
  *   `hasCoordinateBinding` `:493` and the refusal arm `:1291` did not move,
  *   and `ListView.tsx`'s `case 'map'` is byte-identical, moved by 14, with

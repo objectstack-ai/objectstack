@@ -262,7 +262,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -2064,6 +2064,63 @@ function droppedFieldEvents(
 }
 
 /**
+ * [#21682] The keys the CALLER sent on each row of an insert, recorded at
+ * `insert`'s entry, BEFORE the middleware chain runs, and keyed by the row
+ * OBJECT.
+ *
+ * `insert` takes its caller snapshot (`suppliedPerRow`) inside the middleware
+ * chain's innermost step, so by then a write middleware may already have
+ * filled the payload: `@objectstack/organizations` fills an absent
+ * `organization_id` with the active organization, and
+ * `@objectstack/plugin-security` fills an absent `owner_id` with the acting
+ * user. Both write IN PLACE, onto the very row objects recorded here. Without
+ * this record the snapshot reads those fills as keys the caller sent, so the
+ * static-`readonly` strip took the platform's own `organization_id` and
+ * `droppedFields` reported it, on every walled create that named no
+ * organization. The console announces every non-empty `droppedFields` as a
+ * warning toast. This is the insert-side twin of the update path's #8093
+ * (ADDRESSING IS NOT PAYLOAD): a value the platform put on the payload is
+ * not one the caller lost.
+ *
+ * Keyed by IDENTITY, not by index, so the answer survives a middleware that
+ * reorders a batch. A row a middleware REPLACED wholesale has no entry, and
+ * {@link callerSuppliedRow} then keeps every key it carries: the verdict from
+ * before this record existed. That is the over-reporting direction, never the
+ * under-stripping one.
+ *
+ * ⛔ No name list. Which keys are the platform's is answered by WHEN they
+ * appeared, so a new stamping middleware is covered without being named here.
+ */
+function callerKeySets(data: unknown): WeakMap<object, ReadonlySet<string>> {
+  const sets = new WeakMap<object, ReadonlySet<string>>();
+  for (const row of Array.isArray(data) ? data : [data]) {
+    if (row !== null && typeof row === 'object' && !sets.has(row)) {
+      sets.set(row, new Set(Object.keys(row)));
+    }
+  }
+  return sets;
+}
+
+/**
+ * One row of `insert`'s caller snapshot: a shallow COPY of the row as the
+ * middleware chain handed it on, keeping only the keys the caller sent
+ * (`sent`, from {@link callerKeySets}).
+ *
+ * Only WHICH keys is narrowed. A kept key keeps the value the chain handed
+ * on, so every key the caller did send is judged exactly as it was before
+ * #21682. `sent` undefined means "this row has no record" and keeps every key.
+ */
+function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined): Record<string, unknown> {
+  const copy: Record<string, unknown> = { ...((row ?? {}) as Record<string, unknown>) };
+  if (sent) {
+    for (const key of Object.keys(copy)) {
+      if (!sent.has(key)) delete copy[key];
+    }
+  }
+  return copy;
+}
+
+/**
  * Evaluate formula virtual fields against the raw rows a driver handed back —
  * the read path (`find` / `findOne`) and, since #5504, the write path's
  * response hydration.
@@ -3657,10 +3714,11 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private readonly actionActivation = new ActionActivationProjection();
 
-  // Function registry: name → handler. Used by `bindHooksToEngine` to
-  // resolve string-named hook handlers (the JSON-safe form). Populated by
-  // `defineStack({ functions })` via `AppPlugin`, or directly via
-  // `engine.registerFunction(...)`.
+  // Function registry: name → handler, each entry stamped with its owning
+  // package. Used by `bindHooksToEngine` to resolve string-named hook
+  // handlers (the JSON-safe form) — only against entries the hook's OWN
+  // package registered. Populated by `defineStack({ functions })` via
+  // `AppPlugin`, or directly via `engine.registerFunction(...)`.
   private functions = new Map<string, FunctionEntry>();
 
   // Realtime service for event publishing
@@ -3867,7 +3925,8 @@ export class ObjectQL implements IObjectQLEngine {
    * string from a `Hook.handler` field, an `Action.target`, or a flow
    * `script` node's `config.function`. This is the JSON-safe form of
    * handler binding — declarative metadata persisted to disk or shipped
-   * over the wire only carries the name.
+   * over the wire only carries the name. A `Hook.handler` reaches the entry
+   * only from a hook of the same `packageId` (`bindHooksToEngine`).
    *
    * The third parameter accepts either the owning `packageId` (its original
    * shape, unchanged for every existing caller) or a
@@ -6061,9 +6120,10 @@ export class ObjectQL implements IObjectQLEngine {
         // so the same declaration behaved differently per datasource. That
         // split surfaced two ways: a validation-visible field was REJECTED by
         // the engine's own write validator ("must be a valid datetime"), and a
-        // `readonly`/`system` field — which `validateRecord` skips, i.e. the
-        // ~100 `created_at`/`updated_at` platform declarations — silently
-        // stored the four characters `NOW()`.
+        // `readonly`/`system` field — which `validateRecord` then skipped, i.e.
+        // the ~100 `created_at`/`updated_at` platform declarations — silently
+        // stored the four characters `NOW()`. (Since #21663 a readonly value's
+        // shape is judged too, so that literal would now be refused.)
         //
         // Resolved from the caller's `nowSnapshot`, so every defaulted field
         // in one insert (and every row of one batch) carries the SAME instant.
@@ -9882,12 +9942,19 @@ export class ObjectQL implements IObjectQLEngine {
    * — and not raw type membership, because the registry INJECTS covered-type
    * fields into every object it registers: `organization_id` and `owner_id`
    * (both `system`), plus `created_by` / `updated_by` (both in `SKIP_FIELDS`),
-   * are all `lookup`s. `validateRecord` skips every one of them before it ever
-   * reaches the value-shape check, so counting them made this answer `true` for
-   * literally every object — the dormancy rule above never fired, and this
-   * cache memoized a constant. Same predicate as the scanner for the same
-   * reason the scanner imports it: three readings of "a covered field" drifting
-   * by one clause is how a gate ends up governing fields nothing enforces.
+   * are all `lookup`s. A caller never writes any of them, so counting them made
+   * this answer `true` for literally every object — the dormancy rule above
+   * never fired, and this cache memoized a constant. Same predicate as the
+   * scanner for the same reason the scanner imports it: three readings of "a
+   * covered field" drifting by one clause is how a gate ends up governing
+   * fields nothing enforces.
+   *
+   * [#21663] The three that are `readonly` (`organization_id`, `created_by`,
+   * `updated_by`) DO reach the value-shape check now, on the value a system
+   * writer, hook or stamp stores. They still do not count here, so an object
+   * whose only covered fields are those stays warn-first for them: a malformed
+   * value is admitted, logged and reported, never stored silently. See
+   * `isScannableValueShapeField` for why widening this test is not the fix.
    */
   private objectHasCoveredValueField(objectSchema: any): boolean {
     if (!objectSchema?.fields) return false;
@@ -12467,9 +12534,11 @@ export class ObjectQL implements IObjectQLEngine {
    * call that fires side-effecting hooks (mail, outbound calls, writes to
    * other objects) is the #4052 defect in a new spelling, where a preview
    * quietly executes. So the gap is documented rather than closed: audit and
-   * ownership stamps are `system`/`readonly` and are skipped by validation
-   * anyway, so what remains is the narrow case of a hook deriving a
-   * *business* field that its object also validates.
+   * ownership stamps are `system`/`readonly`, so validation never requires
+   * them, and (#21663) the only thing it asks of a readonly value is its
+   * shape, which a platform stamp always has — so what remains is the narrow
+   * case of a hook deriving a *business* field that its object also
+   * validates.
    *
    * Nothing is written, no sequence is consumed, and no driver is touched —
    * validation is in-process, which is what makes row-by-row dry run of a
@@ -12722,7 +12791,11 @@ export class ObjectQL implements IObjectQLEngine {
         });
       };
       try {
-        validateRecord(schemaForValidation, row, mode, {
+        // [#21663] `'include'` in both modes: the caller-write strips ran
+        // above, so this is the payload the write stores — and the write
+        // judges its readonly values' shape (insert in the same call, update
+        // in a second pass after its own strip).
+        validateRecordInScope(schemaForValidation, row, mode, 'include', {
           mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
@@ -12815,6 +12888,10 @@ export class ObjectQL implements IObjectQLEngine {
     data = normalizeBlankTypedValues(this._registry.getObject(object), data);
     data = normalizeNumericStringValues(this._registry.getObject(object), data);
 
+    // [#21682] What the CALLER sent, recorded before any write middleware
+    // fills the payload. See `callerKeySets`.
+    const callerKeys = callerKeySets(data);
+
     const opCtx: OperationContext = {
       object,
       operation: 'insert',
@@ -12842,6 +12919,14 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
+      // [#21682] Each row's caller key set, looked up NOW, on the row objects
+      // the middleware chain handed on. The computed-field door below may
+      // replace a row with a copy. Index-aligned from here on: every pass
+      // between here and the snapshot keeps the rows' order and count.
+      const callerKeysPerRow: Array<ReadonlySet<string> | undefined> =
+        (isBatch ? (opCtx.data as unknown[]) : [opCtx.data]).map(
+          (row) => (row !== null && typeof row === 'object' ? callerKeys.get(row) : undefined),
+        );
       // [#8682] The declared-field door — see `undeclaredWriteFieldErrors` for
       // what used to run below it for a request that was already refused.
       // FIRST, so nothing downstream (defaults, summary seeding, the hooks, the
@@ -12877,10 +12962,17 @@ export class ObjectQL implements IObjectQLEngine {
       }
       // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
       // resolves any `defaultValue` / `current_user` token and before the
-      // beforeInsert hooks stamp `owner_id` / `organization_id` /
-      // `created_by`. The reference check consults it to decide WHAT THE
-      // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
-      // default is ever reported as the caller's bad reference.
+      // beforeInsert hooks stamp `created_by`. The reference check consults it
+      // to decide WHAT THE CALLER ACTUALLY SENT, so neither a platform stamp
+      // nor a backfilled default is ever reported as the caller's bad
+      // reference.
+      //
+      // [#21682] ...and without the keys a write MIDDLEWARE filled, which ran
+      // before this step: `organization_id` (`@objectstack/organizations`) and
+      // `owner_id` (`@objectstack/plugin-security`) are filled there, not by a
+      // hook. Each row keeps only the keys the caller sent (`callerKeySets`,
+      // recorded at entry), so the strips below report and take only those.
+      // The values stay as the chain handed them on.
       //
       // [#6339] It carries the caller's VALUES, and it is taken HERE — ahead of
       // the hooks — as an explicit shallow COPY. Both halves are load-bearing:
@@ -12902,7 +12994,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    (#5591).
       const suppliedPerRow: Array<Record<string, unknown>> =
         (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
-          (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
+          (row, i) => callerSuppliedRow(row, callerKeysPerRow[i]),
         );
       // [#20082] The write's ONE permission resolution, shared by every consumer
       // below that needs the map: the CEL defaults here, the re-default after
@@ -13513,8 +13605,13 @@ export class ObjectQL implements IObjectQLEngine {
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
-            normalizeMultiValueFields(schemaForValidation, rows[i]);
-            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
+            // [#21663] `'include'`: the readonly strip ran above, so every
+            // readonly value still on the row is one the driver will store —
+            // a system writer's (seed, migration), a hook's or a stamp — and
+            // its SHAPE is judged here like any other field's. See
+            // `ReadonlyValueScope` (record-validator.ts).
+            normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -14864,7 +14961,13 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
-               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
+               // [#21663] Scope `'skip'` — the public `validateRecord` IS that
+               // scope: the readonly strip has NOT run yet, so a readonly value
+               // here may be a caller's the strip is about to drop — judged, a
+               // whole-record write-back echoing a legacy stored value would
+               // become a refusal. Readonly values are judged after the strip
+               // (`validateRecordInScope(…, 'only')`, below).
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
                //
@@ -15049,6 +15152,15 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
+               // [#21663] The payload is FINAL here (see the seam below), so
+               // every readonly value on it is one the driver will store: a
+               // system writer's (the strip above never ran for it), a hook's,
+               // or a stamp. Its SHAPE is judged now, by the same arms and
+               // sentences as the caller-writable fields the first
+               // `validateRecord` above judged ahead of the strip — `'only'`,
+               // because those are already judged. See `ReadonlyValueScope`.
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
+               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // ── [#19989] The post-image seam on the BY-ID path ─────────────
                //
                // The by-id twin of the predicate-path call below, placed at the
@@ -15184,7 +15296,13 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
-               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
+               // [#21663] Scope `'skip'` — the public `validateRecord` IS that
+               // scope: the readonly strip has NOT run yet, so a readonly value
+               // here may be a caller's the strip is about to drop — judged, a
+               // whole-record write-back echoing a legacy stored value would
+               // become a refusal. Readonly values are judged after the strip
+               // (`validateRecordInScope(…, 'only')`, below).
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#2982] The middleware-composed AST — asserted present and
                // bound to the memoized row read in the pre-phase above, so the
@@ -15303,6 +15421,12 @@ export class ObjectQL implements IObjectQLEngine {
                // caller is told before N rows are written with a column missing
                // — the failure mode a bulk write makes N times larger.
                assertNoStrictDrops();
+               // [#21663] The predicate-path twin of the by-id second pass, at the
+               // same point and for the same reason: the readonly values left on
+               // the final payload are stored, so their SHAPE is judged — before
+               // N rows are written.
+               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
+               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // ── [#19950] The post-image seam on the PREDICATE path ─────────
                //
                // An enforcement layer's write `check` must hold for EVERY row a

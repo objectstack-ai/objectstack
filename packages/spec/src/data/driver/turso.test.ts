@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The turso/libSQL config contract (#6345).
+ * The turso/libSQL config contract (commit e2798fab7).
  *
  * These assertions are what "`validateDriverConfig('turso')` flipped from
  * `{ known: false }` to `{ known: true }`" MEANS in practice: before this file
@@ -57,7 +57,7 @@ describe('TursoConfigSchema', () => {
   });
 
   // The exact failure this contract was written for: `token` is the plausible
-  // spelling, `authToken` is the real one, and before #6345 the misspelling was
+  // spelling, `authToken` is the real one, and before commit e2798fab7 the misspelling was
   // accepted in silence and the connection attempted unauthenticated. Until
   // #7990 the fix was a rename hint onto `authToken`; now that `authToken` is
   // itself unwritable the same spelling gets the credential refusal directly —

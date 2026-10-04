@@ -33,8 +33,11 @@ export interface BindHooksOptions {
 
   /**
    * Optional name → function map for resolving string `handler` references.
-   * Typically supplied by `defineStack({ functions })` and merged with any
-   * functions previously registered on the engine.
+   * Typically supplied by `defineStack({ functions })` (an artifact's runtime
+   * module supplies it on the artifact path). A string `handler` resolves
+   * against this map, then against the functions registered on the engine
+   * under the SAME `packageId` — never another package's; a name neither
+   * holds is refused at registration ({@link HOOK_HANDLER_NOT_IN_PACKAGE_CODE}).
    *
    * A value may be the handler itself or a declaration record stating what the
    * function does (`{ handler, effect: 'writes' }`, #4396) — the same two
@@ -96,7 +99,61 @@ const noopLogger: HookDiagnosticsLogger = {
 export interface BindHooksResult {
   registered: number;
   skipped: number;
-  errors: Array<{ hook: string; reason: string }>;
+  /**
+   * One entry per hook that did not bind. `code` and `status` are set when the
+   * failure is a coded registration refusal (ADR-0112 envelope) — today a
+   * `handler` naming a function the hook's own package does not hold
+   * ({@link HOOK_HANDLER_NOT_IN_PACKAGE_CODE}).
+   */
+  errors: Array<{ hook: string; reason: string; code?: string; status?: number }>;
+}
+
+/**
+ * The refusal of a hook whose `handler` names a function its own package does
+ * not hold, as the ADR-0112 envelope carries it.
+ *
+ * A hook's `handler` name resolves inside the hook's own package only: the
+ * functions handed to its bind (the package's `functions`, which its runtime
+ * module supplies) and the functions the same package registered on the
+ * engine. A name the package does not hold — a typo, or a function another
+ * package registered — is refused at registration and the hook is not bound.
+ *
+ * `INVALID_REFERENCE` is the standard catalog's member for a reference that
+ * does not resolve where it must; the condition is generic, so the ledger's
+ * admission rule sends it to the standard member rather than to a new code.
+ */
+export const HOOK_HANDLER_NOT_IN_PACKAGE_CODE = 'INVALID_REFERENCE';
+export const HOOK_HANDLER_NOT_IN_PACKAGE_STATUS = 400;
+
+type HookRegistrationRefusal = Error & {
+  code: string;
+  status: number;
+  hook: string;
+  handler: string;
+  packageId?: string;
+};
+
+function hookHandlerNotInPackageRefusal(
+  hookName: string,
+  fnName: string,
+  packageId: string | undefined,
+): HookRegistrationRefusal {
+  const holder = packageId
+    ? `its own package ('${packageId}') holds no function of that name`
+    : 'this bind names no owning package and was handed no function of that name';
+  const err = new Error(
+    `Hook '${hookName}' was not bound: its \`handler\` names '${fnName}', and ${holder}. `
+    + "A hook's `handler` resolves only among the functions its own package declares — the package's "
+    + "`functions`, its runtime module's among them — and never reaches a function another package "
+    + 'registered. Give the hook a `body` (sandboxed JS), or declare the function in this package\'s own '
+    + '`functions`; to reuse another package\'s function, import it from the package that owns it.',
+  ) as HookRegistrationRefusal;
+  err.code = HOOK_HANDLER_NOT_IN_PACKAGE_CODE;
+  err.status = HOOK_HANDLER_NOT_IN_PACKAGE_STATUS;
+  err.hook = hookName;
+  err.handler = fnName;
+  if (packageId) err.packageId = packageId;
+  return err;
 }
 
 /**
@@ -175,11 +232,32 @@ export function bindHooksToEngine(
       const resolved = resolveHandler(engine, hook, opts);
       if (!resolved) {
         result.skipped += 1;
+        // A `handler` name the hook's own package does not hold is REFUSED at
+        // registration, as a coded refusal, whether the name exists nowhere or
+        // only in another package — the two are one condition from where the
+        // hook stands. Logged at `error`, beside the binder's other coded
+        // registration refusals, and fatal under `strict`.
+        if (!(hook as any).body && typeof hook.handler === 'string' && hook.handler.length > 0) {
+          const refusal = hookHandlerNotInPackageRefusal(hook.name, hook.handler, opts.packageId);
+          result.errors.push({
+            hook: hook.name,
+            reason: refusal.message,
+            code: refusal.code,
+            status: refusal.status,
+          });
+          if (opts.strict) throw refusal;
+          logger.error('[hook-binder] hook refused: its handler names no function of its own package', refusal, {
+            hook: hook.name,
+            handler: hook.handler,
+            packageId: opts.packageId,
+            code: refusal.code,
+            status: refusal.status,
+          });
+          continue;
+        }
         const reason = (hook as any).body
           ? `hook body present but no bodyRunner supplied to bindHooksToEngine (runtime must wire QuickJSScriptRunner)`
-          : typeof hook.handler === 'string'
-            ? `unknown function '${hook.handler}'`
-            : 'no handler';
+          : 'no handler';
         result.errors.push({ hook: hook.name, reason });
         if (opts.strict) {
           throw new Error(`[hook-binder] strict: cannot bind hook '${hook.name}': ${reason}`);
@@ -313,15 +391,34 @@ function resolveHandler(
   const h = hook.handler;
   if (typeof h === 'function') return h as HookHandler;
   if (typeof h === 'string' && h.length > 0) {
-    // Try the per-bundle map first (hot path during initial bind),
-    // then fall back to whatever the engine already knows. A declaration
+    // A name resolves inside the hook's OWN package only. First the functions
+    // handed to this bind — the package's `functions`, which an artifact's
+    // runtime module supplies (hot path during initial bind). A declaration
     // record resolves to its handler — a hook cares only about the callable.
     const fromBundle = normalizeFlowFunctionEntry(opts.functions?.[h]);
     if (fromBundle) return fromBundle.handler as HookHandler;
-    if (typeof (engine as any).resolveFunction === 'function') {
-      const fn = (engine as any).resolveFunction(h);
-      if (typeof fn === 'function') return fn as HookHandler;
-    }
+    // Then a function the SAME package registered on the engine earlier. The
+    // registry is keyed by bare name, so the owner on the entry is what keeps
+    // a hook from binding to a function another package registered under the
+    // same name — that package's code would run on this package's events.
+    return ownPackageFunction(engine, h, opts.packageId);
   }
   return undefined;
+}
+
+/**
+ * The engine-registered function `name` when — and only when — its owner is
+ * `packageId`. A bind that states no owner holds only the functions handed to
+ * it: an entry with no owner, or with another owner, is not this package's.
+ */
+function ownPackageFunction(
+  engine: ObjectQL,
+  name: string,
+  packageId: string | undefined,
+): HookHandler | undefined {
+  if (!packageId) return undefined;
+  if (typeof (engine as any).resolveFunctionEntry !== 'function') return undefined;
+  const entry = (engine as any).resolveFunctionEntry(name);
+  if (!entry || entry.packageId !== packageId) return undefined;
+  return typeof entry.handler === 'function' ? (entry.handler as HookHandler) : undefined;
 }

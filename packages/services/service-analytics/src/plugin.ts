@@ -1233,9 +1233,10 @@ export class AnalyticsServicePlugin implements Plugin {
      * single source of its bucketing and no second table lives here.
      *
      * `undefined` on every tier that cannot answer: no data engine, a driver
-     * without the member (memory, mongo), a granularity the driver buckets in
-     * memory (it answers `null`), a throw. `undefined` keeps the echo's
-     * representative `date_trunc(…)`.
+     * without the member (memory, mongo), a granularity the driver leaves to
+     * the engine's in-memory bucketing (it answers `null`), a throw. On
+     * `undefined` the echo refuses the bucket (#21647): it prints a bucket in
+     * no expression but the one answered here.
      */
     const dateBucketSql = (objectName: string, field: string, granularity: string): string | undefined => {
       try {

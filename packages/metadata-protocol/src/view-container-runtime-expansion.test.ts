@@ -1216,12 +1216,17 @@ describe('#21334 a container on another package\'s object never takes that packa
             protocol: Protocol, name: string, item: unknown, organizationId?: string, mode?: 'draft' | 'publish',
         ) => protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId), ...(mode ? { mode } : {}) } as any);
         const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
-        /** The minimum a rejection pin asserts — the ADR-0112 envelope — plus the subjects it names. */
+        /**
+         * The minimum a rejection pin asserts — the ADR-0112 envelope — plus the subjects it names.
+         * [#21639] Every name below is also a name the showcase SHIPS, and the family's one
+         * predicate names that other owner: the shipping package, and the object its view is on.
+         */
         const expectRefused = (error: any, saveName: string) => {
             expect(error).toBeInstanceOf(Error);
             expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
             expect(error.message, 'the refusal names the save name').toContain(`'${saveName}'`);
-            expect(error.message, 'the prescription names the object\'s own name').toContain(`'${TASK}'`);
+            expect(error.message, 'the refusal names the object its view is on').toContain(`'${TASK}'`);
+            expect(error.message, 'the refusal names the other owner, the shipping package').toContain(`the package '${SHOWCASE}' ships`);
         };
         /** The doors answer `name` with the one item `expectItem` names, and the same item on both. */
         const expectBothDoors = async (
@@ -1321,6 +1326,10 @@ describe('#21334 a container on another package\'s object never takes that packa
      * item under an expanded name still saves. One more control is the
      * census's: a container under a name of its own, not its object's and not
      * a sibling's expansion, still saves.
+     *
+     * [#21639] Since generalised: the family's one predicate drops "of the
+     * same object" and adds the shapes this check left open (that block,
+     * below). Every pin here keeps its envelope and its intent.
      */
     describe('#21620 the save door refuses a container saved under a name another stored container of the same object expands to', () => {
         const LEAD = 'crm_lead';
@@ -1513,6 +1522,482 @@ describe('#21334 a container on another package\'s object never takes that packa
                     // The other organization still gets its own container's view, on both doors.
                     await expectServed(protocol, PIPELINE, 'org_globex', 'Lead Pipeline');
                 });
+            });
+        }
+    });
+
+    /**
+     * #21639, with #21638 folded in — the family's ONE collision predicate at
+     * the save door, and its enumeration pin (triage's acceptance).
+     *
+     * The rule: a stored view container is refused at save when its save
+     * name, or any name its expansion produces, is a name already served from
+     * elsewhere — another stored container's expansion in the caller's
+     * selection, whatever that container's object, or a view item a package
+     * ships. It replaces #21558's and #21620's one-shape checks; their blocks
+     * above keep their envelopes and their intent.
+     *
+     * Measured on `origin/main` before this change (`7b07749f05`), with this
+     * harness: every REFUSED row below that is not #21558's or #21620's own
+     * shape was accepted, and the doors then served the collision — the
+     * sibling's or the package's view gone, or replaced by the later
+     * container's.
+     *
+     * The table is the acceptance: one row per container shape, each either
+     * REFUSED (the ADR-0112 envelope, and the other owner and the colliding
+     * name named) or ALLOWED (with its reason). A row that is neither fails;
+     * the ruling's shapes and every cell of the predicate (which name × which
+     * owner) must each have a row, so a shape added without a verdict, or a
+     * cell left without a refused row, turns the pin red.
+     */
+    describe('#21639 the save door\'s one collision predicate — the enumeration pin', () => {
+        const LEAD = 'crm_lead';
+        const OTHER_ORG = 'org_globex';
+        const leadData = { provider: 'object', object: LEAD };
+        const leadList = (label: string) => ({ label, type: 'grid', data: leadData, columns: [{ field: 'name' }] });
+        const taskList = (label: string) => ({ label, type: 'grid', data, columns: [{ field: 'title' }] });
+        /** The stored container most rows sit beside: `crm_lead` with a default list and a `pipeline`. */
+        const storedLead = { name: LEAD, object: LEAD, list: leadList('All Leads'), listViews: { pipeline: leadList('Lead Pipeline') } };
+        const KANBAN = `${TASK}.kanban`;
+        /** A view item the showcase ships on its own, outside its `showcase_task` container. */
+        const shippedKanban = {
+            name: KANBAN, object: TASK, viewKind: 'list', label: 'Board',
+            config: { type: 'kanban', data, columns: [{ field: 'title' }] },
+        };
+        function collisionHarness(environmentId?: string) {
+            const harness = showcaseHarness(environmentId);
+            harness.registry.registerItem('view', { ...shippedKanban }, 'name', SHOWCASE);
+            return harness;
+        }
+
+        type Subject = 'its save name' | 'a name its expansion produces';
+        type OwnerKind = 'its own expansion' | 'another stored container' | 'a view item a package ships';
+        type Scope = 'environment-wide' | 'organization-scoped';
+        /** `organizationId`: absent — the caller's own scope; `null` — environment-wide; a string — that organization. */
+        interface Write { name: string; item: unknown; packageId?: string; organizationId?: string | null }
+        interface Served { object: string; name: string; label: string }
+        interface Shape {
+            shape: string;
+            /** The ruling's own name for the shape, where it names one. */
+            ruled?: string;
+            scopes?: readonly Scope[];
+            given?: readonly Write[];
+            save: Write;
+            refused?: { subject: Subject; owner: OwnerKind; ownerName: string; collides: string; stillServed?: Served };
+            allowed?: { because: string; serves: readonly Served[] };
+        }
+
+        const SHAPES: readonly Shape[] = [
+            // ── REFUSED ─────────────────────────────────────────────────────
+            {
+                shape: 'a container saved under a name its own expansion produces',
+                ruled: '#21558\'s own-expansion name',
+                save: { name: `${LEAD}.default`, item: { name: `${LEAD}.default`, object: LEAD, list: leadList('Self') } },
+                refused: { subject: 'its save name', owner: 'its own expansion', ownerName: LEAD, collides: `${LEAD}.default` },
+            },
+            {
+                shape: 'a container saved under a name its own expansion produces, while a stored container holds its object\'s name',
+                given: [{ name: LEAD, item: { name: LEAD, object: LEAD, listViews: { hot: leadList('Hot Leads') } } }],
+                save: { name: `${LEAD}.default`, item: { name: `${LEAD}.default`, object: LEAD, list: leadList('Self') } },
+                refused: {
+                    subject: 'its save name', owner: 'its own expansion', ownerName: LEAD, collides: `${LEAD}.default`,
+                    stillServed: { object: LEAD, name: `${LEAD}.hot`, label: 'Hot Leads' },
+                },
+            },
+            {
+                shape: 'a container of the same object saved under a name a stored container expands',
+                ruled: '#21620\'s sibling expansion of the same object',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Other') } },
+                refused: {
+                    subject: 'its save name', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.pipeline`,
+                    stillServed: { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                },
+            },
+            {
+                shape: 'a container bound to ANOTHER object saved under a name a stored container expands',
+                ruled: '(1)\'s other-object container',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: `${LEAD}.pipeline`, item: { object: 'crm_account', list: { label: 'Accounts', type: 'grid', columns: [{ field: 'name' }] } } },
+                refused: {
+                    subject: 'its save name', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.pipeline`,
+                    stillServed: { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                },
+            },
+            {
+                shape: 'an UNBOUND container saved under a name a stored container expands',
+                ruled: '(1)\'s unbound container',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: `${LEAD}.pipeline`, item: { list: { label: 'Unbound', type: 'grid', columns: [{ field: 'name' }] } } },
+                refused: {
+                    subject: 'its save name', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.pipeline`,
+                    stillServed: { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                },
+            },
+            {
+                shape: 'a second container of one object, under a free name, whose bare list takes <object>.default',
+                ruled: '(2)\'s second container default',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: 'lead_other_views', item: { object: LEAD, list: leadList('Other') } },
+                refused: {
+                    subject: 'a name its expansion produces', owner: 'another stored container', ownerName: LEAD, collides: `${LEAD}.default`,
+                    stillServed: { object: LEAD, name: `${LEAD}.default`, label: 'All Leads' },
+                },
+            },
+            {
+                shape: 'a container under its object\'s name, saved after a free-named container of that object took <object>.default',
+                given: [{ name: 'lead_other_views', item: { name: 'lead_other_views', object: LEAD, list: leadList('Other') } }],
+                save: { name: LEAD, item: storedLead },
+                refused: {
+                    subject: 'a name its expansion produces', owner: 'another stored container', ownerName: 'lead_other_views', collides: `${LEAD}.default`,
+                    stillServed: { object: LEAD, name: `${LEAD}.default`, label: 'Other' },
+                },
+            },
+            {
+                shape: 'a package-less container saved under the name of a view item a package ships',
+                ruled: '#21638\'s shipped item name',
+                save: { name: `${TASK}.in_progress`, item: { name: `${TASK}.in_progress`, object: TASK, list: listView } },
+                refused: {
+                    subject: 'its save name', owner: 'a view item a package ships', ownerName: SHOWCASE, collides: `${TASK}.in_progress`,
+                    stillServed: { object: TASK, name: `${TASK}.in_progress`, label: 'In Progress' },
+                },
+            },
+            {
+                shape: 'a container in a writable package saved under the name of a view item another package ships',
+                save: { name: DEFAULT, item: { name: DEFAULT, object: TASK, list: listView }, packageId: REPAIR },
+                refused: {
+                    subject: 'its save name', owner: 'a view item a package ships', ownerName: SHOWCASE, collides: DEFAULT,
+                    stillServed: { object: TASK, name: DEFAULT, label: 'All Tasks' },
+                },
+            },
+            {
+                shape: 'an overlay of the package\'s own container whose new member takes the name of a view item the package ships on its own',
+                save: {
+                    name: TASK,
+                    item: { name: TASK, list: taskList('Overlay'), listViews: { in_progress: taskList('Overlay In Progress'), kanban: taskList('Mine') } },
+                },
+                refused: {
+                    subject: 'a name its expansion produces', owner: 'a view item a package ships', ownerName: SHOWCASE, collides: KANBAN,
+                    stillServed: { object: TASK, name: KANBAN, label: 'Board' },
+                },
+            },
+            // ── ALLOWED ─────────────────────────────────────────────────────
+            {
+                shape: 'a view item saved under a name a stored container expands',
+                ruled: 'a view item under an expanded name (allowed)',
+                given: [{ name: LEAD, item: storedLead }],
+                save: {
+                    name: `${LEAD}.pipeline`,
+                    item: { name: `${LEAD}.pipeline`, object: LEAD, viewKind: 'list', label: 'ByNameRow', config: { type: 'grid', data: leadData, columns: [{ field: 'name' }] } },
+                },
+                allowed: {
+                    because: 'a view item is not a container: under an expanded name it is that name\'s sanctioned override (#21510)',
+                    serves: [{ object: LEAD, name: `${LEAD}.pipeline`, label: 'ByNameRow' }, { object: LEAD, name: `${LEAD}.default`, label: 'All Leads' }],
+                },
+            },
+            {
+                shape: 'a view item saved under the name of a view item a package ships',
+                save: {
+                    name: `${TASK}.in_progress`,
+                    item: { name: `${TASK}.in_progress`, object: TASK, viewKind: 'list', label: 'Overridden', config: { type: 'grid', data, columns: [{ field: 'title' }] } },
+                },
+                allowed: {
+                    because: 'a view item is not a container: under a packaged view\'s name it is that view\'s sanctioned override by name',
+                    serves: [{ object: TASK, name: `${TASK}.in_progress`, label: 'Overridden' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
+                },
+            },
+            {
+                shape: 'a container under its object\'s name',
+                ruled: 'a container under its object\'s name (allowed)',
+                save: { name: LEAD, item: storedLead },
+                allowed: {
+                    because: 'the name the container contract gives it (ADR-0017 §3.2), and its expansion takes no name served elsewhere',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'All Leads' }, { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' }],
+                },
+            },
+            {
+                shape: 'a container\'s own re-save',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: LEAD, item: { ...storedLead, list: leadList('All Leads, edited') } },
+                allowed: {
+                    because: 'the row under the save name is the row this save replaces, never its own sibling',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'All Leads, edited' }, { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' }],
+                },
+            },
+            {
+                shape: 'a container under a name of its own beside a sibling of its object, expanding names the sibling does not',
+                given: [{ name: LEAD, item: storedLead }],
+                save: { name: 'lead_hot_views', item: { object: LEAD, listViews: { hot: leadList('Hot Leads') } } },
+                allowed: {
+                    because: 'the census writers\' shape this door keeps (a container saved under a name other than its object), and its names collide with nothing',
+                    serves: [
+                        { object: LEAD, name: `${LEAD}.hot`, label: 'Hot Leads' },
+                        { object: LEAD, name: `${LEAD}.default`, label: 'All Leads' },
+                        { object: LEAD, name: `${LEAD}.pipeline`, label: 'Lead Pipeline' },
+                    ],
+                },
+            },
+            {
+                shape: 'an overlay of the package\'s own container, by its own name',
+                save: { name: TASK, item: { name: TASK, list: taskList('Overlay'), listViews: { in_progress: taskList('Overlay In Progress') } } },
+                allowed: {
+                    because: 'ADR-0005 keys an overlay by its own name: the row stands in for the shipped container, and its views for that container\'s',
+                    serves: [
+                        { object: TASK, name: DEFAULT, label: 'Overlay' },
+                        { object: TASK, name: `${TASK}.in_progress`, label: 'Overlay In Progress' },
+                        { object: TASK, name: KANBAN, label: 'Board' },
+                    ],
+                },
+            },
+            {
+                shape: 'a package-less container on another package\'s object, under a name of its own',
+                save: { name: OWN, item: { object: TASK, list: taskList('Probe') } },
+                allowed: {
+                    because: '#21334\'s arm: every name it expands derives from its own name, so none is a name the owning package ships',
+                    serves: [{ object: TASK, name: `${TASK}.${OWN}`, label: 'Probe' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
+                },
+            },
+            {
+                shape: 'a container in a writable package on another package\'s object, under a name of its own',
+                save: { name: OWN, item: { object: TASK, list: taskList('Probe') }, packageId: REPAIR },
+                allowed: {
+                    because: '#21334\'s arm, bound to its own package: its names derive from its own name',
+                    serves: [{ object: TASK, name: `${TASK}.${OWN}`, label: 'Probe' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
+                },
+            },
+            {
+                shape: 'a container saved under the expanded name of ANOTHER organization\'s container',
+                scopes: ['organization-scoped'],
+                given: [{ name: LEAD, item: storedLead, organizationId: OTHER_ORG }],
+                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Mine') } },
+                allowed: {
+                    because: 'the caller\'s selection decides, as it does for the readers: another organization\'s row is not in it',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'Mine' }],
+                },
+            },
+            {
+                shape: 'an environment-wide container saved under the expanded name of an organization\'s container',
+                scopes: ['environment-wide'],
+                given: [{ name: LEAD, item: storedLead, organizationId: ORG }],
+                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Everyone') } },
+                allowed: {
+                    because: 'the caller\'s selection decides: an organization\'s rows are not an environment-wide caller\'s, and reading every organization\'s rows at an environment-wide save would be a cross-tenant read at a write door',
+                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'Everyone' }],
+                },
+            },
+        ];
+
+        /** The ruling's acceptance list, verbatim in substance: each must be a row. */
+        const RULED = [
+            '#21558\'s own-expansion name',
+            '#21620\'s sibling expansion of the same object',
+            '(1)\'s other-object container',
+            '(1)\'s unbound container',
+            '(2)\'s second container default',
+            '#21638\'s shipped item name',
+            'a view item under an expanded name (allowed)',
+            'a container under its object\'s name (allowed)',
+        ] as const;
+        /** Every cell of the predicate: which name collides, with which owner. */
+        const CELLS: ReadonlyArray<readonly [Subject, OwnerKind]> = [
+            ['its save name', 'its own expansion'],
+            ['its save name', 'another stored container'],
+            ['its save name', 'a view item a package ships'],
+            ['a name its expansion produces', 'another stored container'],
+            ['a name its expansion produces', 'a view item a package ships'],
+        ];
+        /** How the refusal names each kind of owner. */
+        const OWNER_NAMED: Record<OwnerKind, (owner: string) => string> = {
+            'its own expansion': (object) => `its own expansion produces (its list view on '${object}')`,
+            'another stored container': (container) => `the stored container '${container}'`,
+            'a view item a package ships': (packageId) => `the package '${packageId}' ships`,
+        };
+
+        it('every row is either REFUSED, naming its owner, or ALLOWED, with its reason — never both, never neither', () => {
+            for (const row of SHAPES) {
+                expect([row.refused !== undefined, row.allowed !== undefined].filter(Boolean), row.shape).toHaveLength(1);
+                if (row.allowed) {
+                    expect(row.allowed.because.trim().length, `${row.shape}: the reason`).toBeGreaterThan(0);
+                    expect(row.allowed.serves.length, `${row.shape}: what it serves`).toBeGreaterThan(0);
+                }
+                if (row.refused) expect(row.refused.ownerName.length, `${row.shape}: the owner`).toBeGreaterThan(0);
+            }
+            expect(new Set(SHAPES.map((row) => row.shape)).size, 'one row per shape').toBe(SHAPES.length);
+        });
+
+        it('the ruling\'s shapes each have exactly one row, and every cell of the predicate has a refused row', () => {
+            expect([...RULED].sort()).toEqual(SHAPES.flatMap((row) => (row.ruled ? [row.ruled] : [])).sort());
+            for (const [subject, owner] of CELLS) {
+                expect(
+                    SHAPES.filter((row) => row.refused?.subject === subject && row.refused.owner === owner).length,
+                    `a refused row for ${subject} × ${owner}`,
+                ).toBeGreaterThan(0);
+            }
+            expect(
+                SHAPES.filter((row) => row.refused).every((row) => CELLS.some(([s, o]) => s === row.refused!.subject && o === row.refused!.owner)),
+                'every refused row sits in a cell of the predicate',
+            ).toBe(true);
+        });
+
+        const writeIn = (protocol: Protocol, write: Write, callerOrganizationId: string | undefined, mode?: 'draft' | 'publish') => {
+            const organizationId = write.organizationId === undefined ? callerOrganizationId : (write.organizationId ?? undefined);
+            return protocol.saveMetaItem({
+                type: 'view', name: write.name, item: write.item,
+                ...(write.packageId ? { packageId: write.packageId } : {}),
+                ...scoped(organizationId),
+                ...(mode ? { mode } : {}),
+            } as any);
+        };
+        const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
+        const viewRowsOf = (rows: Map<string, Row>) =>
+            [...rows.values()].filter((r) => r.type === 'view').map((r) => [r.name, r.organization_id, r.state, r.metadata]).sort();
+        /** `name` answers one view item carrying `label` on BOTH doors. */
+        const expectServed = async (protocol: Protocol, served: Served, organizationId: string | undefined) => {
+            const listed = named(
+                switcherMatches(((await protocol.getMetaItems({ type: 'view', ...scoped(organizationId) } as any)) as any).items, served.object),
+                served.name,
+            );
+            expect(listed.map((v) => v.label), `${served.name} on the object door`).toEqual([served.label]);
+            const read = await byNameDoor(protocol, served.name, organizationId);
+            expect(isAggregatedViewContainer(read), `${served.name} by name is a view item, not a raw container`).toBe(false);
+            expect(read?.label, `${served.name} by name`).toBe(served.label);
+        };
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope: Scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const row of SHAPES) {
+                        if (row.scopes && !row.scopes.includes(scope)) continue;
+                        it(`${scope}: ${row.shape} — ${row.refused ? 'REFUSED' : 'ALLOWED'}`, async () => {
+                            const { protocol, rows, registry } = collisionHarness(environmentId);
+                            for (const given of row.given ?? []) {
+                                expect(((await writeIn(protocol, given, organizationId)) as any)?.success, `${given.name} is stored first`).toBe(true);
+                            }
+                            if (row.allowed) {
+                                expect(((await writeIn(protocol, row.save, organizationId)) as any)?.success, 'the save is accepted').toBe(true);
+                                for (const served of row.allowed.serves) await expectServed(protocol, served, organizationId);
+                                return;
+                            }
+                            const refused = row.refused!;
+                            const storedBefore = viewRowsOf(rows);
+                            const registeredBefore = JSON.stringify(registry.listItems('view'));
+                            for (const mode of ['publish', 'draft'] as const) {
+                                const error = await refusalOf(writeIn(protocol, row.save, organizationId, mode));
+                                // The ADR-0112 envelope …
+                                expect(error, `${mode}: the save is refused`).toBeInstanceOf(Error);
+                                expect({ code: error?.code, status: error?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+                                // … the save name, the colliding name and the other owner …
+                                expect(error.message, 'the refusal names the save name').toContain(`'${row.save.name}'`);
+                                expect(error.message, 'the refusal names the colliding name').toContain(`'${refused.collides}'`);
+                                expect(error.message, 'the refusal names the other owner').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
+                                // … the owner and the prescription both inside the first 500 characters,
+                                // the bound a 4xx message crosses the REST boundary under, tail cut
+                                // (`CLIENT_MESSAGE_MAX`): the explanation is the half that may be lost …
+                                const delivered = String(error.message).slice(0, 500);
+                                expect(delivered, 'the owner survives the wire bound').toContain(OWNER_NAMED[refused.owner](refused.ownerName));
+                                expect(delivered, 'the prescription survives the wire bound')
+                                    .toContain(`a view item (name, object, viewKind and config) under '${refused.collides}'`);
+                                // … and never prescribes a save under a name another stored row
+                                // holds: wherever a stored row's name appears, it is named as THE
+                                // CONTAINER (or as the object a view binds to), never as a name.
+                                for (const given of row.given ?? []) {
+                                    const leadIns = String(error.message).split(`'${given.name}'`).slice(0, -1);
+                                    expect(
+                                        leadIns.filter((leadIn) => !/(container|on) $/.test(leadIn)),
+                                        `'${given.name}', a stored row's name, is never prescribed as a name to save under`,
+                                    ).toEqual([]);
+                                }
+                            }
+                            expect(viewRowsOf(rows), 'no row and no draft is stored').toEqual(storedBefore);
+                            expect(JSON.stringify(registry.listItems('view')), 'nothing is registered').toBe(registeredBefore);
+                            if (refused.stillServed) {
+                                await expectServed(protocol, refused.stillServed, organizationId);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    });
+
+    /**
+     * #21638's attribution half, folded into #21639: a package-less view
+     * container ROW stored under the name of a view ITEM a package ships is
+     * not that item's overlay — a container is not a view — so it belongs to
+     * no package.
+     *
+     * Measured on `origin/main` before this change (`7b07749f05`), with these
+     * rows written straight to the store (the save door refuses the shape
+     * now; these stand for rows stored before it did): `runtimeViewContainerPackage`
+     * read the row's package from the shipped item of the same name, so the
+     * container was judged the shipping package's own and expanded under that
+     * package's names — its bare `list` replaced the packaged
+     * `showcase_task.default` on both doors, wearing the package's
+     * `_packageId`, and a `listViews.edit` member replaced the packaged
+     * `showcase_task.edit`. Read now, each is a package-less container on
+     * another package's object, expanded under its own name (#21334's arm),
+     * with no re-save. The control is the overlay path that DOES take a
+     * package: a package-less row of the package's own container name.
+     */
+    describe('#21638 a package-less container row stored under a shipped view item\'s name belongs to no package', () => {
+        const AT_REST = [
+            {
+                member: 'a bare list', rowName: `${TASK}.in_progress`, body: { object: TASK, list: listView },
+                spared: DEFAULT, servedAs: `${TASK}.${TASK}.in_progress`, authored: listView,
+            },
+            {
+                member: 'listViews.edit', rowName: `${TASK}.in_progress`, body: { object: TASK, listViews: { edit: listView } },
+                spared: `${TASK}.edit`, servedAs: `${TASK}.${TASK}.in_progress.edit`, authored: listView,
+            },
+        ] as const;
+        const storeAtRest = (rows: Map<string, Row>, name: string, body: Record<string, unknown>, organizationId?: string) =>
+            rows.set(`at-rest:${name}:${organizationId ?? 'env'}`, {
+                id: `r_${name}`, type: 'view', name, organization_id: organizationId ?? null,
+                package_id: null, state: 'active', metadata: JSON.stringify({ name, ...body }),
+            });
+
+        for (const [kernel, environmentId] of KERNELS) {
+            describe(`on ${kernel}`, () => {
+                for (const organizationId of [undefined, ORG]) {
+                    const scope = organizationId ? 'organization-scoped' : 'environment-wide';
+                    for (const c of AT_REST) {
+                        it(`${scope}, ${c.member} stored at ${c.rowName}: ${c.spared} still answers the packaged view on both doors, and the container's view is served under its own name, with no package and no default`, async () => {
+                            const { protocol, rows } = showcaseHarness(environmentId);
+                            storeAtRest(rows, c.rowName, c.body, organizationId);
+
+                            const shipped = PACKAGED.find((v) => v.name === c.spared)!;
+                            const served = await objectDoor(protocol, organizationId);
+                            const listed = named(served, c.spared);
+                            expect(listed, `exactly one item answers ${c.spared} on the object door`).toHaveLength(1);
+                            expect({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId })
+                                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+                            const read = await byNameDoor(protocol, c.spared, organizationId);
+                            expect({ label: read?.label, config: read?.config, _packageId: read?._packageId })
+                                .toEqual({ label: shipped.label, config: shipped.config, _packageId: SHOWCASE });
+
+                            const own = named(served, c.servedAs);
+                            expect(own, `the container's view answers ${c.servedAs}`).toHaveLength(1);
+                            expect(own[0].config).toEqual(c.authored);
+                            expect(own[0]._packageId, 'the row belongs to no package').toBeUndefined();
+                            expect(own[0]._provenance).not.toBe('package');
+                            expect(own[0].isDefault).toBeUndefined();
+                            expectOnlyPackagedDefaults(served);
+                        });
+                    }
+
+                    it(`${scope}: CONTROL — a package-less row of the package's own container name is that container's overlay and keeps its package`, async () => {
+                        const { protocol, rows } = showcaseHarness(environmentId);
+                        storeAtRest(rows, TASK, { list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] } }, organizationId);
+
+                        const listed = named(await objectDoor(protocol, organizationId), DEFAULT);
+                        expect(listed).toHaveLength(1);
+                        expect(listed[0].label).toBe('Customized');
+                        expect(listed[0]._packageId).toBe(SHOWCASE);
+                        expect(listed[0].isDefault).toBe(true);
+                        expect((await byNameDoor(protocol, DEFAULT, organizationId))?.label).toBe('Customized');
+                    });
+                }
             });
         }
     });

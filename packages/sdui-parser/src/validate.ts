@@ -331,7 +331,13 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
  * down over the member kind `of` declares). The two copies must agree on the accepted
  * grammar AND on diagnostic codes/severities — if they drift, the save gate
  * and the renderer speak different dialects. Change these functions only
- * together with the objectui copy. */
+ * together with the objectui copy.
+ *
+ * Known lead: this copy grades every `type-mismatch` and `member-type-mismatch`
+ * `error` (a literal's coarse type is certain; see `checkType`). objectui's
+ * copy, `packages/sdui-parser/src/validate.ts` at the `.objectui-sha` pin,
+ * still grades them `error` only when an `enum` arm is present. Codes and
+ * messages agree; the severity differs until objectui ports the same rule. */
 
 /** The values an `enum` arm admits, flattened from either declaration form. */
 const enumValues = (input: ManifestInput): unknown[] =>
@@ -417,10 +423,14 @@ function memberEntries(value: unknown): Array<[string, unknown]> | null {
  * made once, and N copies of it is the noise this repo treats as the thing that
  * trains authors to dismiss real reports.
  *
- * Severity mirrors `checkType`'s rule for the same reason — `error` when an
- * `enum` arm is present, because a closed list is the one fact this layer can
- * be certain about; `warning` otherwise, since the coarse kind is a KIND claim
- * and `os validate` / `os build` remain the judge of values.
+ * Severity mirrors `checkType`'s rule for the same reason, and is therefore
+ * always `error`. Every member reaching this function belongs to a container
+ * the parser materialized WHOLE: `interpretBrace` either reads the entire
+ * braced value as a literal or keeps the entire value as one `{ $expr }`
+ * marker (`["a", foo]` is one marker, never an array holding one), and a
+ * marker never gets here. So a member is a literal too, its coarse kind is
+ * final at compile time, and a member no declared arm accepts is as certain a
+ * mismatch as a prop no arm accepts.
  */
 function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Diagnostic | null {
   const arms = inputTypeArms(input.of);
@@ -433,7 +443,7 @@ function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Di
   if (offenders.length === 0) return null;
   const expectation = arms.map((arm) => armExpectation(arm, input)).join(' or ');
   return {
-    severity: arms.includes('enum') ? 'error' : 'warning',
+    severity: 'error',
     code: 'member-type-mismatch',
     message: `<${tag}> prop "${input.name}" expected every member to be ${expectation}` +
       ` — ${offenders.map(([position]) => `[${position}]`).join(', ')} ` +
@@ -454,16 +464,29 @@ function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Di
  * as legal, it does not turn the check off. Two properties of the reporting are
  * deliberate:
  *
- *  - A single-arm input produces the byte-identical diagnostic it always did,
- *    `invalid-enum` included. This change adds a form; it does not restate the
- *    old one.
- *  - A multi-arm input produces ONE diagnostic naming every arm, at the
- *    STRICTEST arm's severity — `error` when an `enum` arm is present, because
- *    an enum's closed list is the one fact this layer can be certain about, and
- *    a value outside it should not become dismissible merely because a second
- *    arm was added next to it. Its code is `type-mismatch` (not `invalid-enum`)
- *    since the reported fact is "fits none of the declared arms", and the
- *    message carries the allowed values so the author still sees the list.
+ *  - A single-arm input produces the code and message it always did, and a
+ *    single `enum` arm's `invalid-enum` is byte-identical, severity included.
+ *    The union form adds a form; it does not restate the old one.
+ *  - A multi-arm input produces ONE diagnostic naming every arm. Its code is
+ *    `type-mismatch` (not `invalid-enum`) since the reported fact is "fits
+ *    none of the declared arms", and the message carries the allowed values so
+ *    the author still sees the list.
+ *
+ * Every `type-mismatch` is an `error`, because this layer reports only what it
+ * can be certain about, and there are two certain facts here:
+ *
+ *  1. An `enum` arm's closed list. A value outside it should not become
+ *     dismissible merely because a second arm was added next to it.
+ *  2. A LITERAL's coarse type. Only literals reach this function: a braced
+ *     value the parser could not materialize is the deferred `{ $expr }`
+ *     marker, which `validateTree` diverts to `inert-expression` (a warning)
+ *     before calling here. A quoted attribute is a string, a bare attribute is
+ *     `true`, and a materialized brace is exactly the literal written. So
+ *     `aggregate="count"` against an input declared `object` is final at
+ *     compile time: no expression stands between the source and the renderer,
+ *     and the tile that reads `aggregate.function` receives a string and
+ *     draws nothing. A warning there let `os build` stay green on a page that
+ *     renders nothing.
  */
 function checkType(tag: string, input: ManifestInput, value: unknown): Diagnostic | null {
   const arms = inputTypeArms(input.type);
@@ -480,7 +503,7 @@ function checkType(tag: string, input: ManifestInput, value: unknown): Diagnosti
   }
 
   return {
-    severity: arms.includes('enum') ? 'error' : 'warning',
+    severity: 'error',
     code: 'type-mismatch',
     message: `<${tag}> prop "${input.name}" expected ${arms
       .map((arm) => armExpectation(arm, input))

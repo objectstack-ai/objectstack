@@ -143,7 +143,10 @@ const SAMPLE: Array<{
         type: 'hook',
         klass: 'declared',
         creatable: true,
-        item: { name: 'probe_hook', object: 'task', events: ['beforeInsert'] },
+        // [#21689] With a `body`: the mint door refuses a hook without one (it
+        // could never run), which would misread the advertisement this suite
+        // measures, as a 422 from schema resolution would.
+        item: { name: 'probe_hook', object: 'task', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } },
     },
     {
         // The `false` direction of class 1, and it must be present: a listing

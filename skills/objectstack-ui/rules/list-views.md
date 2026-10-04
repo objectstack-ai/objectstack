@@ -11,8 +11,8 @@
 ### The `defineView` container (`*.view.ts` file shape)
 
 Views ship **inside a `defineView` container** — one per object, aggregating
-the default `list`, named `listViews`, and `formViews`. The loader expands it
-into `<object>.<key>` view items that power the view switcher.
+the default `list` and `form`, named `listViews`, and `formViews`. The loader
+expands it into `<object>.<key>` view items that power the view switcher.
 
 <!-- os:check -->
 ```typescript
@@ -22,20 +22,18 @@ const data = { provider: 'object' as const, object: 'support_case' };
 
 export const CaseViews = defineView({
   list: { label: 'All Cases', type: 'grid', data, columns: ['subject', 'status'] },
+  form: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   listViews: {
     open: { label: 'Open', type: 'grid', data, columns: ['subject', 'status'],
             filter: [{ field: 'status', operator: 'equals', value: 'open' }] },
-  },
-  formViews: {
-    edit: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   },
 });
 ```
 
 > **Never export a bare flat view object** (`{ name, label, type, columns }`
 > at top level). It is not a valid view container — nothing registers and no
-> view appears in the switcher. Every view lives under `list` / `listViews` /
-> `formViews`, exactly as in the `defineView` example above.
+> view appears in the switcher. Every view lives under `list` / `form` /
+> `listViews` / `formViews`, exactly as in the `defineView` example above.
 
 ### Data Source (`data`)
 

@@ -52,7 +52,7 @@ import { ConnectorSchema } from './connector.zod';
 // post-transform `{ dialect, source }` envelope and a bare cron string is
 // correctly rejected. When this gate was written that state sat on the bare
 // `Connector` and the author state on `ConnectorInput`, and this comment called
-// flipping them "a real but separate appetite". ADR-0122 phase 2 (#6083) did it:
+// flipping them "a real but separate appetite". ADR-0122 phase 2 (commit 53068c130) did it:
 // the bare `Connector` is now `z.input` — the shape the document annotates with
 // — and `ConnectorParsed` carries the parse result. The pinned FACT is
 // unchanged; the two names swapped sides, which is what the last describe block
