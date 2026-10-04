@@ -12477,9 +12477,11 @@ export class ObjectQL implements IObjectQLEngine {
    * call that fires side-effecting hooks (mail, outbound calls, writes to
    * other objects) is the #4052 defect in a new spelling, where a preview
    * quietly executes. So the gap is documented rather than closed: audit and
-   * ownership stamps are `system`/`readonly` and are skipped by validation
-   * anyway, so what remains is the narrow case of a hook deriving a
-   * *business* field that its object also validates.
+   * ownership stamps are `system`/`readonly`, so validation never requires
+   * them, and (#21663) the only thing it asks of a readonly value is its
+   * shape, which a platform stamp always has — so what remains is the narrow
+   * case of a hook deriving a *business* field that its object also
+   * validates.
    *
    * Nothing is written, no sequence is consumed, and no driver is touched —
    * validation is in-process, which is what makes row-by-row dry run of a
