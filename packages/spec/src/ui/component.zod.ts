@@ -6474,6 +6474,15 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
+/**
+ * Post-parse shape of {@link ObjectFormProps} — transforms run (ADR-0122).
+ * [#21464] Since the S-forms stage `customFields` and `sections` carry the
+ * evaluated `*When` predicates, whose bare CEL string parses to its
+ * `{ dialect, source }` envelope, so input ≠ infer and the block left the
+ * type-alias convention pin's isomorphic family (its Iso line deleted with this
+ * alias), the route {@link ObjectMasterDetailFormPropsParsed} took.
+ */
+export type ObjectFormPropsParsed = z.infer<typeof ObjectFormPropsSchema>;
 
 // `formType` old-vocabulary prescriptions (#11873; the objectui#5939
 // measurement). Declared with `//` on purpose — the `LIST_VIEW_EXPORT_PDF_RETIRED`
