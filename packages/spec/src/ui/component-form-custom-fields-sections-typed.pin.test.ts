@@ -148,7 +148,7 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
         { name: 'items', type: 'grid', columns: [{ name: 'product', type: 'text' }, { name: 'qty', type: 'number' }] },
       ],
     }],
-    // objectstack `examples/app-showcase/src/ui/pages/new-project-wizard.page.ts:60`.
+    // objectstack `examples/app-showcase/src/ui/pages/new-project-wizard.page.ts` (its `object-form` node).
     ['the showcase wizard\'s sections', 'object-form', {
       sections: [
         { label: 'Basics', description: 'Name the project and bind its account.', fields: ['name', 'account', 'owner'] },
