@@ -58,6 +58,10 @@
  * (`--json` and human), a booted database holding one row of work for each
  * (the control: the door READS the table and reports the row), and the four
  * doors that already exited 0 on the absent database, which still do.
+ *
+ * [#21573] `os migrate unmapped-columns` joined the roster later, born with
+ * the same answer: it asks `tableAbsent` before the differ. Its control row is
+ * a retired field's column on `os21529_contact`, holding a value.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -418,6 +422,9 @@ await k('sys_secret').insert({
 await k('sys_file').insert({
   id: 'file_21552', key: 'attachments/os21552.txt', name: 'os21552.txt', size: 12, scope: 'attachments', status: 'committed',
 });
+// A retired field's column: in the table, in no metadata, holding a value.
+await k.raw('ALTER TABLE os21529_contact ADD COLUMN legacy_note text');
+await k('os21529_contact').insert({ id: 'con_21573', name: 'Ann', legacy_note: 'kept-21573' });
 await raw.disconnect();
 process.stderr.write('[fixture] seeded\\n');
 process.exit(0);
@@ -512,6 +519,19 @@ const DOORS: readonly Door[] = [
     humanEmpty: /Nothing stranded on this deployment/,
     tables: ['sys_file', 'sys_attachment'],
     work: (doc) => expect(doc).toMatchObject({ filesScanned: 1, stranded: 1 }),
+  },
+  {
+    // Born after #21552 with the family's answer: it asks `tableAbsent` before
+    // the differ, so an absent table is empty work and is never read.
+    name: 'migrate unmapped-columns',
+    argv: ['migrate', 'unmapped-columns', '--object', 'os21529_contact'],
+    empty: (doc) => expect(doc).toMatchObject({ object: 'os21529_contact', columns: [], count: 0, records: [] }),
+    humanEmpty: /No unmapped column on os21529_contact/,
+    tables: ['os21529_contact'],
+    work: (doc) => {
+      expect(doc.columns).toEqual([{ column: 'legacy_note', actual: 'text' }]);
+      expect(doc.records).toContainEqual({ id: 'con_21573', values: { legacy_note: 'kept-21573' } });
+    },
   },
 ];
 

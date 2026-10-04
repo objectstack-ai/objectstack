@@ -66,6 +66,7 @@ import MigratePlan from '../commands/migrate/plan.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
+import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
 import SecretOrphans from '../commands/secret/orphans.js';
 import SecretRewrap from '../commands/secret/rewrap.js';
@@ -210,6 +211,14 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateSummaryNulls),
     noWrite: [{ label: 'migrate summary-nulls', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate summary-nulls --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/unmapped-columns.ts': {
+    run: invoke(MigrateUnmappedColumns),
+    // `osf_lead` is declared by both releases; the next one adds a column,
+    // which is pending work and not an unmapped one, so the run reads nothing.
+    noWrite: [{ label: 'migrate unmapped-columns', argv: ['--object', 'osf_lead', '--database-url', '@DB@', '--json'] }],
+    write: [],
+    note: 'a read-only report: it has no writing mode, and dropping the columns is `os migrate apply --allow-destructive`',
   },
   'commands/migrate/value-shapes.ts': {
     run: invoke(MigrateValueShapes),

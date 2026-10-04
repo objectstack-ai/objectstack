@@ -35,6 +35,10 @@ export { default as MigrateRecordedByCommand } from './commands/migrate/recorded
 // `sys_account.issuer` is dropped and account identity re-keys onto
 // (provider_id, account_id).
 export { default as MigrateAccountIssuerCommand } from './commands/migrate/account-issuer.js';
+// #21573: the operator-only read of the columns `os migrate plan` reports as
+// `unmapped_column` for one object, keyed by record id, for a conversion run
+// before `os migrate apply --allow-destructive` drops them.
+export { default as MigrateUnmappedColumnsCommand } from './commands/migrate/unmapped-columns.js';
 
 // ─── Environments topic subcommands ─────────────────────────────────
 export { default as EnvironmentsListCommand } from './commands/environments/list.js';
