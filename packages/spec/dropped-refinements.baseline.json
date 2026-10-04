@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 218,
-    "droppedRefinementSites": 670,
+    "droppedRefinementSites": 676,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -1427,11 +1427,17 @@
     "ui/ObjectMetricProps": {
       "sites": [
         "aggregate",
+        "drillDown.report",
+        "drillDown.report.blocks.element",
+        "drillDown.report.blocks.element.runtimeFilter",
+        "drillDown.report.runtimeFilter",
+        "drillDown.report.runtimeFilter.lazy",
         "filter.element"
       ]
     },
     "ui/ObjectTimelineProps": {
       "sites": [
+        "",
         "filter.element",
         "timeline.groupByField"
       ]

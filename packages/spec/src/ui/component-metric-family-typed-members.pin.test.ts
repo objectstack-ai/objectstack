@@ -7,8 +7,10 @@
  * the drill-down's five list members are the chart drill-down's by reference,
  * with `filter` and `mode` refused by name, and the comparison is `{ kind }`,
  * with `kind` the dashboard comparison's by reference and `dimension` refused
- * by name. The drill-down's `report` stays in the enumeration pin's ledger,
- * held until the spec declares a drill report.
+ * by name. The drill-down's `report` was held in the enumeration pin's ledger
+ * until the maintainer ruled it (decision card #21704, fork 1, letter B): it is
+ * `ReportSchema`, by reference, since the S-final stage, pinned in
+ * `component-report-items-action-members-typed.pin.test.ts`.
  *
  * ## The defect this file closes
  *
@@ -44,7 +46,8 @@
  *
  * The enumeration pin (`component-props-unknown-members.pin.test.ts`) holds the
  * other half: these four left its ledger, so a member reverted to
- * `z.unknown()` reds there, and the held `drillDown.report` is listed there.
+ * `z.unknown()` reds there — and so does `drillDown.report`, which left it in
+ * the S-final stage.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -53,6 +56,7 @@ import type { z } from 'zod';
 import { ComponentPropsMap, ObjectMetricPropsSchema } from './component.zod';
 import { ChartAggregateSchema, ChartAggregateFunctionSchema, ChartDrillDownSchema, ChartGroupBySchema } from './chart.zod';
 import { DashboardWidgetSchema } from './dashboard.zod';
+import { ReportSchema } from './report.zod';
 import { AggregationFunction } from '../data/query.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
@@ -105,12 +109,6 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
       drillDown: { enabled: true, title: 'Won deals', target: 'dialog', columns: ['name', 'amount'], maxRows: 5 },
     }],
     ['a drill-down that navigates', { drillDown: { enabled: true, target: 'navigate' } }],
-    ['a drill into a dataset-bound report (held open)', {
-      drillDown: {
-        enabled: true,
-        report: { name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'deals_ds', rows: ['stage'], values: ['amount_sum'] },
-      },
-    }],
     // objectui's comparison pins (`ObjectMetricWidget.compareTo.test.tsx`, `objectMetricTrendMembers-8071.test.tsx`).
     ['a comparison with the year before', { compareTo: { kind: 'previousYear' } }],
     ['a comparison with the period before', { compareTo: { kind: 'previousPeriod' } }],
@@ -123,6 +121,17 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
       expect(r.success && r.data).toStrictEqual({ ...BASE, ...props });
     });
   }
+
+  // objectui's drawn report drill (`objectMetricDrillDownMembers-8071.test.tsx`).
+  // Not byte-identical since the S-final stage: `report` is `ReportSchema`, by
+  // reference, whose `drilldown` default materializes on parse — so the drill
+  // parses to exactly the authored block with the report ReportSchema answers.
+  it('parses a drill into a dataset-bound report, its report exactly what ReportSchema answers', () => {
+    const report = { name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'deals_ds', rows: ['stage'], values: ['amount_sum'] };
+    const r = parse({ drillDown: { enabled: true, report } });
+    expect(issues(r)).toEqual([]);
+    expect(r.success && r.data).toStrictEqual({ ...BASE, drillDown: { enabled: true, report: ReportSchema.parse(report) } });
+  });
 
   it('an absent member stays absent', () => {
     const r = parse({});
