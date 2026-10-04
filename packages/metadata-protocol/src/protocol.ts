@@ -161,6 +161,7 @@ import {
     evaluateLockForWrite,
     evaluateLockForDelete,
     resolveLockState,
+    MetadataLockSchema,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
@@ -777,6 +778,70 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
 function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     return getMetadataTypeSchema(singular) ?? null;
+}
+
+/**
+ * [#21658] The save door's refusal of a `hook` whose `handler` names a
+ * function and that carries no `body`: such a hook can never run once this
+ * door has stored it.
+ *
+ * Why it can never bind. A hook's `handler` name resolves inside the hook's
+ * own package only (the maintainer's ruling on #21604, letter B; the binder's
+ * `resolveHandler` in `@objectstack/objectql`'s `hook-binder.ts`). A hook this
+ * door stores ships with no code package: the runtime binds every stored hook
+ * under the synthetic owner `metadata-service` (`ObjectQLPlugin`'s authored
+ * hook re-sync), with no `functions` map, and no package of that name
+ * registers functions. So the name has nothing to resolve against, and the
+ * binder refuses the hook at registration (`INVALID_REFERENCE` / 400, logged
+ * at `error`) after this door has already answered success. Refusing it here
+ * says so to the author, before anything is stored.
+ *
+ * The predicate is the binder's own body-first test: a `body` object is bound
+ * through the body runner and the `handler` is never consulted, so a hook
+ * carrying BOTH a `body` and a `handler` saves (its body runs), as it installs
+ * on the install-local door. Asked after the type schema has accepted the
+ * body, so `body` here is either absent or a declared hook body, and a
+ * malformed `body` gets the schema's own located `422` instead of this
+ * refusal's "give it a body".
+ *
+ * ⛔ Not a `HookSchema` rule: a build artifact legitimately carries the string
+ * form (`objectstack build` lowers an inline function to the hook's name and
+ * ships the function in the artifact's runtime module), and the artifact and
+ * boot doors never reach `saveMetaItem`. This is the runtime-authoring door's
+ * rule only, the same shape install-local refuses on its own door (#21585).
+ *
+ * Every writer through this door is judged: the REST and dispatcher saves, in
+ * draft and in publish mode, and the two server-stated re-savers
+ * (`migrateStoredMetadata`, `duplicatePackage`), which record this refusal as
+ * the row's failure. A row stored before this rule keeps its bytes.
+ *
+ * `VALIDATION_ERROR` / 400, the envelope of the name check the door runs on
+ * every body (`savedItemNameRefusal`). The message names the hook and its
+ * `handler`, prescribes the `body` first, and only then explains: a 4xx
+ * message crosses the REST boundary bounded at 500 characters with its TAIL
+ * truncated, and the whole sentence stays under that bound for any hook and
+ * function name shorter than about 65 characters each. Runtime words carry no
+ * tracker number.
+ */
+function runtimeHookWithoutBodyRefusal(
+    singularType: string,
+    item: unknown,
+    saveName: string,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined {
+    if (singularType !== 'hook') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const hook = item as { handler?: unknown; body?: unknown };
+    if (hook.body && typeof hook.body === 'object') return undefined;
+    if (typeof hook.handler !== 'string' || hook.handler === '') return undefined;
+    const err = new Error(
+        `Invalid hook: '${saveName}' names the function '${hook.handler}' in its \`handler\` and carries no \`body\`, `
+        + 'so it can never run. Give it a `body` (sandboxed JS, `{ language: \'js\', source }`, or an expression), '
+        + 'which is stored with the hook. A hook saved through the metadata API ships with no code package, so it '
+        + "holds no functions, and a `handler` name resolves only inside the hook's own package.",
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    return err;
 }
 
 /**
@@ -9734,9 +9799,10 @@ export class ObjectStackProtocolImplementation implements
             } catch { /* reference diagnostics are best-effort */ }
         }
         // ADR-0010 — surface lock/provenance flags so Studio can render
-        // the correct affordances without a second round trip.
+        // the correct affordances without a second round trip. [#21670] They
+        // report the write doors' verdicts — see {@link servedLockState}.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        const lockState = resolveLockState(decorated, artifactBacked);
+        const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked);
         return {
             type: request.type,
             name: request.name,
@@ -10188,7 +10254,9 @@ export class ObjectStackProtocolImplementation implements
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
         // Lock resolution: artifact wins over overlay, matching getEffectiveLock.
         const lockSource: any = code ?? overlay ?? {};
-        const lockState = resolveLockState(lockSource, artifactBacked);
+        // [#21670] …joined with the locked-packaged-base verdict the write
+        // doors answer — the same derivation `getMetaItem` publishes.
+        const lockState = this.servedLockState(request.type, request.name, lockSource, artifactBacked);
 
         // [#8154] The per-type credential redaction, on the ONE read exit
         // `decorateMetadataItem` does not reach — this method never calls it
@@ -15521,6 +15589,70 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21670, ADR-0010 §5, ADR-0126 §2] The protection envelope a metadata READ
+     * publishes beside the document — `lock`, `editable`, `deletable` and the
+     * rest — for `(type, name)`, whose served document is `document`. The ONE
+     * derivation both reads call: {@link getMetaItem} and
+     * {@link getMetaItemLayered}.
+     *
+     * The flags are a promise about the write doors: `editable` says whether a
+     * write of this item is refused on lock grounds, `deletable` whether its
+     * removal is. Two limbs refuse such a write, so both are asked here, and
+     * neither is re-derived:
+     *
+     *  - the item's own ADR-0010 `_lock` — `resolveLockState`, unchanged;
+     *  - the locked packaged base: an item a code package ships, on a type with
+     *    no overlay channel — {@link packagedBaseRefusal}, the verdict the
+     *    `/meta` doors and the `/automation` doors already share (`NOT_OVERRIDABLE`,
+     *    or `ITEM_LOCKED` when the write names the read-only package). It
+     *    carries the registry's flags, the #6960 removal carve-out and the
+     *    `OS_METADATA_WRITABLE` hatch, and answers alike on every topology.
+     *
+     * Asked from the first limb alone, a packaged flow or action read
+     * `lock: 'none'`, `editable: true`, `deletable: true` while every door
+     * refused it in place: a client or an agent that reads `editable` was told
+     * the opposite of what the server enforces.
+     *
+     * `lock` is then the state whose ADR-0010 verdicts are exactly the two
+     * booleans — read off the lock algebra itself (`evaluateLockForWrite` /
+     * `evaluateLockForDelete`), never a second table — so the envelope keeps
+     * the shape the spec declares for it: `editable` false iff `lock` is
+     * `no-overlay` or `full`, `deletable` false iff `no-delete` or `full`. An
+     * item's own `_lock` and the package verdict JOIN; neither replaces the
+     * other. `lockReason` / `lockSource` / `lockDocsUrl` stay what the document
+     * declares: the package limb adds no prose of its own, and `provenance` /
+     * `packageId` already name the package.
+     *
+     * ⛔ Not a policy. Which writes are refused is decided at the doors; this
+     * method only reports their answer, so a door that moves moves this read
+     * with it.
+     */
+    private servedLockState(
+        type: string,
+        name: string,
+        document: unknown,
+        artifactBacked: boolean,
+    ): ReturnType<typeof resolveLockState> {
+        const declared = resolveLockState(document, artifactBacked);
+        const editable = declared.editable
+            && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
+        const deletable = declared.deletable
+            && this.packagedBaseRefusal({ type, name, operation: 'delete' }) === null;
+        const lock = MetadataLockSchema.options.find((state) =>
+            (evaluateLockForWrite(state) === null) === editable
+            && (evaluateLockForDelete(state) === null) === deletable);
+        if (lock === undefined) {
+            // Unreachable while the lock algebra covers all four verdict pairs;
+            // a state added to it without a write/delete answer must fail here,
+            // loudly, not publish a guessed lock.
+            throw new Error(
+                `No ADR-0010 lock state answers editable=${editable}, deletable=${deletable}.`,
+            );
+        }
+        return { ...declared, lock, editable, deletable };
+    }
+
+    /**
      * [#20913, #20761 ruling rule 1, ADR-0126 §2 / §3] Is `name` a FLOW name
      * the loader's set holds ({@link packagedArtifactOwner})? Every other type,
      * and a flow name no managed package ships, answers `false`.
@@ -18813,6 +18945,17 @@ export class ObjectStackProtocolImplementation implements
                 // fix. See {@link withDeclaredPageTypeDefault}.
                 request.item = withDeclaredPageTypeDefault(request.type, request.item);
             }
+        }
+
+        // [#21658] A hook whose `handler` names a function and that carries
+        // no `body` can never run once stored here: a stored hook ships with
+        // no code package, and a `handler` name resolves only inside the
+        // hook's own package. Refused in draft and in publish mode, after the
+        // schema (so `body` is absent or a declared body) and before the
+        // authoring gate and every write. See {@link runtimeHookWithoutBodyRefusal}.
+        {
+            const hookRefusal = runtimeHookWithoutBodyRefusal(singularType, request.item, request.name);
+            if (hookRefusal) throw hookRefusal;
         }
 
         // The #4463 runtime authoring gate — the shared author-time rule

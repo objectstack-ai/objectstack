@@ -492,3 +492,81 @@ describe('[#21565] a hook body bound to a stored-metadata table is refused at th
         expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. #21658 — the `hook` door refuses a `handler` name with no `body`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The same door as section 6, and the contrast to it: this refusal is NOT the
+// type schema's. `HookSchema` keeps accepting the string `handler`, because a
+// build artifact legitimately carries that form, and the artifact door never
+// reaches `saveMetaItem`. What this door stores ships with no code package,
+// and a `handler` name resolves only inside the hook's own package, so a hook
+// naming a function and carrying no `body` can never bind once stored. The
+// door refuses it with `VALIDATION_ERROR` / 400 — the envelope of the name
+// check every body passes — before anything is stored, in publish and in draft
+// mode. Rides this file's pinned engine double, as section 6 does.
+
+describe('[#21658] a hook naming a function in `handler` with no `body` is refused at the metadata door', () => {
+    const handlerOnly = () => ({
+        name: 'stamp_status',
+        object: 'hks_note',
+        events: ['beforeInsert'],
+        handler: 'x_stamp',
+    });
+    const body = { language: 'js', source: "ctx.input.status = 'seen';" };
+
+    it.each([
+        ['publish', undefined],
+        ['draft', 'draft'],
+    ] as const)('%s mode — VALIDATION_ERROR / 400, naming the hook and its handler, nothing stored', async (_label, mode) => {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await protocol.saveMetaItem({
+                type: 'hook',
+                name: 'stamp_status',
+                item: handlerOnly(),
+                writeFace: 'meta-envelope',
+                actor: 'usr_admin',
+                ...(mode ? { mode } : {}),
+            });
+        } catch (e) {
+            err = e;
+        }
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(err.message).toContain("'stamp_status'");
+        expect(err.message).toContain("'x_stamp'");
+        expect(err.message).toContain('Give it a `body`');
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same hook with a `body` saves', async () => {
+        const { protocol, rows } = makeProtocol();
+        const { handler: _dropped, ...withoutHandler } = handlerOnly();
+        const result = await saveHookAsAdministrator(protocol, { ...withoutHandler, body });
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
+    });
+
+    it('a `body` beside the `handler` saves: the binder runs the body and never consults the name', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveHookAsAdministrator(protocol, { ...handlerOnly(), body });
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['hook', 'stamp_status']]);
+    });
+
+    it('a malformed `body` beside the `handler` gets the schema\'s located 422, not "give it a body"', async () => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveHookAsAdministrator(protocol, { ...handlerOnly(), body: 'return;' });
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues as Array<{ path?: string }>).map((i) => i.path)).toContain('body');
+        expect(rows.size).toBe(0);
+    });
+});

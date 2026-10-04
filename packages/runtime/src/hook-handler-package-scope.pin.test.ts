@@ -10,20 +10,27 @@
  *     measured through the public door before the change: Y's insert came back
  *     stamped by X's function.
  *   ② the metadata door — a hook authored at runtime through
- *     `PUT /api/v1/meta/hook/:name` that names `x_stamp` is refused the same way
- *     when the door binds it. A runtime-authored hook ships with no code package
- *     and holds no functions.
+ *     `PUT /api/v1/meta/hook/:name` that names `x_stamp` and carries no `body`
+ *     is refused AT THE DOOR (#21658): `VALIDATION_ERROR` / 400, naming the
+ *     hook and prescribing a `body`, with nothing stored and nothing bound. A
+ *     runtime-authored hook ships with no code package and holds no functions,
+ *     so the name could only ever be refused again at bind (the binder's
+ *     `metadata-service` refusal, pinned in objectql's
+ *     `hook-binder-package-scope.test.ts`).
  *
  * Controls, the two shapes a package's own function takes: app X's hook naming
  * X's own `functions` entry binds and runs, and app Z's hook naming a function
  * its `--artifact` runtime module exports (loaded through `loadArtifactBundle`,
- * the artifact door's loader) binds and runs. A body hook authored through the
- * metadata door binds and runs, which is also the witness that the door's
- * re-sync has happened.
+ * the artifact door's loader) binds and runs — a built artifact's `handler`
+ * hook through its own door, which the save-door refusal leaves unchanged. A
+ * body hook authored through the metadata door saves, binds and runs, which is
+ * also the witness that the door's re-sync has happened; so does one carrying
+ * both a `body` and a `handler`, whose body is what runs.
  *
  * Every observation is a neutral marker appended to a free-text `status`
- * column. The refusal's code and status are read off the engine's own logger,
- * where the binder records each coded registration refusal at `error`.
+ * column. The binder's code and status are read off the engine's own logger,
+ * where it records each coded registration refusal at `error`; the door's are
+ * read off the HTTP answer.
  *
  * Composition: the in-process kernel `@objectstack/verify`'s `bootStack`
  * mirrors (engine, sqlite-wasm default datasource, HTTP server, the apps,
@@ -112,8 +119,6 @@ let app: any;
 let adminToken: string;
 let artifactDir: string;
 let prevNodeEnv: string | undefined;
-/** The metadata door's answer to saving the handler-named hook (printed, not asserted). */
-let recordedCrossHookSaveStatus: number | undefined;
 
 const req = (path: string, init?: RequestInit) => app.request(`${ORIGIN}${API}${path}`, init);
 const asAdmin = (method: string, path: string, body?: unknown) =>
@@ -187,7 +192,6 @@ beforeAll(async () => {
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
-  console.info(`[hook handler package scope pin] metadata door save of a handler-named hook answered: ${recordedCrossHookSaveStatus}`);
   try { await httpServer?.close?.(); } catch { /* best-effort */ }
   try { await kernel?.shutdown?.(); } catch { /* best-effort */ }
   try { rmSync(artifactDir, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -211,6 +215,8 @@ describe('a hook handler name resolves inside its own package only — composed 
     });
   });
 
+  // A built artifact's `handler` hook through its own door: unchanged by the
+  // metadata door's refusal in ② (#21658), which no artifact or boot door reaches.
   it('control: app X\'s hook naming X\'s own `functions` entry binds and runs', async () => {
     expect(await insertAndReadStatus(X_NOTE, 'x-own-probe')).toContain('x-fn');
     expect(refusalsOf('scope_x_own')).toEqual([]);
@@ -221,14 +227,28 @@ describe('a hook handler name resolves inside its own package only — composed 
     expect(refusalsOf('scope_z_own')).toEqual([]);
   });
 
-  it('② the metadata door: a runtime-authored hook naming app X\'s function is refused when the door binds it', async () => {
+  it('② the metadata door refuses a runtime-authored hook that names a function and carries no `body`: VALIDATION_ERROR / 400, nothing stored', async () => {
     const crossHook = await asAdmin('PUT', '/meta/hook/scope_authored_cross', {
       name: 'scope_authored_cross',
       object: Y_NOTE,
       events: ['beforeInsert'],
       handler: 'x_stamp',
     });
-    recordedCrossHookSaveStatus = crossHook.status;
+    // The `/meta` save door's error body: `{ error: <message>, code }`.
+    const refusal: any = await crossHook.json();
+    expect({ status: crossHook.status, code: refusal?.code }, JSON.stringify(refusal))
+      .toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+    // The named subject and the prescription: the hook, the function its
+    // `handler` names, and the `body` that would run.
+    expect(refusal.error).toContain("'scope_authored_cross'");
+    expect(refusal.error).toContain("'x_stamp'");
+    expect(refusal.error).toContain('Give it a `body`');
+    // Nothing stored: the by-name read finds no row.
+    const stored = await asAdmin('GET', '/meta/hook/scope_authored_cross');
+    expect(stored.status, await stored.text()).toBe(404);
+  });
+
+  it('②b a body hook authored through the metadata door saves, binds and runs; so does one carrying both a `body` and a `handler`', async () => {
     const bodyHook = await asAdmin('PUT', '/meta/hook/scope_authored_body', {
       name: 'scope_authored_body',
       object: Y_NOTE,
@@ -236,25 +256,32 @@ describe('a hook handler name resolves inside its own package only — composed 
       body: js("ctx.input.status = (typeof ctx.input.status === 'string' ? ctx.input.status : '') + '|authored-body';"),
     });
     expect(bodyHook.status, await bodyHook.text()).toBeLessThan(300);
+    // A `body` beside a `handler` saves: the binder runs the body and never consults the name.
+    const bothHook = await asAdmin('PUT', '/meta/hook/scope_authored_both', {
+      name: 'scope_authored_both',
+      object: Y_NOTE,
+      events: ['beforeInsert'],
+      handler: 'x_stamp',
+      body: js("ctx.input.status = (typeof ctx.input.status === 'string' ? ctx.input.status : '') + '|authored-both';"),
+    });
+    expect(bothHook.status, await bothHook.text()).toBeLessThan(300);
 
-    // The door's re-sync has bound the authored body hook once it fires…
+    // The door's re-sync has bound both authored body hooks once they fire…
     let lastStatus = '';
     let probe = 0;
     const bound = await waitFor(async () => {
       lastStatus = await insertAndReadStatus(Y_NOTE, `authored-probe-${probe++}`);
-      return lastStatus.includes('authored-body');
+      return lastStatus.includes('authored-body') && lastStatus.includes('authored-both');
     });
-    expect(bound, 'the runtime-authored body hook never bound').toBe(true);
-
-    // …and by then the handler-named one, had it bound, would have run on the same insert.
+    expect(bound, `the runtime-authored body hooks never both bound (last status: ${lastStatus})`).toBe(true);
+    // …and nothing named `x_stamp` ran on the same insert.
     expect(lastStatus, "a runtime-authored hook ran app X's function").not.toContain('x-fn');
-    const refusals = refusalsOf('scope_authored_cross');
-    expect(refusals.length, 'no coded refusal was recorded for the runtime-authored hook').toBeGreaterThan(0);
-    expect(refusals[0][2]).toMatchObject({
-      code: 'INVALID_REFERENCE',
-      status: 400,
-      handler: 'x_stamp',
-      packageId: 'metadata-service',
-    });
+    expect(refusalsOf('scope_authored_both')).toEqual([]);
   }, 30_000);
+
+  it('② nothing bound: once the re-sync has run (②b), the refused hook never reached the binder', async () => {
+    // There was no row for the re-sync to bind, so the binder recorded no
+    // refusal of it either: the door refused it before anything was stored.
+    expect(refusalsOf('scope_authored_cross')).toEqual([]);
+  });
 });

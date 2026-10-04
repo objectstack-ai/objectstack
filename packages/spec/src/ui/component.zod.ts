@@ -3521,6 +3521,22 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * `actionNames`, and a string member would render as an unlabeled button that
  * runs nothing.
  */
+/**
+ * [#21464] The members of `action:group` / `action:menu`: HELD as open
+ * records, in the enumeration pin's ledger as a fork the S-objectui-held stage
+ * reported. Each member is objectui's `UIActionSchema`
+ * (`types/src/ui-action.ts:571` at the `.objectui-sha` pin `ab1879721595`),
+ * drawn and run by the container itself (`action-group.tsx:91-249`,
+ * `:303-382`; `action-menu.tsx:80-147`, `:264-328`, `:408`). Measured from
+ * those reads, the key set this section's method gives is mostly
+ * `action:button`'s, keyed by `type` rather than `actionType` (a member is not
+ * a node) — but it also takes keys whose declaration the rows
+ * above leave undecided: `outcomeMessages` (forwarded, and recorded on
+ * `action:button` / `action:icon` as "a contract decision, not a pin
+ * re-measure"), a member `className` (a node key on the rows), the member's own
+ * `properties.params` bag of static values (`static-params.ts:142-160`) and
+ * `endpoint` (refused on the rows since #21005).
+ */
 const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
 
 /**
@@ -4709,8 +4725,9 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
   maxRows: ChartDrillDownSchema.shape.maxRows,
   /**
    * [#21464] HELD at `z.unknown()`, not typed: the spec declares no drill
-   * report yet, and the spec declares each such contract first (the
-   * `objectui-held` stage of the enumeration pin).
+   * report yet, and the spec declares each such contract first. It waited for
+   * the `objectui-held` stage, which reported it as a fork (the last paragraph
+   * below); the enumeration pin's ledger records it under `fork`.
    *
    * Read at the `.objectui-sha` pin `ab1879721595`: the tile hands `report`
    * to the shared drawer (`ObjectMetricWidget.tsx:742`), and
@@ -4727,6 +4744,16 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
    * the conclusion stage 4 recorded stands: the tile draws a value the
    * by-reference drill shape refuses, and the member waits for the spec to
    * declare it.
+   *
+   * The S-objectui-held stage measured the by-reference candidate
+   * (`ReportSchema`, `report.zod.ts`) against that predicate and kept the hold, reporting
+   * a fork: every drawn report the census found parses, but the two do not
+   * agree. `ReportSchema` admits a `joined` report none of whose blocks binds a
+   * `dataset` (a block's `dataset` is optional there), which
+   * `isDatasetBoundReport` does not draw — the drawer lists the records
+   * instead, the silent fallback this card closes — and it refuses a
+   * dataset-bound report with no `name`, `label` or `values`, which the drawer
+   * does draw.
    */
   report: z.unknown().optional()
     .describe('Drill into a report instead of the record list — not typed on this row yet: the tile draws a dataset-bound report here, but no spec drill shape declares a `report` member yet (the chart\'s drill-down refuses it)'),
@@ -5780,6 +5807,46 @@ const ObjectFormMobileSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * The refusal an object entry in a form's top-level `fields` meets: the two
+ * object shapes authors bring, each answered with what to write instead.
+ */
+function formFieldNameRefusal(input: unknown): string | undefined {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const entry = input as { name?: unknown; field?: unknown };
+  if (typeof entry.field === 'string') {
+    return `\`{ field: '${entry.field}' }\` is the \`sections[].fields\` vocabulary (the form view's field entry), `
+      + `not this list's: the top-level \`fields\` takes bare field names, and the form skips an object entry `
+      + `here. Write \`'${entry.field}'\`, or move the entry into a section's \`fields\`.`;
+  }
+  if (typeof entry.name === 'string') {
+    return `The top-level \`fields\` takes bare field names: write \`'${entry.name}'\`, not an object. The form `
+      + 'draws only the name of an object entry — a `label`, `type` or `required` written beside it is dropped. '
+      + 'A field\'s label, type and required come from the object field; a per-form override goes on a '
+      + '`sections[].fields` entry.';
+  }
+  return undefined;
+}
+
+/**
+ * [#21464] A form's top-level `fields` — `object-form`'s, and the
+ * master-detail form's, which `MasterDetailForm.tsx:1693` hands to the parent
+ * form verbatim — as the form reads it at the `.objectui-sha` pin
+ * `ab1879721595` (unchanged at objectui `main` `94985a92ba`): the field NAMES
+ * to draw, in order, which select from the object's fields and from
+ * `customFields` (`plugin-form/src/ObjectForm.tsx:961-981`,
+ * `flatFields.ts:68-79`). objectui declares the member `string[]`
+ * (`ObjectFormSchema.fields`), and objectstack-ai/objectui#11550's ruling
+ * retired the `{ name }` entry from every authoring face; the form still draws
+ * a STORED `{ name }` entry by its name (`:972`, `flatFields.ts:72`) as
+ * tolerance for metadata already written, and skips any other object entry with
+ * a console warning (`:978`, `warnUnresolvedTopLevelField`). So this is a list
+ * of strings, and each object entry is refused with what to write instead.
+ */
+const formFieldNameList = () => z.array(z.string({
+  error: (issue) => formFieldNameRefusal(issue.input),
+}));
+
+/**
  * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
  * the sub-forms it forwards the whole bag into: `TabbedForm`, `WizardForm`,
  * `SplitForm`, `DrawerForm`, `ModalForm` — the declared set is the UNION of
@@ -5815,34 +5882,41 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
     .describe("Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns`"),
   columns: z.number().optional().describe('Number of field columns (multi-column forms), honoured under either `layout`'),
   /**
-   * [#21464] HELD at `z.unknown()` entries, in the enumeration pin's ledger as
-   * held for a ruling. The renderer's own declared type is field-name strings
-   * (objectui `ObjectFormSchema.fields: string[]`), but its read also draws a
-   * `{ name }` entry by that name (`plugin-form/src/ObjectForm.tsx:961-981`,
-   * `flatFields.ts:71-79` at the pin `89cad75d55`), and measured writers author
-   * one — objectui's published page-builder guide among them — so typing the
-   * member to strings would refuse a value the form draws.
+   * [#21464] Field names, typed in the S-objectui-held stage — see
+   * {@link formFieldNameList}. Held until then because the form drew a
+   * `{ name }` entry its own guide taught; objectstack-ai/objectui#11550 retired
+   * that entry from the authoring faces, and the census at the `.objectui-sha`
+   * pin `ab1879721595` found it written only by fixtures probing the stored
+   * read and the refusal.
    */
-  fields: z.array(z.unknown()).optional().describe('Limit/order the fields shown'),
+  fields: formFieldNameList().optional()
+    .describe('Field names to draw, in order — bare names selecting from the object\'s fields and from `customFields`. A `{ name }` or `{ field }` object entry is refused: a per-form label or required override goes on a `sections[].fields` entry'),
   /**
-   * [#21464] Kept `z.unknown()`, in the enumeration pin's ledger with the
-   * objectui-held contracts: each member is objectui's runtime form field
-   * (`FormField`, identity key `name`), drawn whole by the form renderer
-   * (`plugin-form/src/customFieldsMerge.ts:78-108` at the pin `89cad75d55`).
-   * The spec declares no such field — its own form field (`FormFieldSchema`,
-   * `view.zod.ts`) is keyed by `field` and is never matched by the merge — so
-   * the spec declares that contract first, then this member takes it.
+   * [#21464] Kept `z.unknown()`, in the enumeration pin's ledger as a fork the
+   * S-objectui-held stage reported: each member is objectui's runtime form
+   * field (`FormField`, identity key `name`, `types/src/form.ts:1770` at the
+   * `.objectui-sha` pin `ab1879721595`), drawn whole by the form renderer
+   * (`plugin-form/src/customFieldsMerge.ts:78-108`), and the spec declares no
+   * such field — its own form field (`FormFieldSchema`, `view.zod.ts`) is keyed
+   * by `field` and is never matched by the merge. Writing that declaration
+   * here needs decisions no ruling has made: objectui's field is OPEN (an index
+   * signature beside forty-five members, `:1906`), and eight of them are the
+   * grid widget's snake_case keys (`min_rows`, `allow_add`, …), which this
+   * package's camelCase rule for config keys does not admit as written.
    */
   customFields: z.unknown().optional().describe('Custom field definitions merged into the generated set'),
   /**
-   * [#21464] HELD at `z.unknown()` entries, in the enumeration pin's ledger as
-   * held for a ruling. The form view's own `sections` (`FormSectionSchema`) is
-   * the by-reference shape, and every section key the renderer reads is
-   * declared there, but a section's `fields` also draws an inline runtime form
-   * field `{ name, type, … }` as it stands (`plugin-form/src/sectionFields.ts:367-369`
-   * at the pin `89cad75d55`, its "shape 3"), which the form view's field entry
-   * (keyed by `field`) refuses; objectui's README and its own pins author that
-   * shape and assert that it renders and submits.
+   * [#21464] HELD at `z.unknown()` entries, in the enumeration pin's ledger
+   * with `customFields`'s fork. The form view's own `sections`
+   * (`FormSectionSchema`) is the by-reference shape, and every section key the
+   * renderer reads is declared there, but a section's `fields` also draws an
+   * inline runtime form field `{ name, type, … }` as it stands
+   * (`plugin-form/src/sectionFields.ts:369-370` at the `.objectui-sha` pin
+   * `ab1879721595`, its "shape 3"), which the form view's field entry (keyed by
+   * `field`) refuses. objectstack-ai/objectui#11550's ruling KEPT that entry —
+   * objectui declares it (`ObjectFormSection.fields: (string | FormField)[]`)
+   * and its README's data-source-free wizard relies on it — so this member
+   * takes a shape only once the spec declares the runtime form field.
    */
   sections: z.array(z.unknown()).optional()
     .describe('Form sections ({ label, description?, fields } — wizard steps / tab panes)'),
@@ -6105,13 +6179,16 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half"),
   /**
    * [#21464] `sections` and `fields` are handed to the parent `object-form`
-   * verbatim (`plugin-form/src/MasterDetailForm.tsx:1692-1693` at the pin
-   * `89cad75d55`), so each is read exactly as that block's member is — and is
-   * HELD with it, in the enumeration pin's ledger, for the same reason (see
-   * {@link ObjectFormPropsSchema}'s `sections` and `fields`).
+   * verbatim (`plugin-form/src/MasterDetailForm.tsx:1692-1693` at the
+   * `.objectui-sha` pin `ab1879721595`), so each is read exactly as that
+   * block's member is. `fields` takes the same field-name list
+   * ({@link formFieldNameList}); `sections` is HELD with that block's, in the
+   * enumeration pin's ledger, for the same reason (see
+   * {@link ObjectFormPropsSchema}'s `sections`).
    */
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
-  fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
+  fields: formFieldNameList().optional()
+    .describe('Parent field names to draw, in order — bare names, as on `object-form`; a `{ name }` or `{ field }` object entry is refused'),
   details: z.array(masterDetailDetailEntry()).optional()
     .describe('Detail collections — each a strict entry ({ childObject, title?, addLabel?, columns?, relationshipField?, … }) whose `columns` are the inline grid columns a relationship field\'s `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted'),
   title: I18nLabelSchema.optional().describe('Form title'),
@@ -6511,6 +6588,53 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 ];
 
 /**
+ * [#21464] One `object-gantt` reference line — the element of the block's
+ * `markers`, as the chart reads it at the `.objectui-sha` pin `ab1879721595`
+ * (unchanged at objectui `main` `94985a92ba`). `ObjectGantt.tsx:2505` hands
+ * `schema.markers` to `GanttView` verbatim, which reads three members per
+ * marker: `date` places the line (`GanttView.tsx:913-924` re-bases it for the
+ * chart's time zone, `:2394-2413` maps it through the axis and DROPS a marker
+ * whose date does not parse or falls outside the drawn range), `label` is the
+ * text drawn against it, and `color` its CSS colour, the theme's primary colour
+ * when absent (`:2407`, drawn at `:4083-4100` and in the SVG export at
+ * `:3320-3332`). Nothing else is read off a marker.
+ *
+ * The contract is objectui's own authoring declaration, taken as it stands:
+ * `ObjectGanttSchema.markers` (`types/src/objectql.ts:3787-3794`) and its zod
+ * mirror (`types/src/zod/objectql.zod.ts:2738-2746`) declare
+ * `{ date: string; label?: string; color?: string }`, `date` a STRING because
+ * authored metadata is JSON and a `Date` cannot survive it (the runtime
+ * `GanttMarker` this feeds also takes a `Date`, which only a code-composed
+ * chart can hand it). Closed here, as every element shape on this map is: a
+ * misspelled member was dropped by the chart in silence.
+ *
+ * A factory the row calls, as {@link masterDetailDetailEntry} is, not a
+ * {@link lazySchema}: an array element is built with its row, so its alias
+ * table is registered wherever the row is (a bare lazy proxy as an array
+ * element is never forced by `alias-integrity.test.ts`'s walk, which reds on
+ * the unreached table).
+ */
+function objectGanttMarker() {
+  return strictObject({
+    surface: 'this `object-gantt` marker',
+    history:
+      'Until this shape was declared, `markers` was `z.array(z.unknown())`: a marker with no `date`, a '
+      + 'numeric `date` or a misspelled member passed, and the chart drew no line, or drew it with no label '
+      + 'and in the default colour.',
+    aliases: {
+      at: 'date', day: 'date', when: 'date',
+      title: 'label', text: 'label', name: 'label',
+      colour: 'color', stroke: 'color',
+    },
+  }, {
+    date: z.string()
+      .describe('Where the line stands — an ISO date (`2026-07-01`, read as that day on the chart\'s own calendar) or date-time string; a date that does not parse, or falls outside the drawn range, draws no line'),
+    label: z.string().optional().describe('Text drawn against the line'),
+    color: z.string().optional().describe('Line colour, any CSS colour (renderer default: the theme\'s primary colour)'),
+  });
+}
+
+/**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
  * — `.objectui-sha` = `ab1879721`, re-measured there 2026-10-03:
@@ -6641,8 +6765,10 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
  * `schema.showBaselines !== false`, `schema.persistLayout === false`,
- * `new Set(schema.holidays)`. `markers` stays `z.array(z.unknown())` — its
- * element contract is `GanttView`'s `GanttMarker`, still objectui's.
+ * `new Set(schema.holidays)`. `markers` takes {@link objectGanttMarker}'s shape
+ * since #21464's S-objectui-held stage: objectui's own authoring declaration of
+ * the element, `{ date, label?, color? }` (it was `z.array(z.unknown())` while
+ * the element contract lived only in `GanttView`'s runtime `GanttMarker`).
  */
 export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-gantt`',
@@ -6698,8 +6824,8 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
     .describe('Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName`'),
   viewName: z.string().optional()
     .describe("Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`)"),
-  markers: z.array(z.unknown()).optional()
-    .describe('Extra vertical reference lines drawn like the Today marker ({ date, label?, color? })'),
+  markers: z.array(objectGanttMarker()).optional()
+    .describe('Extra vertical reference lines drawn like the Today marker — each `{ date, label?, color? }`: `date` places the line (a date outside the drawn range draws none), `label` is drawn against it, `color` paints it'),
   criticalPath: z.boolean().optional()
     .describe('Seed the critical-path highlight ON; the toolbar toggle stays available either way'),
   showBaselines: z.boolean().optional()
@@ -7092,6 +7218,47 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 ];
 
 /**
+ * [#21464] The `object-timeline` block's `mapping` — the record-to-entry
+ * binding record, as the rail reads it at the `.objectui-sha` pin
+ * `ab1879721595` (unchanged at objectui `main` `94985a92ba`), in
+ * `ObjectTimeline.tsx`: `title` (`:551`) and `date` (`:576`) are each read
+ * BETWEEN the `timeline` block's member and the flat fallback, `description`
+ * (`:578`) ahead of the flat `descriptionField`, and `variant` (`:579`, default
+ * `'variant'`) is the field whose value picks each entry's marker colour — the
+ * one binding with no other spelling. Each is a FIELD NAME: the rail looks the
+ * record value up by it.
+ *
+ * The contract is objectui's own declaration, taken as it stands: the
+ * component's `mapping` prop (`:254-259`) and the `TimelineMappingSchema` it
+ * checks the node against (`:144-149`) both declare four optional strings. That
+ * check only warns, and its object is not strict, so a misspelled member
+ * (`titleField` inside `mapping`, say) bound nothing and drew the default; it is
+ * closed here, as every element shape on this map is.
+ */
+const ObjectTimelineMappingSchema = lazySchema(() => strictObject({
+  surface: 'this `object-timeline` `mapping`',
+  history:
+    'Until this shape was declared, `mapping` was `z.unknown()`: a non-string binding or a misspelled '
+    + 'member passed, and the rail bound nothing for it and drew the default field.',
+  // The flat block-level spellings an author carries into the binding record.
+  aliases: {
+    titleField: 'title',
+    dateField: 'date', startDateField: 'date',
+    descriptionField: 'description',
+    variantField: 'variant',
+  },
+}, {
+  title: z.string().optional()
+    .describe('Field whose value is each entry\'s title — read after `timeline.titleField`, ahead of the flat `titleField` (renderer default `name`)'),
+  date: z.string().optional()
+    .describe('Field whose value is each entry\'s date — read after `timeline.startDateField` / `timeline.dateField`, ahead of the flat spellings'),
+  description: z.string().optional()
+    .describe('Field whose value is each entry\'s description — read ahead of `descriptionField` (renderer default `description`)'),
+  variant: z.string().optional()
+    .describe('Field whose value picks each entry\'s marker colour (renderer default `variant`) — the only spelling this binding has'),
+}));
+
+/**
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
@@ -7228,11 +7395,15 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * VALUE posture: `timeline` takes {@link TimelineConfigSchema}, the block
  * `ListViewSchema.timeline` already declares — one vocabulary, taken by
  * reference, so this element face cannot fork from the view face.
- * `mapping` stays `z.unknown()`: its contract
- * (`TimelineMappingSchema`) still lives in objectui, which is the
- * `object-calendar.calendar` posture this section's header prescribes for
- * exactly that case. `navigation` takes {@link NavigationConfigSchema}, by
- * reference, for the reason the ruling gives.
+ * `mapping` takes {@link ObjectTimelineMappingSchema} since #21464's
+ * S-objectui-held stage: objectui's own declaration of the binding record (four
+ * optional field names), written here first and then taken; it was
+ * `z.unknown()` while that contract lived only in objectui
+ * (`TimelineMappingSchema`), the `object-calendar.calendar` posture this
+ * section's header prescribes for exactly that case. `items` stays
+ * `z.array(z.unknown())`: that stage found two viable spec shapes for the
+ * authored entry (see the member). `navigation` takes
+ * {@link NavigationConfigSchema}, by reference, for the reason the ruling gives.
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
  * (`plugin-timeline/src/index.tsx:446`, in the one `OBJECT_TIMELINE_INPUTS`
@@ -7346,6 +7517,21 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    */
   data: z.array(z.unknown()).optional()
     .describe("Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written"),
+  /**
+   * [#21464] HELD at `z.unknown()` elements, in the enumeration pin's ledger as
+   * a fork the S-objectui-held stage reported. Each element is objectui's
+   * declared authored timeline entry (`types/src/data-display.ts` at the
+   * `.objectui-sha` pin `ab1879721595`: `TimelineFeedItem`, `:2973`, or
+   * `TimelineGanttItem`, `:3042`, ruled on objectui#6356), handed to the rail
+   * verbatim (`ObjectTimeline.tsx:587`). Writing that contract here needs two
+   * decisions no ruling has made: a feed entry's `content` is child schema nodes
+   * (`SchemaNode | SchemaNode[]`), which this map either declares as a slot
+   * position the page walks judge or keeps as an opaque member; and the arm an
+   * entry must match is chosen by the PARENT's `variant`, which objectui judges
+   * in a node-level refinement and a spec row would either repeat or replace
+   * with a plain union of the two arms. (A gantt bar's dates also take a `Date`
+   * there, which authored JSON cannot carry.)
+   */
   items: z.array(z.unknown()).optional()
     .describe("Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each element is objectui's declared timeline element, `@object-ui/types`'s `TimelineFeedItem` (`variant` absent / `vertical` / `horizontal`) or `TimelineGanttItem` (`variant: 'gantt'`), the arm this node's `variant` selects"),
   variant: z.enum(['vertical', 'horizontal', 'gantt']).optional()
@@ -7360,8 +7546,8 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
     .describe('Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured'),
   descriptionField: z.string().optional()
     .describe("Field rendered as each entry's description (renderer default `description`). Declared FLAT because the `timeline` block has no member for it — it is the only spelling this binding has"),
-  mapping: z.unknown().optional()
-    .describe("Record-to-entry field mapping ({ title, date, description, variant }) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has"),
+  mapping: ObjectTimelineMappingSchema.optional()
+    .describe("Record-to-entry field mapping `{ title?, date?, description?, variant? }`, each a field name — the binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has"),
   /**
    * Entry-click navigation (commit e233db9db — the spec half of the objectui#8652
    * maintainer ruling, verbatim `B`), the same carrier and the same def as

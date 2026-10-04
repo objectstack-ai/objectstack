@@ -1172,6 +1172,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.read-lock-flags-write-door.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.read-seam-empty-accumulator.test.ts",
       "verb": "findOne",
       "pinned": 6

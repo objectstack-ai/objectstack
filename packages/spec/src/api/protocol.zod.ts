@@ -305,19 +305,20 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
 
 /**
  * ADR-0010 read-side protection envelope — the flags a metadata READ publishes
- * alongside the document, all derived from one `resolveLockState()` call.
+ * alongside the document, all derived in one place.
  *
  * These are the UN-prefixed, envelope-level counterparts of the `_lock` /
  * `_provenance` fields `MetadataProtectionFields` splices into the document
- * itself: the document stores `_lock`, and the read RESOLVES it into `lock`
- * plus the three `editable` / `deletable` / `resettable` verdicts Studio
- * renders affordances from (ADR-0010 §5), so no consumer re-implements the
- * lock algebra.
+ * itself: the document stores `_lock`, and the read RESOLVES it — joined with
+ * the write doors' locked-packaged-base verdict — into `lock` plus the three
+ * `editable` / `deletable` / `resettable` verdicts Studio renders affordances
+ * from (ADR-0010 §5), so no consumer re-implements the lock algebra.
  *
  * Shared by {@link GetMetaItemResponseSchema} and
  * {@link GetMetaItemLayeredResponseSchema} — both are produced by the SAME
- * `resolveLockState` call in `metadata-protocol`, so a mixin is what keeps the
- * two declarations from drifting apart key by key. Module-local on purpose: it
+ * derivation in `metadata-protocol` (`resolveLockState` joined with
+ * `packagedBaseRefusal`), so a mixin is what keeps the two declarations from
+ * drifting apart key by key. Module-local on purpose: it
  * is a shape these two responses share, not a new public vocabulary.
  *
  * Every key is optional HERE and tightened per-response where the producer
@@ -329,9 +330,12 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
 const MetadataProtectionEnvelopeFields = {
   lock: MetadataLockSchema.optional().describe(
     'Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; '
-    + '`no-overlay` / `no-delete` / `full` refuse the corresponding write with '
-    + '403 `ITEM_LOCKED`. Resolved from the document\'s `_lock`, with the packaged '
-    + 'artifact winning over any org overlay.',
+    + '`no-overlay` / `no-delete` / `full` mean the write doors refuse the '
+    + 'corresponding write with 403. Joins two refusals: the document\'s own '
+    + '`_lock` (`ITEM_LOCKED`; the packaged artifact wins over any org overlay), '
+    + 'and the locked packaged base — an item a code package ships, on a type with '
+    + 'no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the '
+    + 'write names the read-only package).',
   ),
   lockReason: z.string().optional().describe(
     'Human-readable explanation shown next to a refused write. Present only when '

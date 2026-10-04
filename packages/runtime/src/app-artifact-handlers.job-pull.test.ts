@@ -17,7 +17,11 @@
  *   - a pull that does not bind (a mapping the artifact does not declare, one
  *     with no `connectorSource`, code beside it) and a composition with no pull
  *     door are NOT scheduled, and the reason is said;
- *   - `collectJobsWithoutBody` never names a pull job — it is data.
+ *   - `collectJobsWithoutBody` — what the install-local door refuses by — names
+ *     an enabled pull job exactly when the binder's `judgeJobPull` does not
+ *     bind it, with that refusal as its `pullRefusal`, and never a pull job that
+ *     binds: every pull job it names is one the binder does not schedule, and
+ *     every enabled pull job it does not name the binder schedules.
  *
  * Q2-O1: a job declares the organization it runs as, judged at bind by the
  * scheduled flows' posture rule (`resolveScheduledWorkPolicy`). Pinned here:
@@ -231,13 +235,62 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
         expect(h.defaultAutomation.pullConnectorSource).not.toHaveBeenCalled();
     });
 
-    it('collectJobsWithoutBody never names a pull job — the pull is data, like a body (a handler job beside it is, control)', () => {
-        const named = collectJobsWithoutBody({
-            id: APP_ID,
-            jobs: [PULL_JOB, { ...PULL_JOB, name: 'unbound_pull', pull: { mapping: 'nope' } }, { name: 'fn_job', schedule: INTERVAL, handler: 'sweep' }],
-            mappings: [MAPPING],
+});
+
+describe('collectJobsWithoutBody judges a pull job by the binder\'s own judgeJobPull', () => {
+    withPosture(undefined);
+
+    const { connectorSource: _dropped, ...IMPORT_ONLY } = { ...MAPPING, name: 'orders_import' };
+    const BODY = { language: 'js', capabilities: ['api.write'], source: "await ctx.api.object('order').insert({});" };
+    const JOBS = [
+        PULL_JOB,
+        { ...PULL_JOB, name: 'undeclared_pull', pull: { mapping: 'orders_pul' } },
+        { ...PULL_JOB, name: 'sourceless_pull', pull: { mapping: 'orders_import' } },
+        { ...PULL_JOB, name: 'pull_beside_body', body: BODY },
+        { ...PULL_JOB, name: 'disabled_undeclared_pull', pull: { mapping: 'orders_pul' }, enabled: false },
+        { name: 'fn_job', schedule: INTERVAL, handler: 'sweep' },
+    ];
+    const bundle = { id: APP_ID, version: '0.1.0', type: 'app', jobs: JOBS, mappings: [MAPPING, IMPORT_ONLY] };
+
+    it('names each ENABLED pull job that does not bind, with its pullRefusal — never as a job with no body; a pull that binds is not named', () => {
+        const named = collectJobsWithoutBody(bundle);
+
+        expect(named.map((j) => j.name)).toEqual(['undeclared_pull', 'sourceless_pull', 'pull_beside_body', 'fn_job']);
+        const byName = new Map(named.map((j) => [j.name, j]));
+        expect(byName.get('undeclared_pull')).toEqual({
+            name: 'undeclared_pull',
+            pullRefusal: expect.stringMatching(/^pull\.mapping: this artifact declares no mapping 'orders_pul'/),
         });
-        expect(named.map((j) => j.name)).toEqual(['fn_job']);
+        expect(byName.get('sourceless_pull')).toEqual({
+            name: 'sourceless_pull',
+            pullRefusal: expect.stringMatching(/^pull\.mapping: mapping 'orders_import' declares no connectorSource/),
+        });
+        // Code beside the `pull` is the pull's refusal — judged before the body
+        // beside it, as the binder judges it — never a `bodyRefusal`.
+        expect(byName.get('pull_beside_body')).toEqual({
+            name: 'pull_beside_body',
+            pullRefusal: expect.stringMatching(/^pull: the job declares `body` or `handler` beside `pull`/),
+        });
+        // Control: a job with no run form at all is still named with neither refusal.
+        expect(byName.get('fn_job')).toEqual({ name: 'fn_job', handler: 'sweep' });
+    });
+
+    it('the door and the binder agree: every pull job named is NOT scheduled, with the same refusal said; every enabled pull job not named IS', async () => {
+        const h = harness();
+
+        const named = collectJobsWithoutBody(bundle).filter((j) => j.pullRefusal !== undefined);
+        const out = await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            bundle,
+            { appId: APP_ID, ql: undefined, source: 'Test' },
+        );
+
+        expect(out.pulls).toEqual(['orders_pull_hourly']);
+        expect(named.map((j) => j.name).sort()).toEqual([...out.notScheduled].filter((n) => n !== 'fn_job').sort());
+        // One judge: the refusal the door answers with is the sentence the binder logs when it withholds the job.
+        for (const job of named) {
+            expect(h.said('warn').some((m) => m.endsWith(job.pullRefusal!)), `no binder warn carries ${job.name}'s refusal`).toBe(true);
+        }
     });
 });
 

@@ -33,7 +33,8 @@
  * Sweep mode (default):
  *   0  swept COMPLETELY — every governed repo audited, every entry attributed.
  *      Zero entries and forty entries both exit 0; the list is the product.
- *   1  could not sweep at all — bad args, unreadable `--since-ref`.
+ *   1  could not sweep at all — bad args (a flag the sweep does not read
+ *      among them: "The argv is closed" below), unreadable `--since-ref`.
  *   2  swept, but INCOMPLETE — at least one repo unaudited (no checkout, wrong
  *      origin, unreadable `origin/main`, a remote that could not be REACHED,
  *      or a local mirror behind the remote it claims to audit — #13307)
@@ -63,8 +64,9 @@
  *      in the words and in `--json`: `governed` is the PATH limb, `humanMerge`
  *      is either limb. Half a `--additions`/`--deletions` pair is bad args
  *      (1, below): the size is their SUM, and half a pair is no reading.
- *   1  bad args — no paths given. ⛔ Silence never reads as "not governed":
- *      `--test` with an empty path list is a failure, never a green light.
+ *   1  bad args — no paths given, or a flag `--test` does not read. ⛔ Silence
+ *      never reads as "not governed": `--test` with an empty path list is a
+ *      failure, never a green light.
  *   The register rows in `GENERATED_SURFACE_EXCEPTIONS` carry a provenance-
  *   aware exception (the generated-artifact sections below): a hit on a
  *   generator-owned path answers 0 only when that file byte-equals its own
@@ -82,7 +84,9 @@
  *      `--deletions` handed to a mode that reads the number itself (two
  *      readings of one number). ⛔ A derivation that cannot be made is a REFUSAL, never a
  *      quieter answer: see the section below for why the fallback everyone
- *      reaches for is the defect itself.
+ *      reaches for is the defect itself. Also a USAGE refusal, before any API read:
+ *      a flag the mode does not read, or a bare `--pr <n>` beside a
+ *      `PM_SWEEP_REPO` naming another repository ("The argv is closed").
  *
  * `--self-test` mode answers on the sweep's 0 and 1, and adds the repo-wide third:
  *   0  every declared battery ran, and every case held.
@@ -100,6 +104,27 @@
  *      battery was the defect: a fresh worktree before `pnpm install` reported
  *      5 of that battery's 7 cases and prescribed a hunt through the generator
  *      for deleted code that was never deleted.
+ *
+ * ## The argv is closed (#21675)
+ *
+ * Each mode reads a closed set of flags (`ARGV_MODES`) and refuses every other
+ * on exit 1, before any git read, network read or child process. An ignored
+ * flag does not stop a run — it prints a verdict about a question nobody
+ * asked, under the same ✅ as a real answer. Measured at filing:
+ * `--pr 11590 --repo objectstack-ai/objectui` read objectstack's PR 11590 (7
+ * files) and answered NOT governed about an objectui PR of 18; so did
+ * `PM_SWEEP_REPO=objectstack-ai/objectui --pr 11590`, and `--pr 11590
+ * --bogus-flag x`. Only the qualified spelling read objectui.
+ *
+ * ⛔ One spelling names a PR's repository: `--pr <owner>/<repo>#<n>`. There is
+ * no `--repo` (refused like any unread flag, with that spelling prescribed),
+ * and `PM_SWEEP_REPO` is read only to REFUSE a bare `--pr <n>` when it names a
+ * repository other than the one a bare number answers — this checkout's own
+ * (`bareTargetRefusal`) — never to redirect the answer. A qualified `--pr` is
+ * answered exactly as before, whatever the environment says.
+ *
+ * `--self-test` is outside this: its exit 1 means a finding about this file,
+ * and it takes its own `--fixture-child` marker.
  *
  * ## The predicate is correct and its INPUT was undefined (#17003)
  *
@@ -905,8 +930,9 @@
  * re-arm; it opens no second client and wants no second token.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -962,11 +988,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 18,
   '⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones': 20,
   '⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery': 6,
+  '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 31;
+const SELF_TEST_BATTERY_FLOOR = 32;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3532,6 +3559,13 @@ async function runPullMode(args) {
     console.error(`❌  ${target.error}`);
     return EXIT_CANNOT_SWEEP;
   }
+  // #21675: a bare number beside a PM_SWEEP_REPO naming another repository is
+  // refused before the first read — the variable never redirects the answer.
+  const ambiguous = bareTargetRefusal({ raw, target, sweepRepo: process.env.PM_SWEEP_REPO });
+  if (ambiguous !== null) {
+    console.error(ambiguous);
+    return EXIT_CANNOT_SWEEP;
+  }
   const derived = await fetchPullFiles({
     ...apiContext(process.env),
     slug: target.slug,
@@ -3643,6 +3677,161 @@ function reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm }, e
 /** The three ways to ask the register one question. Exactly one per run. */
 const PREDICATE_MODES = ['--test', '--pr', '--branch'];
 
+// ── The argv is CLOSED, per mode (#21675) ───────────────────────────────────
+//
+// Every flag each mode reads, and how it takes its value: `value` consumes the
+// next argument, `list` is `--test`'s path list (every non-flag argument after
+// it), `switch` takes none. A flag the RUNNING mode does not read is a usage
+// refusal on exit 1 — the refusal `label-write.mjs`, `post-stamped.mjs` and
+// `issue-create.mjs` already make — because an ignored flag does not stop the
+// run: it prints a verdict about a question nobody asked, under the same ✅ as
+// a real answer. Measured at filing: `--pr 11590 --repo objectstack-ai/objectui`
+// read objectstack's PR 11590 (7 files) and answered NOT governed for an
+// objectui PR of 18.
+//
+// PER MODE, not one tool-wide list: `--repos objectui` is a real flag of the
+// sweep, and beside `--pr 11590` it was ignored in exactly the same way; so was
+// `--since 7d` beside `--test`, whose value then joined the path list.
+//
+// `--additions`/`--deletions` are listed for `--pr` and `--branch` although
+// neither mode takes them: each refuses them in its own, older words
+// (`refuseSizeFlagsIn` — two readings of one number), so this table lets them
+// through to that refusal rather than replacing it.
+//
+// ⛔ No mode reads a repository from anywhere but its own spelling: `--pr`
+// names one inline (`<owner>/<repo>#<n>`), the sweep narrows by `--repos`.
+// There is no `--repo` here, by ruling — one spelling, the documented one —
+// and the environment's half is `bareTargetRefusal`.
+export const ARGV_MODES = Object.freeze({
+  sweep: Object.freeze({
+    name: 'the sweep',
+    flags: Object.freeze({ '--since': 'value', '--since-ref': 'value', '--repos': 'value', '--repo-root': 'value', '--root': 'value', '--json': 'switch' }),
+    usage: '[--since <7d|36h|ISO date>] [--since-ref [<id>=]<ref>]… [--repos <id>,…] [--repo-root <id>=<path>]… [--root <path>] [--json]',
+  }),
+  '--test': Object.freeze({
+    name: '--test',
+    flags: Object.freeze({ '--test': 'list', '--additions': 'value', '--deletions': 'value', '--root': 'value', '--json': 'switch' }),
+    usage: '--test <path>… [--additions <n> --deletions <n>] [--root <path>] [--json]',
+  }),
+  '--pr': Object.freeze({
+    name: '--pr',
+    flags: Object.freeze({ '--pr': 'value', '--root': 'value', '--json': 'switch', '--additions': 'value', '--deletions': 'value' }),
+    usage: '--pr <n> | --pr <owner>/<repo>#<n>   [--root <path>] [--json]',
+  }),
+  '--branch': Object.freeze({
+    name: '--branch',
+    flags: Object.freeze({ '--branch': 'value', '--root': 'value', '--json': 'switch', '--additions': 'value', '--deletions': 'value' }),
+    usage: '--branch <ref> [--root <path>] [--json]',
+  }),
+});
+
+/** How every prescription below spells this tool. */
+const SELF_COMMAND = 'node scripts/pm/check-governed-merges.mjs';
+
+/**
+ * The flags in `args` that `mode` does not read, in order. Pure. A token is a
+ * flag when it starts with `-` followed by anything but a digit (a lone `-` and
+ * a negative number are values). A `value` flag consumes the next argument
+ * unless that argument is itself a `--` flag, so `--pr --bogus` still names
+ * `--bogus` rather than swallowing it as a PR number.
+ */
+export function unreadFlagsIn(args, mode) {
+  const flags = ARGV_MODES[mode]?.flags ?? {};
+  const unread = [];
+  for (let i = 0; i < args.length; i++) {
+    const token = String(args[i]);
+    if (!/^-(?:-|\D)/.test(token)) continue; // a value, a --test path, a lone `-`, a negative number
+    if (!Object.hasOwn(flags, token)) {
+      unread.push(token);
+      continue;
+    }
+    if (flags[token] === 'value' && i + 1 < args.length && !String(args[i + 1]).startsWith('--')) i += 1;
+  }
+  return unread;
+}
+
+/**
+ * The words for a run carrying flags its mode does not read, or null when it
+ * carries none. Pure; `main()` prints them on stderr and exits 1 before any git
+ * read, any network read, or any verdict.
+ *
+ * `--repo` gets the prescription the ruling asks for: it is the spelling that
+ * produced the measured wrong answer, and beside a bare `--pr <n>` the fix is
+ * the qualified number, spelled out with the caller's own repository and PR.
+ */
+export function argvRefusal(args, mode) {
+  const unread = unreadFlagsIn(args, mode);
+  if (unread.length === 0) return null;
+  const spec = ARGV_MODES[mode];
+  const names = unread.map((f) => `\`${f}\``).join(', ');
+  const lines = [
+    `❌  ${names} ${unread.length === 1 ? 'is not a flag' : 'are not flags'} ${spec.name} reads. An unrecognised flag is REFUSED, never ignored:`,
+    '    an ignored flag still lets the run print a verdict, about a question nobody asked, under the same ✅ as a',
+    '    real answer.',
+  ];
+  const repoFlag = unread.find((f) => f === '--repo' || f.startsWith('--repo='));
+  if (repoFlag) {
+    const at = args.indexOf(repoFlag);
+    const value = repoFlag.includes('=') ? repoFlag.slice(repoFlag.indexOf('=') + 1) : args[at + 1];
+    const id = GOVERNED_REPOS.find((r) => r.id === value);
+    const repo = id ? id.slug : typeof value === 'string' && /^[\w.-]+\/[\w.-]+$/.test(value) ? value : '<owner>/<repo>';
+    const prAt = args.indexOf('--pr');
+    const bare = prAt > -1 ? /^#?(\d+)$/.exec(String(args[prAt + 1] ?? '').trim()) : null;
+    if (mode === '--pr' && bare) {
+      lines.push(
+        `    This tool takes no \`--repo\`, and a bare \`--pr ${bare[1]}\` answers THIS checkout's own repository whatever`,
+        '    `--repo` names. Name the repository inside --pr, the one spelling it takes:',
+        `      ${SELF_COMMAND} --pr ${repo}#${bare[1]}`,
+      );
+    } else {
+      lines.push(`    This tool takes no \`--repo\`: \`--pr\` names its repository inline (\`--pr ${repo}#<n>\`), and the sweep narrows by \`--repos <id>,…\`.`);
+    }
+  }
+  for (const f of unread) {
+    const eq = f.indexOf('=');
+    const name = eq > 0 ? f.slice(0, eq) : null;
+    if (name && Object.hasOwn(spec.flags, name) && spec.flags[name] === 'value') {
+      lines.push(`    ${name} takes its value as the NEXT argument — \`${name} ${f.slice(eq + 1)}\`, never \`${f}\`.`);
+    }
+  }
+  lines.push(`    ${spec.name} reads:  ${SELF_COMMAND} ${spec.usage}`);
+  lines.push('    usage — each mode reads its own flags and refuses every other:');
+  for (const m of Object.values(ARGV_MODES)) lines.push(`      ${SELF_COMMAND} ${m.usage}`);
+  lines.push(`      ${SELF_COMMAND} --self-test`);
+  return lines.join('\n');
+}
+
+/**
+ * A bare `--pr <n>` answers THIS checkout's own repository — the slug its
+ * origin parses to, `objectstack-ai/objectstack` wherever this tool lives — and
+ * nothing in the environment moves it. `PM_SWEEP_REPO` is how the board tools
+ * are told which repository they answer, so a seat with it set is a seat that
+ * believes it has said which repository it means; read here ONLY to refuse,
+ * never to change the answer (one spelling: the qualified number). Returns the
+ * refusal words when a bare number meets a `PM_SWEEP_REPO` naming any other
+ * repository, or null. Pure.
+ *
+ * A qualified `<owner>/<repo>#<n>` names its own repository and is answered as
+ * it always was, whatever the environment says.
+ */
+export function bareTargetRefusal({ raw, target, sweepRepo }) {
+  if (!target || target.error) return null;
+  const bare = /^#?(\d+)$/.exec(String(raw ?? '').trim());
+  if (!bare) return null;
+  const named = String(sweepRepo ?? '').trim();
+  if (named === '' || named.toLowerCase() === String(target.slug).toLowerCase()) return null;
+  const spelled = /^[\w.-]+\/[\w.-]+$/.test(named) ? named : '<owner>/<repo>';
+  return [
+    `❌  --pr ${bare[1]} is a bare number, and a bare number answers THIS checkout's own repository (${target.slug}) —`,
+    `    but PM_SWEEP_REPO names ${named}. This tool takes no repository from the environment, so the run is`,
+    '    refused rather than answered about a different PR in a different repository. Name the repository',
+    '    inside --pr, the one spelling it takes:',
+    `      ${SELF_COMMAND} --pr ${spelled}#${target.pull}`,
+    "    or, if this checkout's own PR is the one you mean:",
+    `      ${SELF_COMMAND} --pr ${target.slug}#${target.pull}`,
+  ].join('\n');
+}
+
 async function main() {
   const args = process.argv.slice(2);
   // ⛔ One list per run. Two mode flags would ask the same question about two
@@ -3653,6 +3842,13 @@ async function main() {
       `❌  ${modes.join(' and ')} each name a DIFFERENT file list, and this predicate answers about one. ` +
         `Run them separately.`,
     );
+    return EXIT_CANNOT_SWEEP;
+  }
+  // ⛔ Closed argv (#21675): a flag this mode does not read is refused here,
+  // before any git read, network read or child process — never ignored.
+  const unreadRefusal = argvRefusal(args, modes[0] ?? 'sweep');
+  if (unreadRefusal !== null) {
+    console.error(unreadRefusal);
     return EXIT_CANNOT_SWEEP;
   }
   if (args.includes('--test')) return await runTestMode(args);
@@ -6315,6 +6511,186 @@ async function selfTest() {
     rmSync(bannerFx, { recursive: true, force: true });
   }
 
+  // ── ⭐ the argv is CLOSED (#21675) ─────────────────────────────────────────
+  //
+  // Header section "The argv is closed". The pure rows pin the table, the walker
+  // and both refusals' words; the end-to-end rows replay the card's own
+  // invocation table against a fake API on 127.0.0.1 that RECORDS every read,
+  // so each refusal is pinned as exit 1 + the prescription + no verdict +
+  // NOTHING READ, and the qualified spelling as the verdict, read from the
+  // repository it names. Before this battery, rows 1–3 of that table read
+  // objectstack's PR and printed ✅ NOT governed on exit 0.
+  battery('⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused');
+  assert('every-flag-a-modes-usage-line-names-is-a-flag-that-mode-reads',
+    Object.values(ARGV_MODES).every((m) => (m.usage.match(/--[a-z][a-z-]*/g) ?? []).every((f) => Object.hasOwn(m.flags, f))),
+    JSON.stringify(Object.values(ARGV_MODES).map((m) => m.usage)));
+  assert('and-every-mode-the-dispatch-can-select-has-exactly-one-row-the-sweep-included',
+    [...PREDICATE_MODES, 'sweep'].every((m) => ARGV_MODES[m] !== undefined) && Object.keys(ARGV_MODES).length === PREDICATE_MODES.length + 1,
+    Object.keys(ARGV_MODES).join());
+  // Preservation: every argv shape the batteries above spawn still passes —
+  // including the size flags beside --branch, whose own older refusal ("two
+  // readings") must still be the one that fires.
+  const argvPasses = [
+    [['--repos', 'cloud', '--repo-root', 'cloud=/x', '--since-ref', 'cloud=abc', '--json'], 'sweep'],
+    [['--since', '7d', '--repos', 'objectstack,objectui'], 'sweep'],
+    [['--test', 'AGENTS.md', 'src/x.ts', '--additions', '238310', '--deletions', '119', '--json'], '--test'],
+    [['--branch', 'claude/issue-17003-x', '--root', '/r', '--additions', '1', '--deletions', '1'], '--branch'],
+    [['--branch', '--root', '/r'], '--branch'],
+    [['--pr', 'objectstack-ai/objectui#42', '--json'], '--pr'],
+    [['--pr', '16997', '--root', '/r'], '--pr'],
+  ];
+  assert('every-argv-the-modes-already-read-still-passes-the-closed-set',
+    argvPasses.every(([a, m]) => argvRefusal(a, m) === null), JSON.stringify(argvPasses.filter(([a, m]) => argvRefusal(a, m) !== null)));
+  // …and so does every usage example this file's header spells, read off the
+  // header itself: a new example naming a flag the table lacks reds here, so
+  // the table and the documented usage cannot drift apart.
+  const headerExamples = readFileSync(scriptPath, 'utf8').split('\n').slice(0, 40)
+    .filter((line) => line.startsWith(' *   node scripts/pm/check-governed-merges.mjs'))
+    .map((line) => line.slice(' *   node scripts/pm/check-governed-merges.mjs'.length).split(/\s+#\s/)[0].trim().split(/\s+/).filter(Boolean))
+    .filter((argv) => !argv.includes('--self-test'));
+  const headerRefused = headerExamples.filter((argv) => argvRefusal(argv, PREDICATE_MODES.find((m) => argv.includes(m)) ?? 'sweep') !== null);
+  assert('every-usage-example-the-header-spells-passes-the-closed-set-and-there-are-at-least-13',
+    headerExamples.length >= 13 && headerRefused.length === 0, JSON.stringify({ n: headerExamples.length, headerRefused }));
+  const bogusWords = argvRefusal(['--pr', '11590', '--bogus-flag', 'x'], '--pr');
+  assert('⭐ an-unknown-flag-is-refused-by-name-never-ignored',
+    typeof bogusWords === 'string' && bogusWords.includes('`--bogus-flag` is not a flag --pr reads') && bogusWords.includes('REFUSED, never ignored'),
+    String(bogusWords));
+  assert('and-the-refusal-carries-the-modes-own-usage-line-and-every-other-modes',
+    String(bogusWords).includes(`--pr reads:  ${SELF_COMMAND} ${ARGV_MODES['--pr'].usage}`) &&
+      Object.values(ARGV_MODES).every((m) => String(bogusWords).includes(`${SELF_COMMAND} ${m.usage}`)) && String(bogusWords).includes('--self-test'),
+    String(bogusWords));
+  const reposWords = argvRefusal(['--pr', '11590', '--repos', 'objectui'], '--pr');
+  assert('⭐ a-flag-of-ANOTHER-mode-is-refused-too-the-sweeps---repos-beside---pr-was-ignored-the-same-way',
+    typeof reposWords === 'string' && reposWords.includes('`--repos` is not a flag --pr reads'), String(reposWords));
+  const sinceWords = argvRefusal(['--test', 'src/x.ts', '--since', '7d'], '--test');
+  assert('and-a-sweep-flag-beside---test-is-refused-before-its-value-can-join-the-path-list',
+    typeof sinceWords === 'string' && sinceWords.includes('`--since` is not a flag --test reads'), String(sinceWords));
+  const eqWords = argvRefusal(['--since=7d'], 'sweep');
+  assert('an-equals-spelling-is-refused-and-told-the-spelling-the-flag-takes',
+    typeof eqWords === 'string' && eqWords.includes('`--since=7d` is not a flag the sweep reads') && eqWords.includes('`--since 7d`'), String(eqWords));
+  assert('a-value-flag-followed-by-a-flag-consumes-nothing-so-that-flag-is-still-judged',
+    JSON.stringify(unreadFlagsIn(['--pr', '--bogus'], '--pr')) === JSON.stringify(['--bogus']) &&
+      JSON.stringify(unreadFlagsIn(['-h'], 'sweep')) === JSON.stringify(['-h']),
+    JSON.stringify([unreadFlagsIn(['--pr', '--bogus'], '--pr'), unreadFlagsIn(['-h'], 'sweep')]));
+  const repoWords = argvRefusal(['--pr', '11590', '--repo', 'objectstack-ai/objectui'], '--pr');
+  assert('⭐ --pr-N---repo-objectui-is-refused-and-prescribes---pr-objectui#N-the-documented-spelling',
+    typeof repoWords === 'string' && repoWords.includes('`--repo` is not a flag --pr reads') &&
+      repoWords.includes(`${SELF_COMMAND} --pr objectstack-ai/objectui#11590`) && repoWords.includes("answers THIS checkout's own repository"),
+    String(repoWords));
+  assert('and---repo-is-no-new-spelling-anywhere-a-governed-id-is-spelled-as-its-slug-and-a-qualified---pr-is-told-to-drop-it',
+    String(argvRefusal(['--pr', '7', '--repo=objectui'], '--pr')).includes('--pr objectstack-ai/objectui#7') &&
+      String(argvRefusal(['--pr', 'objectstack-ai/objectui#7', '--repo', 'objectstack-ai/objectui'], '--pr')).includes('This tool takes no `--repo`') &&
+      argvRefusal(['--pr', '7', '--repo', 'objectstack-ai/objectstack'], '--pr') !== null,
+    String(argvRefusal(['--pr', '7', '--repo=objectui'], '--pr')));
+  const selfSlugFx = 'objectstack-ai/objectstack';
+  const bareFx = parsePullTarget('11590', selfSlugFx);
+  const envWords = bareTargetRefusal({ raw: '11590', target: bareFx, sweepRepo: 'objectstack-ai/objectui' });
+  assert('⭐ PM_SWEEP_REPO-naming-another-repo-refuses-a-bare---pr-and-prescribes-both-qualified-spellings',
+    typeof envWords === 'string' && envWords.includes('PM_SWEEP_REPO names objectstack-ai/objectui') &&
+      envWords.includes(`${SELF_COMMAND} --pr objectstack-ai/objectui#11590`) && envWords.includes(`${SELF_COMMAND} --pr ${selfSlugFx}#11590`),
+    String(envWords));
+  assert('while-PM_SWEEP_REPO-naming-this-checkouts-own-repo-in-any-case-blank-or-unset-refuses-nothing',
+    bareTargetRefusal({ raw: '11590', target: bareFx, sweepRepo: 'ObjectStack-AI/ObjectStack' }) === null &&
+      bareTargetRefusal({ raw: '#11590', target: parsePullTarget('#11590', selfSlugFx), sweepRepo: '  ' }) === null &&
+      bareTargetRefusal({ raw: '11590', target: bareFx, sweepRepo: undefined }) === null);
+  assert('and-a-qualified---pr-names-its-own-repo-so-PM_SWEEP_REPO-changes-nothing-in-either-direction',
+    bareTargetRefusal({ raw: 'objectstack-ai/objectui#11590', target: parsePullTarget('objectstack-ai/objectui#11590', selfSlugFx), sweepRepo: 'objectstack-ai/objectui' }) === null &&
+      bareTargetRefusal({ raw: 'objectstack-ai/objectstack#11590', target: parsePullTarget('objectstack-ai/objectstack#11590', selfSlugFx), sweepRepo: 'objectstack-ai/objectui' }) === null);
+
+  // End to end, the card's table. The fake API answers any `/repos/<slug>/…`
+  // PR read with one ordinary file and records the URL; a token never leaves
+  // this process (both token variables are blanked for the child).
+  const argvFx = mkdtempSync(join(tmpdir(), 'cgm-argv-'));
+  const apiReads = [];
+  const fakeApi = createServer((req, res) => {
+    apiReads.push(req.url);
+    const path = new URL(req.url, 'http://127.0.0.1').pathname;
+    const m = /^\/repos\/([^/]+\/[^/]+)\/(?:pulls\/(\d+)(\/files)?|commits\/[0-9a-f]+\/check-runs)$/.exec(path);
+    let body = null;
+    if (m && m[3]) body = [{ filename: 'src/argv-fixture.ts', status: 'modified' }];
+    else if (m && m[2]) body = { number: Number(m[2]), changed_files: 1, additions: 3, deletions: 1, head: { sha: 'f'.repeat(40), repo: { full_name: m[1] } }, base: { repo: { full_name: m[1] } } };
+    else if (m) body = { total_count: 1 };
+    res.writeHead(body ? 200 : 404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body ?? { message: 'Not Found' }));
+  });
+  try {
+    await new Promise((ok, fail) => {
+      fakeApi.once('error', fail);
+      fakeApi.listen(0, '127.0.0.1', ok);
+    });
+    fakeApi.unref();
+    const apiUrl = `http://127.0.0.1:${fakeApi.address().port}`;
+    // A checkout whose origin IS objectstack, so the bare number's repository is
+    // fixed by the fixture rather than by whatever clone runs this.
+    const argvRoot = join(argvFx, 'objectstack');
+    execFileSync('git', ['init', '-q', argvRoot], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/objectstack-ai/objectstack.git'], { cwd: argvRoot, stdio: 'ignore' });
+    const runArgv = (argv, env = {}) => new Promise((done) => {
+      apiReads.length = 0;
+      const child = spawn(process.execPath, [scriptPath, ...argv, '--root', argvRoot], {
+        env: {
+          ...process.env,
+          [PROXY_REARM_GUARD]: '1',
+          GITHUB_API_URL: apiUrl,
+          GITHUB_TOKEN: '',
+          GH_TOKEN: '',
+          PM_SWEEP_REPO: '',
+          NO_PROXY: '127.0.0.1,localhost',
+          no_proxy: '127.0.0.1,localhost',
+          ...env,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+      });
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (c) => { out += c; });
+      child.stderr.on('data', (c) => { err += c; });
+      child.on('error', (e) => done({ status: null, out, err: `${err}${e?.message ?? e}`, reads: [...apiReads] }));
+      child.on('close', (status) => done({ status, out, err, reads: [...apiReads] }));
+    });
+    const said = (r) => `status=${r.status} reads=${JSON.stringify(r.reads)} out=${r.out.slice(0, 300)} err=${r.err.slice(0, 400)}`;
+    const bogusRun = await runArgv(['--pr', '11590', '--bogus-flag', 'x']);
+    assert('⭐ e2e-pr-N-with-a-bogus-flag-exits-1-names-it-prints-no-verdict-and-READS-NOTHING',
+      bogusRun.status === EXIT_CANNOT_SWEEP && bogusRun.err.includes('`--bogus-flag`') && !bogusRun.out.includes('governed-surface predicate') && bogusRun.reads.length === 0,
+      said(bogusRun));
+    const repoRun = await runArgv(['--pr', '11590', '--repo', 'objectstack-ai/objectui']);
+    assert('⭐ e2e-pr-N---repo-objectui-exits-1-prescribes---pr-objectui#N-and-READS-NOTHING',
+      repoRun.status === EXIT_CANNOT_SWEEP && repoRun.err.includes('--pr objectstack-ai/objectui#11590') && !repoRun.out.includes('governed-surface predicate') && repoRun.reads.length === 0,
+      said(repoRun));
+    const envRun = await runArgv(['--pr', '11590'], { PM_SWEEP_REPO: 'objectstack-ai/objectui' });
+    assert('⭐ e2e-PM_SWEEP_REPO-objectui-with-a-bare---pr-N-exits-1-prescribes---pr-objectui#N-and-READS-NOTHING',
+      envRun.status === EXIT_CANNOT_SWEEP && envRun.err.includes('--pr objectstack-ai/objectui#11590') && !envRun.out.includes('governed-surface predicate') && envRun.reads.length === 0,
+      said(envRun));
+    const qualifiedRun = await runArgv(['--pr', 'objectstack-ai/objectui#11590']);
+    assert('⭐ e2e---pr-objectui#N-answers-as-today-NOT-governed-on-exit-0-every-read-from-objectuis-PR-N',
+      qualifiedRun.status === EXIT_TEST_NOT_GOVERNED && qualifiedRun.out.includes('derived from GET /repos/objectstack-ai/objectui/pulls/11590/files') &&
+        qualifiedRun.out.includes('NOT governed') && qualifiedRun.reads.length === 3 && qualifiedRun.reads.every((u) => u.startsWith('/repos/objectstack-ai/objectui/')),
+      said(qualifiedRun));
+    const qualifiedEnvRun = await runArgv(['--pr', 'objectstack-ai/objectui#11590'], { PM_SWEEP_REPO: 'objectstack-ai/objectui' });
+    assert('and-PM_SWEEP_REPO-beside-the-qualified-spelling-changes-not-one-byte-of-the-answer',
+      qualifiedEnvRun.status === qualifiedRun.status && qualifiedEnvRun.out === qualifiedRun.out && qualifiedEnvRun.out !== '' &&
+        JSON.stringify(qualifiedEnvRun.reads) === JSON.stringify(qualifiedRun.reads),
+      said(qualifiedEnvRun));
+    const ownRun = await runArgv(['--pr', '11590'], { PM_SWEEP_REPO: 'objectstack-ai/objectstack' });
+    assert('control-PM_SWEEP_REPO-naming-this-checkouts-own-repo-answers-the-bare-number-from-that-repo',
+      ownRun.status === EXIT_TEST_NOT_GOVERNED && ownRun.out.includes('derived from GET /repos/objectstack-ai/objectstack/pulls/11590/files') &&
+        ownRun.reads.length === 3 && ownRun.reads.every((u) => u.startsWith('/repos/objectstack-ai/objectstack/')),
+      said(ownRun));
+    const sinceRun = await runArgv(['--test', 'src/x.ts', '--since', '7d']);
+    assert('e2e---test-with-a-sweep-flag-exits-1-and-prints-no-verdict-over-a-path-list-its-value-would-have-joined',
+      sinceRun.status === EXIT_CANNOT_SWEEP && sinceRun.err.includes('`--since` is not a flag --test reads') && !sinceRun.out.includes('governed-surface predicate'),
+      said(sinceRun));
+  } catch (error) {
+    // ⛔ Never a silent skip: a fixture that cannot be built leaves the card's
+    // table unpinned end to end, and that must read as red.
+    assert('the-closed-argv-end-to-end-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+  } finally {
+    fakeApi.closeAllConnections?.();
+    fakeApi.close();
+    rmSync(argvFx, { recursive: true, force: true });
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -6328,7 +6704,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }

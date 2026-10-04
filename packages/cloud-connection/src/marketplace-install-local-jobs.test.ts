@@ -24,6 +24,12 @@
  *     it was found — nothing registered, persisted or scheduled;
  *   - #21585: so does an enabled job whose `body` the declaration refuses (an
  *     expression body, a `body.timeoutMs`), naming the refused key;
+ *   - so does an enabled job whose `pull` does not bind (a mapping the package
+ *     does not declare, one with no `connectorSource`), naming the refusal the
+ *     binder's own `judgeJobPull` gives; a pull naming a declared mapping
+ *     installs and is scheduled, a DISABLED unbindable one installs, and an
+ *     entry an earlier build persisted rehydrates with its unbindable pull job
+ *     withheld and warned by name;
  *   - a package without jobs, and one whose handler-only job is DISABLED,
  *     install unchanged.
  *
@@ -190,12 +196,20 @@ async function bootPlugin() {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    // The `automation` service a pull job's run calls (`IAutomationService.pullConnectorSource`).
+    const automation = {
+        pullConnectorSource: vi.fn(async (request: { mapping: string }) => ({
+            mapping: request.mapping, targetObject: 'order', connector: 'orders_api', action: 'request', pulled: 0,
+            summary: { total: 0, processed: 0, created: 0, updated: 0, skipped: 0, errors: 0, ok: 0, cancelled: false },
+        })),
+    };
     const services: Record<string, unknown> = {
         manifest: { register },
         auth: installerAuthService(),
         objectql: withInstallerGrants(rec.engine),
         job: jobs.svc,
         protocol: registryProtocol(),
+        automation,
     };
     const ctx = {
         hook: (e: string, h: any) => hooks.set(e, h),
@@ -214,7 +228,7 @@ async function bootPlugin() {
         rawApp.routes.get('POST /api/v1/marketplace/install-local')!(makeC({ manifest: bundle }));
     const uninstall = async (manifestId: string) =>
         rawApp.routes.get('DELETE /api/v1/marketplace/install-local/:manifestId')!(makeDeleteC(manifestId));
-    return { install, uninstall, rec, jobs, register, logger };
+    return { install, uninstall, rec, jobs, register, logger, automation };
 }
 
 describe('#21489: install-local schedules an installed package’s job bodies', () => {
@@ -376,5 +390,111 @@ describe('#21489: install-local refuses an enabled job with no body', () => {
         ]);
         expect(registered(register)).toEqual([APP_ID]);
         expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+});
+
+describe('install-local refuses an enabled job whose pull does not bind, by the binder\'s own judgeJobPull', () => {
+    const MAPPING = {
+        name: 'orders_pull',
+        targetObject: TICK,
+        fieldMapping: [{ source: 'id', target: 'name' }],
+        mode: 'upsert',
+        upsertKey: ['name'],
+        connectorSource: { connector: 'orders_api', action: 'request' },
+    };
+    const { connectorSource: _dropped, ...IMPORT_ONLY } = MAPPING;
+    const PULL_JOB = { name: 'jobs_app_pull', schedule: INTERVAL, pull: { mapping: 'orders_pull' } };
+    const UNDECLARED = { ...PULL_JOB, name: 'jobs_app_pull_typo', pull: { mapping: 'orders_pul' } };
+
+    /** The compiled-artifact shape, carrying `mappings` beside `jobs`. */
+    const withMappings = (jobs: unknown[], mappings: unknown[] = [MAPPING]) => ({ ...artifact(jobs), mappings });
+
+    it('a pull naming a mapping the package does not declare answers 422 VALIDATION_ERROR naming the job and the refusal — and changes nothing', async () => {
+        const { install, jobs, register, automation } = await bootPlugin();
+
+        const res = await install(withMappings([BODY_JOB, UNDECLARED]));
+
+        expect(res.status).toBe(422);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        const message: string = res.payload.error.message;
+        expect(message).toContain(`its enabled job '${UNDECLARED.name}' (pull.mapping: this artifact declares no mapping 'orders_pul'`);
+        expect(message).toContain('has a `pull` that does not bind');
+        expect(message).toContain('os validate');
+        // The pull's own clause, never the no-`body` one: a `body` beside a `pull` is refused by the declaration.
+        expect(message).not.toMatch(/give the job a `body`/i);
+        // The runtime is left exactly as it was found.
+        expect(registered(register), 'a refused package must not be registered').toEqual([]);
+        expect(new LocalManifestSource(dir).read(APP_ID).entry, 'nor persisted').toBeNull();
+        expect(jobs.svc.schedule, 'nor any of its jobs scheduled — not even its body job').not.toHaveBeenCalled();
+        expect(automation.pullConnectorSource).not.toHaveBeenCalled();
+    });
+
+    it('a pull whose mapping declares no connectorSource is refused the same way', async () => {
+        const { install, jobs, register } = await bootPlugin();
+
+        const res = await install(withMappings([PULL_JOB], [IMPORT_ONLY]));
+
+        expect(res.status).toBe(422);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        expect(res.payload.error.message).toContain(`its enabled job '${PULL_JOB.name}' (pull.mapping: mapping 'orders_pull' declares no connectorSource`);
+        expect(registered(register)).toEqual([]);
+        expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+
+    it('one answer names every kind the door cannot run — the unbindable pull beside a job with no body', async () => {
+        const { install } = await bootPlugin();
+
+        const res = await install(withMappings([HANDLER_JOB, UNDECLARED]));
+
+        expect(res.status).toBe(422);
+        const message: string = res.payload.error.message;
+        expect(message).toContain(`'${HANDLER_JOB.name}' (handler 'tick') has no \`body\``);
+        expect(message).toContain(`'${UNDECLARED.name}' (pull.mapping: `);
+    });
+
+    it('a DISABLED pull job naming an undeclared mapping does not block the install, and is not scheduled', async () => {
+        const { install, jobs, register } = await bootPlugin();
+
+        const res = await install(withMappings([{ ...UNDECLARED, enabled: false }]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(registered(register)).toEqual([APP_ID]);
+        expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+
+    it('control: a pull naming a declared mapping with a connectorSource installs, is scheduled, and a run pulls that mapping', async () => {
+        const { install, jobs, automation } = await bootPlugin();
+
+        const res = await install(withMappings([PULL_JOB]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect([...jobs.scheduled.keys()]).toEqual([PULL_JOB.name]);
+        await jobs.scheduled.get(PULL_JOB.name)!.run({ jobId: PULL_JOB.name });
+        expect(automation.pullConnectorSource).toHaveBeenCalledTimes(1);
+        expect(automation.pullConnectorSource.mock.calls[0][0]).toMatchObject({ mapping: 'orders_pull' });
+    });
+
+    it('rehydrate — an entry an earlier build persisted with an unbindable pull job: the job is withheld and warned by name, the bindable one scheduled', async () => {
+        const { manifest: meta, ...sections } = withMappings([PULL_JOB, UNDECLARED]);
+        new LocalManifestSource(dir).write({
+            packageId: APP_ID,
+            versionId: 'local',
+            manifestId: APP_ID,
+            version: '0.1.0',
+            manifest: { ...meta, ...sections },
+            installedAt: '2026-01-01T00:00:00.000Z',
+            installedBy: 'admin',
+            withSampleData: false,
+        });
+
+        const { jobs, logger, register } = await bootPlugin();
+
+        expect(registered(register), 'the entry still rehydrates').toEqual([APP_ID]);
+        expect([...jobs.scheduled.keys()]).toEqual([PULL_JOB.name]);
+        const warned = logger.warn.mock.calls.find(([message, meta]) =>
+            String(message).includes('NOT scheduled') && (meta as { job?: string } | undefined)?.job === UNDECLARED.name);
+        expect(warned, 'no warn names the withheld pull job').toBeDefined();
+        expect(String(warned![0])).toContain("pull.mapping: this artifact declares no mapping 'orders_pul'");
     });
 });

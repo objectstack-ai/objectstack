@@ -33,6 +33,15 @@
  * a flow variable leaves the family table unchanged, and the three nodes write
  * an ordinary object exactly as before.
  *
+ * [#21654] The save-time half. `FlowSchema` now refuses a write node whose
+ * STATIC `objectName` names a family table, and `registerFlow` parses first,
+ * so a flow carrying one is refused before it can run. Every static case here
+ * therefore asserts that refusal first (`registerFlow` throws, the issue sits at
+ * the node's `config.objectName`, the table is unchanged), and only then reaches
+ * the run-time guard, with a definition the parse never judged: see
+ * {@link registerForRun}. A dynamic target (`{record.target}`) is not judged at
+ * save and registers as before.
+ *
  * Composition: `ObjectKernel`, `ObjectQLPlugin`, `driver-sql` on
  * better-sqlite3 `:memory:` and the real `AutomationServicePlugin`, the stack
  * the family read pins boot; the secured composition adds the real
@@ -59,6 +68,49 @@ type RunAs = 'system' | 'user';
 /** The stored body every seeded family row carries, and a fragment of it a filter can guess. */
 const STORED_BODY = JSON.stringify({ name: 'pin_body', label: 'Pin body' });
 const BODY_FRAGMENT = '"label":"Pin body"';
+
+/**
+ * [#21654] The target a static family case is registered under, so that the
+ * parse lets it through; {@link registerForRun} then puts the family table back
+ * on the registered definition. No object of this name exists: a definition
+ * whose retarget did not land fails its run with a not-found error, never with
+ * the family refusal its case asserts.
+ */
+const STAND_IN_TARGET = 'pin_stand_in_target';
+
+/** One write node in a flow definition aimed at a family table, and where it sits. */
+interface FamilyTarget {
+  readonly path: string;
+  readonly object: string;
+}
+
+/**
+ * Every write node in `def`, at any depth (a `try_catch` region's nodes
+ * included), whose `config.objectName` is `match` — or, with no `match`, is a
+ * family table by name. Paths in the parse's dotted spelling
+ * (`nodes.1.config.objectName`).
+ */
+function writeTargetsIn(def: unknown, match?: string): Array<FamilyTarget & { readonly node: Record<string, unknown> }> {
+  const found: Array<FamilyTarget & { readonly node: Record<string, unknown> }> = [];
+  const visit = (value: unknown, path: string[]): void => {
+    if (Array.isArray(value)) {
+      value.forEach((item, i) => visit(item, [...path, String(i)]));
+      return;
+    }
+    if (value === null || typeof value !== 'object') return;
+    const rec = value as Record<string, unknown>;
+    const config = rec.config as Record<string, unknown> | undefined;
+    if ((WRITE_NODES as readonly unknown[]).includes(rec.type) && config && typeof config.objectName === 'string') {
+      const object = config.objectName;
+      if (match === undefined ? (FAMILY as readonly string[]).includes(object) : object === match) {
+        found.push({ path: [...path, 'config', 'objectName'].join('.'), object, node: config });
+      }
+    }
+    for (const [key, child] of Object.entries(rec)) visit(child, [...path, key]);
+  };
+  visit(def, []);
+  return found;
+}
 
 /** An ordinary object: the non-family control. */
 const PLAIN_OBJECT = {
@@ -169,9 +221,71 @@ function harness(ql: ObjectQL, automation: AutomationEngine) {
     return { objectName: object, filter: { id } };
   }
 
+  /**
+   * [#21654] Register `def` so that it can RUN. A definition with no static
+   * family target registers as it always did. One that carries such a target is
+   * refused by the parse at save, now that `FlowSchema` judges it, so this first
+   * asserts that refusal — `registerFlow` throws, the issue is a `custom` one at
+   * each such node's `config.objectName` carrying the metadata-protocol
+   * prescription, nothing is registered under the name, and the target table is
+   * unchanged — and only then reaches the run-time guard with a definition the
+   * parse never judged: the same definition registered with
+   * {@link STAND_IN_TARGET} in place of each family table, after which the
+   * family table is put back on the definition the engine holds.
+   *
+   * The engine behaviour this leans on, none of which the save-time refusal
+   * changes: `registerFlow` stores the parsed definition it returns, by
+   * reference (`this.flows.set(name, parsed)`, then `return parsed`), and
+   * `execute` runs `this.flows.get(name)` as stored, never re-parsing it. Both
+   * are read back here rather than assumed: `getFlow(name)` must answer the
+   * family table at every retargeted path before the run. Were either to stop
+   * holding — a copy, a freeze, a re-parse — the retarget would fail to land,
+   * that read-back would go red, and the run would refuse nothing for the family
+   * reason; a frozen definition throws on the write itself.
+   */
+  async function registerForRun(def: { name: string }): Promise<void> {
+    const targets = writeTargetsIn(def);
+    if (targets.length === 0) {
+      automation.registerFlow(def.name, def as any);
+      return;
+    }
+
+    // Save time: refused, located at each family target, nothing registered, the table unchanged.
+    const tables = [...new Set(targets.map((t) => t.object))];
+    const before = await Promise.all(tables.map((object) => snapshot(object)));
+    let thrown: { issues?: Array<{ code: string; path: PropertyKey[]; message: string }> } | undefined;
+    try {
+      automation.registerFlow(def.name, def as any);
+    } catch (err) {
+      thrown = err as typeof thrown;
+    }
+    expect(thrown, `${def.name}: registerFlow must refuse a static family target at save`).toBeDefined();
+    expect(
+      (thrown!.issues ?? []).map((i) => ({ code: i.code, path: i.path.join('.') })),
+      `${def.name}: the save-time refusal's issues`,
+    ).toEqual(targets.map((t) => ({ code: 'custom', path: t.path })));
+    for (const issue of thrown!.issues ?? []) expect(issue.message).toContain('the metadata protocol');
+    expect(await automation.getFlow(def.name), `${def.name}: a refused flow was registered`).toBeNull();
+    expect(await Promise.all(tables.map((object) => snapshot(object))), `${def.name}: the save-time refusal changed a table`)
+      .toEqual(before);
+
+    // Run time: a definition the parse never judged — registered aimed at the stand-in, then retargeted.
+    const standIn = JSON.parse(JSON.stringify(def)) as { name: string };
+    for (const target of writeTargetsIn(standIn)) target.node.objectName = STAND_IN_TARGET;
+    const registered = automation.registerFlow(def.name, standIn as any);
+    const placeholders = writeTargetsIn(registered, STAND_IN_TARGET);
+    expect(placeholders.map((p) => p.path), `${def.name}: the stand-in sits where the family targets did`)
+      .toEqual(targets.map((t) => t.path));
+    placeholders.forEach((placeholder, i) => {
+      placeholder.node.objectName = targets[i]!.object;
+    });
+    expect(writeTargetsIn(await automation.getFlow(def.name)), `${def.name}: the engine holds the retargeted definition`)
+      .toEqual(targets.map((t) => expect.objectContaining({ path: t.path, object: t.object })));
+  }
+
   /** Run `def` with the engine's write verbs watched; count the calls aimed at the family. */
   async function runWatched(def: { name: string }, trigger: Record<string, unknown>) {
-    automation.registerFlow(def.name, def as any);
+    await registerForRun(def);
     const insert = vi.spyOn(ql, 'insert');
     const update = vi.spyOn(ql, 'update');
     const remove = vi.spyOn(ql, 'delete');
@@ -193,7 +307,7 @@ function harness(ql: ObjectQL, automation: AutomationEngine) {
   async function codeAsAFlowReadsIt(runAs: RunAs, node: Record<string, unknown>, trigger: Record<string, unknown>) {
     const name = `pin_code_${seq++}`;
     captured.length = 0;
-    automation.registerFlow(name, {
+    await registerForRun({
       name, label: name, type: 'autolaunched', runAs,
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
@@ -208,7 +322,7 @@ function harness(ql: ObjectQL, automation: AutomationEngine) {
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [{ id: 'e1', source: 'start', target: 'guarded' }, { id: 'e2', source: 'guarded', target: 'end' }],
-    } as any);
+    } as { name: string });
     await automation.execute(name, { ...trigger } as any);
     expect(captured, 'the catch region must have run once').toHaveLength(1);
     return captured[0]!;

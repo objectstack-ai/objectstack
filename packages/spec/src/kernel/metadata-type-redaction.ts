@@ -49,7 +49,12 @@
 import { redactDatasourceConfig } from '../data/datasource-credential-redaction';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 // [#21565] The family set and its predicate: declared in a leaf, re-exported below.
-import { STORED_METADATA_BODY_OBJECTS, isStoredMetadataBodyObject } from './stored-metadata-body-objects';
+// [#21654] So is the one prescription a refusal of the family's reach ends on.
+import {
+  STORED_METADATA_BODY_OBJECTS,
+  STORED_METADATA_BODY_PRESCRIPTION,
+  isStoredMetadataBodyObject,
+} from './stored-metadata-body-objects';
 
 /** What a {@link MetadataTypeRedactor} returns: the servable item, and what was withheld. */
 export interface MetadataRedactionResult {
@@ -162,9 +167,11 @@ export function listMetadataTypeRedactorTypes(): string[] {
  * importer of this module and of `@objectstack/spec/kernel` receives the very
  * same objects. [#21565] They moved so that `data/hook.zod.ts` can judge a hook
  * target by the predicate without importing this module's closure; the leaf's
- * header says why. ⛔ Never restate the list here.
+ * header says why. ⛔ Never restate the list here. [#21654] The prescription a
+ * refusal of the family's reach ends on is re-exported beside them, for the
+ * same reason: one sentence, imported wherever it is said.
  */
-export { STORED_METADATA_BODY_OBJECTS, isStoredMetadataBodyObject };
+export { STORED_METADATA_BODY_OBJECTS, STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject };
 
 /** The column holding the serialized body, on every {@link STORED_METADATA_BODY_OBJECTS} member. */
 export const STORED_METADATA_BODY_COLUMN = 'metadata';

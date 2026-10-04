@@ -176,7 +176,8 @@ export const CloseStaleTasksJob = defineJob({
   package whose enabled job has no `body`, or a `body` that does not bind (an
   expression body, or one carrying `body.timeoutMs`), with `422 VALIDATION_ERROR`
   and the remedy: give the job a valid `body`, or boot it with `os start --artifact`.
-  A [`pull`](#pulling-a-mapping) job is data too, and is not refused.
+  A [`pull`](#pulling-a-mapping) job is data too: it installs when its `pull`
+  binds, and is refused with the same `422` when it does not.
   Uninstalling a package stops its scheduled jobs at once, and a reinstall whose
   new version drops a job stops that job.
 </Callout>
@@ -249,7 +250,10 @@ export const OrdersPullJob = defineJob({
 - **Checked when you build.** `defineStack` — and so `os validate` — refuses a
   `pull` that names a mapping the stack does not declare, or one with no
   `connectorSource`. The binder checks the same reference against the artifact
-  before it schedules the job, on every door.
+  before it schedules the job, on every door, and `os package install` refuses a
+  package whose enabled job's `pull` fails that check, with `422 VALIDATION_ERROR`
+  naming the job and the reason. A package an earlier version installed still
+  loads after a restart; such a job of it is not scheduled, and a warning names it.
 - **Each run is one pull.** It calls the connector's read action once, reads one
   response, and writes the records through the import runner with the mapping's
   `mode` and `upsertKey` — see
