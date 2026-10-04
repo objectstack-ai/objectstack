@@ -52,7 +52,7 @@ import {
 // assert the strongest set this surface really has: refusal, the issue `code`,
 // the `path` naming WHICH site refused, and the prescription text (#5240:
 // where the wording is the contract, pin the wording).
-describe("[#11846] RuntimeMode 'preview' retirement", () => {
+describe("RuntimeMode 'preview' retirement", () => {
   it("no longer offers 'preview' as a mode", () => {
     expect(RuntimeMode.options).toEqual([
       'development',
@@ -107,7 +107,7 @@ describe("[#11846] RuntimeMode 'preview' retirement", () => {
   });
 });
 
-describe('[#11846] KernelContext.previewMode retirement', () => {
+describe('KernelContext.previewMode retirement', () => {
   const baseContext = {
     instanceId: '550e8400-e29b-41d4-a716-446655440000',
     mode: 'production',
@@ -170,7 +170,7 @@ describe('[#11846] KernelContext.previewMode retirement', () => {
   });
 });
 
-describe('[#11846] kernel/PreviewModeConfig def retirement', () => {
+describe('kernel/PreviewModeConfig def retirement', () => {
   /** The 3 names the retired def exported (1 schema const + 2 types). */
   const RETIRED_NAMES = [
     'PreviewModeConfigSchema',
@@ -190,7 +190,7 @@ describe('[#11846] kernel/PreviewModeConfig def retirement', () => {
 
     // ── ABSENCE (every entry, not just ./kernel) ──────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #11846`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────

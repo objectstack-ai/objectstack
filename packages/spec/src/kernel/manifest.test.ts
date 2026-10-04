@@ -381,7 +381,7 @@ describe('ManifestSchema', () => {
   });
 });
 
-describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, not deleted)', () => {
+describe('contributes dead-member retirement (ADR-0049 — tombstoned, not deleted)', () => {
   // Nine members had zero readers monorepo-wide (the controlled census commit be21955ba records,
   // completed on cloud 2026-08-24). When they were retired `ManifestSchema` and
   // the `contributes` object were NOT `.strict()`, so a plain deletion would
@@ -417,7 +417,7 @@ describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, n
     );
   });
 
-  it('still parses the surviving `kinds` member — `routes` retired separately (#10726)', () => {
+  it('still parses the surviving `kinds` member — `routes` retired separately', () => {
     const parsed = ManifestSchema.parse({
       ...base,
       contributes: {
@@ -434,7 +434,7 @@ describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, n
   });
 });
 
-describe('contributes.routes retirement (#10726, ADR-0049 — maintainer-ruled Option B 2026-08-22)', () => {
+describe('contributes.routes retirement (ADR-0049 — removed for the `http.server` mount, maintainer-ruled 2026-08-22)', () => {
   // The one `contributes` member split onto its own card: zero readers like
   // its nine siblings retired by commit be21955ba (that commit's controlled census, cloud leg closed
   // clean on 2026-08-24), but four published surfaces taught it as THE way to
@@ -472,7 +472,7 @@ describe('contributes.routes retirement (#10726, ADR-0049 — maintainer-ruled O
   });
 });
 
-describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-ruled 2026-08-24)', () => {
+describe('contributes.kinds[].globs retirement (ADR-0049 — maintainer-ruled 2026-08-24)', () => {
   // The sub-field promised glob-driven file-type discovery that actually runs
   // off the metadata type registry's `filePatterns` — which `contributes.kinds`
   // does not extend — so an authored `globs` was stored, served back, and never
@@ -511,7 +511,7 @@ describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-
   });
 });
 
-describe('dead-container retirement (#11332, ADR-0049 — tombstoned, not deleted)', () => {
+describe('dead-container retirement (ADR-0049 — tombstoned, not deleted)', () => {
   // Three top-level manifest containers had ZERO reads of the container itself
   // monorepo-wide (objectstack + objectui + cloud, controlled census), which
   // settles every key beneath them at once — a key cannot be read if the
@@ -667,7 +667,7 @@ describe('manifest.id — reverse-domain identifier', () => {
     expect(ManifestSchema.safeParse({ ...legal('com.example.app'), namespace: 'my_app' }).success).toBe(true);
   });
 
-  describe('the refusal carries a remedy (#4001)', () => {
+  describe('the refusal carries a remedy', () => {
     const refusalFor = (id: string) => {
       const r = ManifestSchema.safeParse(legal(id));
       expect(r.success).toBe(false);

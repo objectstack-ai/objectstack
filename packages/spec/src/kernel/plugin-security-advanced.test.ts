@@ -314,7 +314,7 @@ describe('Plugin Security Advanced Schemas', () => {
 // (ms, seconds, days, hours) and none said so in its name. All four old
 // spellings are `retiredKey()` tombstones inside live blocks, so the refusal
 // carries the RENAME and each block's other members keep parsing beside it.
-describe('Plugin security durations carry their unit (#15678)', () => {
+describe('Plugin security durations carry their unit', () => {
   it('SandboxConfig REFUSES the retired `process.timeout` with the rename in the message', () => {
     const result = SandboxConfigSchema.safeParse({ process: { timeout: 30000 } });
     expect(result.success).toBe(false);
@@ -410,7 +410,7 @@ describe('Plugin security durations carry their unit (#15678)', () => {
 // slot now pins the OPPOSITE fact: the bare spelling is refused with the rename
 // prescription, and the suffixed spelling parses at the same magnitude. The
 // guard succeeded by failing — ⛔ it was not deleted, weakened or skipped.
-describe('RuntimeConfig.resourceLimits.timeout → timeoutMs (#15939 ruling A, #14478)', () => {
+describe('RuntimeConfig.resourceLimits.timeout → timeoutMs (its unit was named in JSDoc only)', () => {
   it('REFUSES the retired `resourceLimits.timeout` with the rename to `timeoutMs`', () => {
     const result = RuntimeConfigSchema.safeParse({
       engine: 'process' as const,
@@ -477,7 +477,7 @@ describe('RuntimeConfig.resourceLimits.timeout → timeoutMs (#15939 ruling A, #
 // ⚠️ No gate can catch this key losing its marker, because a marker's absence is
 // how an undeclared key looks — the census simply stops admitting it. This pin is
 // the only guard, exactly as the twin's pin in `system/object-storage.test.ts` is.
-describe('KernelSecurityPolicy.cors.maxAge declares seconds by mirror (#18124)', () => {
+describe('KernelSecurityPolicy.cors.maxAge declares seconds by mirror', () => {
   const policy = {
     cors: {
       allowedOrigins: ['https://app.example.com'],

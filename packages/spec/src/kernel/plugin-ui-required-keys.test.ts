@@ -64,7 +64,7 @@ function issueShapes(input: unknown): Array<[string, string]> {
   return result.error.issues.map((i): [string, string] => [i.code, i.path.join('.')]);
 }
 
-describe('A — a `ui` plugin without `staticPath` or `slug` fails PluginSchema.safeParse (#16334)', () => {
+describe('A — a `ui` plugin without `staticPath` or `slug` fails PluginSchema.safeParse', () => {
   it('missing both: refused with one issue per key, in declaration order, path naming the key', () => {
     const keyless = without(without(UI_COMPLETE, 'staticPath'), 'slug');
     expect(keyless).toEqual({ type: 'ui' });
@@ -140,7 +140,7 @@ describe('C — SCOPE: only `type: \'ui\'` owes the two keys', () => {
   });
 });
 
-describe('D — the code is a member of the closed ADR-0112 vocabulary (#16449)', () => {
+describe('D — the code is a member of the closed ADR-0112 vocabulary', () => {
   it('PLUGIN_UI_REQUIRED_KEY_MISSING parses against ErrorCode and is registered under @objectstack/spec', () => {
     // The #16404 ruling: a code that ships in `dist` is the published face,
     // door or no door. This one rides a zod issue and a boot refusal's

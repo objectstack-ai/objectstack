@@ -135,7 +135,7 @@ describe('EventSchema', () => {
   // This pin holds the WIDENING: spellings the retired grammar refused
   // (PascalCase, kebab-case, leading digit/dot) now parse — a regression to a
   // schema-level grammar here should be a deliberate ruling, not drift.
-  it('accepts event names as plain strings — the dot-notation grammar is retired (#13613)', () => {
+  it('accepts event names as plain strings — the dot-notation grammar is retired', () => {
     const names = [
       // conventional dot-notation spellings (valid before and after)
       'user.created',
@@ -823,7 +823,7 @@ describe('Enhanced Event Handler', () => {
 // payload) rather than a bare unrecognized-key error, and the value survives at
 // the same magnitude. Asserting the message, not just `.toThrow()`: a bare
 // throw stays green when the schema throws for some unrelated reason.
-describe('Event bus retention windows carry their unit (#15678)', () => {
+describe('Event bus retention windows carry their unit', () => {
   it.each([
     ['EventPersistence', EventPersistenceSchema, { enabled: true }],
     ['EventSourcingConfig', EventSourcingConfigSchema, {}],

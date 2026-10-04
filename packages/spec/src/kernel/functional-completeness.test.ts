@@ -39,7 +39,7 @@ const only = (findings: ReturnType<typeof checkFieldCompleteness>) => {
 };
 
 describe('checkFieldCompleteness — the verified inert shapes go red', () => {
-  it('flags a bare summary as an ERROR (the cloud#687 founding case)', () => {
+  it('flags a bare summary as an ERROR (the founding case: a roll-up that reads 0 forever)', () => {
     const f = only(checkFieldCompleteness({ type: 'summary' }));
     expect(f.rule).toBe(FIELD_SUMMARY_WITHOUT_OPERATIONS);
     expect(f.severity).toBe('error');
@@ -158,7 +158,7 @@ describe('checkViewCompleteness — layout bindings', () => {
     expect(checkViewCompleteness({ type: 'tree', tree: { parentField: 'parent' } })).toEqual([]);
   });
 
-  it('the calendar body describes the REFUSAL, not a deleted literal fallback (#17445)', () => {
+  it('the calendar body describes the REFUSAL, not a deleted literal fallback', () => {
     // Re-measured on objectui `main` at `0cf2d6644` (2026-09-21), both halves
     // of the path: `ListView.tsx`'s `case 'calendar'` restates only declared
     // bindings — objectui#7029 deleted the `startDateField || 'start_date'` /
@@ -199,7 +199,7 @@ describe('checkViewCompleteness — layout bindings', () => {
       keys: ['timeline.startDateField', 'timeline.titleField'] },
     { type: 'map', component: 'ObjectMap.tsx', screen: 'Map configuration required',
       keys: ['map.locationField', 'map.latitudeField', 'map.longitudeField'] },
-  ])('the $type body describes the REFUSAL, not a deleted literal fallback (#19630)', ({ type, component, screen, keys }) => {
+  ])('the $type body describes the REFUSAL, not a deleted literal fallback', ({ type, component, screen, keys }) => {
     const f = only(checkViewCompleteness({ type }) as never);
     expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
     expect(f.message).not.toContain('falls back to literal default field names');
@@ -429,7 +429,7 @@ describe('checkViewCompleteness — rowColor without a colour map (the parse-cle
   // Pinning the literal string would rot. What is pinned instead is the
   // PROPERTY that made it wrong: the value the prescription suggests is fed
   // back through this module, and must survive it.
-  it('hands the author a prescription this module itself accepts (#18791)', () => {
+  it('hands the author a prescription this module itself accepts', () => {
     const f = only(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }) as never);
     const suggested = /'<field_value>':\s*'([^']+)'/.exec(f.fix)?.[1];
     expect(suggested, `no suggested colour value in the prescription: ${f.fix}`).toBeDefined();
@@ -440,7 +440,7 @@ describe('checkViewCompleteness — rowColor without a colour map (the parse-cle
     ).toEqual([]);
   });
 
-  it('⛔ names no hex placeholder anywhere in the prescription (#18791)', () => {
+  it('⛔ names no hex placeholder anywhere in the prescription', () => {
     // The direct, dumb half of the pin above: whatever the wording becomes, it
     // must not put a hex back in front of an author. `token` is refused for the
     // same reason — it named nothing an author could look up, and stood beside
@@ -519,7 +519,7 @@ describe('checkViewCompleteness — rowColor without a colour map (the parse-cle
  * app-local resolvability arm went red naming all four, and the presence arm
  * stayed green.
  */
-describe('checkViewCompleteness — rowColor values the renderer resolves to nothing (#18791)', () => {
+describe('checkViewCompleteness — rowColor values the renderer resolves to nothing', () => {
   const grid = (colors: Record<string, unknown>) =>
     checkViewCompleteness({ type: 'grid', rowColor: { field: 'priority', colors } });
 

@@ -112,7 +112,7 @@ describe('MetadataManagerConfig', () => {
 // (nothing read the outer block), so `cache.ttl` now prescribes deletion — an
 // author upgrading from a published 17.x sees ONE hop, never a rename to a key
 // that is itself a tombstone.
-describe('cache.ttl → deleted (absorbed by #15624), cache.databaseLoader.ttl → ttlMs (#14478)', () => {
+describe('cache.ttl → deleted (the unread outer block is retired), cache.databaseLoader.ttl → ttlMs', () => {
   it('REFUSES the outer `cache.ttl` with a DELETION naming the live `cache.databaseLoader.ttlMs` — not a rename to the retired `ttlSeconds`', () => {
     const result = MetadataManagerConfigSchema.safeParse({ cache: { ttl: 3600 } });
     expect(result.success).toBe(false);
@@ -158,7 +158,7 @@ describe('cache.ttl → deleted (absorbed by #15624), cache.databaseLoader.ttl �
 // and nothing else to `new DatabaseLoader({ cache })`. All three are retiredKey
 // tombstones; the prescription names the live nested half. Nothing in the
 // runtime changed — the pins below are about the ACCEPT face only.
-describe('cache.{enabled, ttlSeconds, maxSize} are retired; cache.databaseLoader is the only live half (#15624)', () => {
+describe('cache.{enabled, ttlSeconds, maxSize} are retired; cache.databaseLoader is the only live half', () => {
   const RETIRED = [
     { key: 'enabled', value: false, live: /`cache\.databaseLoader`; its `enabled` is the switch that is honoured/s },
     { key: 'ttlSeconds', value: 60, live: /`cache\.databaseLoader\.ttlMs` \(milliseconds, default 60000\)/s },

@@ -30,7 +30,7 @@ describe('PLATFORM_CAPABILITY_TOKENS', () => {
     }
   });
 
-  it('contains no camelCase legacy spellings (aliases removed, #3308)', () => {
+  it('contains no camelCase legacy spellings (aliases removed)', () => {
     for (const legacy of ['aiStudio', 'aiSeat']) {
       expect(PLATFORM_CAPABILITY_TOKENS).not.toContain(legacy);
     }
@@ -44,7 +44,7 @@ describe('isKnownPlatformCapability', () => {
     expect(isKnownPlatformCapability('governance')).toBe(true);
   });
 
-  it('rejects the removed camelCase aliases and typos (no canonicalization, #3308)', () => {
+  it('rejects the removed camelCase aliases and typos (no canonicalization)', () => {
     expect(isKnownPlatformCapability('aiStudio')).toBe(false);
     expect(isKnownPlatformCapability('aiSeat')).toBe(false);
     expect(isKnownPlatformCapability('automations')).toBe(false);
@@ -77,7 +77,7 @@ describe('PLATFORM_CAPABILITY_PROVIDERS', () => {
 // cross-registry drift pins (edition agreement with the token-keyed map, the
 // serve-resolver exclusions) live in the CLI's
 // `serve-capability-vocabulary.test.ts` beside the map's own 1:1 pins.
-describe('PLATFORM_PLUGIN_WIRED_RUNTIMES (#11263)', () => {
+describe('PLATFORM_PLUGIN_WIRED_RUNTIMES — runtimes wired by plugins[], not by a token', () => {
   it('is frozen and non-empty', () => {
     expect(Object.isFrozen(PLATFORM_PLUGIN_WIRED_RUNTIMES)).toBe(true);
     expect(Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES).length).toBeGreaterThan(0);
@@ -118,7 +118,7 @@ describe('PLATFORM_PLUGIN_WIRED_RUNTIMES (#11263)', () => {
   });
 });
 
-describe('classifyRequiredCapability (#3366)', () => {
+describe('classifyRequiredCapability — preflight for an installable provider in this edition', () => {
   const allInstalled = () => true;
   const noneInstalled = () => false;
 
@@ -313,7 +313,7 @@ describe('PLATFORM_ALWAYS_ON_CAPABILITIES', () => {
  * ("a token advertising a store that is not there"), and the reason the split
  * exists rather than a rename.
  */
-describe("package-registry carve-out (#17676 ruling A')", () => {
+describe("package-registry carve-out — its persistence is always-on core, split from `marketplace`", () => {
   it('is its own vocabulary token — the persistence is named, not spelled `marketplace`', () => {
     expect(PLATFORM_CAPABILITY_TOKENS).toContain('package-registry');
     expect(isKnownPlatformCapability('package-registry')).toBe(true);

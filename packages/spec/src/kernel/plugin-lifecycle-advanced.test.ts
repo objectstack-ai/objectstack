@@ -81,7 +81,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     } as const;
 
     for (const [key, value] of Object.entries(RETIRED_RESTART_KEYS)) {
-      it(`refuses ${key} with the retirement prescription (#12032)`, () => {
+      it(`refuses ${key} with the retirement prescription`, () => {
         const result = PluginHealthCheckSchema.safeParse(
           { [key]: value } as Record<string, unknown>
         );
@@ -272,7 +272,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       expect(result).not.toHaveProperty('distributedConfig');
     });
 
-    it('refuses watchPatterns with the retirement prescription (#12428)', () => {
+    it('refuses watchPatterns with the retirement prescription', () => {
       // Unlike the distributedConfig pin above, this one asserts a REFUSAL, not
       // a strip: `watchPatterns` is `retiredKey()`-tombstoned. A bare deletion
       // was tried first and `gen:schema` gate (a) refused it — this object is
@@ -328,7 +328,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
 // number lives in the key NAME. Both old spellings are `retiredKey()`
 // tombstones inside the live `metrics` block, so the refusal carries the RENAME
 // and the block's other members must keep parsing beside it.
-describe('PluginHealthReport metrics durations carry their unit (#15678)', () => {
+describe('PluginHealthReport metrics durations carry their unit', () => {
   const base = { status: 'healthy' as const, timestamp: new Date().toISOString() };
 
   it.each([
@@ -375,7 +375,7 @@ describe('PluginHealthReport metrics durations carry their unit (#15678)', () =>
 // value carried in milliseconds. All three old spellings are `retiredKey()`
 // tombstones — neither object is `.strict()`, so a bare deletion would be a
 // silent strip.
-describe('plugin lifecycle durations carry their unit (#17780, #14478)', () => {
+describe('plugin lifecycle durations carry their unit', () => {
   it.each([
     ['interval', 'intervalMs', 60000],
     ['timeout', 'timeoutMs', 10000],
@@ -435,7 +435,7 @@ describe('plugin lifecycle durations carry their unit (#17780, #14478)', () => {
 // `DurationMs` is `z.number().int().nonnegative()` and this key declared
 // `z.number().int().min(0)`, so the accepted set is UNCHANGED — the pins below
 // are about what the declaration now refuses loudly at the authoring site.
-describe('HotReloadConfig.shutdownTimeout declares milliseconds (#18124)', () => {
+describe('HotReloadConfig.shutdownTimeout declares milliseconds', () => {
   it('refuses a fractional millisecond count', () => {
     const result = HotReloadConfigSchema.safeParse({ shutdownTimeout: 30000.5 });
     expect(result.success).toBe(false);

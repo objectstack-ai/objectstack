@@ -98,7 +98,7 @@ describe('`api` is a declared metadata kind', () => {
     expect(getMetadataTypeSchema('api')).toBeDefined();
   });
 
-  it('resolves to ApiEndpointSchema — the one endpoint shape (#4939 convergence)', () => {
+  it('resolves to ApiEndpointSchema — the one endpoint shape', () => {
     // Identity, not "some schema": `packages/spec/src/api` deliberately retired
     // its rival endpoint shapes down to this one, and a binding to a lookalike
     // would silently reintroduce the second dialect that retirement removed.
@@ -131,11 +131,11 @@ describe('`api` registry flags — the authorization verdict, written down', () 
   // implementation first, declaration second. Until then these pins are what
   // makes a silent re-flip loud.
 
-  it('declares `allowRuntimeCreate: false` — the runtime create door is retired (#5488)', () => {
+  it('declares `allowRuntimeCreate: false` — the runtime create door is retired', () => {
     expect(apiEntry()!.allowRuntimeCreate).toBe(false);
   });
 
-  it('IS code-only: no runtime write channel is declared (#5086 refuses the inlet)', () => {
+  it('IS code-only: no runtime write channel is declared (PUT /meta refuses the inlet)', () => {
     // The exact predicate #5086 (PR #5263) refuses on, spelled as the gate
     // spells it. `true` here is what makes `PUT /api/v1/meta/api/:name` answer
     // 403 `NOT_CREATABLE` instead of 200 "Saved" — in draft mode too, since the
@@ -189,7 +189,7 @@ describe('the declaration shape door (artifact / publish route — see the heade
     }
   });
 
-  it('a headless body parses at the shape door and is refused by the GATE, naming the missing half (#10338)', () => {
+  it('a headless body parses at the shape door and is refused by the GATE, naming the missing half', () => {
     // Until commit d2619fd0c the VOCABULARY refused this body for its missing `target`.
     // That requirement was a dead letter for `object_operation` — nothing
     // reads `target` for that type — so the key is optional now, and "no

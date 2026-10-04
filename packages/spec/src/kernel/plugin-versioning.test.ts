@@ -498,7 +498,7 @@ describe('Plugin Versioning Schemas', () => {
 // number lives in the key NAME. The old spelling is a `retiredKey()` tombstone
 // inside the live `rollout` block, so the refusal carries the RENAME and the
 // block's unit-less `percentage` must keep parsing beside it.
-describe('MultiVersionSupport rollout duration carries its unit (#15678)', () => {
+describe('MultiVersionSupport rollout duration carries its unit', () => {
   it('REFUSES the retired `rollout.duration` with the rename in the message', () => {
     const result = MultiVersionSupportSchema.safeParse({
       rollout: { strategy: 'canary' as const, duration: 3600000 },

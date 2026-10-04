@@ -280,7 +280,7 @@ const UNDECLARED_ENVELOPE_UNREGISTERED = new Set<string>([]);
  * `connector` is not, and choosing between them is #2657's decision to make, not
  * this suite's.
  */
-describe('#6931 — the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
+describe('the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
   const bound = listUnregisteredKindSchemaTypes();
 
   it('is a non-empty set — guards the derivation returning nothing', () => {
@@ -289,7 +289,7 @@ describe('#6931 — the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS
     expect(bound.length).toBeGreaterThan(0);
   });
 
-  it('stays OUT of the registered-kind set — the #6245 fence, pinned', () => {
+  it('stays OUT of the registered-kind set — the bound-but-unregistered fence, pinned', () => {
     // The scope fence, made mechanical: enrollment here must never leak into
     // `listMetadataTypeSchemaTypes()`, which is what would attach the KIND
     // obligations #2657 has not decided to attach. Should #2657 later resolve to
@@ -419,7 +419,7 @@ function arrayElementOf(schema: unknown, depth = 0): unknown {
   }
 }
 
-describe('#10194 — each bound entry IS its stack collection\'s schema', () => {
+describe('each bound entry IS its stack collection\'s schema', () => {
   it('the mapping table covers exactly the bound set', () => {
     expect(Object.keys(STACK_COLLECTION_OF).sort()).toEqual(listUnregisteredKindSchemaTypes());
   });
@@ -578,7 +578,7 @@ function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null 
   }
 }
 
-describe('#4001 — registered-type closure is derived, not tallied', () => {
+describe('registered-type closure is derived, not tallied', () => {
   const types = listMetadataTypeSchemaTypes();
 
   it.each(types.filter((t) => !STILL_STRIP.has(t)))('%s REJECTS unknown keys', (type) => {

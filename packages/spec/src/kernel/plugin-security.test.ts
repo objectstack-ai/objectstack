@@ -344,7 +344,7 @@ describe('Plugin Security Protocol', () => {
 // #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
 // number lives in the key NAME. The old spelling is a `retiredKey()` tombstone,
 // so the refusal carries the RENAME rather than a bare unrecognized-key error.
-describe('PackageDependencyResolutionResult.resolvedIn carries its unit (#15678)', () => {
+describe('PackageDependencyResolutionResult.resolvedIn carries its unit', () => {
   const base = { status: 'success' as const, installOrder: ['com.acme.app'] };
 
   it('REFUSES the retired `resolvedIn` with the rename in the message', () => {

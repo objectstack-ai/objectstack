@@ -284,7 +284,7 @@ describe('RollbackPackageResponseSchema', () => {
 // #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
 // number lives in the key NAME. The old spelling is a `retiredKey()` tombstone,
 // so the refusal carries the RENAME rather than a bare unrecognized-key error.
-describe('UpgradePlan.estimatedDuration carries its unit (#15678)', () => {
+describe('UpgradePlan.estimatedDuration carries its unit', () => {
   const basePlan = {
     packageId: 'com.acme.crm',
     fromVersion: '1.0.0',

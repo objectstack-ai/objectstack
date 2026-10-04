@@ -63,7 +63,7 @@ const DECLARATION = {
   packageId: 'com.acme.billing',
 };
 
-describe('#5961 — capability is a registered metadata kind', () => {
+describe('capability is a registered metadata kind', () => {
   // ── the three registries that were missing it ─────────────────────────
 
   it('is a member of the kind enum', () => {

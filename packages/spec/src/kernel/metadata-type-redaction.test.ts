@@ -157,7 +157,7 @@ describe('FAIL-CLOSED: the datasource redactor is a BUILT-IN, not a plugin regis
   });
 });
 
-describe('absence is distinguishable from "nothing to redact" (#8154 consumer contract)', () => {
+describe('absence is distinguishable from "nothing to redact" (the consumer contract of the per-type redaction hook)', () => {
   it('a type with no redactor answers undefined — a fact, not a failure', () => {
     expect(getMetadataTypeRedactor('object')).toBeUndefined();
     expect(getMetadataTypeRedactor('view')).toBeUndefined();
@@ -172,7 +172,7 @@ describe('absence is distinguishable from "nothing to redact" (#8154 consumer co
   });
 });
 
-describe('stored metadata ROWS — the family-wide seam (#21120)', () => {
+describe('stored metadata ROWS — the family-wide seam every exit routes through', () => {
   // A datasource body as it is stored in sys_metadata.metadata: serialized JSON
   // carrying credential material the datasource redactor withholds.
   const storedDatasourceBody = () =>
