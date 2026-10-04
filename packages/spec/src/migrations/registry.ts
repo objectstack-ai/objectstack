@@ -5593,7 +5593,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'flow-write-node-stored-metadata-target-refused',
-    order: 71,
+    order: 74,
     text:
       'It also refuses, at parse, a flow `create_record`, `update_record` or `delete_record` node whose '
       + '`objectName` is the string `sys_metadata` or `sys_metadata_history` (the maintainer ruling of '
