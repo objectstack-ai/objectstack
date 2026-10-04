@@ -1534,9 +1534,18 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/driver-sqlite-wasm':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sqlite-wasm
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../plugin-security
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../../rest

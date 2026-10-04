@@ -26,7 +26,10 @@
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-security": "workspace:*",
     "@objectstack/rest": "workspace:*",
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
