@@ -246,8 +246,8 @@ describe('#14147 — the exemptions, each one load-bearing', () => {
   };
 
   it('[#21682] a write middleware’s fill is not caller-supplied either: it lands, and nothing is reported', async () => {
-    const o = await observeInsert({ title: 'T' }, { context: { userId: 'u1' } }, fillAbsent('completed_at', 'stamp'));
-    expect(o.created?.completed_at, 'the platform’s value reaches the driver').toBe('stamp');
+    const o = await observeInsert({ title: 'T' }, { context: { userId: 'u1' } }, fillAbsent('completed_at', '2026-01-01T00:00:00Z'));
+    expect(o.created?.completed_at, 'the platform’s value reaches the driver').toBe('2026-01-01T00:00:00Z');
     expect(o.dropped, 'droppedFields names only keys the caller sent').toEqual([]);
   });
 
