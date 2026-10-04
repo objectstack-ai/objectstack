@@ -16,21 +16,24 @@
  * of the family's rule:
  *
  *  - a sandboxed body's `ctx.api.object(...)` (`sandbox/body-runner.ts`,
- *    `buildSandboxApi`): action and hook bodies alike, and with them every
- *    copy a body makes of what it read, since a body can copy only what it
- *    was served;
+ *    `buildSandboxApi`): hook, action and job bodies alike. [#21594] A body is
+ *    no longer served here at all: for an app-authored body the family is
+ *    reached through the metadata API only, so its API refuses every read and
+ *    every write of a family table before it runs
+ *    ({@link refuseStoredMetadataBodyReads}, {@link refuseStoredMetadataBodyWrites});
  *  - an action handler's `ctx.api` (`action-execution.ts`, `buildActionApi`):
- *    the same scoped context an action body receives, handed to host code
- *    handlers too;
+ *    host code registered with `registerAction`. It is also the source an
+ *    action body's API is built over, and the body's own layers refuse a
+ *    family read or write before this seam is reached;
  *  - an action handler's `ctx.engine.find` (`action-execution.ts`,
- *    `buildActionEngineFacade`).
+ *    `buildActionEngineFacade`), host code only.
  *
  * The answers all run elevated (`isSystem: true`), so the engine cannot tell
  * them from the platform's own internal readers of the family, which need the
  * stored form. So the family's rule is applied HERE, at the reader-context
  * seam, and never at the engine.
  *
- * ## Three things this seam does to a family READ, consuming the door's own code
+ * ## What this seam does to a host handler's family READ, consuming the door's own code
  *
  * 1. **Refuse the EVALUATE shapes** ({@link refuseOrNarrowStoredMetadataEvaluate}),
  *    through the generic data door's OWN refusal predicates
@@ -44,8 +47,8 @@
  *    cross-field `{ $field }` comparand, at any depth), and a default `$search`
  *    is NARROWED by the door's ONE narrowing (`narrowStoredMetadataSearch`) —
  *    the body and hash columns removed, judged field by field by the door's own
- *    search predicate — rather than refused, so a body may still search a
- *    family table by `name` exactly as the door serves it; a search that would
+ *    search predicate — rather than refused, so a host handler may still search
+ *    a family table by `name` exactly as the door serves it; a search that would
  *    scan nothing after the removal is refused. A `count` with such a predicate
  *    is an oracle too, so it is guarded the same way and runs the guarded query
  *    (it serves no row, so only the refusal applies to it).
@@ -61,24 +64,33 @@
  *    projected / keyed way a read is, since a returned row is a serve. That
  *    serve is for the contexts that may still write here (a host code
  *    handler's `ctx.api`).
- * 4. **Refuse a BODY's write** ({@link refuseStoredMetadataBodyWrites}, #21520):
- *    a sandboxed hook or action body may not write the family's tables at all —
- *    the metadata protocol is their only writer for an app-authored body — so
- *    the API a body holds refuses every family-table write before it runs. A
- *    separate layer, applied only where a body gets its API, because the served
- *    repository is also a host handler's, and the boundary refuses bodies only.
+ *
+ * ## The body layers: a BODY may not touch the family
+ *
+ * Applied only where a body gets its API (`buildSandboxApi`), because the
+ * served repository is also a host handler's, and the boundary refuses bodies
+ * only. Each refuses before the underlying verb is called, with the boundary's
+ * `PERMISSION_DENIED` / 403 and a prescription naming the metadata API
+ * (`stored-metadata-body-boundary.ts`):
+ *
+ * - **Refuse a BODY's write** ({@link refuseStoredMetadataBodyWrites}, #21520):
+ *   every family-table write, and every verb not known to be a read.
+ * - **Refuse a BODY's read** ({@link refuseStoredMetadataBodyReads}, #21594):
+ *   every read verb this seam serves (`find`, `findOne`, `count`,
+ *   `aggregate`), and with them every evaluate and search shape a read can
+ *   carry, refused alike whatever the query names.
  *
  * ## What it does not do
  *
  * It judges the object by name with the family's own predicate
  * (`isStoredMetadataBodyObject`), exactly as the door does. The engine's own
- * action verb (`ScopedRepo.execute`) is never reached by a served body — the
- * sandbox bridge exposes no `execute`, `sudo` or `withRunAs` — so this seam
- * leaves it untouched (the reach is recorded on #21454, not closed here).
+ * action verb (`ScopedRepo.execute`) is never reached by a body — the sandbox
+ * bridge exposes no `execute`, `sudo` or `withRunAs` — so this seam leaves it
+ * untouched (the reach is recorded on #21454, not closed here).
  */
 
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
-import { storedMetadataBodyWriteRefusal } from './stored-metadata-body-boundary.js';
+import { storedMetadataBodyReadRefusal, storedMetadataBodyWriteRefusal } from './stored-metadata-body-boundary.js';
 import {
   collectStoredMetadataFilterFields,
   ephemeralStoredHashDigest,
@@ -261,20 +273,21 @@ function serveRepository(objectName: string, repo: unknown, engine: unknown): un
 }
 
 /**
- * The scoped data API (`ctx.api`) a reader context hands to a body or a
- * handler, with every read of a family object served through
+ * The scoped data API (`ctx.api`) an action handler's reader context hands to
+ * host code, with every read of a family object served through
  * {@link serveStoredMetadataRead}, every evaluate shape refused, and every
  * write's RETURN served. Everything else is the same object, by delegation.
+ * (A sandboxed body's API is never served here: its body layers refuse a
+ * family read or write first.)
  *
  * The contexts the API can derive are served the same way, so no route around
  * the seam opens: `object(name)`, `sudo()`, `withRunAs(...)`, the context a
  * `transaction(fn)` callback receives, and the `ctx` `beginTransaction()`
- * returns (the sandbox's `ctx.api.transaction` reads through that one).
+ * returns.
  *
- * Idempotent: an API already served through this seam is returned as is, so a
- * body whose API was served at the action door is not served twice at the
- * sandbox (a keyed hash keyed again would no longer be the door's form).
- * A value that is not an object is returned as is.
+ * Idempotent: an API already served through this seam is returned as is (a
+ * keyed hash keyed again would no longer be the door's form). A value that is
+ * not an object is returned as is.
  */
 export function serveStoredMetadataReadsThrough<T>(api: T, engine: unknown): T {
   return deriveThroughSeam(api, SERVED_THROUGH_SEAM, (name, repo) => serveRepository(name, repo, engine));
@@ -283,13 +296,18 @@ export function serveStoredMetadataReadsThrough<T>(api: T, engine: unknown): T {
 /** Marks a scoped context whose family-table writes are already refused for a body. */
 const BODY_WRITES_REFUSED = Symbol.for('objectstack.runtime.storedMetadataBodyWritesRefused');
 
-/** The repository verbs a body may still call on a family table: the reads this seam serves. */
+/**
+ * The read verbs of a family table: the reads this seam serves a host handler.
+ * The body WRITE layer passes exactly these to the layer beneath it, and the
+ * body READ layer refuses exactly these.
+ */
 const BODY_FAMILY_READS: ReadonlySet<PropertyKey> = new Set([...ROW_SERVING_READS, COUNT_READ]);
 
 /**
- * A family table's repository as a sandboxed BODY holds it: the served reads
- * pass through, and every other verb — each write alias, and anything not
- * known to be a read — is refused before it runs, with the boundary's
+ * A family table's repository as a sandboxed BODY holds it, write half: the
+ * read verbs pass to the layer beneath (the body read layer, which refuses
+ * them), and every other verb — each write alias, and anything not known to be
+ * a read — is refused before it runs, with the boundary's
  * `PERMISSION_DENIED` / 403 and the metadata-API prescription
  * ({@link storedMetadataBodyWriteRefusal}). Fail-closed by construction: a verb
  * added to the repository later is refused here until it is named a read.
@@ -312,24 +330,70 @@ function refuseBodyRepositoryWrites(objectName: string, repo: unknown): unknown 
 }
 
 /**
- * [#21520, ruling A] The scoped API a sandboxed BODY (a hook body or an action
+ * [#21520, ruling A] The scoped API a sandboxed BODY (a hook, action or job
  * body) holds, with every write of a stored-metadata family table refused: for
  * an app-authored body, the metadata protocol is the family's only writer.
- * Reads are untouched here — they are served by
- * {@link serveStoredMetadataReadsThrough}, which this layers over — and every
- * other object writes as before.
+ * Reads pass to the layer this one sits over — the body read layer,
+ * {@link refuseStoredMetadataBodyReads}, which refuses them — and every other
+ * object writes as before.
  *
- * Applied at ONE place, the sandbox's `buildSandboxApi`, which only the two body
+ * Applied at ONE place, the sandbox's `buildSandboxApi`, which only the body
  * runners reach. It is a separate layer rather than a branch of the served
  * repository because that repository is also a host code handler's `ctx.api`,
  * and the boundary refuses bodies only: the platform's own writers and the
  * deployer's host code reach the store through their own imports. Every
  * context the API derives is refused the same way (the same walk as the read
- * seam). Idempotent, and transparent to the read seam's own marker, so a body
- * API served at the action door is still served exactly once.
+ * seam). Idempotent, and transparent to every other layer's marker.
  */
 export function refuseStoredMetadataBodyWrites<T>(api: T): T {
   return deriveThroughSeam(api, BODY_WRITES_REFUSED, refuseBodyRepositoryWrites);
+}
+
+/** Marks a scoped context whose family-table reads are already refused for a body. */
+const BODY_READS_REFUSED = Symbol.for('objectstack.runtime.storedMetadataBodyReadsRefused');
+
+/**
+ * A family table's repository as a sandboxed BODY holds it, read half: every
+ * read verb ({@link BODY_FAMILY_READS}) is refused before it runs, with the
+ * boundary's `PERMISSION_DENIED` / 403 and the metadata-API read prescription
+ * ({@link storedMetadataBodyReadRefusal}). Refused before the underlying verb
+ * is called and before its query is looked at, so a refused read reaches no
+ * row and answers the same whatever its filter, sort, grouping, search or
+ * projection names. Every other verb is handed on (the write layer above has
+ * already refused it); any other object's repository is returned untouched.
+ */
+function refuseBodyRepositoryReads(objectName: string, repo: unknown): unknown {
+  if (!isStoredMetadataBodyObject(objectName) || repo === null || typeof repo !== 'object') return repo;
+  return new Proxy(repo as Record<PropertyKey, unknown>, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== 'function') return value;
+      if (BODY_FAMILY_READS.has(prop)) {
+        return async () => {
+          throw storedMetadataBodyReadRefusal(objectName, String(prop));
+        };
+      }
+      return value.bind(target);
+    },
+  });
+}
+
+/**
+ * [#21594, ruling B] The scoped API a sandboxed BODY (a hook, action or job
+ * body) holds, with every read of a stored-metadata family table refused: for
+ * an app-authored body, the family is reached through the metadata API only,
+ * so a body is served nothing of it — neither the stored row nor a projection
+ * of it. Every other object reads as before.
+ *
+ * Applied at the same ONE place as the write layer, beneath it
+ * (`buildSandboxApi`): a host code handler's `ctx.api` is not a body's and is
+ * still served by {@link serveStoredMetadataReadsThrough}. Every context the
+ * API derives is refused the same way (the shared walk), so a read inside
+ * `ctx.api.transaction`, after `sudo()` or under `withRunAs(...)` is refused
+ * too. Idempotent.
+ */
+export function refuseStoredMetadataBodyReads<T>(api: T): T {
+  return deriveThroughSeam(api, BODY_READS_REFUSED, refuseBodyRepositoryReads);
 }
 
 /**
