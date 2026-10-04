@@ -48,9 +48,12 @@
  * `object-timeline` `mapping`, and the field-name `fields` of `object-form`
  * and `object-master-detail-form`) in
  * `component-objectui-held-typed-members.pin.test.ts`; the rest of them are
- * held below as forks — the drill-down's `report`, the form's `customFields`
- * and both forms' `sections`, the timeline's `items` and the action
- * containers' members. The one member this ledger held for a ruling,
+ * held below as forks — the drill-down's `report`, the timeline's `items` and
+ * the action containers' members. Two of that stage's forks were ruled and
+ * typed in the S-forms stage — the form's `customFields` and both forms'
+ * `sections` — and are pinned in
+ * `component-form-custom-fields-sections-typed.pin.test.ts`; the predicate ASTs
+ * and the roll-up filter inside them are lines here. The one member this ledger held for a ruling,
  * `object-kanban` `conditionalFormatting`, exited its hold once objectui's
  * kanban declared the list view's rule as its only dialect, and is pinned
  * in §5 below, where its hold was recorded.
@@ -147,7 +150,7 @@ function unknownMembers(schema: unknown): UnknownMember[] {
  * would refuse a measured writer is reported, not shipped.
  */
 const STAGES = {
-  'fork': 'element contracts whose declaration is still objectui\'s (the timeline items, `UIActionSchema` — an objectui interface that borrows some members from the spec `Action` — and the runtime form field `FormField`, identity key `name`, which a form section\'s inline entry is too) and the metric drill-down\'s `report`: the S-objectui-held stage, the last of #21464, measured each and found two or more viable spec shapes that no ruling decides, so under the stop valve each is held and its fork reported on the card with its census; the member is typed once a ruling picks a shape',
+  'fork': 'element contracts whose declaration is still objectui\'s (the timeline items, and `UIActionSchema` — an objectui interface that borrows some members from the spec `Action`) and the metric drill-down\'s `report`: the S-objectui-held stage, the last of #21464, measured each and found two or more viable spec shapes that no ruling decides, so under the stop valve each is held and its fork reported on the card with its census; the member is typed once a ruling picks a shape (the runtime form field and the form sections were ruled, and typed in the S-forms stage)',
 } as const;
 type Stage = keyof typeof STAGES;
 
@@ -191,6 +194,11 @@ const BULK_OPTION_ENTRY: Reason = {
   owner: 'ui/bulk-action.zod.ts `BulkActionDefSchema` `params[].options[]`',
   why: 'a deliberately open option entry (`.passthrough()`): the widget reads `color` / `icon` / `disabled` / `visibleWhen` beyond the declared `{ label, value }` pair',
 };
+const FILTER_CONDITION: Reason = {
+  kind: 'shared',
+  owner: 'data/filter.zod.ts `FilterConditionSchema`',
+  why: 'a summary field\'s roll-up `filter` is a query `where` condition: each key names a field of the CHILD object and each value is its comparand, which the filter schema judges with its own refinement (`checkFilterConditionComparands`) and no page-component row can know',
+};
 const RECORDS: Reason = { kind: 'records' };
 const SLOT: Reason = { kind: 'slot' };
 const RUNNER: Reason = { kind: 'runner' };
@@ -222,6 +230,18 @@ on(['record:line_items'], ['columns[].readonlyWhen.ast', 'columns[].requiredWhen
 on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'details[].columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-grid'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
 on(['object-kanban'], ['conditionalFormatting[].condition.ast'], EXPRESSION_AST);
+// The S-forms stage: an inline form field (`customFields[]`, and a section's
+// inline entry) and the form view's `{ field }` entry carry the three `*When`
+// predicates, an option's `visibleWhen` and a grid column's two rules; a
+// section carries its own `visibleWhen`.
+const FORM_FIELD_AST_PATHS = [
+  'visibleWhen.ast', 'readonlyWhen.ast', 'requiredWhen.ast', 'options[].visibleWhen.ast',
+  'columns[].readonlyWhen.ast', 'columns[].requiredWhen.ast',
+];
+on(['object-form'], FORM_FIELD_AST_PATHS.map((p) => `customFields[].${p}`), EXPRESSION_AST);
+on(['object-form', 'object-master-detail-form'], [
+  'sections[].visibleWhen.ast', ...FORM_FIELD_AST_PATHS.map((p) => `sections[].fields[].${p}`),
+], EXPRESSION_AST);
 
 // The action blocks' runner-forwarded members.
 on(['action:button', 'action:icon'], ACTION_RUNNER_PATHS, RUNNER);
@@ -241,6 +261,8 @@ on(['object-grid'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].defa
 // is the row's own values (`plugin-kanban/src/index.tsx:155`, kept verbatim).
 on(['object-kanban'], ['columns[].cards[].*'], RECORDS);
 on(['object-grid'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
+on(['object-form'], ['customFields[].summaryOperations.filter{}'], FILTER_CONDITION);
+on(['object-form', 'object-master-detail-form'], ['sections[].fields[].summaryOperations.filter{}'], FILTER_CONDITION);
 
 // The rest, one line each.
 on(['element:definition-list'], ['items[].description'], {
@@ -267,31 +289,6 @@ on(['object-metric'], ['drillDown.report'], fork(
     '`ReportSchema` by reference, as it stands: a joined report whose blocks bind no dataset is accepted and lists the records',
     '`ReportSchema` once a joined report\'s blocks must each bind a dataset, as its own refinement comment says they do',
     'a drill-report shape of its own, the two arms the drawer draws',
-  ],
-));
-// The form's inline members are objectui's runtime form field (`FormField`,
-// identity key `name`), merged over the generated set and drawn whole; the spec
-// declares no such field — its own form field is keyed by `field`, and the
-// merge never matches it. objectui's field is open (an index signature) and
-// eight of its forty-five members are the grid widget's snake_case keys.
-on(['object-form'], ['customFields'], fork(
-  'plugin-form/src/customFieldsMerge.ts:78-108 (`FormField`, by `name`), from ObjectForm.tsx:755, :1180',
-  [
-    'objectui\'s `FormField` as it stands, open, with its snake_case grid keys',
-    'a closed spec runtime field of the members a form draws, the grid keys camelCased or left out',
-    'the spec\'s own `FormFieldSchema` re-keyed by `name`',
-  ],
-));
-// A section's `fields` draws, beside a name and the form view's `{ field }`
-// entry, an inline runtime form field as it stands ("shape 3") — kept by
-// objectui#11550's ruling and declared by objectui
-// (`ObjectFormSection.fields: (string | FormField)[]`). So this member takes a
-// shape once the spec declares the runtime form field: `customFields`'s fork.
-on(['object-form', 'object-master-detail-form'], ['sections[]'], fork(
-  'plugin-form/src/sectionFields.ts:369-370 (shape 3), reached from ObjectForm.tsx:364, :1518 and every sectioned arm; the master-detail form hands it on at MasterDetailForm.tsx:1692',
-  [
-    'the form view\'s `FormSectionSchema`, its field entry widened by the runtime form field `customFields` declares',
-    'a page-block section shape of its own, the form view\'s section keys plus the three entry arms the form reads',
   ],
 ));
 // The authored timeline entry is objectui's (`TimelineFeedItem` /

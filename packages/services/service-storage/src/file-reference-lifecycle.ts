@@ -221,15 +221,36 @@ export class FileReferenceCopyError extends Error {
   }
 }
 
+/** The media-field declaration a {@link FileConstraintError} names as violated. */
+export type FileConstraint = 'accept' | 'maxSize';
+
 /**
  * Raised when a referenced file violates its field's declared `accept` /
  * `maxSize`. Fails the write: a stored value that breaks its own field's
  * declaration is the "declared but not enforced" state ADR-0104 removes.
+ *
+ * ADR-0112 envelope, the same shape as {@link FileFieldBulkWriteError} below:
+ * a registered `code` plus a 4xx `status`, so the REST layer's declared-status
+ * passthrough answers `400 ERR_FILE_CONSTRAINT` with this message instead of
+ * the bare error falling through to the sanitised `500 INTERNAL_ERROR` with
+ * the sentence withheld. `400` because the verdict is about the file the
+ * CALLER chose — wrong type, too large — and the remedy is the caller's: pick
+ * a file the field's declaration permits.
+ *
+ * `field` and `constraint` carry the two named subjects as members for
+ * in-process callers. On the HTTP wire the passthrough forwards `status`, the
+ * registered `code` and the bounded message, so there the message is what
+ * names both — keep it naming the field and the constraint.
  */
 export class FileConstraintError extends Error {
   readonly code = 'ERR_FILE_CONSTRAINT';
-  constructor(message: string) {
+  readonly status = 400;
+  readonly field: string;
+  readonly constraint: FileConstraint;
+  constructor(field: string, constraint: FileConstraint, message: string) {
     super(message);
+    this.field = field;
+    this.constraint = constraint;
   }
 }
 
@@ -328,6 +349,8 @@ function assertFileConstraints(
   if (typeof maxSize === 'number' && maxSize > 0 && typeof file.size === 'number') {
     if (file.size > maxSize) {
       throw new FileConstraintError(
+        field,
+        'maxSize',
         `File exceeds the maximum size declared for '${field}' ` +
           `(${file.size} bytes > ${maxSize} bytes)`,
       );
@@ -351,6 +374,8 @@ function assertFileConstraints(
 
     if (!testable.some((e) => matchesAcceptEntry(e, mime, name))) {
       throw new FileConstraintError(
+        field,
+        'accept',
         `File type '${mime || name}' is not permitted by the accept list declared for ` +
           `'${field}' (${accept.join(', ')})`,
       );

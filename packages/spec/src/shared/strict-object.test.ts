@@ -13,7 +13,7 @@ const WidgetSchema = lazySchema(() =>
   strictObject(
     {
       surface: 'this widget',
-      history: 'Until #4001 these were dropped silently — the widget still rendered.',
+      history: 'Until unknown keys were refused, these were dropped silently — the widget still rendered.',
       aliases: { visibleWhen: 'visible' },
       guidance: { span: '`span` was retired in vX. Use `columnSpan`.' },
     },
@@ -60,7 +60,7 @@ describe('strictObject', () => {
     expect(r.error!.issues[0].message).toContain('`visibleWhen` → `visible`');
   });
 
-  it('ONE alias entry already covers every case/separator spelling of itself (#5481)', () => {
+  it('ONE alias entry already covers every case/separator spelling of itself', () => {
     // The fact that makes a second spelling of the same probe not merely
     // redundant but unreachable: the table is indexed by `aliasProbe`, which
     // folds case, `_`, `-` and spaces. Three tables on `main` carried a second
@@ -192,8 +192,8 @@ describe('strictObject', () => {
  * back into the front matter passes every `toContain` in this file; it fails
  * here.
  */
-describe('message order — the fix comes before the history (#5955)', () => {
-  const HISTORY = 'Until #4001 these were dropped silently — the widget still rendered.';
+describe('message order — the fix comes before the history', () => {
+  const HISTORY = 'Until unknown keys were refused, these were dropped silently — the widget still rendered.';
 
   const messageFor = (body: Record<string, unknown>) => {
     const r = WidgetSchema.safeParse({ name: 'x', ...body });
@@ -262,7 +262,7 @@ describe('message order — the fix comes before the history (#5955)', () => {
  *   3. a set match suppresses the rename channel for that key;
  *   4. a set speaks once per message, at the first key that matched it.
  */
-describe('strictObject guidanceSets — the set-keyed prescription channel (#6619)', () => {
+describe('strictObject guidanceSets — the set-keyed prescription channel', () => {
   const HISTORY = 'Until this shape was closed, these were dropped silently.';
   const SetSchema = lazySchema(() =>
     strictObject(
@@ -507,7 +507,7 @@ describe('strictObject — the error map is lazy, so cycles cannot break it', ()
 // own module-scope `strictObject(…)` call is the one that lands here
 // mid-initialization — reached through a module that pulls THIS file first.
 // ============================================================================
-describe('#5593 — eager construction with this module entered first', () => {
+describe('eager construction with this module entered first', () => {
   it('does not throw at import time under OS_EAGER_SCHEMAS=1', () => {
     const barrel = new URL('../automation/index.ts', import.meta.url).href;
     const run = (): string =>

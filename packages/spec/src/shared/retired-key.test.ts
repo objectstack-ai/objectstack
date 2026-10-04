@@ -23,9 +23,9 @@ import { acceptRetiredDefaultResidue, enumWithRetiredValues, retiredKey } from '
 import { strictObject } from './strict-object';
 
 const GONE_GUIDANCE =
-  '`gone` was removed in @objectstack/spec 99 (#0000). Delete the key.';
+  '`gone` was removed in @objectstack/spec 99. Delete the key.';
 const MODE_GUIDANCE =
-  '`legacyMode` was removed in @objectstack/spec 99 (#0000). Delete the key.';
+  '`legacyMode` was removed in @objectstack/spec 99. Delete the key.';
 
 /** A synthetic "next retirement": one boolean default, one string default. */
 const inner = strictObject(
@@ -52,7 +52,7 @@ const schema = acceptRetiredDefaultResidue(inner, {
   legacyMode: 'classic',
 });
 
-describe('acceptRetiredDefaultResidue (#12840)', () => {
+describe('acceptRetiredDefaultResidue — a retired default parses as inert residue', () => {
   it('accepts each captured retired default and strips it from the output', () => {
     const r = schema.safeParse({ keep: 'x', gone: false, legacyMode: 'classic' });
     expect(r.success).toBe(true);
@@ -186,7 +186,7 @@ const VariantEnum = enumWithRetiredValues(
   { heading: HEADING_RETIRED, subheading: SUBHEADING_RETIRED },
 );
 
-describe('enumWithRetiredValues (#17109)', () => {
+describe('enumWithRetiredValues — value-level retirement beside retiredKey()', () => {
   it('refuses a retired member with ITS OWN prescription, byte-for-byte', () => {
     for (const [member, prescription] of [
       ['heading', HEADING_RETIRED],

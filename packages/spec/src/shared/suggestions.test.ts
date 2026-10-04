@@ -58,7 +58,7 @@ describe('findClosestMatches', () => {
   });
 });
 
-describe('camelCase parity in the distance fallback (#4990)', () => {
+describe('camelCase parity in the distance fallback', () => {
   // The budget `strictUnknownKeyError` actually spends. Reproduced rather than
   // imported because the point of these tests is the INTERACTION between the
   // budget and the scoring — a test that shared the constant could not show it.

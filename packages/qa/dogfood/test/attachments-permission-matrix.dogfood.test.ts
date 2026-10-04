@@ -8,6 +8,7 @@
 //
 // Matrix legend (letters reference the gap inventory in the #2755 plan):
 //   (a) delete-anyone's-attachment  → uploader-or-parent-editor gate
+//       (#21729: the parent-editor limb, reachable past the platform floor)
 //   (b) attach-to-invisible-record  → parent read-visibility gate
 //   (c) attachment LISTING does not inherit parent visibility — KNOWN GAP
 //   (e) anonymous uploads           → session gate; anonymous downloads — KNOWN GAP
@@ -15,6 +16,23 @@
 //   (g) tenant isolation            → multiTenant block
 //
 // @proof: attachments-permission-matrix
+//
+// [#21729] The matrix below boots ORG-BOUND, and the arming is the pin. The
+// platform's wildcard row-level delete floor (`owner_only_deletes`:
+// `created_by == current_user.id`, positions ['org_member']) binds only a
+// principal holding `org_member`, and an org-less boot hands every sign-up
+// `['everyone']` — so this file used to measure the delete gate in the one
+// posture where the floor never applied. That is how a parent-record editor's
+// delete of someone else's attachment was refused (403 `PERMISSION_DENIED`, by
+// the floor, before the gate ran) in every org-bound deployment while case (a)
+// accepted "either code" and stayed green. Booted org-bound, case (a) measures
+// the composition a real member meets: the floor, the alternate match
+// `service-storage` contributes beside its gate (delete limb only), and the gate.
+// ⛔ Do not "simplify" the boot back to org-less. The `assertArmed` probe in
+// `beforeAll` refuses such a boot outright; without it, the parent-editor 200
+// and the readable-non-editor `ATTACHMENT_DELETE_DENIED` would both pass with
+// neither the floor nor the alternate match ever in play — certifying the fix
+// in the one posture where there was nothing to fix.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync } from 'node:fs';
@@ -26,9 +44,23 @@ import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { attachmentsFixtureStack, attachmentsFixtureSecurity } from './fixtures/attachments-fixture.js';
 import { organizationsAvailable, warnIfUnavailable } from './enterprise-organizations.js';
+import { assertArmed, principalArmed } from './armed.js';
+import { SysAttachment } from '@objectstack/platform-objects/audit';
 
 const SYS = { isSystem: true } as const;
 const DAY_MS = 86_400_000;
+
+/**
+ * [#21729] The control case (a) measures, and the default that silences it —
+ * named so a disarm fails the file saying what was disarmed.
+ */
+const DELETE_FLOOR =
+  "the platform's wildcard row-level delete floor (`owner_only_deletes`, positions ['org_member']) " +
+  "and the delete-only alternate match service-storage contributes beside the attachment gate";
+const DELETE_FLOOR_DISARM =
+  "an org-less harness: no organization ⇒ a fresh sign-up holds only ['everyone'] ⇒ the floor never " +
+  "applies, so case (a) measures the gate alone and cannot see the floor pre-empt it. `orgContext: true` " +
+  'in the matrix boot below is what arms it.';
 
 /** Extract the created record id from a REST create response ({id} | {record:{id}}). */
 async function createdId(res: Response): Promise<string> {
@@ -38,7 +70,7 @@ async function createdId(res: Response): Promise<string> {
   return String(id);
 }
 
-function bootFixture(extra: { multiTenant?: boolean } = {}) {
+function bootFixture(extra: { multiTenant?: boolean; orgContext?: boolean } = {}) {
   const rootDir = mkdtempSync(join(tmpdir(), 'att-dogfood-'));
   return {
     rootDir,
@@ -114,7 +146,8 @@ describe('attachments permission matrix (#2755)', () => {
     });
 
   beforeAll(async () => {
-    const boot = bootFixture();
+    // [#21729] Org-bound on purpose — see the header.
+    const boot = bootFixture({ orgContext: true });
     rootDir = boot.rootDir;
     stack = await boot.stack;
     adminTok = await stack.signIn();
@@ -135,6 +168,34 @@ describe('attachments permission matrix (#2755)', () => {
     for (const userId of [memberAId, memberBId]) {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
     }
+
+    // [#21729] The precondition the header records, read off the live stack
+    // before anything is measured: both members hold `org_member` (so the floor
+    // binds them) and the delete bit (so a delete reaches row-level evaluation
+    // at all, instead of passing case (a) on an RBAC refusal). memberA is the
+    // UPLOADER whose attachment gets deleted, memberB the PARENT EDITOR (and the
+    // non-editor elsewhere); a probe on one alone would leave the other free to
+    // drift org-less and disarm half the case.
+    await assertArmed([
+      principalArmed({
+        stack,
+        token: memberATok,
+        who: 'memberA (the uploader)',
+        positions: ['org_member'],
+        permissions: ['att_attachment_manager'],
+        control: DELETE_FLOOR,
+        disarmedBy: DELETE_FLOOR_DISARM,
+      }),
+      principalArmed({
+        stack,
+        token: memberBTok,
+        who: 'memberB (the parent editor — and, on a record it cannot edit, the non-editor)',
+        positions: ['org_member'],
+        permissions: ['att_attachment_manager'],
+        control: DELETE_FLOOR,
+        disarmedBy: DELETE_FLOOR_DISARM,
+      }),
+    ]);
 
     // Parent records: a public case owned by memberA, a private secret owned by admin.
     const caseRes = await stack.apiAs(memberATok, 'POST', '/data/att_case', { name: 'public case' });
@@ -254,13 +315,21 @@ describe('attachments permission matrix (#2755)', () => {
     expect(row?.id, 'admin attachment on att_secret exists').toBeTruthy();
 
     // memberB holds the delete bit, but is neither the uploader nor able to
-    // edit the (admin-owned, private-model) parent → 403. Depending on which
-    // layer fires first (member_default's owner-scoped delete RLS pre-image
-    // vs the attachment access hook) the code is PERMISSION_DENIED or
-    // ATTACHMENT_DELETE_DENIED — both are the fail-closed contract.
+    // edit — nor even READ — the (admin-owned, private-model) parent → 403.
+    //
+    // [#21729] ONE code, and it is the platform's not-visible refusal, not the
+    // gate's. An attachment's read visibility is its parent's, so to memberB
+    // this row does not exist (its by-id GET is a 404, case (c)); the by-id
+    // pre-image re-reads the target through the caller's own visibility and
+    // refuses a row it cannot see ("you cannot mutate what you cannot see")
+    // BEFORE the attachment gate runs. That ordering is what keeps the parent's
+    // object and id — which the gate's refusal names — away from a caller who
+    // cannot read that record. The gate's own code is pinned on a parent the
+    // caller CAN read (the next case). This used to accept either code because
+    // which one arrived depended on whether the boot was org-bound.
     const denied = await stack.apiAs(memberBTok, 'DELETE', `/data/sys_attachment/${row.id}`);
     expect(denied.status).toBe(403);
-    expect(['ATTACHMENT_DELETE_DENIED', 'PERMISSION_DENIED']).toContain(((await denied.json()) as any).code);
+    expect(((await denied.json()) as any).code).toBe('PERMISSION_DENIED');
     expect(await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS })).toBeTruthy();
 
     // The uploader (admin) may delete it.
@@ -274,6 +343,58 @@ describe('attachments permission matrix (#2755)', () => {
     const own = await ql.findOne('sys_attachment', { where: { file_id: fileId }, context: SYS });
     const ownDelete = await stack.apiAs(memberATok, 'DELETE', `/data/sys_attachment/${own.id}`);
     expect(ownDelete.status).toBeLessThan(300);
+  });
+
+  // [#21729] The parent-editor limb of the gate's delete rule, past the floor.
+  it('(a) a parent-record editor who is NOT the uploader may delete the attachment (200)', async () => {
+    // att_case is public_read_write → memberB can edit memberA's case. memberA
+    // uploads and attaches; memberB is neither the uploader nor the row's
+    // creator, so `owner_only_deletes` does not admit it — only the alternate
+    // match service-storage contributes beside its gate does, and then the gate
+    // admits it on its parent-editor limb.
+    const fileId = await uploadFile(stack, memberATok);
+    const created = await attach(memberATok, 'att_case', caseAId, fileId);
+    expect(created.status).toBeLessThan(300);
+    const row = await ql.findOne('sys_attachment', { where: { file_id: fileId }, context: SYS });
+    expect(row?.uploaded_by).toBe(memberAId);
+
+    const removed = await stack.apiAs(memberBTok, 'DELETE', `/data/sys_attachment/${row.id}`);
+    expect(removed.status, await removed.clone().text()).toBe(200);
+    expect(await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS })).toBeFalsy();
+  });
+
+  it('(a) a non-uploader who can READ the parent but not EDIT it is refused by the gate: 403 ATTACHMENT_DELETE_DENIED', async () => {
+    // att_readonly is public_read: memberB reads the record (and so its
+    // attachments) but only the owner (admin) edits it. With the floor no
+    // longer answering for this limb, the refusal is the gate's — one code.
+    const ro = await ql.insert('att_readonly', { name: 'ro for delete', owner_id: adminId }, { context: { ...SYS } });
+    const adminFile = await uploadFile(stack, adminTok);
+    const created = await attach(adminTok, 'att_readonly', ro.id, adminFile);
+    expect(created.status).toBeLessThan(300);
+    const row = await ql.findOne('sys_attachment', { where: { file_id: adminFile }, context: SYS });
+    expect((await stack.apiAs(memberBTok, 'GET', `/data/sys_attachment/${row.id}`)).status).toBe(200);
+
+    const denied = await stack.apiAs(memberBTok, 'DELETE', `/data/sys_attachment/${row.id}`);
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as any).code).toBe('ATTACHMENT_DELETE_DENIED');
+    expect(await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS })).toBeTruthy();
+  });
+
+  it('(a) the EDIT limb is not widened: a parent editor who is not the uploader still cannot PATCH the attachment (403 PERMISSION_DENIED)', async () => {
+    // ⛔ The ruling's boundary: the alternate match is DELETE only. The gate's
+    // `beforeUpdate` would admit a parent editor, but the floor's update limb
+    // (`owner_only_writes`) still answers first, exactly as before. If this
+    // turns 200, an edit-limb relief rode in on the delete-limb ruling.
+    const fileId = await uploadFile(stack, memberATok);
+    const created = await attach(memberATok, 'att_case', caseAId, fileId, { description: 'memberA wrote this' });
+    expect(created.status).toBeLessThan(300);
+    const row = await ql.findOne('sys_attachment', { where: { file_id: fileId }, context: SYS });
+
+    const patched = await stack.apiAs(memberBTok, 'PATCH', `/data/sys_attachment/${row.id}`, { description: 'memberB rewrote this' });
+    expect(patched.status).toBe(403);
+    expect(((await patched.json()) as any).code).toBe('PERMISSION_DENIED');
+    const after = await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS });
+    expect(after?.description).toBe('memberA wrote this');
   });
 
   // ── (c) attachment LIST inherits parent visibility (#2970 item 1) ────
@@ -526,6 +647,103 @@ describe('attachments permission matrix (#2755)', () => {
       expect(await ql.findOne('sys_upload_session', { where: { id: uploadId }, context: SYS })).toBeNull();
       await expect(fs.access(partsDir), 'parts aborted by the reap guard').rejects.toThrow();
     });
+  });
+});
+
+// ── (a′) without service-storage, the floor is the last word (#21729) ────
+// The ruling's other half. `sys_attachment` is DEFINED in platform-objects and
+// gated by service-storage, so the alternate match that relieves the delete
+// floor is contributed beside the gate — and a composition that registers the
+// object WITHOUT service-storage carries neither. Booted here: the object, the
+// security plugin (whose seam is present and unused), org-bound members — and
+// no gate. A parent-record editor's delete of another member's attachment is
+// refused by the floor; the row's creator, whom the floor admits, may delete it.
+/** Registers `sys_attachment` the way service-storage does, and installs nothing else. */
+const sysAttachmentWithoutStorage = {
+  name: 'com.dogfood.sys-attachment-without-storage',
+  type: 'standard' as const,
+  version: '0.0.0',
+  optionalDependencies: ['com.objectstack.engine.objectql'],
+  async init(ctx: any) {
+    ctx.getService('manifest').register({
+      id: 'com.dogfood.sys-attachment-without-storage',
+      name: 'sys_attachment without service-storage',
+      version: '0.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [SysAttachment],
+    });
+  },
+  async start() {},
+};
+
+describe('attachments without service-storage (a′)', () => {
+  let stack: VerifyStack;
+  let ql: any;
+
+  beforeAll(async () => {
+    stack = await bootStack(attachmentsFixtureStack as never, {
+      security: attachmentsFixtureSecurity(),
+      extraPlugins: [sysAttachmentWithoutStorage as never],
+      orgContext: true,
+    });
+    ql = await stack.kernel.getServiceAsync('objectql');
+  }, 120_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it("a parent editor's delete of another member's attachment is refused by the floor (403 PERMISSION_DENIED); the creator's is admitted", async () => {
+    await stack.signIn();
+    const uploaderTok = await stack.signUp('att-nostorage-a@verify.test');
+    const editorTok = await stack.signUp('att-nostorage-b@verify.test');
+    const uploaderId = (await ql.findOne('sys_user', { where: { email: 'att-nostorage-a@verify.test' }, context: SYS }))?.id;
+    const editorId = (await ql.findOne('sys_user', { where: { email: 'att-nostorage-b@verify.test' }, context: SYS }))?.id;
+    const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'att_attachment_manager' }, context: SYS });
+    for (const userId of [uploaderId, editorId]) {
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
+    }
+    await assertArmed([
+      principalArmed({
+        stack,
+        token: editorTok,
+        who: 'the parent editor',
+        positions: ['org_member'],
+        permissions: ['att_attachment_manager'],
+        control: DELETE_FLOOR,
+        disarmedBy: DELETE_FLOOR_DISARM,
+      }),
+    ]);
+
+    // The seam is there; what is absent is the plugin that contributes to it.
+    const security = await stack.kernel.getServiceAsync<any>('security');
+    expect(typeof security?.contributeOwnershipFloorAlternates).toBe('function');
+
+    const caseRes = await stack.apiAs(uploaderTok, 'POST', '/data/att_case', { name: 'no storage here' });
+    expect(caseRes.status).toBeLessThan(300);
+    const caseId = await createdId(caseRes);
+    // Both members can edit this public_read_write case.
+    expect((await stack.apiAs(editorTok, 'PATCH', `/data/att_case/${caseId}`, { name: 'edited by the editor' })).status).toBe(200);
+
+    const linkRes = await stack.apiAs(uploaderTok, 'POST', '/data/sys_attachment', {
+      parent_object: 'att_case',
+      parent_id: caseId,
+      file_id: 'file-without-storage',
+      file_name: 'hello.txt',
+    });
+    expect(linkRes.status, await linkRes.clone().text()).toBeLessThan(300);
+    const rowId = await createdId(linkRes);
+
+    const refused = await stack.apiAs(editorTok, 'DELETE', `/data/sys_attachment/${rowId}`);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as any).code).toBe('PERMISSION_DENIED');
+    expect(await ql.findOne('sys_attachment', { where: { id: rowId }, context: SYS })).toBeTruthy();
+
+    // Control: the floor admits the row's creator, so the refusal above was the
+    // floor's and not an RBAC or visibility refusal.
+    const own = await stack.apiAs(uploaderTok, 'DELETE', `/data/sys_attachment/${rowId}`);
+    expect(own.status, await own.clone().text()).toBe(200);
   });
 });
 

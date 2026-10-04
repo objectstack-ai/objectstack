@@ -36,6 +36,7 @@ import type { FileReadVerdict, StorageUploadSession } from './storage-routes.js'
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
+import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
 // storage domain, not the audit/compliance ledger. Definition stays in
@@ -373,6 +374,14 @@ export class StorageServicePlugin implements Plugin {
           },
           ctx.logger,
         );
+        // [#21729] The gate's parent-editor DELETE limb, made reachable: the
+        // alternate match that stops the platform's `created_by` delete floor
+        // answering for `sys_attachment` before the gate above runs. Contributed
+        // HERE and nowhere else — beside the gate that judges it, so a
+        // composition without this gate never carries the relief and the floor
+        // stays the last word there (maintainer ruling; the reasoning is in
+        // `attachment-delete-floor-alternate.ts`). Delete limb only.
+        contributeAttachmentDeleteFloorAlternate(() => ctx.getService<unknown>('security'), ctx.logger);
         // Parent-derived READ visibility (#2970 item 1) — list/find/count of
         // sys_attachment only returns rows whose parent record the caller can
         // read. Middleware (not a hook) so list `total` is filtered too.

@@ -24,13 +24,100 @@
  * contract, several implementations, one table.
  */
 
-/** The object schema every exit serves while the contract runs. */
+/**
+ * The object schema every exit serves while the contract runs.
+ *
+ * Besides the four fields, it names them in every KIND of position an object
+ * document has outside `fields` (ADR-0106 D1 removes a field WHOLE, so a
+ * reference is part of the field): a rule entry whose condition reads one, a
+ * rule entry that names one only through its `fields` pointer list, role
+ * pointers, name lists, an expression, a field-group predicate, an index,
+ * list views (a column list, a filter, a view KEYED by a field's name, an
+ * object-form column naming one through its nested `prefix` / `summary`),
+ * actions (a visibility predicate) — and, inside the READABLE fields, a name
+ * list, a `dependsOn`, a predicate, a formula `expression` and an inline grid
+ * (`inlineColumns` by name and by computed `expr`, `inlineAmountField`) that
+ * read a sibling. The inline grid sits on `name` only so that a field every
+ * restricted case can read carries it — the mask does not read `type`, and a
+ * fifth field would change the field set every exit's suite counts. Each
+ * position also carries a reference to a
+ * field EVERY restricted case can read, so an over-eager mask that deletes the
+ * position wholesale fails the `retained` half of the case.
+ */
 export const FLS_CONTRACT_OBJECT = {
     name: 'account',
     label: 'Account',
+    nameField: 'name',
+    stageField: 'salary_grade',
+    titleFormat: '{name} ({salary_grade})',
+    highlightFields: ['name', 'salary_grade', 'bonus_formula'],
+    searchableFields: ['name', 'salary_grade'],
+    fieldGroups: [
+        { key: 'compensation', label: 'Compensation', visibleWhen: 'record.salary_grade != null' },
+        { key: 'general', label: 'General', visibleWhen: 'record.name != null' },
+    ],
+    indexes: [
+        { fields: ['salary_grade', 'name'] },
+        { fields: ['name'] },
+    ],
+    validations: [
+        {
+            type: 'script',
+            name: 'graded_account_needs_name',
+            condition: { dialect: 'cel', source: 'record.salary_grade != null && record.name == null' },
+            message: 'A graded account needs a name.',
+        },
+        {
+            type: 'cross_field',
+            name: 'bonus_needs_name',
+            fields: ['bonus_formula', 'name'],
+            condition: 'record.name == null',
+            message: 'A bonus needs a name.',
+        },
+        {
+            type: 'script',
+            name: 'name_not_blank',
+            condition: 'record.name == ""',
+            message: 'Name must not be blank.',
+        },
+    ],
+    listViews: {
+        all: { label: 'All', type: 'grid', columns: ['name', 'salary_grade'] },
+        graded: { label: 'Graded', type: 'grid', columns: ['name'], filter: [{ field: 'salary_grade', operator: 'is_not_null' }] },
+        salary_grade: { label: 'By grade', type: 'grid', columns: ['name'] },
+        // Object-form columns: a column's nested pointers (`prefix.field`,
+        // `summary.field`) name fields of THIS object as surely as its `field`.
+        compact: {
+            label: 'Compact',
+            type: 'grid',
+            columns: [
+                { field: 'name', width: 200 },
+                { field: 'name', prefix: { field: 'salary_grade', type: 'badge' } },
+                { field: 'id', summary: { type: 'sum', field: 'bonus_formula' } },
+            ],
+        },
+    },
+    actions: [
+        { name: 'regrade', label: 'Regrade', type: 'script', visible: 'record.salary_grade != null' },
+        { name: 'rename', label: 'Rename', type: 'script', visible: 'record.name != null' },
+    ],
     fields: {
         id: { type: 'text', label: 'Id' },
-        name: { type: 'text', label: 'Name' },
+        name: {
+            type: 'text',
+            label: 'Name',
+            relatedListColumns: ['name', 'salary_grade'],
+            dependsOn: ['id', 'salary_grade'],
+            readonlyWhen: 'record.bonus_formula != null',
+            requiredWhen: 'record.id != null',
+            inlineColumns: [
+                { name: 'id' },
+                { name: 'salary_grade', label: 'Grade' },
+                { name: 'name', label: 'Name', readonlyWhen: 'record.salary_grade != null' },
+                { name: 'id', label: 'Bonus x2', computed: true, expr: 'bonus_formula * 2' },
+            ],
+            inlineAmountField: 'bonus_formula',
+        },
         // Everything ADR-0106's Context section names as leaking with the field:
         // a sensitive enumeration, the capability guarding it, and a formula
         // that is itself business IP.
@@ -43,7 +130,7 @@ export const FLS_CONTRACT_OBJECT = {
         bonus_formula: {
             type: 'formula',
             label: 'Bonus',
-            formula: 'salary_grade == "band_a" ? 0.2 : 0.1',
+            expression: 'salary_grade == "band_a" ? 0.2 : 0.1',
             visibleWhen: 'record.status == "active"',
         },
     },
@@ -55,10 +142,117 @@ export const FLS_CONTRACT_ALL_FIELDS = ['id', 'name', 'salary_grade', 'bonus_for
 /** What the exit's `security` double answers, or that it throws. */
 export type FlsContractReadable = readonly string[] | undefined | 'throw';
 
+/**
+ * One thing a masked document must STILL say — the control half of a
+ * projection case. Without it a mask that deleted every position wholesale
+ * (all validations, every pointer) would pass the absence checks while serving
+ * a schema stripped of everything the caller IS entitled to.
+ */
+export interface FlsContractRetention {
+    /** What is kept, in words — this is what a failure names. */
+    readonly what: string;
+    /** Holds on the served document. */
+    readonly holds: (document: any) => boolean;
+}
+
+/** Names of the validation rules a served document carries. */
+const ruleNames = (document: any): string[] => (Array.isArray(document?.validations)
+    ? document.validations.map((rule: any) => rule?.name)
+    : []);
+
+const sameList = (actual: unknown, expected: readonly unknown[] | Readonly<Record<string, unknown>>): boolean =>
+    JSON.stringify(actual) === JSON.stringify(expected);
+
+/**
+ * What a caller who reads `id` and `name` only is still served: every
+ * reference to those two survives, every position keeps its non-denied part.
+ */
+const RETAINED_FOR_ID_AND_NAME: readonly FlsContractRetention[] = [
+    { what: 'the `nameField` pointer to a readable field', holds: (d) => d?.nameField === 'name' },
+    { what: 'the validation rule over readable fields only', holds: (d) => sameList(ruleNames(d), ['name_not_blank']) },
+    { what: '`highlightFields`, minus the denied entries', holds: (d) => sameList(d?.highlightFields, ['name']) },
+    { what: '`searchableFields`, minus the denied entry', holds: (d) => sameList(d?.searchableFields, ['name']) },
+    { what: 'the index over readable fields only', holds: (d) => sameList(d?.indexes, [{ fields: ['name'] }]) },
+    {
+        what: 'both field groups, and the predicate that reads a readable field',
+        holds: (d) => sameList(d?.fieldGroups?.map((g: any) => g?.key), ['compensation', 'general'])
+            && d?.fieldGroups?.[1]?.visibleWhen === 'record.name != null',
+    },
+    {
+        what: 'the readable field\'s own name lists, minus the denied entries',
+        holds: (d) => sameList(d?.fields?.name?.relatedListColumns, ['name'])
+            && sameList(d?.fields?.name?.dependsOn, ['id']),
+    },
+    { what: 'the readable field\'s predicate over a readable sibling', holds: (d) => d?.fields?.name?.requiredWhen === 'record.id != null' },
+    {
+        what: 'the inline grid\'s readable columns, minus a predicate over the denied field',
+        holds: (d) => sameList(d?.fields?.name?.inlineColumns, [{ name: 'id' }, { name: 'name', label: 'Name' }]),
+    },
+    {
+        what: 'the list views over readable fields, minus the denied columns — object-form columns included',
+        holds: (d) => sameList(d?.listViews, {
+            all: { label: 'All', type: 'grid', columns: ['name'] },
+            compact: { label: 'Compact', type: 'grid', columns: [{ field: 'name', width: 200 }] },
+        }),
+    },
+    { what: 'the action whose predicate reads a readable field', holds: (d) => sameList(d?.actions?.map((a: any) => a?.name), ['rename']) },
+];
+
+/**
+ * What a caller who reads everything but `salary_grade` is still served —
+ * including the readable formula field, minus only the formula that reads the
+ * denied one.
+ */
+const RETAINED_WITH_BONUS_READABLE: readonly FlsContractRetention[] = [
+    {
+        what: 'the validation rules that do not read the denied field',
+        holds: (d) => sameList(ruleNames(d), ['bonus_needs_name', 'name_not_blank']),
+    },
+    { what: '`highlightFields`, minus the denied entry', holds: (d) => sameList(d?.highlightFields, ['name', 'bonus_formula']) },
+    { what: 'the readable field\'s predicate over a readable sibling', holds: (d) => d?.fields?.name?.readonlyWhen === 'record.bonus_formula != null' },
+    {
+        what: 'the readable formula field, minus its formula — its other facets stay',
+        holds: (d) => d?.fields?.bonus_formula?.label === 'Bonus'
+            && d?.fields?.bonus_formula?.visibleWhen === 'record.status == "active"'
+            && !('expression' in (d?.fields?.bonus_formula ?? {})),
+    },
+    {
+        what: 'the object-form column aggregating the readable formula field, minus the one prefixed by the denied field',
+        holds: (d) => sameList(d?.listViews?.compact?.columns, [
+            { field: 'name', width: 200 },
+            { field: 'id', summary: { type: 'sum', field: 'bonus_formula' } },
+        ]),
+    },
+    {
+        what: 'the inline grid\'s column computed from the readable formula field, and its amount field',
+        holds: (d) => d?.fields?.name?.inlineColumns?.length === 3
+            && d?.fields?.name?.inlineColumns?.[2]?.expr === 'bonus_formula * 2'
+            && d?.fields?.name?.inlineAmountField === 'bonus_formula',
+    },
+];
+
+/** An unmasked answer is the whole fixture — every reference in every position. */
+const RETAINED_UNMASKED: readonly FlsContractRetention[] = [
+    { what: 'every validation rule', holds: (d) => ruleNames(d).length === 3 },
+    { what: 'every role pointer', holds: (d) => d?.nameField === 'name' && d?.stageField === 'salary_grade' },
+    { what: 'every name-list entry', holds: (d) => d?.highlightFields?.length === 3 && d?.indexes?.length === 2 },
+    { what: 'the formula', holds: (d) => typeof d?.fields?.bonus_formula?.expression === 'string' },
+    {
+        what: 'every inline-grid column, every list view and every action',
+        holds: (d) => d?.fields?.name?.inlineColumns?.length === 4
+            && Object.keys(d?.listViews ?? {}).length === 4 && d?.listViews?.compact?.columns?.length === 3
+            && d?.actions?.length === 2,
+    },
+];
+
 /** The one verdict every exit must reach for a case. */
 export type FlsContractVerdict =
-    /** These field names are present; those are COMPLETELY absent. */
-    | { kind: 'fields'; present: readonly string[]; absent: readonly string[] }
+    /**
+     * These field names are present; those are COMPLETELY absent — from
+     * `fields` AND from every other position, expressions included — and the
+     * `retained` facts still hold.
+     */
+    | { kind: 'fields'; present: readonly string[]; absent: readonly string[]; retained?: readonly FlsContractRetention[] }
     /** Every declared field survives — the passthrough tiers (D4 exemptions, D6 tier 1/2, D8). */
     | { kind: 'unmasked' }
     /** D6 tier 3 — the exit refuses: 5xx, no body carrying `fields`. */
@@ -87,17 +281,17 @@ export interface ObjectSchemaMaskCase {
 export const OBJECT_SCHEMA_MASK_CASES: readonly ObjectSchemaMaskCase[] = [
     {
         id: 'restricted-caller/field-vanishes-whole',
-        why: 'D1 — an unreadable field is removed whole: name, label, type, options, formula, visibleWhen and requiredPermissions all go with it.',
+        why: 'D1 — an unreadable field is removed whole: name, label, type, options, formula, visibleWhen and requiredPermissions all go with it, and so does every reference to it elsewhere in the document — the rules that read it, the pointers and lists that name it, the readable fields\' predicates over it.',
         context: { userId: 'u_portal', systemPermissions: [] },
         readable: ['id', 'name'],
-        expect: { kind: 'fields', present: ['id', 'name'], absent: ['salary_grade', 'bonus_formula'] },
+        expect: { kind: 'fields', present: ['id', 'name'], absent: ['salary_grade', 'bonus_formula'], retained: RETAINED_FOR_ID_AND_NAME },
     },
     {
         id: 'restricted-caller/required-permissions-cause',
-        why: 'D1 — the two causes of unreadability (an explicit `readable:false` and a missing `requiredPermissions` capability) are already folded together by `getReadableFields`, so an exit sees one answer and must not distinguish them.',
+        why: 'D1 — the two causes of unreadability (an explicit `readable:false` and a missing `requiredPermissions` capability) are already folded together by `getReadableFields`, so an exit sees one answer and must not distinguish them. The READABLE formula field stays, but not the formula that reads the denied one.',
         context: { userId: 'u_portal', systemPermissions: [] },
         readable: ['id', 'name', 'bonus_formula'],
-        expect: { kind: 'fields', present: ['id', 'name', 'bonus_formula'], absent: ['salary_grade'] },
+        expect: { kind: 'fields', present: ['id', 'name', 'bonus_formula'], absent: ['salary_grade'], retained: RETAINED_WITH_BONUS_READABLE },
     },
     {
         id: 'unrestricted-caller/byte-identical',
@@ -160,7 +354,7 @@ export const OBJECT_SCHEMA_MASK_CASES: readonly ObjectSchemaMaskCase[] = [
         why: 'D7 — a caller resolving to zero permission sets goes through the fallback set rather than the everything-default; the exit sees whatever that resolution answers and projects it like any other. (The resolution itself is pinned in plugin-security; a truly ANONYMOUS caller never reaches an exit on a requireAuth deployment, which D7 says in as many words.)',
         context: { userId: 'u_guest', positions: [], permissions: [], systemPermissions: [] },
         readable: ['id', 'name'],
-        expect: { kind: 'fields', present: ['id', 'name'], absent: ['salary_grade', 'bonus_formula'] },
+        expect: { kind: 'fields', present: ['id', 'name'], absent: ['salary_grade', 'bonus_formula'], retained: RETAINED_FOR_ID_AND_NAME },
     },
     {
         id: 'masking-disabled/D8',
@@ -229,7 +423,7 @@ export function assertObjectSchemaMaskCase(
     }
 
     const expected = testCase.expect.kind === 'unmasked'
-        ? { present: [...FLS_CONTRACT_ALL_FIELDS], absent: [] as readonly string[] }
+        ? { present: [...FLS_CONTRACT_ALL_FIELDS], absent: [] as readonly string[], retained: RETAINED_UNMASKED }
         : testCase.expect;
 
     for (const name of expected.present) {
@@ -243,15 +437,55 @@ export function assertObjectSchemaMaskCase(
                 `${where}: field '${name}' must be COMPLETELY ABSENT for this caller, but the exit served it. ${testCase.why}`,
             );
         }
-        // The whole-field rule: no residue anywhere in the serialized document.
+        // The whole-field rule: no residue anywhere in the served document.
         // A partial redaction (a name kept, the details stripped) still leaks
-        // existence, which D1 rules out in as many words.
-        if (JSON.stringify(outcome.document).includes(`"${name}"`)) {
+        // existence, which D1 rules out in as many words — and so does a
+        // REFERENCE: a rule whose condition reads the field, a formula over it,
+        // a pointer naming it. Judged by identifier token, so a name embedded
+        // in an expression (`record.<name> > 0`) is caught, not only a quoted one.
+        const residue = findIdentifierResidue(outcome.document, name);
+        if (residue) {
             throw new Error(
-                `${where}: '${name}' is gone from \`fields\` but still appears elsewhere in the served document — D1 removes the field WHOLE.`,
+                `${where}: '${name}' is gone from \`fields\` but is still referenced at ${residue} — D1 removes the field WHOLE.`,
             );
         }
     }
+    for (const fact of expected.retained ?? []) {
+        if (!fact.holds(outcome.document)) {
+            throw new Error(
+                `${where}: the mask over-reached — the served document no longer carries ${fact.what}. ${testCase.why}`,
+            );
+        }
+    }
+}
+
+const IDENTIFIER_TOKEN = /[A-Za-z_][A-Za-z0-9_]*/g;
+
+/**
+ * Where `name` occurs as an identifier token — in any string leaf or object
+ * key of `value` — as a dotted path, or `undefined` when it occurs nowhere.
+ *
+ * Deliberately independent of the mask's own reference detector: a matcher
+ * that shared it would go blind exactly where the mask does.
+ */
+function findIdentifierResidue(value: unknown, name: string, path = '$'): string | undefined {
+    const tokenIs = (text: string): boolean => (text.match(IDENTIFIER_TOKEN) ?? ([] as string[])).includes(name);
+    if (typeof value === 'string') return tokenIs(value) ? path : undefined;
+    if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+            const hit = findIdentifierResidue(value[i], name, `${path}[${i}]`);
+            if (hit) return hit;
+        }
+        return undefined;
+    }
+    if (value && typeof value === 'object') {
+        for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+            if (tokenIs(key)) return `${path}.${key} (key)`;
+            const hit = findIdentifierResidue(inner, name, `${path}.${key}`);
+            if (hit) return hit;
+        }
+    }
+    return undefined;
 }
 
 /**

@@ -275,6 +275,7 @@
     "ObjectCalendarPropsParsed": "src/ui/component.zod.ts#ObjectCalendarPropsParsed (type)",
     "ObjectCalendarPropsSchema": "src/ui/component.zod.ts#ObjectCalendarPropsSchema (const)",
     "ObjectFormProps": "src/ui/component.zod.ts#ObjectFormProps (type)",
+    "ObjectFormPropsParsed": "src/ui/component.zod.ts#ObjectFormPropsParsed (type)",
     "ObjectFormPropsSchema": "src/ui/component.zod.ts#ObjectFormPropsSchema (const)",
     "ObjectGanttProps": "src/ui/component.zod.ts#ObjectGanttProps (type)",
     "ObjectGanttPropsParsed": "src/ui/component.zod.ts#ObjectGanttPropsParsed (type)",

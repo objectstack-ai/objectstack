@@ -94,7 +94,10 @@ import {
   masterGovernsRowWrites,
   owdDeclaresOpenRowWrites,
   owdOpenWritesCoversOperation,
+  withOwnershipFloorAlternates,
+  type OwnershipFloorAlternate,
 } from './platform-ownership-policies.js';
+import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   unresolvedPostureDenialMessage,
@@ -1242,6 +1245,16 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly nameFoldWarned = new Set<string>();
 
+  /**
+   * [#21729] Alternate matches other plugins contributed to the platform's
+   * ownership floor, keyed by contributing plugin — read on every
+   * {@link collectRLSPolicies} call, never copied into a resolved set, so a
+   * contribution landing at `kernel:ready` is in force for the first request
+   * and no memo can hold a set composed without it. The seam and its rules:
+   * `ownership-floor-alternates.ts`.
+   */
+  private readonly ownershipFloorAlternates = new OwnershipFloorAlternates();
+
   constructor(options: SecurityPluginOptions = {}) {
     this.bootstrapPermissionSets =
       options.defaultPermissionSets ?? securityDefaultPermissionSets;
@@ -2099,9 +2112,29 @@ export class SecurityPlugin implements Plugin {
         // separate change. Consumers feature-detect.
         discardPermissionSetOverlay: (callerContext: any, id: string) =>
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
+        // [#21729] The ownership-floor alternate seam — how a plugin that
+        // installs a tighter row gate stops the platform's `created_by` floor
+        // pre-empting it, registered beside that gate and nowhere else. Same
+        // extension pattern as the two above (the contract lives in
+        // `packages/spec`; a contributor feature-detects the method). Keyed by
+        // the contributing plugin: a second call replaces the first, an empty
+        // list withdraws. Throws on a contribution the seam refuses — see
+        // `ownership-floor-alternates.ts` for the rules.
+        contributeOwnershipFloorAlternates: (
+          plugin: string,
+          alternates: readonly OwnershipFloorAlternate[],
+        ): void => {
+          this.ownershipFloorAlternates.contribute(plugin, alternates);
+          ctx.logger.info(
+            `[security] ownership-floor alternates from '${plugin}': ` +
+              (alternates.length === 0
+                ? 'withdrawn'
+                : alternates.map((a) => `${a.object}.${a.operation} (${a.name})`).join(', ')),
+          );
+        },
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay, contributeOwnershipFloorAlternates) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -8824,10 +8857,17 @@ export class SecurityPlugin implements Plugin {
     heldPositions?: string[],
   ): RowLevelSecurityPolicy[] {
     const allPolicies: RowLevelSecurityPolicy[] = [];
+    const floorAlternates = this.ownershipFloorAlternates.all();
 
     for (const ps of permissionSets) {
       if (ps.rowLevelSecurity) {
-        for (const policy of ps.rowLevelSecurity) {
+        // [#21729] A contributed alternate match lands BESIDE the floor policy
+        // it relieves, in the floor's own domain, and only in a set that ships
+        // an enabled floor of its limb (`withOwnershipFloorAlternates`). Every
+        // reader of the collection — the by-id pre-image gate, the bulk write
+        // filter, the post-image check, `checkAuthoredRowWrite`, explain — sees
+        // the same list, because this is the one place they all collect from.
+        for (const policy of withOwnershipFloorAlternates(ps.rowLevelSecurity, floorAlternates)) {
           // [ADR-0105 D3] When org isolation is NOT active, strip the tenant
           // policies the PLATFORM itself ships — there is no meaningful active
           // organization to compare against, so they would match zero rows (or

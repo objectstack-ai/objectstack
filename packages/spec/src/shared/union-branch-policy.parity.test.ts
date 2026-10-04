@@ -161,12 +161,12 @@ const FIXTURES: Array<[string, { safeParse: (v: unknown) => any }, unknown]> = [
     { u: { next: { next: { next: { next: { wrong: 1 } } } } } },
   ],
   [
-    'container descent — invalid_key on a constrained z.record key (#5389)',
+    'container descent — invalid_key on a constrained z.record key',
     z.object({ fields: z.record(z.string().regex(/^[a-z_]+$/, 'Must be snake_case.'), z.number()) }),
     { fields: { 'First Name': 1 } },
   ],
   [
-    'container descent — invalid_element on a z.map with a non-PropertyKey key (#5389)',
+    'container descent — invalid_element on a z.map with a non-PropertyKey key',
     z.object({ m: z.map(z.object({ id: z.string() }), z.string()) }),
     { m: new Map([[{ id: 'a' }, 42]]) },
   ],
@@ -182,7 +182,7 @@ const FIXTURES: Array<[string, { safeParse: (v: unknown) => any }, unknown]> = [
   ],
 ];
 
-describe('[#8318] the two walks reach the same union-branch verdict', () => {
+describe('the two walks reach the same union-branch verdict', () => {
   for (const [name, schema, value] of FIXTURES) {
     it(`agrees pair for pair — ${name}`, () => {
       const issues = issuesFor(schema, value);
@@ -211,7 +211,7 @@ describe('[#8318] the two walks reach the same union-branch verdict', () => {
   });
 });
 
-describe('[#8318] the ONE deliberate asymmetry, asserted rather than assumed', () => {
+describe('the ONE deliberate asymmetry, asserted rather than assumed', () => {
   const [, cappedSchema, cappedValue] = FIXTURES.find(
     ([name]) => name.startsWith('the branch cap'),
   )!;
@@ -242,7 +242,7 @@ describe('[#8318] the ONE deliberate asymmetry, asserted rather than assumed', (
   });
 });
 
-describe('[#8318] the policy constants are the ones both walks were pinned on', () => {
+describe('the policy constants are the ones both walks were pinned on', () => {
   it('depth limit 3, branch cap 3', () => {
     expect(NESTED_EXPANSION_DEPTH_LIMIT).toBe(3);
     expect(UNION_BRANCH_SELECTION_LIMIT).toBe(3);
@@ -257,7 +257,7 @@ describe('[#8318] the policy constants are the ones both walks were pinned on', 
   });
 });
 
-describe('[#8318] ⛔ the policy stays package-internal', () => {
+describe('⛔ the policy stays package-internal', () => {
   // The #4001 pitfall the card names: this module is machinery two siblings
   // need, not a contract anyone should author against. If a barrel ever
   // re-exports it, `api-surface/` and `export-origins/` move with it and this

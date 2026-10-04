@@ -107,7 +107,7 @@ function persistenceSchemaCodeLines(): string[] {
   return hits;
 }
 
-describe('#15811 population — no declaring position still mounts the persistence schema', () => {
+describe('evaluated-slot population — no declaring position still mounts the persistence schema', () => {
   const hits = persistenceSchemaCodeLines();
 
   it('LIT CONTROL — the scan does find the name where it legitimately lives', () => {
@@ -242,7 +242,7 @@ const POSITIONS: ReadonlyArray<readonly [string, () => z.ZodType]> = [
   ['system/settings-manifest.zod.ts:SettingsManifestSchema.visible', () => slot(SettingsManifestSchema, 'visible')],
 ];
 
-describe('#15811 — every evaluated slot refuses the two shapes no engine can run', () => {
+describe('every evaluated slot refuses the two shapes no engine can run', () => {
   it('reaches exactly the 34 declaring positions the census enumerated', () => {
     // A position that stops being reachable must red here rather than fall out
     // of the table: that silent drop is the #17630 failure in another costume.

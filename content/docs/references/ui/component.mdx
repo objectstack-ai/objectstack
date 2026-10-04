@@ -524,8 +524,8 @@ Sort field and direction pair
 | **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `number` | optional | Number of field columns (multi-column forms), honoured under either `layout` |
 | **fields** | `string[]` | optional | Field names to draw, in order — bare names selecting from the object's fields and from `customFields`. A `{ name }` or `{ field }` object entry is refused: a per-form label or required override goes on a `sections[].fields` entry |
-| **customFields** | `any` | optional | Custom field definitions merged into the generated set |
-| **sections** | `any[]` | optional | Form sections (`{ label, description?, fields }` — wizard steps / tab panes) |
+| **customFields** | `{ name: string; label?: string; description?: string; type?: string; … }[]` | optional | Field definitions merged over the set generated from the object's metadata — each a closed inline field `{ name, label?, type?, required?, … }`: a member naming a field the object declares replaces that field's whole definition, any other is added after the generated fields. With no object behind the form, the members are its only fields |
+| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional | Form sections — wizard steps, tab panes or stacked groups: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }`, or `{ group, columns?, pane? }` to inherit an object field group. Each `fields` entry is a field name, the form view's `{ field, … }` entry, or an inline form field `{ name, type, … }` |
 | **title** | `string \| Record<string, string>` | optional | Form title |
 | **description** | `string \| Record<string, string>` | optional | Form description (rendered by the drawer/modal presentations) |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed) |
@@ -556,6 +556,59 @@ Sort field and direction pair
 | **initialValues** | `Record<string, any>` | optional | Prefill values (create mode) |
 | **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
 | **mobile** | `{ stickyActions?: boolean; stepper?: boolean \| 'auto'; stepperMinFields?: integer; stepperFieldsPerStep?: integer; … }` | optional | Phone presentation options, each opt-in — `{ stickyActions?, stepper?, stepperMinFields?, stepperFieldsPerStep?, fullscreenLongText? }`. Read by the flat (simple, sectionless) form |
+
+### Nested Shape: `ObjectFormProps.customFields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | The field's name: its identity, and the key its value is submitted under. A member naming a field the object declares replaces that field's whole definition |
+| **label** | `string` | optional | The label drawn beside the control (a plain string) |
+| **description** | `string` | optional | Help text drawn under the control |
+| **type** | `string` | optional | The widget the field renders as — a built-in input type (`input`, `textarea`, `select`, …) or a field widget (`email`, `field:markdown`, …); the renderer's default input when omitted |
+| **inputType** | `string` | optional | The HTML `type` of the built-in input (`email`, `tel`, `number`, `date`, …) |
+| **widget** | `string` | optional | A widget to render instead of the one `type` resolves to |
+| **required** | `boolean` | optional | Refuse the submit while the field is empty |
+| **disabled** | `boolean` | optional | Draw the control greyed out and not interactive |
+| **readonly** | `boolean` | optional | Draw the value plainly, not editable |
+| **hidden** | `boolean` | optional | Do not draw the field (its value still submits) |
+| **placeholder** | `string` | optional | Placeholder text in the empty control |
+| **options** | `{ label: string; value: string \| number \| boolean; description?: string; visibleWhen?: string \| object }[]` | optional | The choices of a select / radio / checkboxes field (and a lookup's static options) — `{ label, value, description?, visibleWhen? }`, `value` a string, a number or a boolean |
+| **validation** | `{ required?: string; minLength?: object; maxLength?: object; min?: object; … }` | optional | Extra rules checked at submit — `{ required?, minLength?, maxLength?, min?, max? }`, each bound rule a `{ value, message }`, and `required` the message a required field shows |
+| **dependsOn** | `string \| (string \| { field: string; param?: string })[]` | optional | The field(s) this field's options depend on: the form gates the field until they are set and re-evaluates its options as they change — a field name, or the object field's list of names / `{ field, param }` entries |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the field is drawn only when TRUE |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the field is read-only when TRUE |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the field is required when TRUE |
+| **colSpan** | `integer` | optional | Absolute column span (1-4), clamped to the form grid's column count |
+| **span** | `Enum<'auto' \| 'full'>` | optional | Relative width: 'auto' (the default) sizes the field from its widget and the column count; 'full' takes the whole row |
+| **group** | `string` | optional | The object field group (`fieldGroups[].key`) this field is drawn in when the form derives its sections from the object's groups |
+| **multiple** | `boolean` | optional | Hold several values instead of one (file, image, lookup, user and select fields) |
+| **rows** | `integer` | optional | Height of the textarea / markdown editor, in text rows |
+| **accept** | `string[]` | optional | Upload types a file field's picker offers, as MIME types or extensions (e.g. `["image/*", ".pdf"]`) |
+| **dimensions** | `integer` | optional | Vector dimensionality a vector field prints beside its value |
+| **reference** | `string` | optional | The object a lookup / user field's picker queries |
+| **min** | `number` | optional | Minimum value — the native control's `min`, enforced by the browser at submit |
+| **max** | `number` | optional | Maximum value — the native control's `max`, enforced by the browser at submit |
+| **minLength** | `integer` | optional | Minimum character count — the native control's `minlength` |
+| **maxLength** | `integer` | optional | Maximum character count — the control's ceiling (a textarea also draws its counter) |
+| **pattern** | `string` | optional | Regular expression the value must match, as a string — the native control's `pattern`, enforced by the browser at submit |
+| **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | The value type a formula field displays (number / text / boolean / date) |
+| **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | The roll-up a summary field displays — the object field's own `{ object, field, function, … }` |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes |
+
+### Nested Shape: `ObjectFormProps.sections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier (snake_case) — the heading resolves through `objects.<object>._sections.<name>.label` |
+| **label** | `string` | optional | Section heading (a plain string) |
+| **description** | `string` | optional | Text drawn under the heading |
+| **collapsible** | `boolean` | optional | Draw a disclosure control on the heading, so a reader can close the section and open it again. `collapsed: true` implies it |
+| **collapsed** | `boolean` | optional | Start the section closed (implies `collapsible`) |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the whole section, heading and fields, is drawn only when TRUE |
+| **columns** | `integer` | optional | Field-grid columns for this section (1-4), a number |
+| **pane** | `Enum<'primary' \| 'secondary'>` | optional | The split form's panel this section renders in; omitted → the first section 'primary', the others 'secondary' |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`) |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … } \| { name: string; label?: string; description?: string; type?: string; … })[]` | optional | The section's fields, in order — each a field name, the form view's `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members |
 
 ### Nested Shape: `ObjectFormProps.submitBehavior[kind='redirect']`
 
@@ -1097,7 +1150,7 @@ Sort field and direction pair
 | **recordId** | `string \| number` | optional | Parent record to load (edit mode) |
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
 | **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half |
-| **sections** | `any[]` | optional | Parent form sections |
+| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional | Parent form sections — the same section shape `object-form` takes: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }` or `{ group, columns?, pane? }` |
 | **fields** | `string[]` | optional | Parent field names to draw, in order — bare names, as on `object-form`; a `{ name }` or `{ field }` object entry is refused |
 | **details** | `{ childObject: string; relationshipField?: string; columns?: object[]; formFields?: string[]; … }[]` | optional | Detail collections — each a strict entry (`{ childObject, title?, addLabel?, columns?, relationshipField?, … }`) whose `columns` are the inline grid columns a relationship field's `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted |
 | **title** | `string \| Record<string, string>` | optional | Form title |
@@ -1107,6 +1160,21 @@ Sort field and direction pair
 | **initialValues** | `Record<string, any>` | optional | Prefill values for the parent (create mode) |
 | **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
 | **taxRateField** | `string` | optional | Child field holding the per-line tax rate (line-items totals) |
+
+### Nested Shape: `ObjectMasterDetailFormProps.sections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier (snake_case) — the heading resolves through `objects.<object>._sections.<name>.label` |
+| **label** | `string` | optional | Section heading (a plain string) |
+| **description** | `string` | optional | Text drawn under the heading |
+| **collapsible** | `boolean` | optional | Draw a disclosure control on the heading, so a reader can close the section and open it again. `collapsed: true` implies it |
+| **collapsed** | `boolean` | optional | Start the section closed (implies `collapsible`) |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the whole section, heading and fields, is drawn only when TRUE |
+| **columns** | `integer` | optional | Field-grid columns for this section (1-4), a number |
+| **pane** | `Enum<'primary' \| 'secondary'>` | optional | The split form's panel this section renders in; omitted → the first section 'primary', the others 'secondary' |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`) |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … } \| { name: string; label?: string; description?: string; type?: string; … })[]` | optional | The section's fields, in order — each a field name, the form view's `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members |
 
 ### Nested Shape: `ObjectMasterDetailFormProps.details[number]`
 

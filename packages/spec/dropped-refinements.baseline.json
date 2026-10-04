@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 218,
-    "droppedRefinementSites": 665,
+    "droppedRefinementSites": 670,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -1376,6 +1376,9 @@
     },
     "ui/ObjectFormProps": {
       "sites": [
+        "customFields.element.columns.element",
+        "customFields.element.summaryOperations.filter.lazy",
+        "sections.element",
         "submitBehavior.options[1].url"
       ]
     },
@@ -1416,7 +1419,9 @@
     },
     "ui/ObjectMasterDetailFormProps": {
       "sites": [
-        "details.element.columns.element"
+        "details.element.columns.element",
+        "sections.element",
+        "sections.element.fields.element.options[2].summaryOperations.filter.lazy"
       ]
     },
     "ui/ObjectMetricProps": {

@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { resolveUserAuthzGrants, resetPlatformAdminEmailMemo } from '@objectstack/core';
-import { PermissionSetSchema } from '@objectstack/spec/security';
+import { ExplainDecisionSchema, PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, resolveDelegatorContext, type ExplainEngineDeps } from './explain-engine';
 import { RLS_DENY_FILTER } from './rls-compiler';
@@ -592,6 +592,178 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     expect(vama.verdict).toBe('widens');
     expect(vama.contributors?.map((c) => c.name)).toEqual(['compliance_auditor']);
     expect(d.record).toMatchObject({ visible: true, decidedBy: 'vama_bypass' });
+  });
+
+  // ── read depth, at row granularity ──────────────────────────────────────
+  // The sharing read filter is one predicate carrying two grants: the
+  // owner-match the read depth widens, OR-ed with the caller's own shares. A
+  // row the filter admits with no share and no ownership behind it was admitted
+  // by the depth, and the report names the depth layer, not sharing.
+  describe('read depth admits a row that no share does', () => {
+    const ORG_READER = PermissionSetSchema.parse({
+      name: 'org_reader',
+      objects: { leave_request: { allowRead: true, readScope: 'org' } },
+    });
+    const NOT_MINE = { id: 'r1', organization_id: 'org1', owner_id: 'u_other' };
+    const RULE_SHARE = {
+      id: 'shr_rule', recipient_type: 'user', recipient_id: 'u1', access_level: 'read' as const,
+      source: 'rule', source_id: 'rule_open_requests',
+    };
+    const layerRecord = (d: { layers: Array<{ layer: string; record?: any }> }, layer: string) =>
+      d.layers.find((l) => l.layer === layer)!.record!;
+    const read = (deps: ExplainEngineDeps, context: any = REC_CTX) =>
+      explainAccess(deps, { object: 'leave_request', operation: 'read', context, recordId: 'r1' });
+
+    it("org depth: the row explains as decidedBy 'depth', with a depth-layer record block", async () => {
+      // At org depth plugin-sharing composes no owner-match: the filter is null.
+      const d = await read(recDeps({ sets: [ORG_READER], record: NOT_MINE, shares: [], sharingFilter: null }));
+      expect(d.record).toMatchObject({ visible: true, decidedBy: 'depth' });
+      const depth = layerRecord(d, 'depth');
+      expect(depth.outcome).toBe('admitted');
+      expect(depth.detail).toContain("read depth 'org'");
+      const sharing = layerRecord(d, 'sharing');
+      expect(sharing.outcome).not.toBe('admitted');
+      expect(sharing.detail).not.toContain('access is granted');
+      expect(sharing.detail).toContain('see the depth layer');
+    });
+
+    it("unit depth: an owner inside the caller's unit explains as 'depth', naming the owner", async () => {
+      const d = await read(recDeps({ record: NOT_MINE, shares: [], sharingFilter: { owner_id: { $in: ['u1', 'u_other'] } } }));
+      expect(d.record).toMatchObject({ visible: true, decidedBy: 'depth' });
+      expect(layerRecord(d, 'depth').outcome).toBe('admitted');
+      expect(layerRecord(d, 'depth').detail).toContain("owner (u_other) is inside the caller's 'unit' read depth");
+      expect(layerRecord(d, 'sharing').outcome).toBe('not_evaluated');
+    });
+
+    it("unit depth: an owner outside the caller's unit is excluded by the depth layer too", async () => {
+      const d = await read(recDeps({ record: NOT_MINE, shares: [], sharingFilter: { owner_id: { $in: ['u1'] } } }));
+      expect(d.record).toMatchObject({ visible: false, decidedBy: 'sharing' });
+      expect(layerRecord(d, 'depth').outcome).toBe('excluded');
+      expect(layerRecord(d, 'sharing').outcome).toBe('excluded');
+    });
+
+    it("a criteria rule's share still explains as 'sharing', with '1 share(s) attached'", async () => {
+      // A criteria sharing rule materialises as a `sys_record_share` row with
+      // `source: 'rule'` naming the matched user (sharing-rule-service.ts).
+      const d = await read(recDeps({
+        record: NOT_MINE,
+        shares: [RULE_SHARE],
+        sharingFilter: { $or: [{ owner_id: { $in: ['u1'] } }, { id: { $in: ['r1'] } }] },
+      }));
+      expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
+      const sharing = layerRecord(d, 'sharing');
+      expect(sharing.outcome).toBe('admitted');
+      expect(sharing.detail).toBe('1 share(s) attached; access is granted for this record.');
+      expect(sharing.rules?.[0]).toMatchObject({ kind: 'sharing_rule', name: 'rule_open_requests', effect: 'admits' });
+    });
+
+    it("a share AND org depth: 'sharing' decides, the last layer to admit; the depth layer admits as well", async () => {
+      const d = await read(recDeps({ sets: [ORG_READER], record: NOT_MINE, shares: [RULE_SHARE], sharingFilter: null }));
+      expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
+      expect(layerRecord(d, 'depth').outcome).toBe('admitted');
+    });
+
+    it("a share AND unit depth: 'sharing' decides; the depth layer says it cannot separate the two", async () => {
+      const d = await read(recDeps({
+        record: NOT_MINE,
+        shares: [RULE_SHARE],
+        sharingFilter: { $or: [{ owner_id: { $in: ['u1', 'u_other'] } }, { id: { $in: ['r1'] } }] },
+      }));
+      expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
+      expect(layerRecord(d, 'depth').outcome).toBe('not_evaluated');
+      expect(layerRecord(d, 'depth').detail).toContain('not separated');
+    });
+
+    it('below org, a null filter is the sharing service imposing nothing — not the depth', async () => {
+      const d = await read(recDeps({ record: NOT_MINE, shares: [], sharingFilter: null }));
+      expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
+      const sharing = layerRecord(d, 'sharing');
+      expect(sharing.detail).toContain('imposes no owner-match');
+      expect(sharing.detail).not.toContain('access is granted');
+      expect(layerRecord(d, 'depth').outcome).toBe('not_evaluated');
+    });
+
+    it('an on-behalf-of read never credits the depth: its filter is asked with no depth stamped', async () => {
+      const d = await read(
+        { ...recDeps({ record: NOT_MINE, shares: [], sharingFilter: { owner_id: { $in: ['u1', 'u_other'] } } }), ql: DELEGATOR_QL },
+        { ...REC_CTX, onBehalfOf: { userId: 'u_boss' } },
+      );
+      expect(d.record?.visible).toBe(true);
+      expect(d.record?.decidedBy).not.toBe('depth');
+      expect(layerRecord(d, 'depth').outcome).toBe('not_evaluated');
+      expect(layerRecord(d, 'sharing').detail).not.toContain('access is granted');
+    });
+  });
+
+  // ── every published decider is reachable ────────────────────────────────
+  // The enum is read from the spec, never restated here: a member the spec
+  // gains, and no branch of the decision tree produces, fails by name until a
+  // scenario produces it or the ledger below says why none can.
+  describe('decision.record.decidedBy: each published member is produced by a branch, or ledgered', () => {
+    const DECIDED_BY: readonly string[] =
+      ExplainDecisionSchema.shape.record.unwrap().shape.decidedBy.unwrap().options;
+    const VIEW_ALL = PermissionSetSchema.parse({
+      name: 'compliance_auditor',
+      objects: { '*': { allowRead: true, viewAllRecords: true } },
+    });
+    const CAPS_GATED = {
+      isPrivate: false,
+      requiredPermissions: { all: [], read: ['manage_metadata'], create: [], update: [], delete: [] },
+      fieldRequiredPermissions: {},
+    };
+    const NOT_MINE = { id: 'r1', organization_id: 'org1', owner_id: 'u_other' };
+    const ask = (deps: ExplainEngineDeps, operation: 'read' | 'delete' = 'read') =>
+      explainAccess(deps, { object: 'leave_request', operation, context: REC_CTX, recordId: 'r1' });
+
+    const PRODUCERS: Record<string, () => Promise<{ record?: { decidedBy?: string } }>> = {
+      tenant_isolation: () => ask(recDeps({
+        layered: { layer0: { organization_id: 'org1' }, layer1: null },
+        record: { ...NOT_MINE, organization_id: 'org2' },
+      })),
+      required_permissions: () => ask({ ...recDeps(), getObjectSecurityMeta: async () => CAPS_GATED }),
+      object_crud: () => ask(recDeps(), 'delete'),
+      owd_baseline: () => ask(recDeps({ record: { id: 'r1', organization_id: 'org1', owner_id: 'u1' } })),
+      depth: () => ask(recDeps({ record: NOT_MINE, shares: [], sharingFilter: { owner_id: { $in: ['u1', 'u_other'] } } })),
+      sharing: () => ask(recDeps({
+        record: NOT_MINE,
+        shares: [{ id: 'shr_1', recipient_type: 'user', recipient_id: 'u1', access_level: 'read', source: 'manual' }],
+        sharingFilter: { $or: [{ owner_id: { $in: ['u1'] } }, { id: { $in: ['r1'] } }] },
+      })),
+      vama_bypass: () => ask(recDeps({ sets: [VIEW_ALL], record: NOT_MINE, shares: [], sharingFilter: { owner_id: 'u1' } })),
+      rls: () => ask(recDeps({
+        layered: { layer0: null, layer1: { status: 'open' } },
+        record: { ...NOT_MINE, owner_id: 'u1', status: 'closed' },
+      })),
+    };
+    const NOT_PRODUCED: Record<string, string> = {
+      principal:
+        'The principal layer resolves who is asking and which sets they hold; it never judges a row. A principal ' +
+        'whose grants fail to resolve (a missing or unresolvable delegator) is refused at object_crud, which is ' +
+        'the layer the tree names for it.',
+      fls:
+        'Field-level security masks fields of a row that is served; it never admits or removes the row, so it ' +
+        'cannot decide whether the row is visible.',
+    };
+
+    it('the producers and the ledger partition the enum exactly', () => {
+      for (const member of DECIDED_BY) {
+        const produced = member in PRODUCERS;
+        const ledgered = member in NOT_PRODUCED;
+        expect(produced || ledgered, `decidedBy member '${member}' is produced by no branch and carries no ledger reason`).toBe(true);
+        expect(produced && ledgered, `decidedBy member '${member}' is both produced and ledgered`).toBe(false);
+      }
+      for (const key of [...Object.keys(PRODUCERS), ...Object.keys(NOT_PRODUCED)]) {
+        expect(DECIDED_BY, `'${key}' is not a member of the published decidedBy enum`).toContain(key);
+      }
+      for (const [member, reason] of Object.entries(NOT_PRODUCED)) {
+        expect(reason.trim().length, `the ledger entry for '${member}' carries no reason`).toBeGreaterThan(0);
+      }
+    });
+
+    it.each(Object.keys(PRODUCERS))("'%s' is produced by the branch its scenario drives", async (member) => {
+      const d = await PRODUCERS[member]();
+      expect(d.record?.decidedBy).toBe(member);
+    });
   });
 
   it('degrades gracefully with no record-grained deps — object-level layers plus a best-effort verdict', async () => {

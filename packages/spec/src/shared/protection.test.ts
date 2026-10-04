@@ -132,7 +132,7 @@ describe('applyProtection', () => {
  * reading the source cannot distinguish "has an error map" from "has an error
  * map that says something useful".
  */
-describe('ProtectionSchema — unknown-key refusal (#16845)', () => {
+describe('ProtectionSchema — unknown-key refusal names the surface and the rename', () => {
     it('names the surface, echoes the key and suggests the rename', () => {
         const issue = unknownKeyIssue(ProtectionSchema.safeParse({ lock: 'full', reason: 'r', lockk: 'system' } as never));
         expect(issue, 'a `.strict()` shape must still raise unrecognized_keys').toBeDefined();
@@ -206,7 +206,7 @@ describe('ProtectionSchema — unknown-key refusal (#16845)', () => {
  * an argument; this is the measurement. Every row below reads identically on the
  * pre-fix build.
  */
-describe('ProtectionSchema — accept set is unchanged (#16845)', () => {
+describe('ProtectionSchema — accept set is unchanged', () => {
     it('declares exactly `lock`, `reason`, `docsUrl`', () => {
         expect(Object.keys(ProtectionSchema.shape).sort()).toEqual(['docsUrl', 'lock', 'reason']);
     });

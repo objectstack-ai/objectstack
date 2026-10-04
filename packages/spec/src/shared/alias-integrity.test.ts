@@ -513,7 +513,7 @@ describe('alias integrity — coverage', () => {
     expect(unreached, 'these alias tables are not reachable from any module export, so nothing judges them').toEqual([]);
   });
 
-  it('NOTHING in packages/spec calls `strictUnknownKeyError` directly any more (#5593)', () => {
+  it('NOTHING in packages/spec calls `strictUnknownKeyError` directly any more', () => {
     // This was a shrink-only ratchet at 44 — the pre-helper wiring, which hands
     // the factory a hand-transcribed `knownKeys` array instead of a shape.
     // #5593 migrated the last of them, so it is a hard ZERO and the assertion
@@ -767,7 +767,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(broken.sort()).toEqual([]);
   });
 
-  it('no two alias keys in one table collapse onto the same probe (#5481)', () => {
+  it('no two alias keys in one table collapse onto the same probe', () => {
     // The table is indexed by `aliasProbe(key)`, so a colliding pair does not
     // produce two entries — it produces one, decided by source order, with the
     // earlier key gone before any author can reach it. Judged with the REAL
@@ -809,7 +809,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect([...PROSE_ALIAS_TARGETS].filter((x) => !used.has(x)).sort()).toEqual([]);
   });
 
-  it('no guidance SET member is itself a declared key, and no two entries claim one key (#6619)', () => {
+  it('no guidance SET member is itself a declared key, and no two entries claim one key', () => {
     // The set-keyed guidance form arrived with #6619's fold of the three
     // hand-written `$ZodErrorMap`s — maps that, being hand-rolled, no registry
     // saw and nothing judged (#6416's blind spot). Folding them in is only
@@ -849,7 +849,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(broken.sort()).toEqual([]);
   });
 
-  it('every pattern-keyed set carries examples that really match it and are really rejected (#6619)', () => {
+  it('every pattern-keyed set carries examples that really match it and are really rejected', () => {
     // A pattern is an OPEN family, so the dead-entry question cannot be asked
     // of its membership the way it is of a list — the visibility pattern
     // deliberately also matches the canonical `visibleWhen`, which the shape
@@ -880,7 +880,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(broken.sort()).toEqual([]);
   });
 
-  it('no alias row is dead on arrival because a guidanceSet in the same table already consumes it (#7889)', () => {
+  it('no alias row is dead on arrival because a guidanceSet in the same table already consumes it', () => {
     // The live-table verdict. If this ever turns red on a real schema, the fix
     // is at the authoring site (drop the row, or fold the key into the set's
     // prescription) — never here, and never a change to the predicate that
@@ -904,7 +904,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     ).toBeGreaterThan(0);
   });
 
-  it('the guidanceSet-reachability check can actually go red — a planted dead row, no live schema touched (#7889)', () => {
+  it('the guidanceSet-reachability check can actually go red — a planted dead row, no live schema touched', () => {
     // Self-test, per the triage ruling: prove the gate can fail before trusting
     // that it passing on the live table means anything. Entirely synthetic —
     // `unreachableAliasRows` only reads `options.aliases` / `options.guidanceSets`,
@@ -914,7 +914,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     const planted: StrictObjectDeclaration[] = [{
       options: {
         surface: 'synthetic reachability probe',
-        history: 'n/a — planted for #7889 self-test',
+        history: 'n/a — planted for the reachability self-test',
         aliases: { visibleIf: 'visibleWhen' },
         guidanceSets: [{
           name: 'SYNTHETIC_VIS_PATTERN',
@@ -936,7 +936,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     const reachable: StrictObjectDeclaration[] = [{
       options: {
         surface: 'synthetic reachability probe (no set)',
-        history: 'n/a — planted for #7889 self-test',
+        history: 'n/a — planted for the reachability self-test',
         aliases: { visibleIf: 'visibleWhen' },
       },
       shape: emptyShape,
@@ -949,7 +949,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     const nonMatching: StrictObjectDeclaration[] = [{
       options: {
         surface: 'synthetic reachability probe (non-matching set)',
-        history: 'n/a — planted for #7889 self-test',
+        history: 'n/a — planted for the reachability self-test',
         aliases: { disabled: 'readonly' },
         guidanceSets: [{
           name: 'SYNTHETIC_VIS_PATTERN',
@@ -963,7 +963,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(unreachableAliasRows(nonMatching)).toEqual([]);
   });
 
-  it('the three #6416 hand-written maps are FOLDED and judged here — the blind spot stays closed (#6619)', () => {
+  it('the three hand-written error maps are FOLDED and judged here — the blind spot stays closed', () => {
     // The reason #6619 existed: `strictVisibilityError`,
     // `strictWidgetAnalyticsError` and `strictTenancyError` were hand-rolled
     // `$ZodErrorMap`s, so their alias pointers and prescriptions registered in
@@ -1008,7 +1008,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
       .toEqual(['crossTenantAccess', 'organizationField', 'strategy']);
   });
 
-  it('no live surface still reports the shared view/page FAMILY name (#8202)', () => {
+  it('no live surface still reports the shared view/page FAMILY name', () => {
     // `VISIBILITY_STRICT_OPTIONS.surface` is the family's name, and every
     // consumer overrides it with its own shape's (`'this form field'` /
     // `'this form section'` / `'this page component'`) — because since #7887
@@ -1028,7 +1028,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     ).toEqual([]);
   });
 
-  it('the two maps #6619 MISSED are folded and judged here too (#6805)', () => {
+  it('the two maps the first fold MISSED are folded and judged here too', () => {
     // #6619's inventory was two short, and both survivors were the same shape
     // as the three above — `unrecognized_keys` prescription tables attached to
     // a `.strict()` object through `{ error: … }`, seen by no registry. The
@@ -1055,7 +1055,7 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(Object.keys(capabilities!.options.guidance ?? {}).sort()).toEqual(['mru', 'trash']);
   });
 
-  it('NO module outside the shared helpers writes its own `unrecognized_keys` map (#6805)', () => {
+  it('NO module outside the shared helpers writes its own `unrecognized_keys` map', () => {
     // The class, not the instances. Both closure pins above name surfaces, so
     // each only holds the line it was written for — #6416 named three, and the
     // inventory that produced the number was two short. A pin over the SHAPE
@@ -1097,11 +1097,11 @@ describe('alias integrity — every table is a true claim about its schema', () 
       offenders.sort(),
       'build the shape with `strictObject(options, shape)` and put the prescriptions in '
       + '`guidance` / `guidanceSets` — a hand-rolled map registers in no registry, so its '
-      + 'aliases and prescriptions are unmeasured rather than clean (#6416/#6619/#6805)',
+      + 'aliases and prescriptions are unmeasured rather than clean',
     ).toEqual([]);
   });
 
-  it('…and that scan is alive: the pre-fold shape is found, prose and the two out-of-class maps are not (#6805)', () => {
+  it('…and that scan is alive: the pre-fold shape is found, prose and the two out-of-class maps are not', () => {
     // Anti-vacuity for the verdict above, which asserts that a search came back
     // EMPTY — the shape that passes just as well when the instrument is dead.
     // Four controls, each closing a different way it could be.

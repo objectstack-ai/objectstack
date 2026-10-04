@@ -6214,6 +6214,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-object-form-custom-fields-typed',
+    order: 78,
+    text:
+      'It also types the `object-form` page block\'s `customFields`, one of the two contracts the '
+      + '`ComponentPropsMap` `z.unknown()` close-out held as forks and the maintainer has since ruled: each '
+      + 'member is the runtime form field the form draws, which the spec did not declare, so a member with no '
+      + '`name` or a misspelled member passed every door and the form drew the field without it. The spec now '
+      + 'declares a closed runtime form field of the members the form draws, in camelCase, keyed by `name` — '
+      + 'the `grid` widget\'s snake_case keys stay out until the widget reads a camelCase spelling — and the '
+      + 'row takes a list of it. Read by the component-props gate (advisory); a stored page still saves and '
+      + 'loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-form-custom-fields-typed`.',
+  },
+  {
     id: 'ui-object-form-fields-names-typed',
     order: 74,
     text:
@@ -6242,6 +6256,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'runtime form field its entries are. Read by the component-props gate (advisory); a stored page '
       + 'still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-form-members-typed`.',
+  },
+  {
+    id: 'ui-object-form-sections-typed',
+    order: 79,
+    text:
+      'It also types the `sections` of the `object-form` and `object-master-detail-form` page blocks, the '
+      + 'other ruled fork: a section\'s `fields` draws an inline runtime form field beside a name and the form '
+      + 'view\'s `{ field }` entry, which the stored form view\'s section refuses, so the sections stayed '
+      + '`z.unknown()` and a misspelled key passed every door. Both rows now take one page-block section shape '
+      + 'of their own — the form view\'s section keys plus those three entry arms, the inline arm the runtime '
+      + 'form field — in canonical spellings only: a page block\'s `properties` is never parsed on the way to '
+      + 'the form, so a deprecated section `visibleOn` or a string `columns`, which a form view folds at '
+      + 'parse, was dropped, and is refused with the canonical spelling. The stored form view is unchanged. '
+      + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'registered. Its D3 record is the semantic entry `ui-object-form-sections-typed`.',
   },
   {
     id: 'ui-object-gantt-markers-typed',
@@ -19863,6 +19892,49 @@ const step18: MigrationStep = {
         + 'group per value of that field, and a board that showed one swimlane shows one swimlane per value — '
         + 'check that this is the grouping you meant.',
     },
+    // #21464 — the `object-form` page block's `customFields` was `z.unknown()`:
+    // each member is objectui's runtime form field, which the spec did not declare,
+    // and objectui's own declaration is open and spells eight of its members in
+    // snake_case. The maintainer ruled on #21704 (fork 2, letter B) that the spec
+    // declares a closed runtime form field of the members the form draws, in
+    // camelCase, keyed by `name`. D3 only: page-component `properties` is not
+    // parsed on the metadata save or load path, so a stored page is never refused;
+    // and the authored census, with every inline option list evaluated, found no
+    // working member to respell — the refused values are a type-level test's
+    // `visibleOn` and a fixture pinning that an inline `defaultValue` seeds
+    // nothing. The shipped object-manager dialog's options (`{ label: 'Box', value:
+    // 'Box' }`, …) parse because an inline option's `value` is a runtime value, not
+    // a stored field's identifier; typed as the form view's option, they did not.
+    {
+      id: 'ui-object-form-custom-fields-typed',
+      surface: 'page `object-form` components — `properties.customFields` (which used to accept any value)',
+      replacement: 'a list of closed inline form fields `{ name, label?, type?, required?, options?, … }` — the '
+        + 'members the form draws, in camelCase, each option `{ label, value, description?, visibleWhen? }` with '
+        + '`value` a string, a number or a boolean. Write a `visibleOn` (or a legacy `condition`) as '
+        + '`visibleWhen`, move a member\'s `defaultValue` into the block\'s `initialValues`, drop `id`, and leave '
+        + 'the `grid` widget\'s snake_case keys (`min_rows`, `allow_add`, …) out until the widget reads a camelCase '
+        + 'spelling.',
+      reason: 'The form merges `customFields` over the fields it generates from the object\'s metadata — a member '
+        + 'naming a declared field replaces that field\'s whole definition, any other is added — and draws each '
+        + 'member as it was written, handing it to the field widget as its metadata. The page-component row '
+        + 'declared it `z.unknown()`, so `42`, a member with no `name`, or a misspelled member passed the '
+        + 'component-props gate, and the form drew the field without it. The row now takes a closed runtime form '
+        + 'field of the members the form draws, keyed by `name`, each typed to its read — by reference where this '
+        + 'package already declares the member (the object field\'s metadata members, the evaluated predicates). '
+        + 'An option is the runtime option the form\'s option controls draw — `label`, `value`, `description`, '
+        + '`visibleWhen` — and its `value` is any string, number or boolean, kept as written: an inline field binds '
+        + 'no object column, so a stored field\'s lowercase identifier rule does not apply to it. It is read where '
+        + 'every page component\'s props are: the component-props gate '
+        + 'reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
+        + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
+        + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save or load '
+        + 'path. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
+        + 'with every inline option list evaluated, found no working member to respell. Deployed metadata NOT '
+        + 'MEASURED.',
+      acceptanceCriteria: 'Every `object-form` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.customFields`. '
+        + 'Each form draws every inline field with the label, type and rules its member names.',
+    },
     // #21464 — the top-level `fields` of the `object-form` and
     // `object-master-detail-form` page blocks was `z.array(z.unknown())`, held
     // while the form drew a `{ name }` field entry its own page-builder guide
@@ -19951,6 +20023,49 @@ const step18: MigrationStep = {
         + '`component-props-invalid` / `component-props-unknown-key` finding under the four members\' paths. '
         + 'Each form that set one of them now shows it: the post-submit behaviour it names, the modal\'s tabbed '
         + 'sections, the navigation after a save, and the phone presentation.',
+    },
+    // #21464 — the `sections` of the `object-form` and `object-master-detail-form`
+    // page blocks were `z.array(z.unknown())`: a section's `fields` draws an inline
+    // runtime form field beside a name and the form view's `{ field }` entry, which
+    // the stored form view's section refuses. The maintainer ruled on #21704 (fork
+    // 3, letter B) a page-block section shape of its own — the form view's section
+    // keys plus the three entry arms the form reads, canonical spellings only — and
+    // the stored form view is unchanged. D3 only: page-component `properties` is
+    // not parsed on the metadata save or load path, so a stored page is never
+    // refused; and the authored census, with every inline option list evaluated,
+    // found no working section to respell — the refused values are the two probes
+    // in objectui's `formSectionGroupReference-7051.test.tsx` (a section declaring
+    // neither `fields` nor `group`, and a group-owned `label` / `collapsible`
+    // beside `group`), shapes that test says this door refuses at parse.
+    {
+      id: 'ui-object-form-sections-typed',
+      surface: 'page `object-form` and `object-master-detail-form` components — `properties.sections` (whose '
+        + 'entries used to accept any value)',
+      replacement: 'closed sections `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, '
+        + 'columns?, pane?, fields }` (or `{ group, columns?, pane? }`), each `fields` entry a field name, the form '
+        + 'view\'s `{ field, … }` entry or an inline form field `{ name, type, … }`. Write a section or field '
+        + '`visibleOn` as `visibleWhen`, a string `columns: \'2\'` as the number `2`, and a section `label` (or a '
+        + 'field entry\'s `label` / `placeholder` / `helpText`) as a plain string.',
+      reason: 'The form reads a section\'s heading, collapse pair, `visibleWhen`, `columns`, `pane`, `group` and '
+        + '`fields` — the key set of the form view\'s section — and draws three kinds of field entry: a name, the '
+        + 'form view\'s `{ field }` entry overriding that object field, and an inline runtime form field drawn as '
+        + 'it stands. The page-component rows declared each section `z.unknown()`, so a misspelled key passed the '
+        + 'component-props gate and the form drew the section without it; a form view\'s deprecated `visibleOn` '
+        + 'and string `columns`, which a form view folds at parse, reached the form raw — a page block\'s '
+        + '`properties` is never parsed on the way — and were dropped. Both rows now take one section shape of '
+        + 'their own, the stored form view unchanged: the form view\'s section keys plus the three entry arms, '
+        + 'canonical spellings only, a label a plain string because the form draws it as it stands, and the form '
+        + 'view\'s group-reference rule. It is read where every page component\'s props are: the component-props '
+        + 'gate reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
+        + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
+        + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save or load '
+        + 'path. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
+        + 'with every inline option list evaluated, found no working section to respell. Deployed metadata NOT '
+        + 'MEASURED.',
+      acceptanceCriteria: 'Every `object-form` and `object-master-detail-form` node validates: `objectstack '
+        + 'validate` reports no `component-props-invalid` / `component-props-unknown-key` finding under '
+        + '`properties.sections`. Each form draws every section with the heading, visibility and columns it '
+        + 'names, and every entry in it.',
     },
     // #21464 — the `object-gantt` page block's `markers` was `z.array(z.unknown())`:
     // its element contract lived only in objectui, so a marker with no `date`, a

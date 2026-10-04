@@ -40,6 +40,11 @@ import {
   // union): both form renderers switch on exactly that union, so one
   // declaration judges the form view and the block.
   FormViewSchema,
+  // [#21464] A form section's `{ field }` entry is the form view's own field
+  // entry, member by member — see `objectFormSectionFieldEntry()`.
+  FormFieldSchema,
+  type FormField,
+  type FormFieldInput,
 } from './view.zod';
 // [#21445] `object-grid.bulkActionDefs` is the list view's bulk-action def,
 // by identity — the element `ListViewSchema.bulkActionDefs` declares.
@@ -85,8 +90,12 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 // [#20928] `object-master-detail-form`'s `details[].columns` is the SAME inline
 // grid column a relationship field's `inlineColumns` and a form view's
 // `subforms[].columns` take, referenced rather than copied: all three carriers
-// feed one objectui grid.
-import { InlineGridColumnSchema } from '../data/field.zod';
+// feed one objectui grid. [#21464] An inline `object-form` field's metadata
+// members a field widget reads off it (`rows`, `accept`, `reference`, …) take the
+// object field's own member schemas, by reference, and its option's `label`,
+// `description` and `visibleWhen` the object field's option's — see
+// `objectFormRuntimeField()` and `buildObjectFormRuntimeOption()`.
+import { InlineGridColumnSchema, FieldSchema, SelectOptionSchema } from '../data/field.zod';
 // [#21589] The child field names the renderer derives a detail's line-position
 // field from — the one list the retired detail-entry `sortField`'s
 // prescriptions print (reached by relative import only, never the barrel).
@@ -5935,6 +5944,476 @@ const formFieldNameList = () => z.array(z.string({
   error: (issue) => formFieldNameRefusal(issue.input),
 }));
 
+// ---------------------------------------------------------------------------
+// [#21464] `object-form` `customFields` and both forms' `sections` — the two
+// contracts the S-objectui-held stage held as forks, in the shapes the
+// maintainer ruled on the decision card #21704 (record 5978663135): fork 2,
+// letter B (a closed runtime form field) and fork 3, letter B (a page-block
+// section shape of its own). Read points are at the `.objectui-sha` pin
+// `2e818d0b51ec`; each cited reader file is byte-identical at objectui `main`
+// `b92329c894`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `grid` widget's eight field-level keys, spelled snake_case.
+ *
+ * The widget reads them off a `type: 'grid'` field (`GridFieldMetadata`,
+ * `fields/src/widgets/GridField.tsx:588`), so the form does draw them; they are
+ * left out of {@link objectFormRuntimeField} by the ruling itself, because this
+ * package spells configuration keys in camelCase. They come in once the widget
+ * reads a camelCase spelling (objectstack-ai/objectui#11610 carries the rename).
+ */
+const OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS = [
+  'min_rows', 'max_rows', 'allow_add', 'allow_delete', 'allow_reorder', 'total_field', 'add_label', 'sort_field',
+] as const;
+
+/** What an inline form field's undeclared keys used to cost. */
+const OBJECT_FORM_RUNTIME_FIELD_HISTORY =
+  'Until this shape was declared, an inline form field was `z.unknown()`: a misspelled member passed, and '
+  + 'the form drew the field without it.';
+
+/**
+ * [#21464] An inline field's `validation` block — the rules react-hook-form
+ * runs off it, as the form renderer reads them
+ * (`components/src/renderers/form/form.tsx:2795-2895`): `minLength`,
+ * `maxLength`, `min` and `max` are spread into the field's rules as
+ * `{ value, message }` objects, and `required` is read only as the MESSAGE a
+ * required field shows (`:2847`) — the renderer deletes the rule itself
+ * (`:2843`) and decides required-ness from the field's own `required` /
+ * `requiredWhen`, so a boolean here was dropped. objectui declares the same
+ * four `{ value, message }` rules (`FieldValidationRules`,
+ * `types/src/form.ts:1568`); its `pattern` rule needs a compiled `RegExp`, which
+ * JSON cannot carry, and its `validate` is a function — both are refused with
+ * the spelling that works.
+ */
+function objectFormRuntimeFieldValidation() {
+  const rule = (what: string) => strictObject({
+    surface: `this inline form field's \`validation.${what}\` rule`,
+    history: OBJECT_FORM_RUNTIME_FIELD_HISTORY,
+  }, {
+    value: z.number().describe(`The ${what === 'minLength' || what === 'maxLength' ? 'character count' : 'value'} the rule checks against`),
+    message: z.string().describe('The message shown when the rule fails'),
+  });
+  return strictObject({
+    surface: 'this inline form field\'s `validation` block',
+    history: OBJECT_FORM_RUNTIME_FIELD_HISTORY,
+    guidance: {
+      pattern:
+        'A `validation.pattern` rule runs only with a compiled `RegExp` value, which JSON cannot carry, so a '
+        + 'written one checked nothing. Write the pattern as the field\'s own `pattern` string instead — the '
+        + 'browser enforces it on the input at submit.',
+      validate:
+        'A `validation.validate` rule is a function, which metadata cannot carry. Write the check as '
+        + '`minLength` / `maxLength` / `min` / `max` here, as the field\'s `pattern`, or as a `requiredWhen` '
+        + 'predicate.',
+    },
+  }, {
+    required: z.string({
+      error: (issue) => (typeof issue.input === 'boolean'
+        ? '`validation.required` is the MESSAGE a required field shows, not a switch — the form decides '
+          + 'whether the field is required from its own `required` (or `requiredWhen`) and drops a boolean here. '
+          + 'Write `required: true` on the field, and put a message here only to replace the default one.'
+        : undefined),
+    }).optional().describe('The message a required field shows when it is left empty (the field\'s own `required` decides whether it is required)'),
+    minLength: rule('minLength').optional().describe('Minimum character count, with its message'),
+    maxLength: rule('maxLength').optional().describe('Maximum character count, with its message'),
+    min: rule('min').optional().describe('Minimum value, with its message'),
+    max: rule('max').optional().describe('Maximum value, with its message'),
+  });
+}
+
+/**
+ * [#21464] One option of an inline form field's `options` — CLOSED, holding the
+ * keys the form's option readers draw, measured at the `.objectui-sha` pin
+ * `2e818d0b51ec` (each cited file byte-identical at objectui `main` `fd060f076`):
+ *
+ * - `label` and `value`: every option control the form reaches — the built-in
+ *   select (`components/src/renderers/form/form.tsx:3975-3977`) and the four
+ *   option widgets `SelectField`, `MultiSelectField`, `RadioField` and
+ *   `CheckboxesField` — draws `label` (the widgets through
+ *   `optionDisplayLabel`, `core/src/evaluator/optionRules.ts:173`, which falls
+ *   back to the value for a blank label) and keys, compares and submits by
+ *   `value`;
+ * - `visibleWhen`: the cascade offers an option only while it holds
+ *   (`resolveCascadingOptions`, from `form.tsx:2940` and from each widget's
+ *   `useCascadingOptions`);
+ * - `description`: a lookup field's typeahead searches its static options'
+ *   description beside the label (`fields/src/widgets/LookupField.tsx:705-706`).
+ *
+ * ## `value` is a runtime value
+ *
+ * It is not the stored field's identifier (the object field's option takes a
+ * lowercase `SystemIdentifierSchema`): an inline form field binds no object
+ * column, and the readers treat the value opaquely — they compare it by
+ * identity, stringify it only at the control, and the built-in select maps the
+ * pick back to the authored value (`matchOptionValue`, `form.tsx:3955`). So it
+ * is `string | number | boolean`, as objectui's runtime option declares on
+ * purpose (`types/src/zod/form.zod.ts:142-145`: "standalone UI forms
+ * legitimately bind numeric/boolean values"). The shipped `object-manager`
+ * dialog writes `{ label: 'Box', value: 'Box' }`
+ * (`plugin-designer/src/ObjectManager.tsx:244`), which the stored field's
+ * identifier rule refused.
+ *
+ * `label` and `description` are the object field's option's own member
+ * schemas, by reference. `visibleWhen` is the evaluated predicate, declared
+ * here rather than taken from that option: the object field's option is also
+ * re-checked by the server on write, and an inline form field's option never
+ * is — it binds no object column. No form option control reads `color`,
+ * `default`, or objectui's `disabled` / `icon`, so each is refused with the
+ * spelling that works.
+ */
+function buildObjectFormRuntimeOption() {
+  const { label, description } = SelectOptionSchema.shape;
+  return strictObject({
+    surface: 'this inline form field\'s option',
+    history: OBJECT_FORM_RUNTIME_FIELD_HISTORY,
+    aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value', visible: 'visibleWhen', showWhen: 'visibleWhen' },
+    guidance: {
+      color:
+        'No form option control draws `color`: a select, radio or checkbox option is drawn as its `label`. A '
+        + 'colour belongs to the object field\'s own option, which list and grid cells draw as a badge. Delete it '
+        + 'here.',
+      default:
+        'An inline option\'s `default` seeds nothing: the form opens on the block\'s `initialValues` and on the '
+        + 'object\'s own field defaults. Write the pre-selected value in the block\'s `initialValues` '
+        + '(`initialValues: { FIELD: VALUE }`).',
+      disabled:
+        'No form option control reads an option\'s `disabled`: every option drawn can be picked. Offer the option '
+        + 'only while it applies with its `visibleWhen`, or freeze the whole field with the field\'s own '
+        + '`disabled` / `readonly`.',
+      icon:
+        'No form option control draws an option\'s `icon`: the option is drawn as its `label`. Put the cue in the '
+        + 'label, or delete it.',
+    },
+  }, {
+    label,
+    value: z.union([z.string(), z.number(), z.boolean()])
+      .describe('The value the field takes when the option is picked — a string, a number or a boolean, kept as written'),
+    description,
+    visibleWhen: EvaluatedExpressionInputSchema.optional()
+      .describe('Predicate (CEL) over the live `record` and `current_user` — the option is offered only while TRUE. UI gating only: nothing re-checks an inline option on write'),
+  });
+}
+
+/**
+ * [#21464] The runtime form field — one entry of an `object-form`'s
+ * `customFields`, and the inline arm of a form section's `fields` — CLOSED, in
+ * camelCase, holding only the members the form draws (decision card #21704,
+ * fork 2, letter B). Its identity key is `name`.
+ *
+ * ## How the member reaches a draw
+ *
+ * `customFields` is merged over the fields generated from the object's metadata
+ * (`plugin-form/src/customFieldsMerge.ts:78-108`, called from
+ * `ObjectForm.tsx:1178-1185` and from every other `formType` arm): a member
+ * naming a generated field replaces its WHOLE definition, and any other member
+ * is appended. A section entry that is not the form view's `{ field }` entry is
+ * drawn as it stands (`sectionFields.ts:369-370`). Either way the field reaches
+ * the form renderer as it was written, and the renderer hands it to the field
+ * widget as its metadata carrier (`form.tsx:3171`, `field.field || field` — an
+ * inline field stashes no object field).
+ *
+ * ## The draw set, read member by member (not transcribed from objectui's `FormField`)
+ *
+ * - **the field row** (`form.tsx` `renderFormField`, `:2675-2693`): `name`,
+ *   `label`, `description`, `type`, `widget` (`:2915-2918`, ahead of `type`),
+ *   `required`, `disabled`, `readonly`, `hidden` (`:2696`), `validation`
+ *   (`:2795`), `visibleWhen` / `readonlyWhen` / `requiredWhen` (`:2732`),
+ *   `colSpan` (`:2988`), `placeholder` (`:3185`), `inputType` (`:3174`, the
+ *   built-in input's `type`), `options` and `dependsOn` (`:2935-2941`, the
+ *   cascading option list) and `multiple` (`:2917`);
+ * - **the layout** (`plugin-form/src/autoLayout.ts:162-172`): `span` and
+ *   `colSpan`; and `group` (`fieldGroups.ts:52`), which places the field in the
+ *   object's declared field group when the form derives its sections from them;
+ * - **the field widgets**, off the carrier: `rows` (`TextAreaField.tsx:102`),
+ *   `accept` and `multiple` (`FileField.tsx:147-148`), `dimensions`
+ *   (`VectorField.tsx:11`), `reference` (`LookupField.tsx:326`), `min` / `max`
+ *   (`NumberField.tsx:88-89`), `minLength` / `maxLength` (`form.tsx:4080`,
+ *   `:4146`), `pattern` (the built-in input's attribute), `returnType`
+ *   (`FormulaField.tsx:22`), `summaryOperations` (`SummaryField.tsx:15`) and
+ *   `columns` (`GridField.tsx:589`).
+ *
+ * Where this package already declares the member, its value schema is taken
+ * by reference — the object field's (`FieldSchema`) for the widget metadata
+ * members and the evaluated predicate for the three `*When` rules. `options`
+ * takes the runtime option ({@link buildObjectFormRuntimeOption}), whose
+ * `value` is any runtime value the form binds. `label`, `description` and `placeholder` are
+ * plain strings: the renderer draws each as it is, so an inline locale map
+ * would be a React child.
+ *
+ * ## Read, and refused anyway
+ *
+ * - the `grid` widget's snake_case keys ({@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS}),
+ *   by the ruling;
+ * - `visibleOn` (`form.tsx:2767`) and the legacy `condition` (`:2717`): two
+ *   more spellings of the conditional-visibility predicate, which this package
+ *   spells `visibleWhen` (ADR-0089);
+ * - `id`: the renderer keys the row by `id ?? name` (`:2898`), and `name` is
+ *   already unique in the drawn list (the merge keeps the first member of a
+ *   name), so it adds nothing;
+ * - `fields`: the member claim of the section-divider row the form builds from
+ *   a section, not a member of a field.
+ *
+ * Measured outside objectui's 45 members: `group` (above) is declared, and
+ * `defaultValue` is refused — an inline field's default seeds nothing (the
+ * form opens on `initialValues` and on the object's declared defaults,
+ * `schemaDefaults.ts`; pinned by `initialRecordMerge-9760.test.tsx` row 7).
+ *
+ * Declared once, built once: both the `object-form` row and the shared section
+ * shape take this one instance. A factory the rows call, not a
+ * {@link lazySchema}, for the reason {@link objectGanttMarker} gives.
+ */
+function buildObjectFormRuntimeField() {
+  return strictObject({
+    surface: 'this inline form field',
+    history: OBJECT_FORM_RUNTIME_FIELD_HISTORY,
+    aliases: { helpText: 'description' },
+    guidance: {
+      visibleOn:
+        '`visibleOn` is not a key of an inline form field: the conditional-visibility predicate is spelled '
+        + '`visibleWhen` (ADR-0089). Write the predicate as `visibleWhen`; where both were written, join them '
+        + 'with `&&` in one `visibleWhen` — the form shows the field only when both hold.',
+      condition:
+        '`condition` is the form\'s legacy structured visibility rule (`{ field, equals | notEquals | in }`), '
+        + 'not part of this contract: the conditional-visibility predicate is `visibleWhen` (ADR-0089), CEL '
+        + 'over `record`. Write `{ field: \'status\', equals: \'open\' }` as '
+        + '`visibleWhen: "record.status == \'open\'"`, `notEquals` as `!=`, and `in: [ … ]` as '
+        + '`record.FIELD in [ … ]`.',
+      defaultValue:
+        'An inline field\'s `defaultValue` seeds nothing: the form opens on the block\'s `initialValues` and on '
+        + 'the object\'s own field defaults, never on an inline field\'s. Write the value in the block\'s '
+        + '`initialValues` instead (`initialValues: { FIELD: VALUE }`).',
+      id:
+        'An inline form field is identified by its `name` — the form keys each field by it, and two inline '
+        + 'fields never share one — so `id` adds nothing. Delete it.',
+      fields:
+        '`fields` on a form field is the member list of the section-divider row the form builds from a '
+        + 'section; it is not written on a field. Group fields with the block\'s `sections` instead.',
+      field:
+        '`field` is the identity key of the form view\'s section entry (`{ field: \'email\', … }`, which only '
+        + 'a section\'s `fields` takes); an inline form field is keyed by `name`. Write one or the other.',
+    },
+    guidanceSets: [{
+      name: 'OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS',
+      keys: OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS,
+      prescription:
+        'This is one of the `grid` widget\'s snake_case field-level keys (`min_rows`, `max_rows`, `allow_add`, '
+        + '`allow_delete`, `allow_reorder`, `total_field`, `add_label`, `sort_field`). This contract spells '
+        + 'configuration keys in camelCase, and these come in once the widget reads a camelCase spelling; until '
+        + 'then a `grid` field takes its `columns` and the widget\'s own defaults.',
+    }],
+  }, {
+    name: z.string().min(1).describe('The field\'s name: its identity, and the key its value is submitted under. A member naming a field the object declares replaces that field\'s whole definition'),
+    label: z.string().optional().describe('The label drawn beside the control (a plain string)'),
+    description: z.string().optional().describe('Help text drawn under the control'),
+    type: z.string().optional().describe('The widget the field renders as — a built-in input type (`input`, `textarea`, `select`, …) or a field widget (`email`, `field:markdown`, …); the renderer\'s default input when omitted'),
+    inputType: z.string().optional().describe('The HTML `type` of the built-in input (`email`, `tel`, `number`, `date`, …)'),
+    widget: z.string().optional().describe('A widget to render instead of the one `type` resolves to'),
+    required: z.boolean().optional().describe('Refuse the submit while the field is empty'),
+    disabled: z.boolean().optional().describe('Draw the control greyed out and not interactive'),
+    readonly: z.boolean().optional().describe('Draw the value plainly, not editable'),
+    hidden: z.boolean().optional().describe('Do not draw the field (its value still submits)'),
+    placeholder: z.string().optional().describe('Placeholder text in the empty control'),
+    options: z.array(buildObjectFormRuntimeOption()).optional().describe('The choices of a select / radio / checkboxes field (and a lookup\'s static options) — `{ label, value, description?, visibleWhen? }`, `value` a string, a number or a boolean'),
+    validation: objectFormRuntimeFieldValidation().optional().describe('Extra rules checked at submit — `{ required?, minLength?, maxLength?, min?, max? }`, each bound rule a `{ value, message }`, and `required` the message a required field shows'),
+    dependsOn: z.union([z.string(), FieldSchema.shape.dependsOn.unwrap()]).optional().describe('The field(s) this field\'s options depend on: the form gates the field until they are set and re-evaluates its options as they change — a field name, or the object field\'s list of names / `{ field, param }` entries'),
+    visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the field is drawn only when TRUE'),
+    readonlyWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the field is read-only when TRUE'),
+    requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the field is required when TRUE'),
+    colSpan: z.number().int().min(1).max(4).optional().describe('Absolute column span (1-4), clamped to the form grid\'s column count'),
+    span: z.enum(['auto', 'full']).optional().describe("Relative width: 'auto' (the default) sizes the field from its widget and the column count; 'full' takes the whole row"),
+    group: SectionGroupKeySchema.optional().describe('The object field group (`fieldGroups[].key`) this field is drawn in when the form derives its sections from the object\'s groups'),
+    multiple: z.boolean().optional().describe('Hold several values instead of one (file, image, lookup, user and select fields)'),
+    rows: FieldSchema.shape.rows.describe('Height of the textarea / markdown editor, in text rows'),
+    accept: FieldSchema.shape.accept.describe('Upload types a file field\'s picker offers, as MIME types or extensions (e.g. `["image/*", ".pdf"]`)'),
+    dimensions: FieldSchema.shape.dimensions.describe('Vector dimensionality a vector field prints beside its value'),
+    reference: FieldSchema.shape.reference.describe('The object a lookup / user field\'s picker queries'),
+    min: z.number().optional().describe('Minimum value — the native control\'s `min`, enforced by the browser at submit'),
+    max: z.number().optional().describe('Maximum value — the native control\'s `max`, enforced by the browser at submit'),
+    minLength: FieldSchema.shape.minLength.describe('Minimum character count — the native control\'s `minlength`'),
+    maxLength: FieldSchema.shape.maxLength.describe('Maximum character count — the control\'s ceiling (a textarea also draws its counter)'),
+    pattern: z.string().optional().describe('Regular expression the value must match, as a string — the native control\'s `pattern`, enforced by the browser at submit'),
+    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date)'),
+    summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
+    columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
+  });
+}
+let objectFormRuntimeFieldOnce: ReturnType<typeof buildObjectFormRuntimeField> | undefined;
+/** The one {@link buildObjectFormRuntimeField} instance, built with the first row that takes it. */
+const objectFormRuntimeField = () => (objectFormRuntimeFieldOnce ??= buildObjectFormRuntimeField());
+
+/** A form section's `{ field }` entry, as the page-block section takes it. */
+type ObjectFormSectionFieldEntryInput =
+  Omit<FormFieldInput, 'visibleOn' | 'label' | 'placeholder' | 'helpText' | 'fields'>
+  & { label?: string; placeholder?: string; helpText?: string; fields?: ObjectFormSectionFieldEntryInput[] };
+/** {@link ObjectFormSectionFieldEntryInput} once parsed. */
+type ObjectFormSectionFieldEntry =
+  Omit<FormField, 'label' | 'placeholder' | 'helpText' | 'span' | 'fields'>
+  & { label?: string; placeholder?: string; helpText?: string; span?: 'auto' | 'full'; fields?: ObjectFormSectionFieldEntry[] };
+
+/**
+ * [#21464] The form view's `{ field }` entry, as a page block's section takes
+ * it — the second of the three entry arms the form reads (decision card
+ * #21704, fork 3, letter B).
+ *
+ * The form reads it in `plugin-form/src/sectionFields.ts:373-455`: the entry
+ * names an object field by `field`, and every other key it carries overrides
+ * that field's generated definition, key by key — the key set of the form
+ * view's own entry (`FormFieldSchema`, `view.zod.ts`). So the members ARE that
+ * schema's, by reference (pinned def by def), with three differences, each
+ * from how the page block reaches the form:
+ *
+ * - **canonical spellings only.** A form view folds the deprecated `visibleOn`
+ *   into `visibleWhen` at parse; a page block's `properties` is never parsed on
+ *   the way to the form, so no fold runs, and the deprecated spelling is
+ *   refused with the canonical one (ADR-0089).
+ * - **`label`, `placeholder` and `helpText` are plain strings.** The form
+ *   copies each onto the field it draws as it stands (`:386-388`), and the
+ *   renderer draws a label as a React child, so an inline locale map would
+ *   throw.
+ * - **no parse-time fill.** The arm is the view entry's object half, without
+ *   its `visibleOn` fold, and `span` drops the default the form view fills (the
+ *   form draws an absent `span` as `'auto'` anyway); the one parse-time change
+ *   left is the evaluated predicate's own envelope for a bare CEL string.
+ *
+ * Its sub-field list (`fields`, for a composite field) is this same entry,
+ * recursively, as the form view's is its own entry — so the canonical rule
+ * holds at every depth.
+ */
+function buildObjectFormSectionFieldEntry(): z.ZodType<ObjectFormSectionFieldEntry, ObjectFormSectionFieldEntryInput> {
+  // The object half of the form view's entry: `FormFieldSchema` is that object
+  // piped into its `visibleOn` fold, and its declared type is the pipe's, so
+  // the half is read off the pipe here, in one place.
+  const viewShape = (FormFieldSchema as unknown as z.ZodPipe<z.ZodObject<z.ZodRawShape>, z.ZodType>).in.shape;
+  const {
+    visibleOn: _foldedAtParse, label: _label, placeholder: _placeholder, helpText: _helpText, span, fields: _viewSubFields, ...shape
+  } = viewShape;
+  return strictObject({
+    surface: 'this form section\'s `{ field }` entry',
+    history:
+      'Until this shape was declared, a section entry was `z.unknown()`: a misspelled override passed, and '
+      + 'the form drew the field without it.',
+    aliases: { disabled: 'readonly' },
+    guidance: {
+      visibleOn:
+        '`visibleOn` is the form view\'s deprecated spelling of `visibleWhen` (ADR-0089), which a form view '
+        + 'folds at parse. A page block\'s `properties` is never parsed on the way to the form, so it takes the '
+        + 'canonical spelling only: write `visibleWhen`.',
+      name:
+        'A section field entry is either the form view\'s `{ field: \'email\', … }` entry, keyed by `field`, '
+        + 'or an inline form field keyed by `name` — not both. Drop `name` to override the object field `field` '
+        + 'names, or drop `field` to define the field inline.',
+    },
+  }, {
+    ...shape,
+    span: (span as z.ZodDefault<z.ZodEnum<{ auto: 'auto'; full: 'full' }>>).unwrap().optional()
+      .describe("Relative width: 'auto' (what the form draws when it is omitted) sizes the field from its widget and the column count; 'full' takes the whole row"),
+    label: z.string().optional().describe('Label override (a plain string — the form draws it as it is)'),
+    placeholder: z.string().optional().describe('Placeholder override (a plain string)'),
+    helpText: z.string().optional().describe('Help text drawn under the control (a plain string)'),
+    fields: z.array(z.lazy(() => objectFormSectionFieldEntry())).optional()
+      .describe('Sub-fields of a composite / repeater / record field, each this same entry'),
+  }) as unknown as z.ZodType<ObjectFormSectionFieldEntry, ObjectFormSectionFieldEntryInput>;
+}
+let objectFormSectionFieldEntryOnce: ReturnType<typeof buildObjectFormSectionFieldEntry> | undefined;
+/** The one {@link buildObjectFormSectionFieldEntry} instance. */
+const objectFormSectionFieldEntry = () => (objectFormSectionFieldEntryOnce ??= buildObjectFormSectionFieldEntry());
+
+/** A section `columns` string the form view converts at parse — and the number to write. */
+function objectFormSectionColumnsRefusal(input: unknown): string | undefined {
+  if (typeof input !== 'string' || !/^[1-4]$/.test(input)) return undefined;
+  return `\`columns\` is a number on a page block's section: write \`${input}\`, not \`'${input}'\`. A form view `
+    + 'converts the string at parse, but a page block\'s `properties` is never parsed on the way to the form, '
+    + 'which ignores a column count that is not a number.';
+}
+
+/**
+ * [#21464] One section of an `object-form` — and of an
+ * `object-master-detail-form`, whose parent half hands its `sections` to the
+ * form verbatim (`MasterDetailForm.tsx:1692`) — a page-block section shape of
+ * its own (decision card #21704, fork 3, letter B): the form view's section
+ * keys (`FormSectionSchema`, `view.zod.ts`, which is NOT edited) plus the three
+ * entry arms the form reads.
+ *
+ * ## The section keys, read
+ *
+ * `name` and `label` (the heading, `ObjectForm.tsx:1693-1695` and the
+ * per-`formType` maps at `:412`, `:492`, `:520`, `:556`, `:590`),
+ * `description`, `collapsible` / `collapsed` (`resolveSectionCollapse`,
+ * `:1702`), `visibleWhen` (the divider row's predicate, `:1720`), `columns`
+ * (`:1731`), `pane` (the split form, `SplitForm.tsx:445`), `group` (resolved
+ * into the field group's own section above the routing, `sectionGroups.ts`) and
+ * `fields`. That is exactly the form view's section's key set, and objectui
+ * declares the same (`ObjectFormSection`, `types/src/objectql.ts:1497`).
+ *
+ * ## Canonical spellings only
+ *
+ * A form view folds two spellings at parse: the deprecated section `visibleOn`
+ * into `visibleWhen`, and a string `columns` into its number. A page block's
+ * `properties` is never parsed on the way to the form, so neither fold runs —
+ * and the form reads only `visibleWhen` off a section and only a NUMBER
+ * `columns` (`clampCol`, `:1599`), so both spellings were dropped in silence.
+ * Both are refused with the canonical spelling. `label` is a plain string:
+ * the form draws the heading as it stands. Nothing carries a schema default;
+ * the one parse-time change is the evaluated predicate's own — a bare CEL
+ * `visibleWhen` parses to its `{ dialect, source }` envelope, as on every
+ * surface — and the form reads either spelling.
+ *
+ * ## The entry arms
+ *
+ * A field name; the form view's `{ field }` entry
+ * ({@link buildObjectFormSectionFieldEntry}); and the inline runtime form
+ * field ({@link buildObjectFormRuntimeField}), drawn as it stands
+ * (`sectionFields.ts:369-370`, kept by objectstack-ai/objectui#11550's
+ * ruling). The group-reference rule is the form view's own
+ * ({@link sectionGroupReferenceRefinement}): a section declares its members by
+ * `fields` or by `group`, and a `group` section carries no key the group
+ * declares.
+ *
+ * Declared once, built once: both rows take this one instance.
+ */
+function buildObjectFormSection() {
+  return strictObject({
+    surface: 'this `object-form` section',
+    history:
+      'Until this shape was declared, a form section was `z.unknown()`: a misspelled key passed, and the '
+      + 'form drew the section without it.',
+    aliases: { fieldGroup: 'group', groupKey: 'group' },
+    guidance: {
+      visibleOn:
+        '`visibleOn` is the form view\'s deprecated spelling of a section\'s `visibleWhen` (ADR-0089), which a '
+        + 'form view folds at parse. A page block\'s `properties` is never parsed on the way to the form, and '
+        + 'the form reads only `visibleWhen` off a section, so a `visibleOn` here gated nothing. Write it as '
+        + '`visibleWhen`.',
+    },
+  }, {
+    name: z.string().optional().describe('Stable section identifier (snake_case) — the heading resolves through `objects.<object>._sections.<name>.label`'),
+    label: z.string().optional().describe('Section heading (a plain string)'),
+    description: z.string().optional().describe('Text drawn under the heading'),
+    collapsible: z.boolean().optional().describe('Draw a disclosure control on the heading, so a reader can close the section and open it again. `collapsed: true` implies it'),
+    collapsed: z.boolean().optional().describe('Start the section closed (implies `collapsible`)'),
+    visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the whole section, heading and fields, is drawn only when TRUE'),
+    columns: z.number({ error: (issue) => objectFormSectionColumnsRefusal(issue.input) }).int().min(1).max(4).optional()
+      .describe('Field-grid columns for this section (1-4), a number'),
+    pane: z.enum(['primary', 'secondary']).optional().describe("The split form's panel this section renders in; omitted → the first section 'primary', the others 'secondary'"),
+    group: SectionGroupKeySchema.optional().describe('Field group key (snake_case) whose members and presentation this section inherits, from the object\'s `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`)'),
+    fields: z.array(z.union([
+      z.string(),
+      objectFormSectionFieldEntry(),
+      objectFormRuntimeField(),
+    ])).optional().describe('The section\'s fields, in order — each a field name, the form view\'s `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members'),
+  }).superRefine(sectionGroupReferenceRefinement({
+    surface: 'this `object-form` section',
+    // The form view section's own lists: the keys `deriveFieldGroupLayout`
+    // fills from the group, and the two booleans only a `true` of declares.
+    derivedKeys: ['name', 'label', 'description', 'visibleWhen'],
+    trueOnlyDerivedKeys: ['collapsible', 'collapsed'],
+  }));
+}
+let objectFormSectionOnce: ReturnType<typeof buildObjectFormSection> | undefined;
+/** The one {@link buildObjectFormSection} instance, shared by both form rows. */
+const objectFormSection = () => (objectFormSectionOnce ??= buildObjectFormSection());
+
 /**
  * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
  * the sub-forms it forwards the whole bag into: `TabbedForm`, `WizardForm`,
@@ -5981,34 +6460,25 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   fields: formFieldNameList().optional()
     .describe('Field names to draw, in order — bare names selecting from the object\'s fields and from `customFields`. A `{ name }` or `{ field }` object entry is refused: a per-form label or required override goes on a `sections[].fields` entry'),
   /**
-   * [#21464] Kept `z.unknown()`, in the enumeration pin's ledger as a fork the
-   * S-objectui-held stage reported: each member is objectui's runtime form
-   * field (`FormField`, identity key `name`, `types/src/form.ts:1770` at the
-   * `.objectui-sha` pin `ab1879721595`), drawn whole by the form renderer
-   * (`plugin-form/src/customFieldsMerge.ts:78-108`), and the spec declares no
-   * such field — its own form field (`FormFieldSchema`, `view.zod.ts`) is keyed
-   * by `field` and is never matched by the merge. Writing that declaration
-   * here needs decisions no ruling has made: objectui's field is OPEN (an index
-   * signature beside forty-five members, `:1906`), and eight of them are the
-   * grid widget's snake_case keys (`min_rows`, `allow_add`, …), which this
-   * package's camelCase rule for config keys does not admit as written.
+   * [#21464] Typed in the S-forms stage, as ruled on the decision card #21704
+   * (fork 2, letter B): each member is the closed runtime form field
+   * {@link buildObjectFormRuntimeField} declares — the members the form draws,
+   * in camelCase, keyed by `name` — merged over the generated fields
+   * (`plugin-form/src/customFieldsMerge.ts:78-108`). Until then it was
+   * `z.unknown()`: objectui's own field is open (an index signature beside
+   * forty-five members) and spells eight of them in snake_case.
    */
-  customFields: z.unknown().optional().describe('Custom field definitions merged into the generated set'),
+  customFields: z.array(objectFormRuntimeField()).optional()
+    .describe('Field definitions merged over the set generated from the object\'s metadata — each a closed inline field `{ name, label?, type?, required?, … }`: a member naming a field the object declares replaces that field\'s whole definition, any other is added after the generated fields. With no object behind the form, the members are its only fields'),
   /**
-   * [#21464] HELD at `z.unknown()` entries, in the enumeration pin's ledger
-   * with `customFields`'s fork. The form view's own `sections`
-   * (`FormSectionSchema`) is the by-reference shape, and every section key the
-   * renderer reads is declared there, but a section's `fields` also draws an
-   * inline runtime form field `{ name, type, … }` as it stands
-   * (`plugin-form/src/sectionFields.ts:369-370` at the `.objectui-sha` pin
-   * `ab1879721595`, its "shape 3"), which the form view's field entry (keyed by
-   * `field`) refuses. objectstack-ai/objectui#11550's ruling KEPT that entry —
-   * objectui declares it (`ObjectFormSection.fields: (string | FormField)[]`)
-   * and its README's data-source-free wizard relies on it — so this member
-   * takes a shape only once the spec declares the runtime form field.
+   * [#21464] Typed in the S-forms stage, as ruled on the decision card #21704
+   * (fork 3, letter B): a page-block section shape of its own
+   * ({@link buildObjectFormSection}) — the form view's section keys plus the
+   * three entry arms the form reads, canonical spellings only. The stored form
+   * view's `FormSectionSchema` is unchanged.
    */
-  sections: z.array(z.unknown()).optional()
-    .describe('Form sections ({ label, description?, fields } — wizard steps / tab panes)'),
+  sections: z.array(objectFormSection()).optional()
+    .describe('Form sections — wizard steps, tab panes or stacked groups: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }`, or `{ group, columns?, pane? }` to inherit an object field group. Each `fields` entry is a field name, the form view\'s `{ field, … }` entry, or an inline form field `{ name, type, … }`'),
   title: I18nLabelSchema.optional().describe('Form title'),
   description: I18nLabelSchema.optional().describe('Form description (rendered by the drawer/modal presentations)'),
   defaultTab: z.string().optional().describe('Initially active tab (tabbed)'),
@@ -6078,6 +6548,15 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
+/**
+ * Post-parse shape of {@link ObjectFormProps} — transforms run (ADR-0122).
+ * [#21464] Since the S-forms stage `customFields` and `sections` carry the
+ * evaluated `*When` predicates, whose bare CEL string parses to its
+ * `{ dialect, source }` envelope, so input ≠ infer and the block left the
+ * type-alias convention pin's isomorphic family (its Iso line deleted with this
+ * alias), the route {@link ObjectMasterDetailFormPropsParsed} took.
+ */
+export type ObjectFormPropsParsed = z.infer<typeof ObjectFormPropsSchema>;
 
 // `formType` old-vocabulary prescriptions (#11873; the objectui#5939
 // measurement). Declared with `//` on purpose — the `LIST_VIEW_EXPORT_PDF_RETIRED`
@@ -6269,13 +6748,13 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21464] `sections` and `fields` are handed to the parent `object-form`
    * verbatim (`plugin-form/src/MasterDetailForm.tsx:1692-1693` at the
-   * `.objectui-sha` pin `ab1879721595`), so each is read exactly as that
+   * `.objectui-sha` pin `2e818d0b51ec`), so each is read exactly as that
    * block's member is. `fields` takes the same field-name list
-   * ({@link formFieldNameList}); `sections` is HELD with that block's, in the
-   * enumeration pin's ledger, for the same reason (see
-   * {@link ObjectFormPropsSchema}'s `sections`).
+   * ({@link formFieldNameList}); `sections` takes the same section shape — the
+   * one instance {@link buildObjectFormSection} builds (S-forms stage).
    */
-  sections: z.array(z.unknown()).optional().describe('Parent form sections'),
+  sections: z.array(objectFormSection()).optional()
+    .describe('Parent form sections — the same section shape `object-form` takes: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }` or `{ group, columns?, pane? }`'),
   fields: formFieldNameList().optional()
     .describe('Parent field names to draw, in order — bare names, as on `object-form`; a `{ name }` or `{ field }` object entry is refused'),
   details: z.array(masterDetailDetailEntry()).optional()
