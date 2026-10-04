@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
@@ -179,7 +180,12 @@ async function boot() {
       registerMiddleware: vi.fn(),
       getSchema: (name: string) => SCHEMAS[name],
       find: vi.fn(async () => []),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async (object: string, options: unknown) => {
+        // As strict as `ObjectQL.findOne`: this fake never serves a row, so the
+        // only thing it can get wrong is accepting a call the engine refuses.
+        assertEngineFindOnePredicate(object, options as never);
+        return null;
+      }),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
