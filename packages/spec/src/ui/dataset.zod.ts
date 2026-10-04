@@ -283,7 +283,10 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `ab1879721`; re-derived at that pin 2026-10-03 — `date-display.ts` is
+   * `2e818d0b5`; re-derived at that pin 2026-10-04 — `date-display.ts` and
+   * `dataset-format.ts` are byte-identical to `ab1879721` (`git diff --quiet`),
+   * so every anchor held unmoved. At `ab1879721`, re-derived there
+   * 2026-10-03 — `date-display.ts` is
    * byte-identical to `89cad75d5`, so `formatDate` `445-480` and the ±7-day
    * fallback `399` held unmoved and were re-READ in place; `dataset-format.ts`
    * changed (+53/-36, objectui#11475: `scalePercent` scales at the storage
