@@ -22,6 +22,11 @@
  *  - **Reading** a family table through a body's `ctx.api` is refused before
  *    the read runs ({@link storedMetadataBodyReadRefusal}, consulted by the
  *    seam's body read layer), whatever the read's query names.
+ *  - **Being handed** a family row as an action's subject record (`ctx.record`,
+ *    which the `/actions` door loads before dispatch) is refused before the
+ *    body runs ({@link storedMetadataBodySubjectRecordRefusal}, consulted by
+ *    `actionBodyRunnerFactory` — the one point every action body passes
+ *    through to run, whichever door bound it).
  *
  * Platform code is outside this boundary: the metadata protocol and its own
  * readers and writers, the platform's internal hooks (registered as code,
@@ -130,6 +135,26 @@ export function storedMetadataBodyReadRefusal(object: string, verb: string): Err
         + 'metadata, and a body may not read it directly.',
         object,
         verb,
+        READ_PRESCRIPTION,
+    );
+}
+
+/**
+ * [#21594] The refusal for an action body that would be handed a family row as
+ * its subject record, or `undefined` for any other object. The `/actions` door
+ * loads an action's subject record before it dispatches, through the generic
+ * data door, so an action declared on a family table — or an object-less one
+ * addressed under it — would otherwise reach its body with a family row as
+ * `ctx.record`. Thrown before the body runs, so the body is handed nothing of
+ * the row; a host code handler's subject record is not judged here.
+ */
+export function storedMetadataBodySubjectRecordRefusal(object: string, action: string): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    return refusal(
+        `Action '${action}' was not run: its subject record is a row of '${object}', which holds stored `
+        + 'metadata, and an app-authored body may not be handed one.',
+        object,
+        'record',
         READ_PRESCRIPTION,
     );
 }

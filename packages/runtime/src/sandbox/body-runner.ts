@@ -66,6 +66,7 @@ import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import {
   isWildcardHookTarget,
   storedMetadataBodyHookBindingRefusal,
+  storedMetadataBodySubjectRecordRefusal,
   storedMetadataFamilyTableList,
 } from '../stored-metadata-body-boundary.js';
 
@@ -448,6 +449,11 @@ export function actionBodyRunnerFactory(
     const body = parsed.data;
 
     return async function boundActionHandler(actionCtx: any): Promise<unknown> {
+      // [#21594] A body is handed nothing of the stored-metadata family: an
+      // action whose subject record is a family row is refused here, before
+      // the body runs and before its sandbox context is built.
+      const subjectRefusal = actionSubjectRecordRefusal(actionCtx, action);
+      if (subjectRefusal) throw subjectRefusal;
       const sandboxCtx = buildActionSandboxContext(
         actionCtx,
         opts.ql,
@@ -476,6 +482,38 @@ export function actionBodyRunnerFactory(
       }
     };
   };
+}
+
+/**
+ * [#21594] The refusal for an action body about to be handed a row of the
+ * stored-metadata family as its subject record, or `undefined`.
+ *
+ * Both action doors (REST `/actions` and MCP `run_action`) load the subject
+ * record before they dispatch, through the generic data door, and stamp the
+ * routed object and record id into `params` AFTER the caller's own params, so
+ * `params.objectName` is the door's routed object, never the caller's. That
+ * object is the subject: an action declared on a family table is routed under
+ * it, and so is an object-less action a caller addresses under it
+ * (`/actions/<family table>/<action>/<id>`), which no binding-time refusal
+ * could see. Absent a routed object (an engine `execute` call from host code),
+ * the action's declared object stands in.
+ *
+ * Judged here — the action body's own handler, the one point every action
+ * body passes through to run, whichever door bound it — because only here is
+ * the handler known to be a body: the doors dispatch body and host handlers
+ * alike, and a host code handler's subject record is outside the boundary.
+ * A record is "handed" when the call carries a record id or a non-empty
+ * record; a family-routed call with neither hands the body nothing and runs.
+ */
+function actionSubjectRecordRefusal(actionCtx: any, action: { name: string; object?: string }): Error | undefined {
+  const params = actionCtx?.params;
+  const routed = typeof params?.objectName === 'string' && params.objectName.length > 0 ? params.objectName : undefined;
+  const subject = routed ?? action.object;
+  if (typeof subject !== 'string' || !isStoredMetadataBodyObject(subject)) return undefined;
+  const record = actionCtx?.record;
+  const handed = (typeof params?.recordId === 'string' && params.recordId.length > 0)
+    || (record !== null && typeof record === 'object' && Object.keys(record).length > 0);
+  return handed ? storedMetadataBodySubjectRecordRefusal(subject, action.name) : undefined;
 }
 
 /** What {@link judgeJobBody} answers for a `body` that binds, and for one that does not. */
