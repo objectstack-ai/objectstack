@@ -10,9 +10,11 @@ import type { SemanticMigration } from '../../types.js';
 // keys plus the three entry arms the form reads, canonical spellings only — and
 // the stored form view is unchanged. D3 only: page-component `properties` is
 // not parsed on the metadata save or load path, so a stored page is never
-// refused; and the authored census found no working section to respell — the
-// refused values are objectui's probes that a section's retired style keys
-// reach nothing.
+// refused; and the authored census, with every inline option list evaluated,
+// found no working section to respell — the refused values are the two probes
+// in objectui's `formSectionGroupReference-7051.test.tsx` (a section declaring
+// neither `fields` nor `group`, and a group-owned `label` / `collapsible`
+// beside `group`), shapes that test says this door refuses at parse.
 export const entry: SemanticMigration = {
   id: 'ui-object-form-sections-typed',
   surface: 'page `object-form` and `object-master-detail-form` components — `properties.sections` (whose '
@@ -35,8 +37,9 @@ export const entry: SemanticMigration = {
     + 'gate reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
     + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
     + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save or load '
-    + 'path. No conversion is registered: nothing on the load path refuses the shape, and the authored census '
-    + 'found no working section to respell. Deployed metadata NOT MEASURED.',
+    + 'path. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
+    + 'with every inline option list evaluated, found no working section to respell. Deployed metadata NOT '
+    + 'MEASURED.',
   acceptanceCriteria: 'Every `object-form` and `object-master-detail-form` node validates: `objectstack '
     + 'validate` reports no `component-props-invalid` / `component-props-unknown-key` finding under '
     + '`properties.sections`. Each form draws every section with the heading, visibility and columns it '
