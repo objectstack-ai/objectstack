@@ -30,7 +30,7 @@ import {
 import * as leaf from '../kernel/stored-metadata-body-objects';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
-import { ArtifactStagePackageBodySchema, defineStack } from '../stack.zod';
+import { ArtifactStagePackageBodySchema, ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
 import { HookSchema } from '../data/hook.zod';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { FlowSchema } from './flow.zod';
@@ -169,6 +169,14 @@ describe('every door that parses a flow refuses it', () => {
 
   it('CONTROL: defineStack accepts the ordinary write flow alone', () => {
     expect(() => defineStack(stackWith([named('fws_ok', 'fws_note')]) as never)).not.toThrow();
+  });
+
+  it('ObjectStackDefinitionSchema — the stack parse `objectstack validate` runs — refuses it at the same path', () => {
+    const refused = ObjectStackDefinitionSchema.safeParse(stackWith([named('fws_family', 'sys_metadata')]));
+    expect(refused.success).toBe(false);
+    expect(refused.success ? [] : refused.error.issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.objectName']);
+    // CONTROL: the same parse accepts the ordinary target.
+    expect(ObjectStackDefinitionSchema.safeParse(stackWith([named('fws_ok', 'fws_note')])).success).toBe(true);
   });
 
   it('the registered `flow` type schema — what the metadata save door validates against — refuses it too', () => {
