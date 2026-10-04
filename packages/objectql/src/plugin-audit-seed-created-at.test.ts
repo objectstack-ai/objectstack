@@ -100,7 +100,9 @@ function makeStubDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async syncSchema() {},
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return { ...r };
