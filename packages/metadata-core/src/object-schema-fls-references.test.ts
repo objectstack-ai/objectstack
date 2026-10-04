@@ -10,10 +10,14 @@
 
 import { describe, it, expect } from 'vitest';
 import { FieldSchema, InlineGridColumnSchema, ObjectSchema } from '@objectstack/spec/data';
+import { ColumnPrefixSchema, ColumnSummaryConfigSchema, ListColumnSchema } from '@objectstack/spec/ui';
 import { applyObjectSchemaMask, type ObjectSchemaMaskPosture } from './object-schema-fls.js';
 import {
+    COLUMN_PREFIX_POSITIONS,
+    COLUMN_SUMMARY_POSITIONS,
     FIELD_REFERENCE_POSITIONS,
     INLINE_COLUMN_POSITIONS,
+    LIST_COLUMN_POSITIONS,
     OBJECT_REFERENCE_POSITIONS,
     mentionsDenied,
 } from './object-schema-fls-references.js';
@@ -135,6 +139,46 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served.listViews).toEqual({ all: { label: 'All', columns: ['title'] } });
     });
 
+    it('drops an object-form column whose nested `prefix.field` / `summary.field` names the denied field', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            listViews: {
+                all: {
+                    label: 'All',
+                    columns: [
+                        { field: 'title', prefix: { field: 'secret_score', type: 'badge' } },
+                        { field: 'title', summary: { type: 'sum', field: 'secret_score' } },
+                        { field: 'id', prefix: { field: 'title', type: 'badge' }, summary: { type: 'count', field: 'title' } },
+                        { field: 'title', summary: 'sum', type: 'currency', action: 'secret_score' },
+                    ],
+                },
+                only: { label: 'Only', columns: [{ field: 'title', prefix: { field: 'secret_score', type: 'text' } }] },
+            },
+        });
+        // Control: nested pointers to a readable field, the bare summary
+        // vocabulary, a renderer type and an action id all stay.
+        expect(served.listViews).toEqual({
+            all: {
+                label: 'All',
+                columns: [
+                    { field: 'id', prefix: { field: 'title', type: 'badge' }, summary: { type: 'count', field: 'title' } },
+                    { field: 'title', summary: 'sum', type: 'currency', action: 'secret_score' },
+                ],
+            },
+            only: { label: 'Only' },
+        });
+    });
+
+    it('drops an object-form column carrying a key the column table does not classify, when it mentions the denied field', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            listViews: { all: { label: 'All', columns: [{ field: 'title', futureFacet: { field: 'secret_score' } }, { field: 'id', futureFacet: 'title' }] } },
+        });
+        expect(served.listViews.all.columns).toEqual([{ field: 'id', futureFacet: 'title' }]);
+    });
+
     it('drops an action whose predicate reads the denied field — but not for a word in its prose', () => {
         const served = mask({
             name: 'thing',
@@ -199,6 +243,28 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         });
         expect(served.fields.title.relatedListColumns).toEqual(['title']);
         expect(served.fields.title.dependsOn).toEqual(['id']);
+    });
+
+    it('reads a dotted path rooted at the denied field as a reference to it — keys, names and pointers alike', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({ relatedListFilter: { 'secret_score.city': 'x' }, relatedListColumns: ['title', 'secret_score.city'] }),
+            nameField: 'secret_score.city',
+            displayNameField: 'title.city',
+            lifecycle: { class: 'record', retention: { maxAge: '30d', onlyWhen: { 'secret_score.city': 'x' } } },
+            listViews: { all: { label: 'All', columns: ['title.city', 'secret_score.city'] } },
+        });
+        expect(served.fields.title).not.toHaveProperty('relatedListFilter');
+        expect(served.fields.title.relatedListColumns).toEqual(['title']);
+        expect(served).not.toHaveProperty('nameField');
+        expect(served.displayNameField).toBe('title.city');
+        expect(served.lifecycle).toEqual({ class: 'record', retention: { maxAge: '30d' } });
+        expect(served.listViews.all.columns).toEqual(['title.city']);
+    });
+
+    it('reads a `dependsOn` entry\'s `param` as the lookup target\'s key, not a field of this object', () => {
+        const served = mask({ name: 'thing', fields: fieldsWith({ dependsOn: [{ field: 'id', param: 'secret_score' }] }) });
+        expect(served.fields.title.dependsOn).toEqual([{ field: 'id', param: 'secret_score' }]);
     });
 
     it('deletes the formula and predicates that read the denied field; the field and its other facets stay', () => {
@@ -414,6 +480,20 @@ describe('[ADR-0106 D1] every position is classified — closed against the live
         const unclassified = declaredKeys(InlineGridColumnSchema).filter((key) => !(key in INLINE_COLUMN_POSITIONS));
         expect(unclassified, 'classify each new InlineGridColumnSchema key in INLINE_COLUMN_POSITIONS').toEqual([]);
     });
+
+    // A list column's nested pointers (`prefix.field`, `summary.field`) name
+    // fields of this object: a new facet must be classified before it ships.
+    for (const [label, schema, table] of [
+        ['ListColumnSchema', ListColumnSchema, LIST_COLUMN_POSITIONS],
+        ['ColumnPrefixSchema', ColumnPrefixSchema, COLUMN_PREFIX_POSITIONS],
+        ['ColumnSummaryConfigSchema', ColumnSummaryConfigSchema, COLUMN_SUMMARY_POSITIONS],
+    ] as const) {
+        it(`classifies every ${label} key, and nothing it no longer declares`, () => {
+            const keys = declaredKeys(schema);
+            expect(keys.filter((key) => !(key in table)), `classify each new ${label} key`).toEqual([]);
+            expect(Object.keys(table).filter((key) => !keys.includes(key))).toEqual([]);
+        });
+    }
 
     it('classifies nothing the spec no longer declares', () => {
         const objectKeys = new Set(declaredKeys(ObjectSchema));

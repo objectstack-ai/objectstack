@@ -32,7 +32,8 @@
  * reference is part of the field): a rule entry whose condition reads one, a
  * rule entry that names one only through its `fields` pointer list, role
  * pointers, name lists, an expression, a field-group predicate, an index,
- * list views (a column list, a filter, a view KEYED by a field's name),
+ * list views (a column list, a filter, a view KEYED by a field's name, an
+ * object-form column naming one through its nested `prefix` / `summary`),
  * actions (a visibility predicate) — and, inside the READABLE fields, a name
  * list, a `dependsOn`, a predicate, a formula `expression` and an inline grid
  * (`inlineColumns` by name and by computed `expr`, `inlineAmountField`) that
@@ -84,6 +85,17 @@ export const FLS_CONTRACT_OBJECT = {
         all: { label: 'All', type: 'grid', columns: ['name', 'salary_grade'] },
         graded: { label: 'Graded', type: 'grid', columns: ['name'], filter: [{ field: 'salary_grade', operator: 'is_not_null' }] },
         salary_grade: { label: 'By grade', type: 'grid', columns: ['name'] },
+        // Object-form columns: a column's nested pointers (`prefix.field`,
+        // `summary.field`) name fields of THIS object as surely as its `field`.
+        compact: {
+            label: 'Compact',
+            type: 'grid',
+            columns: [
+                { field: 'name', width: 200 },
+                { field: 'name', prefix: { field: 'salary_grade', type: 'badge' } },
+                { field: 'id', summary: { type: 'sum', field: 'bonus_formula' } },
+            ],
+        },
     },
     actions: [
         { name: 'regrade', label: 'Regrade', type: 'script', visible: 'record.salary_grade != null' },
@@ -176,7 +188,13 @@ const RETAINED_FOR_ID_AND_NAME: readonly FlsContractRetention[] = [
         what: 'the inline grid\'s readable columns, minus a predicate over the denied field',
         holds: (d) => sameList(d?.fields?.name?.inlineColumns, [{ name: 'id' }, { name: 'name', label: 'Name' }]),
     },
-    { what: 'the list view over readable fields, minus the denied column', holds: (d) => sameList(d?.listViews, { all: { label: 'All', type: 'grid', columns: ['name'] } }) },
+    {
+        what: 'the list views over readable fields, minus the denied columns — object-form columns included',
+        holds: (d) => sameList(d?.listViews, {
+            all: { label: 'All', type: 'grid', columns: ['name'] },
+            compact: { label: 'Compact', type: 'grid', columns: [{ field: 'name', width: 200 }] },
+        }),
+    },
     { what: 'the action whose predicate reads a readable field', holds: (d) => sameList(d?.actions?.map((a: any) => a?.name), ['rename']) },
 ];
 
@@ -199,6 +217,13 @@ const RETAINED_WITH_BONUS_READABLE: readonly FlsContractRetention[] = [
             && !('expression' in (d?.fields?.bonus_formula ?? {})),
     },
     {
+        what: 'the object-form column aggregating the readable formula field, minus the one prefixed by the denied field',
+        holds: (d) => sameList(d?.listViews?.compact?.columns, [
+            { field: 'name', width: 200 },
+            { field: 'id', summary: { type: 'sum', field: 'bonus_formula' } },
+        ]),
+    },
+    {
         what: 'the inline grid\'s column computed from the readable formula field, and its amount field',
         holds: (d) => d?.fields?.name?.inlineColumns?.length === 3
             && d?.fields?.name?.inlineColumns?.[2]?.expr === 'bonus_formula * 2'
@@ -215,7 +240,8 @@ const RETAINED_UNMASKED: readonly FlsContractRetention[] = [
     {
         what: 'every inline-grid column, every list view and every action',
         holds: (d) => d?.fields?.name?.inlineColumns?.length === 4
-            && Object.keys(d?.listViews ?? {}).length === 3 && d?.actions?.length === 2,
+            && Object.keys(d?.listViews ?? {}).length === 4 && d?.listViews?.compact?.columns?.length === 3
+            && d?.actions?.length === 2,
     },
 ];
 
