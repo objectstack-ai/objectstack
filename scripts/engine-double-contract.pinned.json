@@ -827,6 +827,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.lock-org-axis-agree.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.many-data-atomic.test.ts",
       "verb": "delete",
       "pinned": 1
