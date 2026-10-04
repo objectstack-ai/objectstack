@@ -255,7 +255,7 @@ describe('Security Service Contract', () => {
       .resolves.toEqual([]);
   });
 
-  it('[#20935] getQueryableFields is OPTIONAL — and a field served masked is readable but NOT queryable', async () => {
+  it('getQueryableFields is OPTIONAL — and a field served masked is readable but NOT queryable', async () => {
     const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name', 'masked'] });
     expect(typeof withoutIt.getQueryableFields).toBe('undefined');
     const mustNotCompileWithoutAGuard = () =>
@@ -284,7 +284,7 @@ describe('Security Service Contract', () => {
       .resolves.toEqual([]);
   });
 
-  it('[#7616] resolvePermissionSetsForContext is OPTIONAL — absence keeps the consumer on its own resolution (compile-time)', () => {
+  it('resolvePermissionSetsForContext is OPTIONAL — absence keeps the consumer on its own resolution (compile-time)', () => {
     // THE structural pin behind "a consumer must keep its local resolution as
     // the fallback until a floor version carrying this method can be assumed".
     // Optional is what makes that a property of the TYPE: a security service
@@ -306,7 +306,7 @@ describe('Security Service Contract', () => {
     expect(typeof withoutIt.resolvePermissionSetNames).toBe('function');
   });
 
-  it('[#7616] the sets carry the four columns the names cannot: objects, fields, systemPermissions, tabPermissions', async () => {
+  it('the sets carry the four columns the names cannot: objects, fields, systemPermissions, tabPermissions', async () => {
     // Why the method exists at all. `resolvePermissionSetNames` answers an
     // AUDIENCE question ("does this caller hold `sales_manager`?"); a consumer
     // that must MERGE the caller's grants — the object/field map
@@ -468,7 +468,7 @@ describe('Security Service Contract', () => {
     expect(typeof partial.getReadableFields).toBe('undefined');
   });
 
-  it('[#5493] AuthoredRowWriteVerdict names exactly admit / abstain (compile-time)', () => {
+  it('AuthoredRowWriteVerdict names exactly admit / abstain (compile-time)', () => {
     const everyVerdict: AuthoredRowWriteVerdict[] = ['admit', 'abstain'];
     // Deliberately NO `deny`. This surface is evidence, not a gate: the caller
     // already holds a refusal and asks only whether a declared widener speaks
@@ -491,7 +491,7 @@ describe('Security Service Contract', () => {
     expect(notAWriteOperation).toBe('select');
   });
 
-  it('[#5493] checkAuthoredRowWrite is OPTIONAL — absence is the fail-closed default (compile-time)', () => {
+  it('checkAuthoredRowWrite is OPTIONAL — absence is the fail-closed default (compile-time)', () => {
     // THE structural pin behind "a deployment without this method behaves
     // byte-for-byte as today". Declaring it optional is what makes that a
     // property of the TYPE rather than a promise in prose: a security service
@@ -515,7 +515,7 @@ describe('Security Service Contract', () => {
     expect(withoutIt.checkAuthoredRowWrite?.('deal', 'r1', 'update', {})).toBeUndefined();
   });
 
-  it('[#5493] admit is a positive measurement; every other outcome is abstain', async () => {
+  it('admit is a positive measurement; every other outcome is abstain', async () => {
     // `admit` means "an app-authored, non-floor policy matches this row for
     // this operation" — it never means "the write is permitted" (CRUD, the
     // tenant wall, sharing and the post-image check all still apply), and it is

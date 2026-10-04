@@ -83,7 +83,7 @@ export type WireStatusMatchesContract = Assert< Eq< WireStatus, ContractStatus >
 /** The wire enum, unwrapped from `.optional()` through the `lazySchema` Proxy. */
 const wireStatusEnum = TriggerFlowResponseSchema.shape.data.shape.status.unwrap();
 
-describe('[#14384] AutomationResult.status names the stranded run', () => {
+describe('AutomationResult.status names the stranded run', () => {
   it('reads a non-empty membership (anti-vacuity)', () => {
     expect(AUTOMATION_RESULT_STATUSES.length).toBe(5);
     expect(wireStatusEnum.options.length).toBeGreaterThan(0);
@@ -93,7 +93,7 @@ describe('[#14384] AutomationResult.status names the stranded run', () => {
     expect([...wireStatusEnum.options]).toEqual([...AUTOMATION_RESULT_STATUSES]);
   });
 
-  it("names the terminally-failed-but-repairable run 'stranded' (#13937 shape 4)", () => {
+  it("names the terminally-failed-but-repairable run 'stranded'", () => {
     expect(AUTOMATION_RESULT_STATUSES).toContain('stranded');
     expect(wireStatusEnum.options).toContain('stranded');
   });
@@ -115,7 +115,7 @@ describe('[#14384] AutomationResult.status names the stranded run', () => {
     expect(parsed.data.runId).toBe('run_stranded_001');
   });
 
-  it("names the refused run 'refused' (#14945) — beside `'failed'`, never folded into it", () => {
+  it("names the refused run 'refused' — beside `'failed'`, never folded into it", () => {
     expect(AUTOMATION_RESULT_STATUSES).toContain('refused');
     expect(wireStatusEnum.options).toContain('refused');
     expect(wireStatusEnum.options).toContain('failed');

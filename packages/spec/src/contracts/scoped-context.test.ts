@@ -157,7 +157,7 @@ function jsdocUsageExample(): string {
   return body.join('\n');
 }
 
-describe('[#5945] the `HookContext.api` JSDoc example compiles', () => {
+describe('the `HookContext.api` JSDoc example compiles', () => {
   const example = jsdocUsageExample();
 
   it('extracts a real example from hook.zod.ts (anti-vacuity)', () => {
@@ -181,7 +181,7 @@ describe('[#5945] the `HookContext.api` JSDoc example compiles', () => {
   });
 });
 
-describe('[#5945] every corpus-measured call compiles', () => {
+describe('every corpus-measured call compiles', () => {
   /**
    * One probe per declared member, each written the way the corpus writes it,
    * so a failure names the member rather than "the big probe went red". The
@@ -235,7 +235,7 @@ describe('[#5945] every corpus-measured call compiles', () => {
   });
 });
 
-describe('[#5945] the evidence bar is enforced, not just documented', () => {
+describe('the evidence bar is enforced, not just documented', () => {
   /**
    * An undeclared member is TS2339 — a NAMED refusal, which is the point:
    * before this contract every one of these was TS18046 ("`ctx.api` is of type
@@ -289,7 +289,7 @@ describe('[#5945] the evidence bar is enforced, not just documented', () => {
   });
 });
 
-describe('[#16786] `updateById` DECLARES its answer, and the declaration is enforced', () => {
+describe('`updateById` DECLARES its answer, and the declaration is enforced', () => {
   /**
    * The spec remainder (commit 6059b29c0), after PR #17255 landed the `objectql` half.
    *
@@ -380,7 +380,7 @@ describe('[#16786] `updateById` DECLARES its answer, and the declaration is enfo
   });
 });
 
-describe('[#5945] IScopedContext is implementable', () => {
+describe('IScopedContext is implementable', () => {
   it('accepts a minimal implementation', async () => {
     const rows = [{ id: 'c1', stage: 'hired', position_id: 'p1' }];
 

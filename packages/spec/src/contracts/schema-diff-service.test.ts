@@ -30,7 +30,7 @@ const col = (name: string, extra: Partial<IntrospectedColumn> = {}): Introspecte
   ...extra,
 });
 
-describe('IntrospectedTable.indexes (#11122: optional, absence ≠ empty)', () => {
+describe('IntrospectedTable.indexes (optional, absence ≠ empty)', () => {
   it('a table WITHOUT `indexes` typechecks — absence means "not read", and the in-tree producer emits exactly this', () => {
     const table: IntrospectedTable = {
       name: 'customers',
@@ -63,7 +63,7 @@ describe('IntrospectedTable.indexes (#11122: optional, absence ≠ empty)', () =
   });
 });
 
-describe('IntrospectedColumn.defaultValue (#11122: raw `unknown`, not `string`)', () => {
+describe('IntrospectedColumn.defaultValue (raw `unknown`, not `string`)', () => {
   it('accepts the measured emitted values — `null`, a dialect-quoted string, a native boolean', () => {
     // Measured on live in-memory SQLite (knex `columnInfo()` pass-through,
     // 2026-08-23): `null` for a column with no default; dialect-quoted

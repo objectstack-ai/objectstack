@@ -123,7 +123,7 @@ describe('Job Service Contract', () => {
  * which reddens the `degraded` direction only, and leaves every legacy pin
  * green. That asymmetry IS additivity.
  */
-describe('[#6617] JobHandler degraded-outcome channel', () => {
+describe('JobHandler degraded-outcome channel — optional and additive', () => {
   /**
    * The handler type EXACTLY as it stood before #6617. Pinning it as a
    * standalone declaration is what makes the additivity claim falsifiable:
@@ -260,7 +260,7 @@ describe('[#6617] JobHandler degraded-outcome channel', () => {
  * signature back to `(name, data?)` — (b), (c) and the identity pin go red,
  * (a) stays green. That asymmetry IS additivity.
  */
-describe('[#14766] IJobService.replay force option — contract half of the #14501 A+a2 ruling', () => {
+describe('IJobService.replay force option — a succeeded window replays only when forced', () => {
   type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
   type ReplayParams = Parameters<NonNullable<IJobService['replay']>>;
 

@@ -90,7 +90,7 @@ interface RequiresTheCount extends SharingRuleEvaluationResult {
   grantsRefused: number;
 }
 
-describe('[#14969] SharingRuleEvaluationResult.grantsRefused is optional, and absent is not zero', () => {
+describe('SharingRuleEvaluationResult.grantsRefused is optional, and absent is not zero', () => {
   it('reads a non-empty required set (anti-vacuity)', () => {
     expect(SHARING_RULE_EVALUATION_REQUIRED_KEYS).toHaveLength(6);
     const pinned: [SixCountsStayRequired, GrantsRefusedIsTheOnlyOptionalKey, GrantsRefusedIsANumberWhenPresent] = [true, true, true];

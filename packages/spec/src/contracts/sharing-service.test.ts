@@ -32,7 +32,7 @@ type Refute<T extends false> = T;
  * was renamed; these pins keep the two vocabularies honest about what they
  * each describe.
  */
-describe('Sharing Service Contract — recipient vocabularies (#4539)', () => {
+describe('Sharing Service Contract — recipient vocabularies, each under its own name', () => {
   it('RecordShareRecipientType matches the sys_record_share recipient_type select', () => {
     // The storage select on SysRecordShare (`@objectstack/plugin-sharing`) is
     // the gate on what a row can contain; the contract type mirrors it 1:1.
@@ -72,7 +72,7 @@ describe('Sharing Service Contract — recipient vocabularies (#4539)', () => {
     expect(ruleRecipient).toBe(notAuthorable);
   });
 
-  it('the stored-row union is exactly the authoring enum plus the reserved `queue` (#14103)', () => {
+  it('the stored-row union is exactly the authoring enum plus the reserved `queue`', () => {
     // `plugin-sharing`'s declared-rule bootstrap copies `sharedWith.type` onto
     // `sys_sharing_rule.recipient_type` member-for-member (an unmapped value is
     // skipped with a warning), so a member added to one list and not the other
@@ -107,7 +107,7 @@ describe('Sharing Service Contract — recipient vocabularies (#4539)', () => {
  * the thing cross-package callers read instead of the plugin. Deleting the
  * sentence again turns this red.
  */
-describe('[#5125] ISharingService write-gate bypass documentation parity', () => {
+describe('ISharingService write-gate bypass documentation parity', () => {
   it('canEdit / canDelete / canManageShares each name the `modifyAllRecords` bypass', async () => {
     const ts = (await import('typescript')).default;
     const { readFileSync } = await import('node:fs');
@@ -191,7 +191,7 @@ describe('[#5125] ISharingService write-gate bypass documentation parity', () =>
  * that tsc evaluates (`tsconfig.test.json` compiles this file — #5286), and
  * prose ones, because prose is the other half of what was missing.
  */
-describe('[#5858] HierarchyScopeContext tenancy authority', () => {
+describe('HierarchyScopeContext tenancy authority — organizationId is authoritative', () => {
   it('requires `organizationId` and keeps `tenantId` optional (compile-time)', () => {
     // A caller with no active org states so EXPLICITLY. `null` is a value the
     // contract carries (platform/unscoped), never an omission.
@@ -357,7 +357,7 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
  * never scroll to. This pins the FILE-level comment rather than a member's, so
  * it reads the leading comment ranges instead of an interface member.
  */
-describe('[#5817] ISharingService module header — one gate per write verb', () => {
+describe('ISharingService module header — one gate per write verb', () => {
   it('routes `update` to canEdit() and `delete` to canDelete(), not both to canEdit()', async () => {
     const ts = (await import('typescript')).default;
     const { readFileSync } = await import('node:fs');
@@ -418,7 +418,7 @@ describe('[#5817] ISharingService module header — one gate per write verb', ()
  * and the fail-closed rule ("a failed lookup is `deny`, never `abstain`") are
  * obligations on IMPLEMENTERS that no type can carry.
  */
-describe('[#6428] ISharingService tri-state write verdict', () => {
+describe('ISharingService tri-state write verdict', () => {
   it('SharingWriteVerdict names exactly allow / abstain / deny (compile-time)', () => {
     const everyVerdict: SharingWriteVerdict[] = ['allow', 'abstain', 'deny'];
     // A fourth state would leave a composing caller with a case it cannot map
@@ -589,7 +589,7 @@ type RetiredSharingContextSpecimen = {
   isSystem?: boolean;
 };
 
-describe('[#6523] sharing / approval enforcement takes the full ExecutionContext', () => {
+describe('sharing / approval enforcement takes the full ExecutionContext', () => {
   it('declares the full envelope on every adjudicating signature, by type identity', () => {
     // Type-level assertions are the substance of this case; the runtime
     // expectation below only keeps vitest from reporting an empty test. tsc

@@ -26,7 +26,7 @@ import type { ConversionNotice } from './types.js';
  *     against `ActionSchema`, and the stored-row seam replays it (the entry is
  *     `retiredFromLoadPath`, so only data-at-rest seams apply it).
  */
-describe('[#20323] action-aria-removed (ADR-0087 D2)', () => {
+describe('action-aria-removed (ADR-0087 D2)', () => {
   const ARIA = { ariaLabel: 'Escalate this case', role: 'button' } as const;
 
   it('is registered for protocol 18 and retired from the authoring load path', () => {
