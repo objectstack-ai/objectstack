@@ -150,6 +150,72 @@ describe('runFilesToReferencesMigration (#3617)', () => {
     expect(await isDataMigrationVerified(engine, MIGRATION)).toBe(false);
   });
 
+  // [#21644] A run narrowed by `objects` read only those objects, so it may
+  // not attest the deployment: it converts what it finds and records no flag.
+  it('a narrowed apply converts what it finds and records NO flag, even when its gate passes', async () => {
+    const engine = fakeEngine({
+      product: [{ id: 'p1', image: '/api/v1/storage/files/f1' }],
+      sys_file: [{ id: 'f1', status: 'committed', ref_object: 'product', ref_id: 'p1', ref_field: 'image' }],
+    });
+
+    const result = await run(engine, { apply: true, objects: ['product'] });
+
+    expect(engine.tables.product[0].image).toBe('f1'); // the fix still lands
+    expect(result.backfill.converted).toBe(1);
+    expect(result.gatePassed).toBe(true);
+    expect(result.flag).toBeNull();
+    expect(engine.tables.sys_migration).toHaveLength(0);
+    expect(await isDataMigrationVerified(engine, MIGRATION)).toBe(false);
+  });
+
+  it('a narrowed apply that finds a blocking discrepancy records nothing either', async () => {
+    const engine = fakeEngine({
+      product: [{ id: 'p1', image: 'f1' }],
+      sys_file: [{ id: 'f1', status: 'committed' }],
+    });
+
+    const result = await run(engine, { apply: true, objects: ['product'] });
+
+    expect(result.gatePassed).toBe(false);
+    expect(result.flag).toBeNull();
+    expect(engine.tables.sys_migration).toHaveLength(0);
+  });
+
+  it('a narrowed apply leaves a flag an earlier full-scope run recorded exactly as it was', async () => {
+    const engine = fakeEngine({
+      product: [{ id: 'p1', image: 'f1' }],
+      sys_file: [{ id: 'f1', ref_object: 'product', ref_id: 'p1', ref_field: 'image', status: 'committed' }],
+    });
+    await run(engine, { apply: true });
+    // Dated in the past, so a rewrite by the narrowed run cannot land on the
+    // same millisecond and read as "unchanged".
+    const EARNED_AT = '2026-01-01T00:00:00.000Z';
+    Object.assign(engine.tables.sys_migration[0], {
+      last_run_at: EARNED_AT,
+      verified_at: EARNED_AT,
+      updated_at: EARNED_AT,
+    });
+    const earned = { ...engine.tables.sys_migration[0] };
+    expect(await isDataMigrationVerified(engine, MIGRATION)).toBe(true);
+
+    await run(engine, { apply: true, objects: ['product'] });
+
+    expect(engine.tables.sys_migration).toEqual([earned]);
+  });
+
+  it('an empty objects list walks nothing, so it narrows too and records no flag', async () => {
+    const engine = fakeEngine({
+      product: [{ id: 'p1', image: 'f1' }],
+      sys_file: [{ id: 'f1', status: 'committed' }],
+    });
+
+    const result = await run(engine, { apply: true, objects: [] });
+
+    expect(result.verify.scannedObjects).toEqual([]);
+    expect(result.flag).toBeNull();
+    expect(engine.tables.sys_migration).toHaveLength(0);
+  });
+
   it('external URLs are advisory: reported on the flag, never blocking the gate', async () => {
     const engine = fakeEngine({
       product: [{ id: 'p1', image: 'https://cdn.example.com/logo.png' }],

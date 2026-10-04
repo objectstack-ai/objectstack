@@ -313,9 +313,18 @@ export const HookSchema = lazySchema(() => strictObject(
    *
    *   - **Inline function** (authoring): `handler: async (ctx) => { ... }`.
    *     Convenient in `defineStack({ hooks: [...] })` source files.
-   *   - **String reference** (build artifact / Studio): `handler: 'my_fn'`.
-   *     Resolved at runtime against the bundle's `functions` map +
-   *     anything `engine.registerFunction(name, fn)` added.
+   *   - **String reference** (build artifact): `handler: 'my_fn'`.
+   *     Resolved at bind time inside the hook's OWN package only: the
+   *     package's `functions` map (on the artifact path, its runtime module
+   *     supplies it) and the functions that same package registered on the
+   *     engine. A function another package registered is never reached by
+   *     name. A name the package does not hold — a typo, or another
+   *     package's function — is refused at registration
+   *     (`INVALID_REFERENCE`, 400) and the hook is not bound.
+   *     A hook authored at runtime through the metadata API ships with no
+   *     code package and holds no functions: give it a `body`. To reuse
+   *     another package's function, import it from the package that owns
+   *     it and declare it in this package's own `functions`.
    *
    * `objectstack build` automatically lowers inline functions to the
    * string form (using `Hook.name` as the ref) and emits the originals
