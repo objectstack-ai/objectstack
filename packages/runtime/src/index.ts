@@ -69,8 +69,8 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate.
 // [#21489] …and its job half: `scheduleAppArtifactJobs` schedules a package's
 // jobs (a `body` runs sandboxed on every door), and `collectJobsWithoutBody`
-// names the enabled jobs no JSON door can run (no `body`, or one that does not
-// bind), which install-local refuses.
+// names the enabled jobs no JSON door can run (no `body`, or a `body` or `pull`
+// that does not bind), which install-local refuses.
 // [#21585] `collectHooksWithoutBody` names the hooks whose code is only a
 // function-name `handler`: install-local refuses them, and withholds them on a
 // rehydrate (`withholdHooksWithoutBody`).

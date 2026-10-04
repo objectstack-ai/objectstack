@@ -70,8 +70,9 @@
  * code: it travels in the artifact's runtime module, which only `os start
  * --artifact` loads, so no JSON door can ever resolve it.
  * {@link collectJobsWithoutBody} names those jobs — and the ones whose `body`
- * the declaration refuses (`judgeJobBody`) — and the install-local install route
- * refuses a package that declares one enabled.
+ * the declaration refuses (`judgeJobBody`), and the ones whose `pull` does not
+ * bind ({@link judgeJobPull}) — and the install-local install route refuses a
+ * package that declares one enabled.
  *
  * ## The pull run form, and the organization a job runs as (#20281 stage ③)
  *
@@ -83,7 +84,9 @@
  * the service registry. A refused pull rejects the run (`failed`, retried per
  * `retryPolicy`); a pull whose rows the import runner refused resolves
  * `degraded` ({@link pullRunOutcomeOf}). It is data, like a `body`, so
- * {@link collectJobsWithoutBody} never names it.
+ * {@link collectJobsWithoutBody} names it only when {@link judgeJobPull} does
+ * not bind it — a job the binder would never schedule, which the install-local
+ * install route refuses, as it refuses a `body` that does not bind.
  *
  * `JobSchema.organization` (ruling Q2-O1) is the organization a job runs as —
  * its `body`, its `handler` and its `pull` alike — judged here, at bind, by the
@@ -332,8 +335,9 @@ export function bindAppArtifactHandlers(
 /**
  * An enabled job a JSON door cannot run: it carries no `body` — or, since
  * #21585, a `body` that does not BIND (the declaration refuses it: an expression
- * body, or one carrying `body.timeoutMs`), which no door can run either. "Without
- * body" reads as "without a body that runs". Its `handler` (deprecated) names a
+ * body, or one carrying `body.timeoutMs`), which no door can run either — or a
+ * `pull` that does not bind ({@link judgeJobPull}). "Without body" reads as
+ * "without a run form that runs". Its `handler` (deprecated) names a
  * `defineStack({ functions })` entry — code, which a JSON artifact never
  * carries (ADR-0088) — or it names nothing at all.
  */
@@ -348,36 +352,52 @@ export interface JobWithoutBody {
      * `body` at all.
      */
     bodyRefusal?: string;
+    /**
+     * Set when the job declares `pull` and it does not bind: the refusal
+     * {@link judgeJobPull} gives, the judgement the binder schedules by. Absent
+     * for a job that declares no `pull`; a job carrying it carries no
+     * `bodyRefusal`, since a `pull` is judged before any `body` beside it.
+     */
+    pullRefusal?: string;
 }
 
 /**
  * The enabled jobs of an artifact that no JSON door can schedule (#21489):
- * those with no `body`, and (#21585) those whose `body` does not BIND — an
+ * those with no `body`, (#21585) those whose `body` does not BIND — an
  * expression (L1) body, or one carrying `body.timeoutMs`, or any other shape
- * the declaration refuses. That second half is the judgement the binder's own
- * {@link jobBodyRunnerFactory} makes ({@link judgeJobBody}, a parse against
- * `JobSchema.body`), so the door and the binder cannot disagree; such a job is
- * named with its `bodyRefusal`. The install-local install route refuses a
- * package that declares one; see the module header.
+ * the declaration refuses — and those whose `pull` does not bind. The second
+ * half is the judgement the binder's own {@link jobBodyRunnerFactory} makes
+ * ({@link judgeJobBody}, a parse against `JobSchema.body`), and the third is
+ * the binder's own {@link judgeJobPull}, so the door and the binder cannot
+ * disagree; such a job is named with its `bodyRefusal` or its `pullRefusal`.
+ * The install-local install route refuses a package that declares one; see the
+ * module header.
  *
  * Reads the jobs the binder reads ({@link collectBundleJobs}), and calls a job
  * enabled exactly when the binder does: `enabled: false` is the one value that
  * disables it (the schema's default is `true`).
  *
- * A job declaring `pull` is never named (#20281 stage ③): the pull run form is
- * data, like a `body`, and binds on every door. Whether its pull binds is
- * {@link judgeJobPull}'s question, answered by the binder at bind — named here
- * it would read as "has no `body`" and send the author to write one beside the
- * pull, which the declaration refuses.
+ * A job declaring `pull` (#20281 stage ③) is judged as the binder judges it,
+ * first and by the same function: {@link judgeJobPull} against this artifact. A
+ * pull that binds is data, like a `body`, and binds on every door, so the job is
+ * not named. A pull that does not bind — a mapping the artifact does not
+ * declare, one with no `connectorSource`, code beside the `pull` — is a job the
+ * binder never schedules, so it is named with its `pullRefusal` and never
+ * with a missing `body`, which would send the author to write one beside the
+ * `pull`, the shape the declaration refuses.
  */
 export function collectJobsWithoutBody(bundle: unknown): JobWithoutBody[] {
     const out: JobWithoutBody[] = [];
     for (const job of collectBundleJobs(bundle)) {
         if (!job || typeof job !== 'object') continue;
         if (job.enabled === false) continue;
-        if (job.pull !== undefined) continue;
         let bodyRefusal: string | undefined;
-        if (job.body) {
+        let pullRefusal: string | undefined;
+        if (job.pull !== undefined) {
+            const judged = judgeJobPull(job, bundle);
+            if (judged.binds) continue;
+            pullRefusal = judged.refusal;
+        } else if (job.body) {
             const judged = judgeJobBody(job.body);
             if (judged.binds) continue;
             bodyRefusal = judged.refusal;
@@ -386,6 +406,7 @@ export function collectJobsWithoutBody(bundle: unknown): JobWithoutBody[] {
             name: typeof job.name === 'string' ? job.name : String(job.name),
             ...(typeof job.handler === 'string' ? { handler: job.handler } : {}),
             ...(bodyRefusal !== undefined ? { bodyRefusal } : {}),
+            ...(pullRefusal !== undefined ? { pullRefusal } : {}),
         });
     }
     return out;
@@ -418,7 +439,9 @@ function collectBundleMappings(bundle: unknown): Array<Record<string, unknown>> 
 
 /**
  * Does a job's `pull` bind on this artifact? The ONE judgement, read by the
- * binder ({@link scheduleAppArtifactJobs}) before it schedules a pull job.
+ * binder ({@link scheduleAppArtifactJobs}) before it schedules a pull job, and
+ * by {@link collectJobsWithoutBody}, whose answer the install-local install
+ * route refuses by — so the door and the binder cannot disagree.
  *
  * It binds when the job declares no code beside it (the declaration refuses
  * `pull` + `body` / `handler`), `pull` parses against `JobSchema.pull`, and the
@@ -641,7 +664,9 @@ export interface AppArtifactJobScheduling {
  *     `automation` service serves `pullConnectorSource`; each run calls that
  *     contract method through the service registry under the job's execution
  *     context, and maps the result with {@link pullRunOutcomeOf}. A pull that
- *     does not bind schedules nothing (warn);
+ *     does not bind schedules nothing (warn) — install-local refuses that
+ *     shape up front ({@link collectJobsWithoutBody}), so on that door this
+ *     fires only on the rehydrate of an entry an earlier build installed;
  *   - a `body` → the sandboxed body (`jobBodyRunnerFactory`), and the `body`
  *     WINS when a `handler` is declared beside it. A body that cannot be bound
  *     (wrong shape, a `body.timeoutMs`) schedules nothing — never the handler
