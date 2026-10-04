@@ -27,9 +27,11 @@
  *      no `connectorSource` is refused the same way; the control — a pull job
  *      naming a declared mapping — installs and is scheduled (its `sys_job`
  *      row, and a `sys_job_run` row per run: every run reaches the automation
- *      service's pull door, which this host answers with a refusal because it
- *      composes no `rest` connector provider — the run's verdict, not the
- *      install's); a DISABLED unbindable pull job does not block its install;
+ *      service's pull door, which refuses it because the package declares no
+ *      `connectors[]` entry for the connector the mapping names — the run's
+ *      verdict, `failed`, not the install's: the install door judges the job's
+ *      `pull` as the binder does, never the connector a run will read); a
+ *      DISABLED unbindable pull job does not block its install;
  *   2. RESTART — a ledger entry an earlier build wrote, carrying an unbindable
  *      pull job beside a bindable one, rehydrates: the bindable job is
  *      scheduled, the unbindable one is not, and a warn names it.
