@@ -1614,7 +1614,7 @@
         {
           "revision": 4,
           "date": "2026-10-04",
-          "change": "A5 record-gone leg and step 7 re-pointed to the measured answer: a deleted record's still-live link resolves 404 INVALID_OR_EXPIRED, byte-identical to an unknown token, never 410 RECORD_GONE (resolveToken's #5190 fail-closed record probe returns null and the route's probe falls through to the one generic refusal; share-links.ts:128-129,228, share-link-service.ts:923). Revoke/expiry legs unchanged (410 EXPIRED_OR_REVOKED). Stale clause found by the 17.7 pre-release runs",
+          "change": "A5 record-gone leg and step 7 re-pointed to the measured answer: a deleted record's still-live link resolves 404 INVALID_OR_EXPIRED, byte-identical to an unknown token, never 410 RECORD_GONE (resolveToken's #5190 fail-closed record probe — share-link-service.ts loadRecordForServing — returns null, and the route's row probe in share-links.ts falls through to its one generic refusal, invalidOrExpired). Revoke/expiry legs unchanged (410 EXPIRED_OR_REVOKED). Stale clause found by the 17.7 pre-release runs",
           "ref": "#21735"
         }
       ]

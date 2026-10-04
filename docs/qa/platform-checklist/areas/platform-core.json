@@ -1422,7 +1422,7 @@
       "title": "The activation ledger's registration home: sys_metadata_activation is registered by PlatformObjectsPlugin under its OWN manifest, so packaged disable works with or without the automation service — one owner, datasource binding carried across the move",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1442,7 +1442,7 @@
         "same boot, the flow half: POST /api/v1/automation/showcase_task_completed/toggle {\"enabled\":false} → 200; re-read the ledger — a metadata_type 'flow' row for showcase_task_completed appears BESIDE the action row, and the flow-name and action-name lists never cross (the discriminator is load-bearing, not decorative)",
         "restore both switches ({\"enabled\":true} / toggle on) — both rows persist with active true (updated, not deleted); leave the boot as found",
         "ownership is proven by the boot itself plus the registry read: the stock boot composes BOTH PlatformObjectsPlugin (serve auto-injects it) and the automation service, and it comes up green — a second registrant of sys_metadata_activation would be a boot FAILURE (`registerObject` throws 'already owned by package …', ADR-0029 D3), never a benign duplicate; the dogfood suite additionally reads registry.getObjectOwner('sys_metadata_activation').packageId === 'com.objectstack.platform-objects.activation-ledger'",
-        "spec receipt: read packages/spec/src/system/constants/platform-object-names.ts — the 'platform-objects' array carries 'sys_metadata_activation', 41 names total; the automation service's entry does NOT list it"
+        "spec receipt: read packages/spec/src/system/constants/platform-object-names.ts — the 'platform-objects' array carries 'sys_metadata_activation' and no other package's array does (the automation service's entry does NOT list it). The array's length is NOT part of the receipt: it grows as platform objects land (41 when this item was authored, 46 at 316be321ef) — record it as context if you like, never score on it"
       ],
       "acceptance": [
         {
@@ -1470,10 +1470,10 @@
           "evidence": "the vitest output naming both assertions"
         },
         {
-          "clause": "the spec-side receipt matches the runtime: PLATFORM_OBJECTS_BY_PACKAGE['platform-objects'] includes sys_metadata_activation (41 names), so the one-way lint rule and every consumer of the constant attribute the ledger to platform-objects, not to the automation service",
+          "clause": "the spec-side receipt matches the runtime: PLATFORM_OBJECTS_BY_PACKAGE['platform-objects'] includes sys_metadata_activation and it is the ONLY package array that does, so the one-way lint rule and every consumer of the constant attribute the ledger to platform-objects, not to the automation service. The discriminator is that one-owner membership, never the array's length (which moves with every platform object added)",
           "oracle": "build",
-          "verify": "grep packages/spec/src/system/constants/platform-object-names.ts: 'sys_metadata_activation' appears in the 'platform-objects' array and in no other package's array; count the array (41)",
-          "evidence": "the grep excerpt + the count"
+          "verify": "grep packages/spec/src/system/constants/platform-object-names.ts: 'sys_metadata_activation' occurs exactly once in the file, inside the 'platform-objects' array and in no other package's array. ⛔ Do not score the array count — a literal here (41 at authoring, 46 at 316be321ef) goes stale with no product change",
+          "evidence": "the grep excerpt + the one-occurrence count"
         }
       ],
       "negative": [
@@ -1508,6 +1508,12 @@
           "date": "2026-09-04",
           "change": "ledger read-back detail only — the registration-home contract is UNCHANGED (one owner, the MOVE, the datasource triple, the no-automation composition and its anti-vacuity control all stand). #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped, so step 2 and the no-automation clause asked a runner to capture a column that is not there. Both now read the row's KEY SET, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — green for exactly the reason it should be red, which is why #15024 inverted the dogfood pin into a key-set assertion rather than carrying the old spelling forward. 'install-level' is also re-said as DEPLOYMENT-level: with no tenant column there is no second scope for install-level to be distinguished from. The sibling item platform-core.activation-ledger-row-contract owns the schema-side probe (PRAGMA + a refused INSERT), so this item cites it instead of restating it",
           "ref": "#15253"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-04",
+          "change": "A5 / step 6 re-pointed: the literal array count is dropped — it read 41, the 'platform-objects' array holds 46 names at 316be321ef (platform-object-names.ts), and the count moves with every platform object added while the one-owner membership is the point. Per RUNNER.md's convention for counts that move (the discriminator is the fact, never its digits; a literal is pinned only where the validator enforces it, as enumSource does), the clause now asserts single-array membership and records the count as context only. Assertion defect",
+          "ref": "#21735"
         }
       ]
     },
@@ -1700,7 +1706,7 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1731,7 +1737,7 @@
         "reseed/purge on the installed entry: create ONE user-authored row in an installed CRM object and record its id; POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data as admin — capture {deleted, skipped, errors}; re-read: every manifest-declared seed id is gone, the user-authored row SURVIVES (the purge deletes only ids declared in the cached manifest's seed datasets — marketplace-install-local-plugin.ts); restart boot B against the same DB and confirm the purged rows do NOT come back (sampleDataPurged persisted on the ledger entry)",
         "POST …/:manifestId/reseed-sample-data as admin — the sample rows return and sampleDataPurged flips back off",
         "capability gate both sides (#8976): as the plain member, POST install-local (any body), DELETE …/:manifestId, POST reseed, POST purge — each 403 naming the manage_metadata requirement; anonymous on each → 401; the admin's same calls succeeded above",
-        "DELETE /api/v1/marketplace/install-local/:manifestId as admin → 2xx whose message documents that a restart is needed to fully unload (engine.registerApp is additive); restart → the CRM app no longer registers (GET /meta/app drops it)"
+        "DELETE /api/v1/marketplace/install-local/:manifestId as admin → 200 {success:true, data:{manifestId, cleanups, note}}; WITHOUT restarting, re-read: a CRM object's data route answers 404 and GET /meta/app no longer lists the CRM app. Then restart once and re-read — the package stays gone (the ledger entry was removed first, so rehydrate does not bring it back)"
       ],
       "acceptance": [
         {
@@ -1771,10 +1777,10 @@
           "evidence": "the status matrix with response codes/bodies"
         },
         {
-          "clause": "DELETE removes the cached manifest and the response says a restart is needed to fully unload; after restart the package is gone from /meta/app — remove is honest about its restart coupling rather than pretending a hot unload",
+          "clause": "DELETE hot-withdraws the package from the RUNNING kernel — no restart: the cached manifest is removed, then SchemaRegistry.uninstallPackage (the verb the protocol's own deletePackage uses) withdraws its objects, namespace and every metadata item it shipped, so its objects answer 404 and the app leaves /meta/app at once; the response note says 'withdrawn from the running kernel' and cleanups carries NO failed 'registry.uninstallPackage' outcome. A restart afterwards does not bring it back",
           "oracle": "api",
-          "verify": "the DELETE response text + the post-restart meta/app listing",
-          "evidence": "the DELETE body + the post-restart listing"
+          "verify": "the DELETE body (data.note reads 'Cached manifest removed, the package withdrawn from the running kernel, …'; data.cleanups has no entry named registry.uninstallPackage with success:false — that entry is the declared degraded branch, meaning the registry refused and the package stays loaded until a restart) + the immediate, pre-restart object 404 and /meta/app listing + the post-restart listing (marketplace-install-local-plugin.ts handleUninstall / withdrawFromRunningKernel)",
+          "evidence": "the DELETE body + the pre-restart object probe and /meta/app listing + the post-restart listing"
         }
       ],
       "negative": [
@@ -1799,6 +1805,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 coverage sweep from a FOUR-angle register hit (console-UI, routes, built-in-apps, docs-claims all found the surface untested). Split per the register's suggestion into this api-lane lifecycle item and platform-core.marketplace-console-honesty (browser). Grounding confirmed every load-bearing citation: planMarketplaceWiring's two arms and the 'off' vs '' control-plane distinction, the #8976 manage_metadata gate and #9011 projection in the plugin source, purge's exactly-the-declared-ids semantics with the sampleDataPurged rehydrate guard, and the CLI's inline-artifact door at install.ts",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-04",
+          "change": "A7 and its step re-pointed: the install-local DELETE now withdraws the package from the running kernel through SchemaRegistry.uninstallPackage — no restart is needed; the object 404s and the app leaves /meta/app at once, and the response note says so (marketplace-install-local-plugin.ts handleUninstall and withdrawFromRunningKernel). The restart-required wording was right when written. Stale clause. Source 901e7cf13 (#21581)",
+          "ref": "#21735"
         }
       ]
     },

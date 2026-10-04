@@ -105,7 +105,7 @@
         {
           "revision": 4,
           "date": "2026-10-04",
-          "change": "A4 / step 7 re-pointed: the draft PUT targets a RUNTIME-CREATED skill/tool name (200, readable via ?state=draft); the same PUT against the package-shipped probe is 403 NOT_OVERRIDABLE, recorded as correct — tool/skill allowOrgOverride was rolled back to false (metadata-plugin.zod.ts:1200-1210, sys-metadata-repository.ts assertAllowed). Assertion defect: the clause expected an overlay of a package-shipped skill to succeed. Source ee58392e1 (#6608)",
+          "change": "A4 / step 7 re-pointed: the draft PUT targets a RUNTIME-CREATED skill/tool name (200, readable via ?state=draft); the same PUT against the package-shipped probe is 403 NOT_OVERRIDABLE, recorded as correct — tool/skill allowOrgOverride was rolled back to false (metadata-plugin.zod.ts tool/skill registry rows, sys-metadata-repository.ts assertAllowed). Assertion defect: the clause expected an overlay of a package-shipped skill to succeed. Source ee58392e1 (#6608)",
           "ref": "#21735"
         }
       ]

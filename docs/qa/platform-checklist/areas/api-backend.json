@@ -97,7 +97,7 @@
         {
           "revision": 4,
           "date": "2026-10-04",
-          "change": "A5 / step 6 re-pointed: \"neither blocks the other\" holds only with options.continueOnError: true; the default (false) stops at the first failure with a NOT_ATTEMPTED tail and nothing rolled back. The clause now names the flag for the mixed-outcome leg and asserts the default stop as a second leg (batch.zod.ts:81-85, 209-214; protocol.ts continueOnError branch). Assertion defect: the clause expected the mixed outcome from the default. Source 744b8f5f5 (#7581)",
+          "change": "A5 / step 6 re-pointed: \"neither blocks the other\" holds only with options.continueOnError: true; the default (false) stops at the first failure with a NOT_ATTEMPTED tail and nothing rolled back. The clause now names the flag for the mixed-outcome leg and asserts the default stop as a second leg (batch.zod.ts BatchOptionsSchema.continueOnError and the BatchOperationResult errors describe; protocol.ts continueOnError branch). Assertion defect: the clause expected the mixed outcome from the default. Source 744b8f5f5 (#7581)",
           "ref": "#21735"
         }
       ]
@@ -308,7 +308,7 @@
         {
           "revision": 3,
           "date": "2026-10-04",
-          "change": "A1-A3 and steps 1/4 re-pointed: the modes were swapped. With OS_SERVER_TIMING off, X-OS-Debug-Timing is the admin-only per-request gate (admin gets spans, non-admin none); OS_SERVER_TIMING=true is global mode and sends spans to EVERY caller, with only X-OS-Debug-Timing-Detail admin-only (hono-plugin.ts:83-104 option doc, :300-353 middleware). Title and negative follow; source cites the file. Assertion defect: the clause expected the env flag to be a second admin gate. Source #3163 / #3169",
+          "change": "A1-A3 and steps 1/4 re-pointed: the modes were swapped. With OS_SERVER_TIMING off, X-OS-Debug-Timing is the admin-only per-request gate (admin gets spans, non-admin none); OS_SERVER_TIMING=true is global mode and sends spans to EVERY caller, with only X-OS-Debug-Timing-Detail admin-only (hono-plugin.ts: the serverTiming option doc and the Server-Timing middleware's globalTiming / gate.privileged branches). Title and negative follow; source cites the file. Assertion defect: the clause expected the env flag to be a second admin gate. Source #3163 / #3169",
           "ref": "#21735"
         }
       ]

@@ -1351,7 +1351,7 @@
         {
           "revision": 2,
           "date": "2026-10-04",
-          "change": "A6, step 8 and the browser-lane knownGap re-pointed: sys_user.enable_two_factor now declares a resultDialog (totpURI qrcode + backupCodes code-list + acknowledge, no successMessage — sys-user.object.ts:526-549), so A6 asserts the declaration and resolves its paths against the live enable response instead of flagging a toast-only gap; the knownGap is reworded (the navigable surface declares the reveal; pixels stay objectui's ActionResultDialog, scored on the browser lane only). Stale clause. Source 266654d82e (#11110)",
+          "change": "A6, step 8 and the browser-lane knownGap re-pointed: sys_user.enable_two_factor now declares a resultDialog (totpURI qrcode + backupCodes code-list + acknowledge, no successMessage — sys-user.object.ts enable_two_factor), so A6 asserts the declaration and resolves its paths against the live enable response instead of flagging a toast-only gap; the knownGap is reworded (the navigable surface declares the reveal; pixels stay objectui's ActionResultDialog, scored on the browser lane only). Stale clause. Source 266654d82e (#11110)",
           "ref": "#21735"
         }
       ]
@@ -1523,7 +1523,7 @@
         {
           "revision": 2,
           "date": "2026-10-04",
-          "change": "A6, step 9, title and the browser-lane knownGap re-pointed: sys_user.generate_backup_codes now declares a one-shot resultDialog (backupCodes code-list + acknowledge, no successMessage — sys-user.object.ts:570-599), so the navigable regenerate is no longer a lockout path; A6 asserts the declaration and resolves its path against the live regenerate response instead of flagging the toast-only gap. Stale clause. Source 266654d82e (#11110)",
+          "change": "A6, step 9, title and the browser-lane knownGap re-pointed: sys_user.generate_backup_codes now declares a one-shot resultDialog (backupCodes code-list + acknowledge, no successMessage — sys-user.object.ts generate_backup_codes), so the navigable regenerate is no longer a lockout path; A6 asserts the declaration and resolves its path against the live regenerate response instead of flagging the toast-only gap. Stale clause. Source 266654d82e (#11110)",
           "ref": "#21735"
         }
       ]
