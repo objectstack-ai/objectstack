@@ -262,7 +262,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -14885,13 +14885,14 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
-               // [#21663] `'skip'`: the readonly strip has NOT run yet, so a
-               // readonly value here may be a caller's the strip is about to
-               // drop — judged, a whole-record write-back echoing a legacy
-               // stored value would become a refusal. Readonly values are
-               // judged after the strip (`'only'`, below).
+               // [#21663] Scope `'skip'` — the public `validateRecord` IS that
+               // scope: the readonly strip has NOT run yet, so a readonly value
+               // here may be a caller's the strip is about to drop — judged, a
+               // whole-record write-back echoing a legacy stored value would
+               // become a refusal. Readonly values are judged after the strip
+               // (`validateRecordInScope(…, 'only')`, below).
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
                //
                // This gate used to ask `this.hooks.get('afterUpdate').length > 0`
@@ -15219,13 +15220,14 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
-               // [#21663] `'skip'`: the readonly strip has NOT run yet, so a
-               // readonly value here may be a caller's the strip is about to
-               // drop — judged, a whole-record write-back echoing a legacy
-               // stored value would become a refusal. Readonly values are
-               // judged after the strip (`'only'`, below).
+               // [#21663] Scope `'skip'` — the public `validateRecord` IS that
+               // scope: the readonly strip has NOT run yet, so a readonly value
+               // here may be a caller's the strip is about to drop — judged, a
+               // whole-record write-back echoing a legacy stored value would
+               // become a refusal. Readonly values are judged after the strip
+               // (`validateRecordInScope(…, 'only')`, below).
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#2982] The middleware-composed AST — asserted present and
                // bound to the memoized row read in the pre-phase above, so the
                // injected row-scoping (RLS write filter, sharing's
