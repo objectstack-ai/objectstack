@@ -404,7 +404,7 @@ const IDENTIFIER_TOKEN = /[A-Za-z_][A-Za-z0-9_]*/g;
  * that shared it would go blind exactly where the mask does.
  */
 function findIdentifierResidue(value: unknown, name: string, path = '$'): string | undefined {
-    const tokenIs = (text: string) => (text.match(IDENTIFIER_TOKEN) ?? []).includes(name);
+    const tokenIs = (text: string): boolean => (text.match(IDENTIFIER_TOKEN) ?? ([] as string[])).includes(name);
     if (typeof value === 'string') return tokenIs(value) ? path : undefined;
     if (Array.isArray(value)) {
         for (let i = 0; i < value.length; i++) {
