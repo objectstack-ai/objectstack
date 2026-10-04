@@ -9,10 +9,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
+import { FieldSchema, InlineGridColumnSchema, ObjectSchema } from '@objectstack/spec/data';
 import { applyObjectSchemaMask, type ObjectSchemaMaskPosture } from './object-schema-fls.js';
 import {
     FIELD_REFERENCE_POSITIONS,
+    INLINE_COLUMN_POSITIONS,
     OBJECT_REFERENCE_POSITIONS,
     mentionsDenied,
 } from './object-schema-fls-references.js';
@@ -146,6 +147,40 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served.actions.map((a: any) => a.name)).toEqual(['retitle']);
     });
 
+    it('drops a list view KEYED by the denied field\'s name; the others stay', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            listViews: {
+                secret_score: { label: 'By score', columns: ['title'] },
+                all: { label: 'All', columns: ['title'] },
+            },
+        });
+        expect(served.listViews).toEqual({ all: { label: 'All', columns: ['title'] } });
+    });
+
+    it('drops an action whose `patch` writes the denied field (a field-keyed block)', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            actions: [
+                { name: 'zero', label: 'Zero', type: 'script', operation: 'update', patch: { secret_score: 0 } },
+                { name: 'clear', label: 'Clear', type: 'script', operation: 'update', patch: { title: '' } },
+            ],
+        });
+        expect(served.actions.map((a: any) => a.name)).toEqual(['clear']);
+    });
+
+    it('serves a field group keyed like the denied field — a group name is not a field reference', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({ group: 'secret_score' }),
+            fieldGroups: [{ key: 'secret_score', label: 'Scores' }],
+        });
+        expect(served.fieldGroups).toEqual([{ key: 'secret_score', label: 'Scores' }]);
+        expect(served.fields.title.group).toBe('secret_score');
+    });
+
     it('deletes an UNCLASSIFIED key that mentions the denied field — fail-safe, never a leak', () => {
         const served = mask({ name: 'thing', fields: fieldsWith(), futureKey: { pick: 'record.secret_score' }, otherKey: 'title' });
         expect(served).not.toHaveProperty('futureKey');
@@ -186,6 +221,40 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         });
     });
 
+    it('scrubs the inline master-detail grid — its columns are THIS (child) object\'s own fields', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({
+                type: 'master_detail',
+                reference: 'parent_thing',
+                inlineColumns: [
+                    { name: 'id' },
+                    { name: 'secret_score', label: 'Score' },
+                    { name: 'title', label: 'Title', type: 'lookup', reference: 'other', displayField: 'secret_score', readonlyWhen: 'record.secret_score > 0' },
+                    { name: 'id', computed: true, expr: 'secret_score * 2' },
+                    { name: 'title', computed: true, expr: 'id + 1' },
+                ],
+                inlineAmountField: 'secret_score',
+            }),
+        });
+        expect(served.fields.title.inlineColumns).toEqual([
+            { name: 'id' },
+            // `displayField` names a field of the lookup's own target — kept.
+            { name: 'title', label: 'Title', type: 'lookup', reference: 'other', displayField: 'secret_score' },
+            { name: 'title', computed: true, expr: 'id + 1' },
+        ]);
+        expect(served.fields.title).not.toHaveProperty('inlineAmountField');
+    });
+
+    it('keeps a readable inline amount field, and deletes a grid left with no column', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({ type: 'master_detail', inlineColumns: [{ name: 'secret_score' }], inlineAmountField: 'id' }),
+        });
+        expect(served.fields.title).not.toHaveProperty('inlineColumns');
+        expect(served.fields.title.inlineAmountField).toBe('id');
+    });
+
     it('leaves names of ANOTHER object\'s fields alone — they are that object\'s projection', () => {
         const served = mask({
             name: 'thing',
@@ -193,6 +262,77 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         });
         expect(served.fields.title.lookupColumns).toEqual(['secret_score']);
         expect(served.fields.title.displayField).toBe('secret_score');
+    });
+});
+
+describe('[ADR-0106 D1] a denied field named like a schema word costs only its own references', () => {
+    /** `type` and `source` are both denied; `title` is the readable control. */
+    const maskWords = (document: Record<string, unknown>) =>
+        applyObjectSchemaMask(document, project(['id', 'title'])).document as Record<string, any>;
+    const wordFields = (extra: Record<string, unknown> = {}) => ({
+        id: { type: 'text' },
+        title: { type: 'text', ...extra },
+        type: { type: 'text' },
+        source: { type: 'text' },
+    });
+
+    it('keeps every rule that does not read `type` / `source`, though each carries a `type` key and a `{ dialect, source }` envelope', () => {
+        const served = maskWords({
+            name: 'thing',
+            fields: wordFields(),
+            validations: [
+                { type: 'script', name: 'title_set', condition: { dialect: 'cel', source: 'record.title == ""' }, message: 'x' },
+                { type: 'format', name: 'title_url', field: 'title', format: 'url', message: 'x' },
+                { type: 'script', name: 'typed', condition: { dialect: 'cel', source: 'record.type == "a"' }, message: 'x' },
+                { type: 'cross_field', name: 'pair', fields: ['source', 'title'], condition: 'true', message: 'x' },
+            ],
+            indexes: [{ name: 'by_title', fields: ['title'], unique: 'global' }, { fields: ['source'] }],
+        });
+        expect(served.validations.map((r: any) => r.name)).toEqual(['title_set', 'title_url']);
+        expect(served.indexes).toEqual([{ name: 'by_title', fields: ['title'], unique: 'global' }]);
+    });
+
+    it('keeps every list view and action that does not read them, though each carries a `type` key', () => {
+        const served = maskWords({
+            name: 'thing',
+            fields: wordFields(),
+            listViews: {
+                all: { label: 'All', type: 'grid', columns: ['title', 'type'], filter: [{ field: 'title', operator: 'is_not_null' }] },
+                typed: { label: 'Typed', type: 'grid', columns: ['title'], filter: [{ field: 'type', operator: 'equals', value: 'a' }] },
+            },
+            actions: [
+                { name: 'retitle', label: 'Retitle', type: 'script', visible: { dialect: 'cel', source: 'record.title != null' } },
+                { name: 'resource', label: 'Re-source', type: 'script', visible: 'record.source != null' },
+            ],
+        });
+        expect(served.listViews).toEqual({
+            all: { label: 'All', type: 'grid', columns: ['title'], filter: [{ field: 'title', operator: 'is_not_null' }] },
+        });
+        expect(served.actions.map((a: any) => a.name)).toEqual(['retitle']);
+    });
+
+    it('keeps a readable field\'s CEL envelopes; a field-keyed filter still keys on the field name', () => {
+        const served = maskWords({
+            name: 'thing',
+            fields: wordFields({
+                visibleWhen: { dialect: 'cel', source: 'record.id != null' },
+                expression: { dialect: 'cel', source: 'record.id * 2' },
+                relatedListFilter: { type: { $eq: 'a' } },
+            }),
+            lifecycle: { class: 'record', retention: { maxAge: '30d', onlyWhen: { source: 'import' } } },
+        });
+        expect(served.fields.title.visibleWhen).toEqual({ dialect: 'cel', source: 'record.id != null' });
+        expect(served.fields.title.expression).toEqual({ dialect: 'cel', source: 'record.id * 2' });
+        expect(served.fields.title).not.toHaveProperty('relatedListFilter');
+        expect(served.lifecycle).toEqual({ class: 'record', retention: { maxAge: '30d' } });
+    });
+
+    it('a field-keyed filter does not read a `$`-operator as a field: denied `and` keeps `$and` over readable fields', () => {
+        const served = applyObjectSchemaMask({
+            name: 'thing',
+            fields: { id: { type: 'text' }, title: { type: 'text', relatedListFilter: { $and: [{ id: { $ne: null } }] } }, and: { type: 'text' } },
+        }, project(['id', 'title'])).document as Record<string, any>;
+        expect(served.fields.title.relatedListFilter).toEqual({ $and: [{ id: { $ne: null } }] });
     });
 });
 
@@ -214,6 +354,19 @@ describe('[ADR-0106 D1/D3] the projection stays pure', () => {
         expect(applyObjectSchemaMask(SOURCE, project(['id', 'title', 'secret_score'])).document).toBe(SOURCE);
     });
 
+    it('is total on a cyclic document: it terminates, and still removes the reference', () => {
+        const cyclic: Record<string, any> = { name: 'thing', fields: fieldsWith() };
+        const loop: Record<string, any> = { pick: 'record.secret_score' };
+        loop.self = loop;
+        cyclic.futureKey = loop;
+        cyclic.otherKey = { back: cyclic };
+        cyclic.validations = [{ type: 'script', name: 'cap', condition: 'record.title == ""', message: 'x' }];
+        cyclic.validations[0].again = cyclic.validations;
+        const served = mask(cyclic);
+        expect(served).not.toHaveProperty('futureKey');
+        expect(served.validations.map((r: any) => r.name)).toEqual(['cap']);
+    });
+
     it('keeps the document\'s key order', () => {
         expect(Object.keys(mask({ ...SOURCE, label: 'Thing' }))).toEqual(['name', 'fields', 'label']);
     });
@@ -225,6 +378,13 @@ describe('mentionsDenied is an identifier-token test', () => {
         expect(mentionsDenied('record.score > 1', denied)).toBe(true);
         expect(mentionsDenied('{score}', denied)).toBe(true);
         expect(mentionsDenied({ score: { $gt: 1 } }, denied)).toBe(true);
+    });
+    it('reads keys only where the caller says they are field names', () => {
+        expect(mentionsDenied({ score: 1 }, denied, 'include', 'classified')).toBe(false);
+        expect(mentionsDenied({ filter: { score: 1 } }, denied, 'include', 'classified')).toBe(true);
+        expect(mentionsDenied({ score: 1 }, denied, 'include', 'field-keyed')).toBe(true);
+        expect(mentionsDenied({ type: 'score' }, denied, 'include', 'classified')).toBe(false);
+        expect(mentionsDenied({ type: 'score' }, denied, 'include', 'all')).toBe(true);
     });
     it('does not match a longer identifier or a capitalised word', () => {
         expect(mentionsDenied('record.score_band', denied)).toBe(false);
@@ -250,9 +410,16 @@ describe('[ADR-0106 D1] every position is classified — closed against the live
         expect(unclassified, 'classify each new FieldSchema key in FIELD_REFERENCE_POSITIONS').toEqual([]);
     });
 
+    it('classifies every InlineGridColumnSchema key', () => {
+        const unclassified = declaredKeys(InlineGridColumnSchema).filter((key) => !(key in INLINE_COLUMN_POSITIONS));
+        expect(unclassified, 'classify each new InlineGridColumnSchema key in INLINE_COLUMN_POSITIONS').toEqual([]);
+    });
+
     it('classifies nothing the spec no longer declares', () => {
         const objectKeys = new Set(declaredKeys(ObjectSchema));
         const fieldKeys = new Set(declaredKeys(FieldSchema));
+        const columnKeys = new Set(declaredKeys(InlineGridColumnSchema));
+        expect(Object.keys(INLINE_COLUMN_POSITIONS).filter((key) => !columnKeys.has(key))).toEqual([]);
         expect(Object.keys(OBJECT_REFERENCE_POSITIONS).filter((key) => !objectKeys.has(key))).toEqual([]);
         expect(Object.keys(FIELD_REFERENCE_POSITIONS).filter((key) => !fieldKeys.has(key))).toEqual([]);
     });

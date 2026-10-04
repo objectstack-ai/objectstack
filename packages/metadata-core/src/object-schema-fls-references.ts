@@ -29,9 +29,12 @@
  * | **rule entry** (`validations[i]`, `indexes[i]`, …) | the entry is dropped — a rule over a field the caller cannot read is server policy the caller cannot evaluate, and its text describes the field |
  *
  * A position that names fields of ANOTHER object (`lookupColumns`,
- * `displayField`, `summaryOperations`, …) is `foreign`: those names are
+ * `displayField`, `summaryOperations`, …) is kept as is: those names are
  * governed by that object's own projection, and filtering them against THIS
  * object's denied set would delete unrelated columns that merely share a name.
+ * The inline master-detail grid (`inlineColumns`, `inlineAmountField`) is NOT
+ * such a position: it is declared on the child's own `master_detail` field and
+ * names the child's own columns, so it is scrubbed against this object.
  *
  * ## Fail-safe by construction
  *
@@ -45,8 +48,33 @@
  * "Mentions" is an identifier-token test, not a substring test: a string
  * mentions `score` when one of its `[A-Za-z_][A-Za-z0-9_]*` tokens IS
  * `score` — so `record.score > 0` and `{score}` do, while `score_band`
- * and `Score` do not. Object keys are tested the same way (a filter
- * condition keys on the field name).
+ * and `Score` do not. In a classified position an object KEY is a reference
+ * only where keys ARE field names — a `FilterCondition` (`relatedListFilter`,
+ * a list view's `filter`), a `lifecycle` `onlyWhen` map, an action's `patch`;
+ * elsewhere a key is a schema word, so a denied field called `type` or
+ * `source` does not cost the caller every rule or every CEL envelope. The
+ * unclassified path tests every key.
+ *
+ * ## Accepted limitations
+ *
+ * - A string LITERAL equal to a denied name in a classified position — a
+ *   `defaultValue`, a filter comparand, a quoted CEL string — reads as a
+ *   reference, so the position is deleted (over-masking, never a leak).
+ * - A composite identifier (`score_positive`) is one token and is not
+ *   matched, even where an author meant it to evoke the field.
+ * - A list view or action that reads a denied field anywhere outside its
+ *   column lists (a nested `kanban.groupByField`, a sort, a param) is dropped
+ *   whole rather than partially rewritten.
+ * - A `fieldGroups[].key` is a group name, not a field reference — the
+ *   readable fields join a group through their own `group: <key>` — so a group
+ *   keyed like a denied field is served; dropping it would regroup fields the
+ *   caller IS entitled to. A `listViews` key, by contrast, is the view's whole
+ *   identity and nothing else points at it, so a view keyed like a denied field
+ *   is dropped.
+ *
+ * Total: a cyclic document terminates (the reference walk guards its path),
+ * and every table is finite, so no input overflows the stack by recursion
+ * through the tables.
  *
  * Pure and non-mutating: the input is the shared cache's single full copy
  * (ADR-0106 D3), so every changed branch is a fresh object and every unchanged
@@ -82,27 +110,107 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Does `value` reference any denied field — in any string leaf or object key?
+ * Keys whose values are a closed vocabulary or a non-field namespace — a rule's
+ * `type` / `severity` / `events`, an expression envelope's `dialect`, a filter
+ * rule's `operator`, a sort's `order`, a state machine's state values, a
+ * `format` rule's enum, a `regex` pattern, a `json_schema` rule's JSON Schema.
+ * In a CLASSIFIED position their values never name a field of this object, so
+ * a denied field that happens to be called `script`, `email` or `cel` must not
+ * cost the caller every rule of that kind. Not consulted on the unclassified
+ * fail-safe path, nor inside a field-keyed block (where `type` IS a field).
+ */
+const VOCABULARY_KEYS: ReadonlySet<string> = new Set([
+    'type', 'dialect', 'severity', 'events', 'format', 'operator', 'order', 'direction',
+    'transitions', 'initialStates', 'regex', 'schema',
+]);
+
+/**
+ * Keys whose value is a FIELD-KEYED block: a Query-DSL `FilterCondition`
+ * (`{ status: { $ne: 'x' }, $and: [...] }`), a `lifecycle.*.onlyWhen` map, an
+ * action's `patch` (field → static value). Only there is an object KEY a field
+ * reference; everywhere else in a classified position a key is a schema word
+ * (`type`, `source`, `name`, …) and is never tested.
+ */
+const FIELD_KEYED_KEYS: ReadonlySet<string> = new Set(['filter', 'where', 'relatedListFilter', 'onlyWhen', 'patch']);
+
+/** How {@link mentionsDenied} reads object keys. */
+export type KeyReading =
+    /** Every key is tested — the UNCLASSIFIED fail-safe path, where nothing is known about the shape. */
+    | 'all'
+    /** Keys are tested only inside a {@link FIELD_KEYED_KEYS} block; {@link VOCABULARY_KEYS} values are skipped. */
+    | 'classified'
+    /** The value itself is a field-keyed block (`relatedListFilter`, `onlyWhen`). */
+    | 'field-keyed';
+
+/**
+ * Does `value` reference any denied field?
  *
  * `prose: 'include'` (rule entries) reads everything, because a rule's message
  * describes the field it guards; `prose: 'skip'` (list views, actions) ignores
- * {@link PROSE_KEYS}.
+ * {@link PROSE_KEYS}. `keys` says which object keys are field references —
+ * see {@link KeyReading}; the default is the fail-safe `'all'`.
+ *
+ * Total on any input, cyclic ones included: a value already on the walk's
+ * path is not re-entered (its answer is the one being computed above it), so a
+ * self-referencing document terminates instead of overflowing the stack. The
+ * guard is the current PATH, not every value ever seen, so a sub-object shared
+ * by two positions is still read in each position's own key reading.
  */
 export function mentionsDenied(
     value: unknown,
     denied: ReadonlySet<string>,
     prose: 'include' | 'skip' = 'include',
+    keys: KeyReading = 'all',
 ): boolean {
-    if (typeof value === 'string') return stringMentions(value, denied);
-    if (Array.isArray(value)) return value.some((entry) => mentionsDenied(entry, denied, prose));
-    if (value && typeof value === 'object') {
-        for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-            if (prose === 'skip' && PROSE_KEYS.has(key)) continue;
-            if (stringMentions(key, denied)) return true;
-            if (mentionsDenied(inner, denied, prose)) return true;
+    const onPath = new WeakSet<object>();
+
+    const enter = (node: object, read: () => boolean): boolean => {
+        if (onPath.has(node)) return false;
+        onPath.add(node);
+        try {
+            return read();
+        } finally {
+            onPath.delete(node);
         }
-    }
-    return false;
+    };
+
+    /** A `FilterCondition` / field → value map: non-`$` keys are field names. */
+    const fieldKeyed = (node: unknown): boolean => {
+        if (typeof node === 'string') return stringMentions(node, denied);
+        if (!node || typeof node !== 'object') return false;
+        if (Array.isArray(node)) return enter(node, () => node.some(fieldKeyed));
+        const rec = node as Record<string, unknown>;
+        // A list-view filter RULE (`{ field, operator, value }`) keys on schema
+        // words, not field names: its field is the `field` string.
+        if (typeof rec.field === 'string') return walk(rec, false);
+        return enter(rec, () => Object.entries(rec).some(([key, inner]) => (
+            key.startsWith('$')
+                ? fieldKeyed(inner) // `$and` / `$or` / `$not` nest conditions; `$gt: 5` is a literal
+                : denied.has(key) || walk(inner, false)
+        )));
+    };
+
+    const walk = (node: unknown, testKeys: boolean): boolean => {
+        if (typeof node === 'string') return stringMentions(node, denied);
+        if (!node || typeof node !== 'object') return false;
+        if (Array.isArray(node)) return enter(node, () => node.some((entry) => walk(entry, testKeys)));
+        return enter(node, () => {
+            for (const [key, inner] of Object.entries(node as Record<string, unknown>)) {
+                if (prose === 'skip' && PROSE_KEYS.has(key)) continue;
+                if (testKeys) {
+                    if (stringMentions(key, denied) || walk(inner, true)) return true;
+                    continue;
+                }
+                if (VOCABULARY_KEYS.has(key)) continue;
+                if (FIELD_KEYED_KEYS.has(key) ? fieldKeyed(inner) : walk(inner, false)) return true;
+            }
+            return false;
+        });
+    };
+
+    if (keys === 'all') return walk(value, true);
+    if (keys === 'field-keyed') return fieldKeyed(value);
+    return walk(value, false);
 }
 
 // ── Building blocks ───────────────────────────────────────────────────────────
@@ -113,8 +221,22 @@ const keep: Scrub = (value) => value;
 /** A string naming ONE field of this object. */
 const pointer: Scrub = (value, denied) => (typeof value === 'string' && denied.has(value) ? REMOVE : value);
 
-/** A CEL predicate / formula / template / filter condition. */
-const expression: Scrub = (value, denied) => (mentionsDenied(value, denied) ? REMOVE : value);
+/**
+ * A CEL predicate / formula / template, bare or in its `{ dialect, source }`
+ * envelope: deleted when a string in it names a denied field. Its object keys
+ * are schema words, not field references (see {@link KeyReading}).
+ */
+const expression: Scrub = (value, denied) => (mentionsDenied(value, denied, 'include', 'classified') ? REMOVE : value);
+
+/** A field-keyed block — a Query-DSL `FilterCondition`, an `onlyWhen` map: its KEYS are field names. */
+const fieldKeyed: Scrub = (value, denied) => (mentionsDenied(value, denied, 'include', 'field-keyed') ? REMOVE : value);
+
+/**
+ * A key no table classifies, or a classified key holding a value of the wrong
+ * shape: nothing is known about it, so every string AND every key is read as a
+ * possible reference — the fail-safe path over-masks rather than leaks.
+ */
+const unclassified: Scrub = (value, denied) => (mentionsDenied(value, denied, 'include', 'all') ? REMOVE : value);
 
 /** The field a name-list entry names: a bare string, or `{ field }` / `{ name }`. */
 function entryFieldName(entry: unknown): string | undefined {
@@ -141,7 +263,7 @@ const names: Scrub = (value, denied) => {
 /** An array whose elements are scrubbed one by one; `REMOVE` drops the element. */
 function arrayOf(element: Scrub): Scrub {
     return (value, denied) => {
-        if (!Array.isArray(value)) return expression(value, denied);
+        if (!Array.isArray(value)) return unclassified(value, denied);
         let changed = false;
         const out: unknown[] = [];
         for (const entry of value) {
@@ -156,25 +278,36 @@ function arrayOf(element: Scrub): Scrub {
 
 /**
  * Rule entries: an entry that mentions a denied field ANYWHERE — its pointers,
- * its condition, its message — is dropped whole.
+ * its condition, its message — is dropped whole. Its keys (`type`, `name`,
+ * `severity`, …) and its vocabulary values are not references; see
+ * {@link VOCABULARY_KEYS}.
  */
-const ruleEntries: Scrub = arrayOf((entry, denied) => (mentionsDenied(entry, denied, 'include') ? REMOVE : entry));
+const ruleEntries: Scrub = arrayOf((entry, denied) => (mentionsDenied(entry, denied, 'include', 'classified') ? REMOVE : entry));
 
-/** An object block scrubbed key by key; an unclassified key is an {@link expression}. */
+/** An object block scrubbed key by key; an unclassified key goes the {@link unclassified} way. */
 function block(table: Readonly<Record<string, Scrub>>): Scrub {
     return (value, denied) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return expression(value, denied);
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
         return scrubRecord(value as Record<string, unknown>, table, denied);
     };
 }
 
-/** A `Record<string, entry>` whose values are scrubbed; `REMOVE` deletes the entry. */
-function recordOf(entry: Scrub): Scrub {
+/**
+ * A `Record<string, entry>` whose values are scrubbed; `REMOVE` deletes the
+ * entry. With `keyIsName`, an entry whose KEY names a denied field is deleted
+ * too — for maps keyed by an author-chosen name the caller is shown
+ * (`listViews`), where a key spelling a denied field discloses it.
+ */
+function recordOf(entry: Scrub, keyIsName = false): Scrub {
     return (value, denied) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return expression(value, denied);
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
         let changed = false;
         const out: Record<string, unknown> = {};
         for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+            if (keyIsName && stringMentions(key, denied)) {
+                changed = true;
+                continue;
+            }
             const next = entry(inner, denied);
             if (next !== inner) changed = true;
             if (next !== REMOVE) out[key] = next;
@@ -192,7 +325,7 @@ function recordOf(entry: Scrub): Scrub {
  */
 function presentationEntry(listKeys: readonly string[]): Scrub {
     return (value, denied) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return expression(value, denied);
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
         const rec = value as Record<string, unknown>;
         let changed = false;
         const out: Record<string, unknown> = {};
@@ -203,9 +336,9 @@ function presentationEntry(listKeys: readonly string[]): Scrub {
                 if (next !== REMOVE) out[key] = next;
                 continue;
             }
-            if (!PROSE_KEYS.has(key) && (stringMentions(key, denied) || mentionsDenied(inner, denied, 'skip'))) {
-                return REMOVE;
-            }
+            // Read as `{ [key]: inner }` so the key's own kind applies: prose and
+            // vocabulary keys are skipped, `filter` / `patch` are field-keyed.
+            if (mentionsDenied({ [key]: inner }, denied, 'skip', 'classified')) return REMOVE;
             out[key] = inner;
         }
         return changed ? out : value;
@@ -221,7 +354,7 @@ function scrubRecord(
     let changed = false;
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(rec)) {
-        const scrub = Object.prototype.hasOwnProperty.call(table, key) ? table[key]! : expression;
+        const scrub = Object.prototype.hasOwnProperty.call(table, key) ? table[key]! : unclassified;
         const next = scrub(inner, denied);
         if (next !== inner) changed = true;
         if (next !== REMOVE) out[key] = next;
@@ -242,6 +375,37 @@ const PROTECTION_ENVELOPE: Readonly<Record<string, Scrub>> = {
 const option = block({ label: keep, value: keep, description: keep, color: keep, default: keep, visibleWhen: expression, icon: keep });
 
 /**
+ * [ADR-0106 D1] Every `InlineGridColumnSchema` key, classified. A column's
+ * `name` is a field of THIS object (the child the grid edits); its lookup
+ * `reference` / `displayField` / `idField` name the referenced object and its
+ * fields; its `readonlyWhen` / `requiredWhen` read the row as `record`.
+ * Pinned against the live schema shape by `object-schema-fls-references.test.ts`.
+ */
+export const INLINE_COLUMN_POSITIONS: Readonly<Record<string, Scrub>> = {
+    name: keep, label: keep, type: keep, options: keep, prefix: keep, step: keep,
+    reference: keep, displayField: keep, idField: keep, multiple: keep, accept: keep,
+    defaultHidden: keep, computed: keep, scale: keep, autofill: keep, width: keep, required: keep,
+    // Judged by `inlineColumn` before the table runs: a denied one drops the column.
+    expr: keep,
+    readonlyWhen: expression,
+    requiredWhen: expression,
+};
+
+/**
+ * One inline-grid column: dropped whole when it IS a denied field (`name`) or
+ * is computed from one (`expr` — a computed cell recomputed from sibling cells,
+ * so serving it without the expression would show a different number). Its
+ * other facets are scrubbed by {@link INLINE_COLUMN_POSITIONS}.
+ */
+const inlineColumn: Scrub = (value, denied) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
+    const rec = value as Record<string, unknown>;
+    if (typeof rec.name === 'string' && denied.has(rec.name)) return REMOVE;
+    if (rec.expr !== undefined && mentionsDenied(rec.expr, denied, 'include', 'classified')) return REMOVE;
+    return scrubRecord(rec, INLINE_COLUMN_POSITIONS, denied);
+};
+
+/**
  * [ADR-0106 D1] Every `FieldSchema` key, classified. Pinned against the live
  * schema shape by `object-schema-fls-references.test.ts`.
  */
@@ -259,10 +423,17 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
     conditionalRequired: keep,
     // Names of ANOTHER object's fields — that object's projection governs them.
-    inlineColumns: keep, inlineAmountField: keep, displayField: keep, descriptionField: keep,
-    lookupColumns: keep, lookupFilters: keep, summaryOperations: keep,
-    // A sibling field of THIS object.
+    // `displayField` / `descriptionField` / `lookupColumns` / `lookupFilters`
+    // name fields of the `reference` target (the lookup picker reads them);
+    // `summaryOperations` (`field`, `filter`) reads the CHILD object it rolls up.
+    displayField: keep, descriptionField: keep, lookupColumns: keep, lookupFilters: keep,
+    summaryOperations: keep,
+    // A sibling field of THIS object. The inline grid is declared on the
+    // child's `master_detail` field and its columns ARE the child's own fields —
+    // this object, not the parent the field points at.
     referenceVia: pointer,
+    inlineAmountField: pointer,
+    inlineColumns: arrayOf(inlineColumn),
     relatedListColumns: names,
     dependsOn: names,
     // Evaluated against this object's record.
@@ -270,7 +441,7 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     visibleWhen: expression,
     readonlyWhen: expression,
     requiredWhen: expression,
-    relatedListFilter: expression,
+    relatedListFilter: fieldKeyed,
     defaultValue: expression,
     autonumberFormat: expression,
     options: arrayOf(option),
@@ -294,7 +465,7 @@ const ttl: Scrub = (value, denied) => {
         const rec = value as Record<string, unknown>;
         if (typeof rec.field === 'string' && denied.has(rec.field)) return REMOVE;
     }
-    return block({ field: pointer, expireAfter: keep, onlyWhen: expression })(value, denied);
+    return block({ field: pointer, expireAfter: keep, onlyWhen: fieldKeyed })(value, denied);
 };
 
 /** `external.columnMap` is remote column → LOCAL field name; an entry mapping onto a denied field goes. */
@@ -341,7 +512,7 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     tenancy: block({ enabled: keep, tenantField: pointer }),
     lifecycle: block({
         class: keep, storage: keep, archive: keep, reclaim: keep,
-        retention: block({ maxAge: keep, onlyWhen: expression }),
+        retention: block({ maxAge: keep, onlyWhen: fieldKeyed }),
         ttl,
     }),
     publicSharing: block({
@@ -349,7 +520,8 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
         redactFields: names, eligibility: expression,
     }),
     // Presentation entries.
-    listViews: recordOf(presentationEntry(LIST_VIEW_NAME_LISTS)),
+    // A view KEYED by a denied field's name goes too: the key is shown to the caller.
+    listViews: recordOf(presentationEntry(LIST_VIEW_NAME_LISTS), true),
     actions: arrayOf(presentationEntry([])),
     ...PROTECTION_ENVELOPE,
 };

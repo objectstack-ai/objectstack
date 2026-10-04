@@ -31,9 +31,15 @@
  * document has outside `fields` (ADR-0106 D1 removes a field WHOLE, so a
  * reference is part of the field): a rule entry whose condition reads one, a
  * rule entry that names one only through its `fields` pointer list, role
- * pointers, name lists, an expression, a field-group predicate, an index —
- * and, inside the READABLE fields, a name list, a `dependsOn`, a predicate and
- * a formula that read a sibling. Each position also carries a reference to a
+ * pointers, name lists, an expression, a field-group predicate, an index,
+ * list views (a column list, a filter, a view KEYED by a field's name),
+ * actions (a visibility predicate) — and, inside the READABLE fields, a name
+ * list, a `dependsOn`, a predicate, a formula `expression` and an inline grid
+ * (`inlineColumns` by name and by computed `expr`, `inlineAmountField`) that
+ * read a sibling. The inline grid sits on `name` only so that a field every
+ * restricted case can read carries it — the mask does not read `type`, and a
+ * fifth field would change the field set every exit's suite counts. Each
+ * position also carries a reference to a
  * field EVERY restricted case can read, so an over-eager mask that deletes the
  * position wholesale fails the `retained` half of the case.
  */
@@ -74,6 +80,15 @@ export const FLS_CONTRACT_OBJECT = {
             message: 'Name must not be blank.',
         },
     ],
+    listViews: {
+        all: { label: 'All', type: 'grid', columns: ['name', 'salary_grade'] },
+        graded: { label: 'Graded', type: 'grid', columns: ['name'], filter: [{ field: 'salary_grade', operator: 'is_not_null' }] },
+        salary_grade: { label: 'By grade', type: 'grid', columns: ['name'] },
+    },
+    actions: [
+        { name: 'regrade', label: 'Regrade', type: 'script', visible: 'record.salary_grade != null' },
+        { name: 'rename', label: 'Rename', type: 'script', visible: 'record.name != null' },
+    ],
     fields: {
         id: { type: 'text', label: 'Id' },
         name: {
@@ -83,6 +98,13 @@ export const FLS_CONTRACT_OBJECT = {
             dependsOn: ['id', 'salary_grade'],
             readonlyWhen: 'record.bonus_formula != null',
             requiredWhen: 'record.id != null',
+            inlineColumns: [
+                { name: 'id' },
+                { name: 'salary_grade', label: 'Grade' },
+                { name: 'name', label: 'Name', readonlyWhen: 'record.salary_grade != null' },
+                { name: 'id', label: 'Bonus x2', computed: true, expr: 'bonus_formula * 2' },
+            ],
+            inlineAmountField: 'bonus_formula',
         },
         // Everything ADR-0106's Context section names as leaking with the field:
         // a sensitive enumeration, the capability guarding it, and a formula
@@ -96,7 +118,7 @@ export const FLS_CONTRACT_OBJECT = {
         bonus_formula: {
             type: 'formula',
             label: 'Bonus',
-            formula: 'salary_grade == "band_a" ? 0.2 : 0.1',
+            expression: 'salary_grade == "band_a" ? 0.2 : 0.1',
             visibleWhen: 'record.status == "active"',
         },
     },
@@ -126,7 +148,7 @@ const ruleNames = (document: any): string[] => (Array.isArray(document?.validati
     ? document.validations.map((rule: any) => rule?.name)
     : []);
 
-const sameList = (actual: unknown, expected: readonly unknown[]): boolean =>
+const sameList = (actual: unknown, expected: readonly unknown[] | Readonly<Record<string, unknown>>): boolean =>
     JSON.stringify(actual) === JSON.stringify(expected);
 
 /**
@@ -150,6 +172,12 @@ const RETAINED_FOR_ID_AND_NAME: readonly FlsContractRetention[] = [
             && sameList(d?.fields?.name?.dependsOn, ['id']),
     },
     { what: 'the readable field\'s predicate over a readable sibling', holds: (d) => d?.fields?.name?.requiredWhen === 'record.id != null' },
+    {
+        what: 'the inline grid\'s readable columns, minus a predicate over the denied field',
+        holds: (d) => sameList(d?.fields?.name?.inlineColumns, [{ name: 'id' }, { name: 'name', label: 'Name' }]),
+    },
+    { what: 'the list view over readable fields, minus the denied column', holds: (d) => sameList(d?.listViews, { all: { label: 'All', type: 'grid', columns: ['name'] } }) },
+    { what: 'the action whose predicate reads a readable field', holds: (d) => sameList(d?.actions?.map((a: any) => a?.name), ['rename']) },
 ];
 
 /**
@@ -168,7 +196,13 @@ const RETAINED_WITH_BONUS_READABLE: readonly FlsContractRetention[] = [
         what: 'the readable formula field, minus its formula — its other facets stay',
         holds: (d) => d?.fields?.bonus_formula?.label === 'Bonus'
             && d?.fields?.bonus_formula?.visibleWhen === 'record.status == "active"'
-            && !('formula' in (d?.fields?.bonus_formula ?? {})),
+            && !('expression' in (d?.fields?.bonus_formula ?? {})),
+    },
+    {
+        what: 'the inline grid\'s column computed from the readable formula field, and its amount field',
+        holds: (d) => d?.fields?.name?.inlineColumns?.length === 3
+            && d?.fields?.name?.inlineColumns?.[2]?.expr === 'bonus_formula * 2'
+            && d?.fields?.name?.inlineAmountField === 'bonus_formula',
     },
 ];
 
@@ -177,7 +211,12 @@ const RETAINED_UNMASKED: readonly FlsContractRetention[] = [
     { what: 'every validation rule', holds: (d) => ruleNames(d).length === 3 },
     { what: 'every role pointer', holds: (d) => d?.nameField === 'name' && d?.stageField === 'salary_grade' },
     { what: 'every name-list entry', holds: (d) => d?.highlightFields?.length === 3 && d?.indexes?.length === 2 },
-    { what: 'the formula', holds: (d) => typeof d?.fields?.bonus_formula?.formula === 'string' },
+    { what: 'the formula', holds: (d) => typeof d?.fields?.bonus_formula?.expression === 'string' },
+    {
+        what: 'every inline-grid column, every list view and every action',
+        holds: (d) => d?.fields?.name?.inlineColumns?.length === 4
+            && Object.keys(d?.listViews ?? {}).length === 3 && d?.actions?.length === 2,
+    },
 ];
 
 /** The one verdict every exit must reach for a case. */
