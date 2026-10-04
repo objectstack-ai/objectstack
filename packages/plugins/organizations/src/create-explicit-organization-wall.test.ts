@@ -42,6 +42,15 @@
  *   every app object. The engine strips that column from a non-system payload
  *   as `readonly` AFTER the wall has judged it, so here an admitted value is
  *   re-derived, and a refused one never reaches the strip.
+ *
+ * ## [#21682] The stamp is not a caller write
+ *
+ * The last block pins the report half of the same seam: a create that names
+ * no organization is filled by Middleware A, and `droppedFields` (the REST
+ * create doors collect it through the `onFieldsDropped` listener driven here)
+ * must not name that fill as a key the caller sent. A key the caller DID send
+ * is still reported, and the array insert and the `single` posture answer
+ * as they did before.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -49,6 +58,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import type { PermissionSet } from '@objectstack/spec/security';
+import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { OrganizationsPlugin } from './organizations-plugin.js';
 
 /** The caller's active organization. */
@@ -108,7 +118,7 @@ const ADMIN_CTX = {
   posture: 'PLATFORM_ADMIN',
 };
 
-type Posture = 'isolated' | 'group';
+type Posture = 'isolated' | 'group' | 'single';
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -125,7 +135,11 @@ interface Booted {
   table: (name: string) => Promise<Array<Record<string, unknown>>>;
 }
 
-async function boot(posture: Posture = 'isolated'): Promise<Booted> {
+/**
+ * `organizations: false` boots without this package, the way `serve` boots the
+ * `single` posture — the control for the [#21682] block.
+ */
+async function boot(posture: Posture = 'isolated', { organizations: mountOrganizations = true } = {}): Promise<Booted> {
   const engine = new ObjectQL();
   engine.registerDriver(new SqliteWasmDriver({ filename: ':memory:' } as never) as never, true);
   await engine.init();
@@ -170,14 +184,18 @@ async function boot(posture: Posture = 'isolated'): Promise<Booted> {
     // not to the insert path under test.
     hook: vi.fn(),
   };
-  const organizations = new OrganizationsPlugin({ ensureDefaultOrganization: false });
+  const organizations = mountOrganizations ? new OrganizationsPlugin({ ensureDefaultOrganization: false }) : null;
   const security = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   // Kernel order: every init, then every start — organizations first, as `serve` mounts it.
-  await organizations.init(ctx as never);
+  await organizations?.init(ctx as never);
   await security.init(ctx as never);
-  await organizations.start(ctx as never);
+  await organizations?.start(ctx as never);
   await security.start(ctx as never);
-  expect(services['org-scoping'], 'the real runtime is the org-scoping service').toBe(organizations);
+  if (organizations) {
+    expect(services['org-scoping'], 'the real runtime is the org-scoping service').toBe(organizations);
+  } else {
+    expect('org-scoping' in services, 'the control boots without the runtime').toBe(false);
+  }
   // The expected refusals log at WARN through the engine's own logger.
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
 
@@ -323,6 +341,88 @@ describe('[#21666] a create naming an organization meets the Layer 0 write wall,
       expectWallRefusal(created, 'insert', DECLARED);
       expectWallRefusal(patched, 'update', DECLARED);
       expect(await b.table(DECLARED)).toEqual(SEEDED);
+    });
+  });
+});
+
+/**
+ * One create with the listener the REST create doors wire
+ * (`ObjectStackProtocolImplementation.createData` / `createManyData` hand
+ * `onFieldsDropped` to `engine.insert` and answer what it collected as
+ * `droppedFields`), so `dropped` is the response's `droppedFields`.
+ */
+const createReporting = async (b: Booted, object: string, data: unknown, context: object) => {
+  const dropped: DroppedFieldsEvent[] = [];
+  const outcome = await attempt(() => b.engine.insert(object, data as never, {
+    context,
+    onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+  } as never));
+  return { outcome, dropped };
+};
+
+describe('[#21682] droppedFields names only keys the caller sent, so the organization stamp is not one', () => {
+  for (const [who, context] of CALLERS) {
+    it(`${who}: a walled create naming no organization reports no dropped field, and is stored in the active organization`, async () => {
+      const b = await boot();
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new' }, context);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped, 'the fill is the platform\'s write, not a key the caller lost').toEqual([]);
+      expect(b.seenByHooks, 'the beforeInsert chain still sees the stamp').toEqual([OWN_ORG]);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+    });
+  }
+
+  it('a caller that sends the readonly key itself still sees it reported, the same key the stamp fills', async () => {
+    const b = await boot();
+
+    const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: OWN_ORG }, MEMBER_CTX);
+
+    expect(outcome.ok, outcome.message).toBe(true);
+    expect(dropped).toEqual([{ object: INJECTED, fields: ['organization_id'], reason: 'readonly' }]);
+    expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+  });
+
+  it('a readonly key the caller sends beside the fill is reported alone', async () => {
+    // `created_by` is an injected readonly column. No audit hook stamps it in
+    // this composition, so the caller's value is the one the strip takes.
+    const b = await boot();
+
+    const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', created_by: 'usr_forged' }, MEMBER_CTX);
+
+    expect(outcome.ok, outcome.message).toBe(true);
+    expect(dropped).toEqual([{ object: INJECTED, fields: ['created_by'], reason: 'readonly' }]);
+  });
+
+  it('the array insert is unchanged: a row naming no organization reports nothing', async () => {
+    const b = await boot();
+
+    const { outcome, dropped } = await createReporting(b, INJECTED, [{ id: 'r2', name: 'new' }], MEMBER_CTX);
+
+    expect(outcome.ok, outcome.message).toBe(true);
+    expect(dropped).toEqual([]);
+    expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+  });
+
+  describe('the `single` posture, booted without this package, is unchanged', () => {
+    it('a create naming no organization reports nothing', async () => {
+      const b = await boot('single', { organizations: false });
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new' }, MEMBER_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual([]);
+      expect(b.seenByHooks, 'no runtime, so no stamp').toEqual([undefined]);
+    });
+
+    it('a create naming an organization still reports it as readonly', async () => {
+      const b = await boot('single', { organizations: false });
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: OWN_ORG }, MEMBER_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual([{ object: INJECTED, fields: ['organization_id'], reason: 'readonly' }]);
     });
   });
 });

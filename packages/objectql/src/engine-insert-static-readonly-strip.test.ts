@@ -228,6 +228,53 @@ describe('#14147 — the exemptions, each one load-bearing', () => {
     expect(o.created?.completed_at, 'the hook wrote it — provenance, not value equality').toBe('2026-01-01T00:00:00Z');
   });
 
+  // [#21682] A write MIDDLEWARE runs before the caller snapshot is taken, so
+  // its fill used to read as a key the caller sent: stripped, and reported in
+  // `droppedFields` (`@objectstack/organizations`' `organization_id` fill, on
+  // every walled create naming no organization). The column here is an
+  // arbitrary author-declared one: what makes a key the platform's is WHEN it
+  // appeared, never its name.
+  const fillAbsent = (key: string, value: unknown) => (engine: ObjectQL) => {
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.operation === 'insert') {
+        for (const row of Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) {
+          if (row && !(key in row)) row[key] = value;
+        }
+      }
+      await next();
+    });
+  };
+
+  it('[#21682] a write middleware’s fill is not caller-supplied either: it lands, and nothing is reported', async () => {
+    const o = await observeInsert({ title: 'T' }, { context: { userId: 'u1' } }, fillAbsent('completed_at', '2026-01-01T00:00:00Z'));
+    expect(o.created?.completed_at, 'the platform’s value reaches the driver').toBe('2026-01-01T00:00:00Z');
+    expect(o.dropped, 'droppedFields names only keys the caller sent').toEqual([]);
+  });
+
+  it('[#21682] …per row on the batch path, beside a key the caller DID send, which is still taken and reported', async () => {
+    const { engine, creates } = await makeEngine();
+    fillAbsent('locked_note', 'stamp')(engine);
+    const dropped: DroppedFieldsEvent[] = [];
+    await engine.insert('duly_task', [
+      { title: 'A' },
+      { title: 'B', completed_at: 'forged' },
+    ] as any, { context: { userId: 'u1' }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } } as any);
+    expect(creates.map((c) => c.locked_note), 'the fill lands on every row').toEqual(['stamp', 'stamp']);
+    expect(creates[1]).not.toHaveProperty('completed_at');
+    expect(dropped).toEqual([{ object: 'duly_task', fields: ['completed_at'], reason: 'readonly' }]);
+  });
+
+  it('[#21682] a key the caller sent is judged as before even when a middleware rewrote its value', async () => {
+    const o = await observeInsert({ title: 'T', completed_at: 'forged' }, { context: { userId: 'u1' } }, (engine) => {
+      engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+        if (opCtx.operation === 'insert') opCtx.data.completed_at = 'rewritten';
+        await next();
+      });
+    });
+    expect(o.created, 'the caller named the key, so the strip still owns it').not.toHaveProperty('completed_at');
+    expect(o.dropped).toEqual([{ object: 'duly_task', fields: ['completed_at'], reason: 'readonly' }]);
+  });
+
   it('a PLATFORM-INTERNAL object is left to its own 403 guard (ADR-0086 / #3004, carried over)', async () => {
     // The reserved `sys_` namespace, and a `managedBy` bucket whose columns
     // carry their own fail-closed refusal, have dedicated write governance —

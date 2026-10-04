@@ -2064,6 +2064,63 @@ function droppedFieldEvents(
 }
 
 /**
+ * [#21682] The keys the CALLER sent on each row of an insert, recorded at
+ * `insert`'s entry, BEFORE the middleware chain runs, and keyed by the row
+ * OBJECT.
+ *
+ * `insert` takes its caller snapshot (`suppliedPerRow`) inside the middleware
+ * chain's innermost step, so by then a write middleware may already have
+ * filled the payload: `@objectstack/organizations` fills an absent
+ * `organization_id` with the active organization, and
+ * `@objectstack/plugin-security` fills an absent `owner_id` with the acting
+ * user. Both write IN PLACE, onto the very row objects recorded here. Without
+ * this record the snapshot reads those fills as keys the caller sent, so the
+ * static-`readonly` strip took the platform's own `organization_id` and
+ * `droppedFields` reported it, on every walled create that named no
+ * organization. The console announces every non-empty `droppedFields` as a
+ * warning toast. This is the insert-side twin of the update path's #8093
+ * (ADDRESSING IS NOT PAYLOAD): a value the platform put on the payload is
+ * not one the caller lost.
+ *
+ * Keyed by IDENTITY, not by index, so the answer survives a middleware that
+ * reorders a batch. A row a middleware REPLACED wholesale has no entry, and
+ * {@link callerSuppliedRow} then keeps every key it carries: the verdict from
+ * before this record existed. That is the over-reporting direction, never the
+ * under-stripping one.
+ *
+ * ⛔ No name list. Which keys are the platform's is answered by WHEN they
+ * appeared, so a new stamping middleware is covered without being named here.
+ */
+function callerKeySets(data: unknown): WeakMap<object, ReadonlySet<string>> {
+  const sets = new WeakMap<object, ReadonlySet<string>>();
+  for (const row of Array.isArray(data) ? data : [data]) {
+    if (row !== null && typeof row === 'object' && !sets.has(row)) {
+      sets.set(row, new Set(Object.keys(row)));
+    }
+  }
+  return sets;
+}
+
+/**
+ * One row of `insert`'s caller snapshot: a shallow COPY of the row as the
+ * middleware chain handed it on, keeping only the keys the caller sent
+ * (`sent`, from {@link callerKeySets}).
+ *
+ * Only WHICH keys is narrowed. A kept key keeps the value the chain handed
+ * on, so every key the caller did send is judged exactly as it was before
+ * #21682. `sent` undefined means "this row has no record" and keeps every key.
+ */
+function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined): Record<string, unknown> {
+  const copy: Record<string, unknown> = { ...((row ?? {}) as Record<string, unknown>) };
+  if (sent) {
+    for (const key of Object.keys(copy)) {
+      if (!sent.has(key)) delete copy[key];
+    }
+  }
+  return copy;
+}
+
+/**
  * Evaluate formula virtual fields against the raw rows a driver handed back —
  * the read path (`find` / `findOne`) and, since #5504, the write path's
  * response hydration.
@@ -12831,6 +12888,10 @@ export class ObjectQL implements IObjectQLEngine {
     data = normalizeBlankTypedValues(this._registry.getObject(object), data);
     data = normalizeNumericStringValues(this._registry.getObject(object), data);
 
+    // [#21682] What the CALLER sent, recorded before any write middleware
+    // fills the payload. See `callerKeySets`.
+    const callerKeys = callerKeySets(data);
+
     const opCtx: OperationContext = {
       object,
       operation: 'insert',
@@ -12858,6 +12919,14 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
+      // [#21682] Each row's caller key set, looked up NOW, on the row objects
+      // the middleware chain handed on. The computed-field door below may
+      // replace a row with a copy. Index-aligned from here on: every pass
+      // between here and the snapshot keeps the rows' order and count.
+      const callerKeysPerRow: Array<ReadonlySet<string> | undefined> =
+        (isBatch ? (opCtx.data as unknown[]) : [opCtx.data]).map(
+          (row) => (row !== null && typeof row === 'object' ? callerKeys.get(row) : undefined),
+        );
       // [#8682] The declared-field door — see `undeclaredWriteFieldErrors` for
       // what used to run below it for a request that was already refused.
       // FIRST, so nothing downstream (defaults, summary seeding, the hooks, the
@@ -12893,10 +12962,17 @@ export class ObjectQL implements IObjectQLEngine {
       }
       // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
       // resolves any `defaultValue` / `current_user` token and before the
-      // beforeInsert hooks stamp `owner_id` / `organization_id` /
-      // `created_by`. The reference check consults it to decide WHAT THE
-      // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
-      // default is ever reported as the caller's bad reference.
+      // beforeInsert hooks stamp `created_by`. The reference check consults it
+      // to decide WHAT THE CALLER ACTUALLY SENT, so neither a platform stamp
+      // nor a backfilled default is ever reported as the caller's bad
+      // reference.
+      //
+      // [#21682] ...and without the keys a write MIDDLEWARE filled, which ran
+      // before this step: `organization_id` (`@objectstack/organizations`) and
+      // `owner_id` (`@objectstack/plugin-security`) are filled there, not by a
+      // hook. Each row keeps only the keys the caller sent (`callerKeySets`,
+      // recorded at entry), so the strips below report and take only those.
+      // The values stay as the chain handed them on.
       //
       // [#6339] It carries the caller's VALUES, and it is taken HERE — ahead of
       // the hooks — as an explicit shallow COPY. Both halves are load-bearing:
@@ -12918,7 +12994,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    (#5591).
       const suppliedPerRow: Array<Record<string, unknown>> =
         (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
-          (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
+          (row, i) => callerSuppliedRow(row, callerKeysPerRow[i]),
         );
       // [#20082] The write's ONE permission resolution, shared by every consumer
       // below that needs the map: the CEL defaults here, the re-default after

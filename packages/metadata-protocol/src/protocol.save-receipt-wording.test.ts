@@ -129,7 +129,9 @@ const OVERLAYLESS_PROBES: Record<string, Record<string, unknown>> = {
         sharingModel: 'private',
         fields: { name: { type: 'text', label: 'Name' } },
     },
-    hook: { name: 'rc5_acct', object: 'task', events: ['beforeUpdate'] },
+    // [#21689] With a `body`: the door refuses a hook without one before the
+    // receipt is built, as it refuses a body the schema rejects.
+    hook: { name: 'rc5_acct', object: 'task', events: ['beforeUpdate'], body: { language: 'js', source: 'return;' } },
     seed: { object: 'task', records: [] },
     action: { name: 'rc5_acct', label: 'Convert', type: 'script', objectName: 'task', target: 'convertHandler' },
     flow: {

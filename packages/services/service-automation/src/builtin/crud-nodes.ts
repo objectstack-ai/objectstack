@@ -18,7 +18,7 @@ import type {
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
 import {
     collectStoredMetadataFilterFields,
     ephemeralStoredHashDigest,
@@ -355,6 +355,11 @@ const STORED_METADATA_WRITE_VERB = {
  * a non-platform principal's write to these tables with in a secured
  * composition, and the code the body-write boundary for the same ruling
  * carries. No code is minted. `undefined` for any other object.
+ *
+ * Its message names the node, the verb and the table, then ends on the
+ * family's ONE prescription, `STORED_METADATA_BODY_PRESCRIPTION`, imported from
+ * `@objectstack/spec/kernel`: the sentence `FlowSchema`'s save-time refusal of
+ * the same node ends on, so the save and the run tell an author the same thing.
  */
 function storedMetadataWriteRefusal(
     nodeType: keyof typeof STORED_METADATA_WRITE_VERB,
@@ -364,9 +369,8 @@ function storedMetadataWriteRefusal(
     return {
         ...refuseNode(
             `${nodeType}: refusing to ${STORED_METADATA_WRITE_VERB[nodeType]} '${objectName}': it holds stored `
-            + 'metadata, and a flow may not write it directly, so the write was not run. Change metadata through the '
-            + 'metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), where it is validated and its '
-            + "provenance is recorded. Elevation (`runAs: 'system'`) does not change this.",
+            + 'metadata, and a flow may not write it directly, so the write was not run. '
+            + STORED_METADATA_BODY_PRESCRIPTION,
         ),
         code: StandardErrorCode.enum.PERMISSION_DENIED,
     };

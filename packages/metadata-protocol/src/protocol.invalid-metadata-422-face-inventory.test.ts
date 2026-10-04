@@ -570,3 +570,50 @@ describe('[#21658] a hook naming a function in `handler` with no `body` is refus
         expect(rows.size).toBe(0);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. #21689 — one predicate: the `hook` door refuses every hook with no `body`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Section 7's refusal, generalised. A hook this door stores ships with no code
+// package, so a `body` is the only code it can run: a hook with neither a
+// `body` nor a `handler` is never bound either (the binder skips it at every
+// re-sync). The door judges by one predicate — no `body` object — and section
+// 7's `handler` form is one case of it, with the same envelope. An empty
+// `handler` names no function, so it reads as no `handler`.
+
+describe('[#21689] a hook with no `body` and no function in `handler` is refused at the metadata door', () => {
+    const bare = (extra: Record<string, unknown> = {}) => ({
+        name: 'stamp_status',
+        object: 'hks_note',
+        events: ['beforeInsert'],
+        ...extra,
+    });
+
+    it.each([
+        ['publish', 'neither field', undefined, {}],
+        ['draft', 'neither field', 'draft', {}],
+        ['publish', 'an empty `handler`', undefined, { handler: '' }],
+    ] as const)('%s mode, %s — VALIDATION_ERROR / 400, naming the hook, prescribing a `body`, nothing stored', async (_label, _shape, mode, extra) => {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await protocol.saveMetaItem({
+                type: 'hook',
+                name: 'stamp_status',
+                item: bare(extra),
+                writeFace: 'meta-envelope',
+                actor: 'usr_admin',
+                ...(mode ? { mode } : {}),
+            });
+        } catch (e) {
+            err = e;
+        }
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(err.message).toContain("'stamp_status'");
+        expect(err.message).toContain('Give it a `body`');
+        expect(rows.size).toBe(0);
+    });
+});
