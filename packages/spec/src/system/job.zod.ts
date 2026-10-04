@@ -319,7 +319,8 @@ export const JobSchema = lazySchema(() => strictObject({
       + 'Preferred over `handler`: when both are present `body` wins. '
       + 'It runs in the QuickJS sandbox with no module scope (no imports, no helpers or constants from the surrounding file): it reaches data only through `ctx.api` under its declared `capabilities` (`api.read` / `api.write` / `api.transaction`) and logs through `ctx.log` (`log`); the in-process handler context (`ql`, `logger`, `bundle`) does not exist there. '
       + "Its time limit is the job's `timeoutMs` (see there): long-running work declares a `timeoutMs` that covers it, or splits into bounded runs that each finish within it. "
-      + "Every door that brings an artifact in schedules a job's `body` — the boot, and `os package install` on install and on every restart — while a `handler` is code that travels only in the artifact's runtime module and runs only on a boot that loads it (a config, or `os start --artifact`); `os package install` therefore refuses an enabled job with no `body` (a `pull` job excepted: it is data too). "
+      + "Every door that brings an artifact in schedules a job's `body` — the boot, and `os package install` on install and on every restart — while a `handler` is code that travels only in the artifact's runtime module and runs only on a boot that loads it (a config, or `os start --artifact`); `os package install` therefore refuses an enabled job with no `body`. "
+      + 'A `pull` is data too, so an enabled `pull` job is judged by its `pull` instead: it installs when the `pull` binds (it names a mapping the package declares, with a `connectorSource`) and is refused when it does not, as is a job whose `body` the declaration refuses. '
       + 'Refused beside `pull`.',
   ),
   /**
