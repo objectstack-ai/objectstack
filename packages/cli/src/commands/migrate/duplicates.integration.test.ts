@@ -70,12 +70,15 @@ const savedEnv: Record<string, string | undefined> = {};
  * The fixture's LOGICAL state — the schema plus every row of every table,
  * ordered — read with a connection of our own, never the booted stack's.
  *
- * ⚠️ Deliberately not a hash of the database FILE. SQLite rewrites header
- * bytes (the change counter, the version-valid-for cookie) on any read-write
- * open, so a file hash reports a difference after a run that only SELECTed and
- * would accuse this command of mutating the install it exists to describe —
- * measured, and very nearly filed as a defect. What must not change is the
- * schema and the rows.
+ * ⚠️ Deliberately not a hash of the database FILE — not on THIS fixture. It is
+ * written by a driver that never connected, so it is still on a rollback
+ * journal, and the boot's first connect converts it to WAL: a persistent
+ * header change (bytes 18–19, plus the change counter at 24–27 and the
+ * version-valid-for number at 92–95) that any first connect makes, measured.
+ * A plain open is byte-neutral, and a file a serving boot already configured
+ * comes through a whole run byte-identical — the second describe below pins
+ * that on its own fixture (#21734). What must not change HERE is the schema
+ * and the rows.
  */
 async function readState(): Promise<unknown> {
   const probe = new SqlDriver({
