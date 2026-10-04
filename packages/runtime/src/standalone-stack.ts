@@ -77,6 +77,7 @@ import {
 import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
+import { devAutoMigrateConfig } from './dev-auto-migrate.js';
 import {
     namesRetiredMemoryEngine,
     resolveProjectDatabaseUrl,
@@ -219,6 +220,14 @@ export const StandaloneStackConfigSchema = z.object({
      * in-memory step-down (#2229). When omitted, defaults to
      * `process.env.NODE_ENV === 'development'`. In production a native load
      * failure is NOT silently swapped for wasm/mingo (fail-closed).
+     *
+     * An EXPLICIT `true` also arms the dev schema self-heal on the `default`
+     * datasource (`autoMigrate: 'safe'` for the SQL kinds, #21733 — decided in
+     * `dev-auto-migrate.ts`). The `NODE_ENV` default does not: the serving
+     * boots (`os dev` / `os serve` / `os start`) always pass this key, and the
+     * one-shot command boot (`bootSchemaStack`) never does, so a one-shot
+     * command cannot apply drift its operator never confirmed, whatever
+     * `NODE_ENV` says.
      */
     dev: z.boolean().optional(),
     /**
@@ -728,9 +737,10 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // a step-down to SQLite, which would open an empty local database while
         // the operator's libSQL data stays untouched (#3276).
         //
-        // No `autoMigrate` passthrough: `TursoDriverConfig` declares no such
-        // key, and handing the driver a config it silently ignores is the kind
-        // of "declared ≠ enforced" the CLI side deliberately avoided too.
+        // No `autoMigrate` for this kind: `TursoDriverConfig` declares no such
+        // key, so the shared self-heal decision below answers `{}` for it —
+        // handing the driver a config it silently ignores would be the kind of
+        // "declared ≠ enforced" both hosts avoid.
         driverId = 'turso';
         const authToken = resolveDatabaseAuthToken(cfg);
         driverConfig = { url: dbUrl, ...(authToken ? { authToken } : {}) };
@@ -771,8 +781,21 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             `would hand the caller a database engine they never selected.`
         );
     }
+    // #21733 — the dev schema self-heal (#2186), read from its ONE home, the
+    // same answer the CLI's config-load fallback reads (`resolveStorageDefinition`).
+    // Before this line the definition never carried it, so a plain `os dev` on
+    // a non-host config left safe drift in place on every restart while the
+    // drift line said it was "auto-applied at boot".
+    //
+    // Keyed on an EXPLICIT `dev: true`, never on `factoryDev`'s NODE_ENV
+    // default: `bootSchemaStack` passes no `dev`, and a non-deferred one-shot
+    // boot (`os meta resync --yes`, the data commands' `--apply`) runs schema
+    // sync — under `NODE_ENV=development` it would apply safe drift its
+    // operator never confirmed. The step-down keeps the default; the self-heal
+    // is a serving host's declaration.
+    const devSelfHeal = devAutoMigrateConfig(dbDriver, cfg.dev === true);
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(
-        { driver: driverId, config: driverConfig },
+        { driver: driverId, config: { ...driverConfig, ...devSelfHeal } },
         {
             dev: factoryDev,
             ...(cfg.sqliteAbsentFile ? { sqliteAbsentFile: cfg.sqliteAbsentFile } : {}),
