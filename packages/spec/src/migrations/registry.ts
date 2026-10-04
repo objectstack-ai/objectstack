@@ -6200,6 +6200,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ui-object-form-members-typed`.',
   },
   {
+    id: 'ui-object-grid-columns-typed',
+    order: 73,
+    text:
+      'It also types the `object-grid` page block\'s `columns` (#21464, the fifth stage of the '
+      + '`ComponentPropsMap` `z.unknown()` close-out), the list member the second stage held: the grid\'s '
+      + 'group headers drew a column\'s `options`, which the list view\'s column entry does not declare, and '
+      + 'objectui has since retired that read and takes the labels from the object field only. So the member '
+      + 'takes the list view\'s own `columns` by reference — all field names or all column entries — and a '
+      + 'column keyed `accessorKey` / `header` / `name`, a mixed list or an undeclared column key (`editable`, '
+      + '`options`, `reference`), which passed every door and drew no column or was ignored, is refused. Read by '
+      + 'the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'registered. Its D3 record is the semantic entry `ui-object-grid-columns-typed`.',
+  },
+  {
     id: 'ui-object-grid-export-options-closed',
     order: 59,
     text:
@@ -6295,6 +6309,32 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the chart drill-down refuses the `report` the tile draws, so each waits on a ruling. Read by the '
       + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-metric-aggregate-trend-typed`.',
+  },
+  {
+    id: 'ui-object-metric-compare-to-typed',
+    order: 71,
+    text:
+      'It also types the `object-metric` page block\'s `compareTo` (#21464, the fifth stage of the '
+      + '`ComponentPropsMap` `z.unknown()` close-out) to the tile\'s read, per the ruling between the '
+      + 'reference and the read: `{ kind }`, with `kind` the dashboard widget comparison\'s own vocabulary by '
+      + 'reference, and `dimension` refused by name, because this inline tile shifts the date macros in its own '
+      + '`filter` and never reads a dataset time dimension. A bare kind string, a kind outside the two and a '
+      + '`dimension` passed every door and compared the wrong window. Read by the component-props gate '
+      + '(advisory); a stored page still saves and loads, so no conversion is registered. Its D3 record is the '
+      + 'semantic entry `ui-object-metric-compare-to-typed`.',
+  },
+  {
+    id: 'ui-object-metric-drill-down-typed',
+    order: 72,
+    text:
+      'It also types the `object-metric` page block\'s `drillDown` to the tile\'s read (#21464, the same '
+      + 'stage and ruling): its five list members — `enabled`, `title`, `target`, `columns`, `maxRows` — are '
+      + 'the chart drill-down\'s own by reference, and `filter` and `mode` are refused by name, because a '
+      + 'metric tile has no click event for a drill filter to resolve against and no row for `mode` to open; '
+      + 'both passed every door and were ignored. The drill `report` stays open: the tile draws a '
+      + 'dataset-bound report, but the spec declares no drill report yet, and declares that contract first. '
+      + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'registered. Its D3 record is the semantic entry `ui-object-metric-drill-down-typed`.',
   },
   {
     id: 'ui-record-line-items-props-closed',
@@ -19726,6 +19766,50 @@ const step18: MigrationStep = {
         + 'Each form that set one of them now shows it: the post-submit behaviour it names, the modal\'s tabbed '
         + 'sections, the navigation after a save, and the phone presentation.',
     },
+    // #21464 — the `object-grid` page block's `columns` was `z.array(z.unknown())`
+    // although the grid reads it with one shape, so a column keyed `accessorKey` /
+    // `header` / `name`, a column with no `field`, a mixed list or a key the grid
+    // never reads off a column passed the component-props gate, and the grid drew no
+    // column or ignored the key, in silence. Stage 2 held it because the grid's group
+    // headers drew a column's `options`, which the list view's column entry does not
+    // declare; objectui retired that read (the group-header labels come from the
+    // object field's `options` only), so the member takes the list view's own
+    // `columns` by reference — the reference it was held from. D3 only:
+    // page-component `properties` is not parsed on the metadata save or load path, so
+    // a stored page is never refused; a refused column has no rewrite that both keeps
+    // what the grid draws today and honours what the author wrote; and the authored
+    // census found no authored value to respell — every refused value is a fixture
+    // whose refused key the grid does not draw.
+    {
+      id: 'ui-object-grid-columns-typed',
+      surface: 'page `object-grid` components — `properties.columns` (whose entries used to accept any value)',
+      replacement: 'the list view\'s own `columns`: all field-name strings, or all column entries `{ field, label?, '
+        + 'width?, align?, hidden?, sortable?, resizable?, wrap?, type?, pinned?, summary?, prefix?, link?, action? }`. '
+        + 'Respell a column keyed `accessorKey` / `header` or `name` as `field` / `label`; write a list as all strings '
+        + 'or all entries, never a mix; delete a column key the entry does not declare (`editable`, `options`, '
+        + '`reference`, `currency`, `precision`, …) — inline editing is the grid\'s own `editable`, and option '
+        + 'labels, relational metadata and number formats are the object field\'s.',
+      reason: 'The grid reads `columns` with one shape — all field-name strings or all column entries, decided by '
+        + 'the first entry, drawing only an entry with a string `field` and reading the column entry\'s own members '
+        + 'off it — and the page-component row declared it `z.array(z.unknown())`, so any entry passed the '
+        + 'component-props gate and the grid answered an off-shape one in silence: a column keyed `accessorKey` / '
+        + '`header` or `name`, or one with no `field`, drew no column, a mixed list lost every entry the first one '
+        + 'did not match, and a key the grid never reads off a column (`editable`, `options`, `reference`) was '
+        + 'ignored. The member was held while the grid\'s group headers drew a column\'s `options` ahead of the '
+        + 'field\'s; the renderer has since retired that read and takes the labels from the object field only, so '
+        + 'the row takes the list view\'s own `columns` by reference — the column entry a list view already '
+        + 'refuses an undeclared key on. It is read where every page component\'s props are: the component-props '
+        + 'gate reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
+        + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
+        + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save or load path. '
+        + 'No conversion is registered: nothing on the load path refuses the shape, and a refused column has no '
+        + 'rewrite that both keeps what the grid draws today and honours what the author wrote — which is the '
+        + 'judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-grid` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.columns`. Each grid '
+        + 'draws every authored column: one per entry, headed by its `label` or the field\'s own, in the order '
+        + 'written.',
+    },
     // #21229 — an `object-grid` page block's `exportOptions` was `z.unknown()`, so a
     // bare format array (the list view's legacy spelling, which the list view lifts
     // to `{ formats }`) was accepted on the grid, whose renderer reads
@@ -20067,6 +20151,88 @@ const step18: MigrationStep = {
         + '`component-props-invalid` / `component-props-unknown-key` finding under the two members\' paths. Each '
         + 'tile that set one of them now shows it: the number its aggregate names, grouped or bucketed as written, '
         + 'and the trend badge with its value, arrow and caption.',
+    },
+    // #21464 — the `object-metric` page block's `compareTo` was `z.unknown()`
+    // although the tile reads it with one shape, so a bare kind string, a kind
+    // outside the two or a `dimension` passed the component-props gate, and the
+    // tile compared against the previous period, or shifted its own filter's window
+    // rather than the dimension named, in silence. It now takes the tile's read:
+    // `{ kind }`, with `kind` the dashboard widget comparison's own vocabulary by
+    // reference, and `dimension` refused by name with a prescription (the inline
+    // tile shifts the date macros in its own `filter` and never reads a dataset
+    // time dimension). D3 only: page-component `properties` is not parsed on the
+    // metadata save or load path, so a stored page is never refused; a `dimension`
+    // has no rewrite that keeps the window the author meant; and the authored census
+    // found no authored value to respell — the one refused value is a fixture
+    // probing that the tile does not read `dimension`.
+    {
+      id: 'ui-object-metric-compare-to-typed',
+      surface: 'page `object-metric` components — `properties.compareTo` (which used to accept any value)',
+      replacement: 'the shape the tile reads: `{ kind }`, with `kind` the dashboard widget comparison\'s own '
+        + 'vocabulary, `previousPeriod` or `previousYear`. Write a bare kind string as an object '
+        + '(`\'previousYear\'` → `{ kind: \'previousYear\' }`), and delete a `dimension`: the tile shifts the date '
+        + 'macros in its own `filter`, so state the window there.',
+      reason: 'The tile reads `compareTo` with one shape — `kind` alone, dispatching on `previousYear` and treating '
+        + 'every other value as `previousPeriod` — and the page-component row declared it `z.unknown()`, so any value '
+        + 'passed the component-props gate and the tile answered an off-shape one in silence: a bare `\'previousYear\'` '
+        + 'or a kind outside the two compared against the previous period, and a `dimension` was carried and never '
+        + 'read, because this inline tile shifts the date macros in its own `filter` while only a dashboard widget\'s '
+        + 'dataset path hands `dimension` to the analytics executor. The row now takes `{ kind }`, with `kind` the '
+        + 'dashboard widget comparison\'s own member by reference, and refuses `dimension` by name with that '
+        + 'prescription rather than accepting a key the tile ignores. It is read where every page component\'s props '
+        + 'are: the component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and `objectstack '
+        + 'lint`, and a stored page still saves and loads, because a page component\'s `properties` is not parsed on '
+        + 'the metadata save or load path. No conversion is registered: nothing on the load path refuses the shape, '
+        + 'and a `dimension` has no rewrite that keeps the window the author meant — which is the judgment this entry '
+        + 'leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-metric` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.compareTo`. Each tile '
+        + 'that sets a comparison shows its trend labelled for the kind it names, over the window its own `filter` '
+        + 'resolves to.',
+    },
+    // #21464 — the `object-metric` page block's `drillDown` was `z.unknown()`
+    // although the tile reads it with one shape, so a drill `filter`, a `mode`, a
+    // misspelled member or a non-numeric page size passed the component-props gate
+    // and the tile ignored each, in silence. It now takes the tile's read: the five
+    // list members (`enabled`, `title`, `target`, `columns`, `maxRows`) are the chart
+    // drill-down's own by reference, and `filter` and `mode` are refused by name with
+    // the prescriptions the renderer's own type for this block carries (a metric has
+    // no click event for a drill filter to resolve against, and no row for `mode` to
+    // open). The drill `report` is held open, not typed: the tile draws a
+    // dataset-bound report, but the spec declares no drill report yet. D3 only:
+    // page-component `properties` is not parsed on the metadata save or load path, so
+    // a stored page is never refused; a drill `filter` has no rewrite that keeps the
+    // scope the author meant; and the authored census found no authored value to
+    // respell — the two refused values are fixtures probing the refusal.
+    {
+      id: 'ui-object-metric-drill-down-typed',
+      surface: 'page `object-metric` components — `properties.drillDown` (which used to accept any value)',
+      replacement: 'the shape the tile reads: `{ enabled?, title?, target?, columns?, maxRows?, report? }`, the first '
+        + 'five the chart drill-down\'s own members — `enabled` a boolean, `title` a string, `target` `drawer`, '
+        + '`dialog` or `navigate`, `columns` field names, `maxRows` a positive whole number — and `report` still open. '
+        + 'Delete a drill `filter` and scope the metric with its own `filter`, one level up; delete a `mode`, since a '
+        + 'metric always lists the records behind its number.',
+      reason: 'The tile reads `drillDown` with one shape — `enabled`, `title`, `target`, `columns`, `maxRows` and '
+        + '`report`, scoping the drilled list by the metric\'s own `filter` — and the page-component row declared it '
+        + '`z.unknown()`, so any value passed the component-props gate and the tile answered an off-shape one in '
+        + 'silence: a drill `filter` or a `mode` was carried and never read, a misspelled member was simply not '
+        + 'applied, and a non-numeric page size reached the drilled list. The row now takes the five list members '
+        + 'the chart drill-down declares, by reference, and refuses `filter` and `mode` by name: a metric tile has no '
+        + 'click event for a drill filter to resolve against, and no row for `mode` to open as a record. The chart\'s '
+        + 'shape is not taken whole, because it declares `filter`. The drill `report` stays open: the tile draws a '
+        + 'dataset-bound report through the shared drawer, but no spec drill shape declares a `report` member yet. '
+        + 'It is read where every page component\'s props are: the component-props gate reports a refused value as '
+        + 'an advisory `component-props-invalid` / `component-props-unknown-key` finding on `objectstack validate`, '
+        + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a page '
+        + 'component\'s `properties` is not parsed on the metadata save or load path. No conversion is registered: '
+        + 'nothing on the load path refuses the shape, and a drill `filter` has no rewrite that keeps the scope the '
+        + 'author meant — which is the judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-metric` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.drillDown`. Each tile '
+        + 'that sets a drill-down opens it as written: the panel shape `target` names, the heading `title` names, '
+        + 'and the records behind the number, scoped by the metric\'s own `filter`, in the columns and page size '
+        + 'written.',
     },
     {
       id: 'ui-react-list-view-binding-aliases-retired',
