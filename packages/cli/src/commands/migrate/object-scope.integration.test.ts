@@ -353,6 +353,12 @@ describe('[#21644] a deployment-level flag is written only by a full-scope run',
       columnMove: null,
       columnsMovedAt: null,
     });
+    // The control: over every object it runs, moves the media column and records it.
+    const control = JSON.parse(full.get('files-to-references')!.run.stdout);
+    expect(control.columnsMovedAt).toBeTruthy();
+    expect(control.columnMove.outcomes.map((o: { table: string; status: string }) => [o.table, o.status])).toEqual([
+      ['os21644_product', 'moved'],
+    ]);
   });
 });
 
@@ -371,7 +377,11 @@ describe('[#21644] an unknown --object is an error, never narrowed to nothing', 
     const { run, state } = unknown.get(command)!;
     expect(state.flags).toEqual([]);
     expect(state.product).toEqual([{ id: 'p1', image: null }]);
-    expect(run.stdout).not.toContain('scannedObjects');
+    // The one document is the refusal, and no report: nothing was scanned.
+    // (`duplicates` keeps its own error shape, a token plus `detail`.)
+    expect(Object.keys(JSON.parse(run.stdout)).sort()).toEqual(
+      command === 'duplicates' ? ['code', 'detail', 'error'] : ['code', 'error'],
+    );
   });
 
   it('human mode: exits 1 and names the unknown object', () => {
