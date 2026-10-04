@@ -247,11 +247,14 @@ function literalPieces(sf: ts.SourceFile): Array<{ text: string; node: ts.Node }
   return out;
 }
 
-/** Every template in `sf` that opens with `${X}:` — the `<type>:<value>` shape. */
+/**
+ * Every template in `sf` that opens with `${X}:` and no space after the colon —
+ * the `<type>:<value>` shape (`${path}: ${message}` is prose, not an address).
+ */
 function typeValueTemplates(sf: ts.SourceFile): ts.TemplateExpression[] {
   const out: ts.TemplateExpression[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isTemplateExpression(node) && node.head.text === '' && node.templateSpans[0]?.literal.text.startsWith(':')) {
+    if (ts.isTemplateExpression(node) && node.head.text === '' && /^:(?!\s)/.test(node.templateSpans[0]?.literal.text ?? '')) {
       out.push(node);
     }
     ts.forEachChild(node, visit);
@@ -494,7 +497,7 @@ describe('approver-address — the readers of the equivalence, and no comparison
       'const csv = \'u1,role:finance\';',
       'const column = \'sys_member.role: owner\';',
       'const key = { role: \'admin\' };',
-      'function f(a: any, type: string) { return [`${a.type}:${a.value}`, `${type}:${a.value}`]; }',
+      'function f(a: any, type: string) { return [`${a.type}:${a.value}`, `${type}:${a.value}`, `${a.path}: ${a.message}`]; }',
     ].join('\n'), ts.ScriptTarget.Latest, true);
     const flagged = literalPieces(planted).filter(({ text }) => RETIRED_PREFIX.test(text)).map(({ text }) => text);
     expect(flagged).toEqual(['role:', 'role:', 'u1,role:finance']);
