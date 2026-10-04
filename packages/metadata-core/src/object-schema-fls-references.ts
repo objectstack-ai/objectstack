@@ -43,9 +43,9 @@
  * it lands.
  *
  * "Mentions" is an identifier-token test, not a substring test: a string
- * mentions `budget` when one of its `[A-Za-z_][A-Za-z0-9_]*` tokens IS
- * `budget` — so `record.budget > 0` and `{budget}` do, while `budget_code`
- * and `Budget` do not. Object keys are tested the same way (a filter
+ * mentions `score` when one of its `[A-Za-z_][A-Za-z0-9_]*` tokens IS
+ * `score` — so `record.score > 0` and `{score}` do, while `score_band`
+ * and `Score` do not. Object keys are tested the same way (a filter
  * condition keys on the field name).
  *
  * Pure and non-mutating: the input is the shared cache's single full copy
@@ -71,7 +71,7 @@ function stringMentions(text: string, denied: ReadonlySet<string>): boolean {
 /**
  * Keys whose values are display prose, skipped by {@link mentionsDenied} in
  * `prose: 'skip'` mode. A label or confirmation sentence is not a field
- * reference — a capitalised "Budget" never matches anyway, and an English
+ * reference — a capitalised "Score" never matches anyway, and an English
  * word that happens to equal a field name must not cost a caller a whole
  * list view or action.
  */
