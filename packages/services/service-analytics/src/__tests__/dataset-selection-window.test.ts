@@ -367,7 +367,7 @@ describe('#3588 — the echoed SQL tells the truth on the ObjectQL path', () => 
         return `driver_bucket('${granularity}', ${field})`;
       },
     });
-    const selection = { dimensions: ['created_at'], measures: ['account_count'], dateGranularity: 'month' };
+    const selection = { dimensions: ['created_at'], measures: ['account_count'], dateGranularity: 'month' as const };
     const result = await svc.queryDataset(accounts, selection, CTX);
     expect(asked).toContain('created_at:month');
     expect(result.sql).toContain(`${DRIVER_BUCKET} AS "created_at"`);
