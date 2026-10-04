@@ -1,14 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#21520] The stored-metadata family's WRITE boundary for app-authored bodies.
+ * [#21520, #21594] The stored-metadata family's boundary for app-authored bodies.
  *
  * The family's tables (`sys_metadata` / `sys_metadata_history`, the set
- * `isStoredMetadataBodyObject` answers for) have one writer for an app-authored
- * body: the metadata protocol, where a change is validated and its provenance
- * recorded. A sandboxed body — a hook body or an action body, whether it came
- * from a code bundle, an installed artifact or the metadata door — may not
- * touch those tables any other way:
+ * `isStoredMetadataBodyObject` answers for) are reached by an app-authored body
+ * through the metadata API only: the metadata protocol is their one writer,
+ * where a change is validated and its provenance recorded, and their one
+ * reader, which serves each definition in its read projection. A sandboxed
+ * body — a hook body, an action body or a job body, whether it came from a
+ * code bundle, an installed artifact or the metadata door — may not touch
+ * those tables any other way:
  *
  *  - **Binding** a body hook to a family table is refused at registration
  *    ({@link storedMetadataBodyHookBindingRefusal}, consulted by
@@ -16,14 +18,22 @@
  *    to become a handler, whichever door bound it).
  *  - **Writing** a family table through a body's `ctx.api` is refused before
  *    the write runs ({@link storedMetadataBodyWriteRefusal}, consulted by the
- *    reader-context seam's body layer).
+ *    reader-context seam's body write layer).
+ *  - **Reading** a family table through a body's `ctx.api` is refused before
+ *    the read runs ({@link storedMetadataBodyReadRefusal}, consulted by the
+ *    seam's body read layer), whatever the read's query names.
+ *  - **Being handed** a family row as an action's subject record (`ctx.record`,
+ *    which the `/actions` door loads before dispatch) is refused before the
+ *    body runs ({@link storedMetadataBodySubjectRecordRefusal}, consulted by
+ *    `actionBodyRunnerFactory` — the one point every action body passes
+ *    through to run, whichever door bound it).
  *
  * Platform code is outside this boundary: the metadata protocol and its own
- * writers, the platform's internal hooks (registered as code, never as a
- * body) and host code a deployer registers all reach the store through their
- * own imports, never through a sandboxed body's API.
+ * readers and writers, the platform's internal hooks (registered as code,
+ * never as a body) and host code a deployer registers all reach the store
+ * through their own imports, never through a sandboxed body's API.
  *
- * Both refusals carry the standard catalog's `PERMISSION_DENIED` / 403: the
+ * Every refusal carries the standard catalog's `PERMISSION_DENIED` / 403: the
  * condition is that this author context is not permitted the operation on this
  * table, which is the catalog member's meaning, and the ledger's own admission
  * rule sends a generic permission condition to the standard member rather than
@@ -37,14 +47,20 @@ import { isStoredMetadataBodyObject, STORED_METADATA_BODY_OBJECTS } from '@objec
 export const STORED_METADATA_BODY_BOUNDARY_CODE = 'PERMISSION_DENIED';
 export const STORED_METADATA_BODY_BOUNDARY_STATUS = 403;
 
-/** The one prescription both refusals end with: the door an author uses instead. */
+/** The prescription the binding and write refusals end with: the door an author changes metadata through. */
 const PRESCRIPTION =
     'Change metadata through the metadata API (`PUT /api/v1/meta/:type/:name`, the metadata protocol), '
     + 'where it is validated and its provenance is recorded. Elevation (`runAs`, a system context) does not '
     + 'change this.';
 
-function refusal(message: string, object: string, operation: string): Error {
-    const err = new Error(`${message} ${PRESCRIPTION}`) as Error & Record<string, unknown>;
+/** The prescription the read refusal ends with: the door an author reads metadata through. */
+const READ_PRESCRIPTION =
+    'Read metadata through the metadata API (`GET /api/v1/meta/:type/:name`, the metadata protocol, and '
+    + '`GET /api/v1/meta/:type/:name/history` for its versions). Elevation (`runAs`, a system context) does not '
+    + 'change this.';
+
+function refusal(message: string, object: string, operation: string, prescription: string = PRESCRIPTION): Error {
+    const err = new Error(`${message} ${prescription}`) as Error & Record<string, unknown>;
     err.code = STORED_METADATA_BODY_BOUNDARY_CODE;
     err.status = STORED_METADATA_BODY_BOUNDARY_STATUS;
     err.object = object;
@@ -102,6 +118,44 @@ export function storedMetadataBodyWriteRefusal(object: string, verb: string): Er
         + 'metadata, and a body may not write it directly.',
         object,
         verb,
+    );
+}
+
+/**
+ * [#21594] The refusal for a sandboxed body's read verb on a family table, or
+ * `undefined` for any other object. Thrown before the read runs, whatever its
+ * query names (a filter, a sort, a grouping, a search, a projection, or none),
+ * so a refused read reaches no row and answers the same way whatever it asks:
+ * it serves nothing, and it is no oracle on what the table holds.
+ */
+export function storedMetadataBodyReadRefusal(object: string, verb: string): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    return refusal(
+        `Cannot ${verb} '${object}' from an app-authored body: the read was not run. '${object}' holds stored `
+        + 'metadata, and a body may not read it directly.',
+        object,
+        verb,
+        READ_PRESCRIPTION,
+    );
+}
+
+/**
+ * [#21594] The refusal for an action body that would be handed a family row as
+ * its subject record, or `undefined` for any other object. The `/actions` door
+ * loads an action's subject record before it dispatches, through the generic
+ * data door, so an action declared on a family table — or an object-less one
+ * addressed under it — would otherwise reach its body with a family row as
+ * `ctx.record`. Thrown before the body runs, so the body is handed nothing of
+ * the row; a host code handler's subject record is not judged here.
+ */
+export function storedMetadataBodySubjectRecordRefusal(object: string, action: string): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    return refusal(
+        `Action '${action}' was not run: its subject record is a row of '${object}', which holds stored `
+        + 'metadata, and an app-authored body may not be handed one.',
+        object,
+        'record',
+        READ_PRESCRIPTION,
     );
 }
 

@@ -32,7 +32,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'tabular' \| 'summary' \| 'matrix'>` | optional (default: `"tabular"`) |  |
-| **dataset** | `string` | optional | Dataset name to bind (ADR-0021) |
+| **dataset** | `string` | optional | Dataset name to bind (ADR-0021); a joined report refuses a block without one |
 | **rows** | `string[]` | optional | Dimension names down (dataset-bound) |
 | **columns** | `string[]` | optional | Dimension names across (matrix, dataset-bound) |
 | **values** | `string[]` | optional | Measure names to show (dataset-bound) |
@@ -111,7 +111,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'tabular' \| 'summary' \| 'matrix'>` | optional (default: `"tabular"`) |  |
-| **dataset** | `string` | optional | Dataset name to bind (ADR-0021) |
+| **dataset** | `string` | optional | Dataset name to bind (ADR-0021); a joined report refuses a block without one |
 | **rows** | `string[]` | optional | Dimension names down (dataset-bound) |
 | **columns** | `string[]` | optional | Dimension names across (matrix, dataset-bound) |
 | **values** | `string[]` | optional | Measure names to show (dataset-bound) |

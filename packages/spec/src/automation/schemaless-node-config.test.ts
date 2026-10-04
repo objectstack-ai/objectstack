@@ -61,7 +61,7 @@ const SCRIPT_RETIRED: ReadonlyArray<[string, unknown]> = [
   ['script', 'return { ok: true };'],
 ];
 
-describe('ScriptConfigSchema (#4343 — converged to a function call)', () => {
+describe('ScriptConfigSchema (converged to a function call)', () => {
   it('accepts the one shape the executor runs', () => {
     expect(ScriptConfigSchema.parse({
       function: 'score_lead',
@@ -119,7 +119,7 @@ describe('ScriptConfigSchema (#4343 — converged to a function call)', () => {
   });
 });
 
-describe('SubflowConfigSchema (#4343 — parsed at execute time)', () => {
+describe('SubflowConfigSchema (parsed at execute time)', () => {
   it('accepts the executor-read shape', () => {
     expect(SubflowConfigSchema.parse({
       flowName: 'escalation_flow',
@@ -141,7 +141,7 @@ describe('SubflowConfigSchema (#4343 — parsed at execute time)', () => {
   });
 });
 
-describe('unknown keys — closed at #4001 批 9, and this class had no other gate', () => {
+describe('unknown keys — refused, not stripped, and this class had no other gate', () => {
   // The asymmetry worth stating once: `registerFlow()`'s #4277 undeclared-key
   // rejection derives its declared set from a descriptor `configSchema`, and
   // these three node types publish none — so the walk skips them BY
@@ -199,7 +199,7 @@ describe('unknown keys — closed at #4001 批 9, and this class had no other ga
     expect(timeout).toContain('FlowNodeSchema.timeoutMs');
   });
 
-  it('decision: `condition` gets the #4414 mechanism, NOT the one-edit rename to `conditions`', () => {
+  it('decision: `condition` is pointed at the out-edges, NOT given the one-edit rename to `conditions`', () => {
     // The finding-7 case this batch had to get right. `condition` →
     // `conditions` is one character, so a bare suggester proposes it with
     // confidence — and taking that advice produces the double-declaration
@@ -240,7 +240,7 @@ describe('unknown keys — closed at #4001 批 9, and this class had no other ga
   });
 });
 
-describe('DecisionConfigSchema.mode (#15429 item 2 — the contract half, declared ahead of the engine)', () => {
+describe('DecisionConfigSchema.mode (taking every true branch must be declared — the contract half, declared ahead of the engine)', () => {
   it('accepts an omitted mode and both members, and injects nothing', () => {
     // No `.default('exclusive')`: "omitted means exclusive" is the contract's
     // prose and the future reader's job, so the parsed output stays exactly the

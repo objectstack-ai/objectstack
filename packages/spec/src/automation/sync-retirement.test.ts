@@ -65,7 +65,7 @@ import {
 // anti-vacuity guards; sabotage-verified in the PR (re-adding an automation
 // export, re-introducing a bare-name re-export on ./integration, and renaming
 // the ui side each turn it red).
-describe('[#4738] sync/conflict dual-source retirement', () => {
+describe('sync/conflict dual-source retirement', () => {
   it('resolves the export surface: one owner per name, across every public entry', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`
@@ -117,7 +117,7 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     ]) {
       expect(
         automationNames,
-        `./automation must not export ${alsoRetired} (#6414, L2 retired on L1's reading)`,
+        `./automation must not export ${alsoRetired} (L2 retired on L1's reading)`,
       ).not.toContain(alsoRetired);
     }
 
@@ -155,7 +155,7 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
       const holders = holderOriginsOf(name);
       expect(
         holders.map((h) => `${h.sub} (${h.origin})`),
-        `${name} was retired with ui/offline.zod.ts at #4988 — no entry may re-adopt the bare name`,
+        `${name} was retired with ui/offline.zod.ts — no entry may re-adopt the bare name`,
       ).toEqual([]);
     }
 

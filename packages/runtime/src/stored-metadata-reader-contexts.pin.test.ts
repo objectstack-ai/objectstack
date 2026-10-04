@@ -1,32 +1,43 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#21454] The in-process reader contexts serve the stored-metadata-body family
+ * The in-process reader contexts over the stored-metadata-body family
  * (`sys_metadata` / `sys_metadata_history`: the `metadata` body column and the
- * `checksum` content-hash column) the way the generic data door serves it: the
- * body as its type's read projection, the hash in keyed form.
+ * `checksum` content-hash column), each through the door a deployment exposes.
  *
- * Each context reads the SAME stored row the control reads through the data
- * door, and each answer is judged against that control, not against a fixed
- * shape: no stored credential and no stored hash anywhere in the answer, the
- * row's non-credential configuration present (the projection of THIS row, not
- * a withheld one), and the served hash equal to the one the door serves for the
- * same row (the door's keyed form, under the door's own key).
- *
- * Contexts, each through the door a deployment exposes:
- *   ① a sandboxed body's object API, `ctx.api.object(...)`
- *     (`sandbox/body-runner.ts`, `buildSandboxApi`):
+ * [#21594] ① A sandboxed BODY may not read the family at all: for an
+ * app-authored body the family is reached through the metadata API only. Every
+ * read verb (`find`, `findOne`, `count`, `aggregate`), and every filter, sort,
+ * grouping or search a read carries, answers the body boundary's
+ * `403 PERMISSION_DENIED` with a prescription naming the metadata API's read
+ * route, and carries no family content:
  *       an action body, dispatched by the REST `/actions` door, read plainly
  *       and inside `ctx.api.transaction`;
- *       a hook body fired by a data-door insert, which COPIES what it read into
- *       an ordinary record (the copy exit: only projected content lands);
- *       an action body authored at runtime through the `/meta` door;
- *   ② an action handler's engine handle, `ctx.engine.find`
- *     (`buildActionEngineFacade`), host code registered with `registerAction`;
- *   ③ the same handler's `ctx.api` (`buildActionApi`), the scoped context an
- *     action body receives too.
- * The action contexts run elevated, so a member invoking one is served what an
- * administrator is: both are pinned.
+ *       a hook body fired by a data-door insert, which would COPY what it read
+ *       into an ordinary record (the insert is refused and nothing lands);
+ *       an action body authored at runtime through the `/meta` door.
+ *
+ * [#21454] ② / ③ An action HANDLER — host code registered with `registerAction`
+ * — is still served the family the way the generic data door serves it: the
+ * body as its type's read projection, the hash in keyed form, judged against
+ * the SAME stored row read through the data door (no stored credential and no
+ * stored hash anywhere in the answer, the row's non-credential configuration
+ * present, and the served hash equal to the one the door serves for that row):
+ *   ② its engine handle, `ctx.engine.find` (`buildActionEngineFacade`);
+ *   ③ its `ctx.api` (`buildActionApi`).
+ *
+ * [#21594] Nor is a body HANDED a family row: an action whose subject record
+ * the `/actions` door loads from a family table (declared there, through the
+ * bundle or the `/meta` door, or object-less and addressed under it) is
+ * refused with the same 403 before its body runs; a host handler's subject
+ * record and an ordinary one are pinned unchanged.
+ *
+ * Platform readers are outside the boundary, pinned as controls: the generic
+ * data door, the metadata API (the route the refusal prescribes) and the
+ * engine's own in-process read of the stored form.
+ *
+ * The action contexts run elevated, so a member invoking one is answered what
+ * an administrator is: both are pinned.
  *
  * Composition: an in-process `ObjectKernel` assembled from the plugins, in the
  * order, `@objectstack/verify`'s `bootStack` uses (it mirrors `objectstack dev`
@@ -74,6 +85,9 @@ const DS_HOST = 'pin.example.invalid';
 const readFamilySource = (object: string) =>
   `const rows = await ctx.api.object('${object}').find({ where: { type: 'datasource', name: '${DS_NAME}' } });`;
 
+/** [#21594] A body that only returns the subject record the door handed it. */
+const RETURN_RECORD = 'return { record: ctx.record };';
+
 const actionBody = (source: string, capabilities: string[] = ['api.read']) => ({
   language: 'js',
   source,
@@ -106,6 +120,24 @@ const PIN_APP: any = {
           body: actionBody(`${readFamilySource('sys_metadata_history')}\nreturn { rows };`),
         },
         {
+          name: 'body_reads_family_one',
+          label: 'Body reads one row',
+          type: 'script',
+          body: actionBody(`return { row: await ctx.api.object('sys_metadata').findOne({ where: { type: 'datasource', name: '${DS_NAME}' } }) };`),
+        },
+        {
+          name: 'body_counts_family',
+          label: 'Body counts rows',
+          type: 'script',
+          body: actionBody(`return { n: await ctx.api.object('sys_metadata').count({ where: { type: 'datasource' } }) };`),
+        },
+        {
+          name: 'body_aggregates_family',
+          label: 'Body aggregates rows',
+          type: 'script',
+          body: actionBody(`return { rows: await ctx.api.object('sys_metadata_history').aggregate({ groupBy: ['type'] }) };`),
+        },
+        {
           name: 'body_reads_family_in_transaction',
           label: 'Body transaction read',
           type: 'script',
@@ -118,8 +150,9 @@ const PIN_APP: any = {
         { name: 'handler_engine_reads_family', label: 'Handler engine read', type: 'script' },
         { name: 'handler_engine_reads_history', label: 'Handler engine history read', type: 'script' },
         { name: 'handler_api_reads_family', label: 'Handler api read', type: 'script' },
-        // [#21454] EVALUATE shapes — each body attempts to evaluate the stored
-        // body or hash, and each must be refused before the query runs. The
+        // EVALUATE shapes — each body attempts to evaluate the stored body or
+        // hash. [#21594] A body's read is refused whatever it carries, so each
+        // answers the body boundary's refusal, the same as a plain read. The
         // VALUE in every predicate is an immaterial constant: the query is
         // refused unrun, so nothing depends on what it is.
         {
@@ -158,8 +191,7 @@ const PIN_APP: any = {
           type: 'script',
           body: actionBody(`return { rows: await ctx.api.object('sys_metadata').find({ search: 'z', searchFields: ['metadata'] }) };`),
         },
-        // A DEFAULT search is narrowed, not refused: a body may still search a
-        // family table by its scalar columns, served like the door.
+        // [#21594] A DEFAULT search is refused too: a body searches no family table.
         {
           name: 'body_searches_default',
           label: 'Body default search',
@@ -176,11 +208,22 @@ const PIN_APP: any = {
         // ② the engine handle's evaluate shape — a handler whose ctx.engine.find
         // filters the body column is refused the same way.
         { name: 'handler_engine_filters_body', label: 'Handler engine filters body', type: 'script' },
+        // [#21594] subject-record control: an ordinary row is handed to a body as before.
+        { name: 'note_reads_record', label: 'Body reads its subject record', type: 'script', body: actionBody(RETURN_RECORD) },
       ],
     },
   ],
+  // [#21594] ① the subject record — actions whose subject the `/actions` door
+  // loads before dispatch. Declared on a family table, or object-less (a
+  // caller may address it under any object), each body only returns
+  // `ctx.record`; the host handler is code, registered by PIN_HANDLER_PLUGIN.
+  actions: [
+    { name: 'family_bound_reads_record', label: 'Family-bound body', objectName: 'sys_metadata', type: 'script', body: actionBody(RETURN_RECORD) },
+    { name: 'object_less_reads_record', label: 'Object-less body', type: 'script', body: actionBody(RETURN_RECORD) },
+    { name: 'host_object_less_reads_record', label: 'Object-less host handler', type: 'script' },
+  ],
   hooks: [
-    // ① a sandboxed hook body: it COPIES what it read onto the row being inserted.
+    // ① a sandboxed hook body: it would COPY what it read onto the row being inserted.
     {
       name: 'hook_copies_family',
       object: 'pin_note',
@@ -230,6 +273,13 @@ const PIN_HANDLER_PLUGIN: Plugin = {
       'pin_note',
       'handler_engine_filters_body',
       async (actionCtx: any) => ({ rows: await actionCtx.engine.find('sys_metadata', { where: { metadata: { $contains: 'z' } } }) }),
+      'pin.reader21454.handler',
+    );
+    // [#21594] the subject-record control: a host handler under the object-less key.
+    ql.registerAction(
+      'global',
+      'host_object_less_reads_record',
+      async (actionCtx: any) => ({ record: actionCtx.record }),
       'pin.reader21454.handler',
     );
   },
@@ -447,45 +497,67 @@ describe('[#21454] CONTROL — the same rows through the generic data door (unch
   });
 });
 
-describe('[#21454] ① a sandboxed body\'s object API (ctx.api.object)', () => {
+/**
+ * [#21594] The body boundary's read refusal, as a door serves it: `403
+ * PERMISSION_DENIED`, a message naming the metadata API's read route, and no
+ * family content anywhere in the answer — neither the stored credential, nor a
+ * stored hash, nor a family row in any form (a projection included).
+ */
+async function expectBodyReadRefused(label: string, res: Response): Promise<void> {
+  const payload = await readJson(res);
+  const text = JSON.stringify(payload ?? null);
+  // Both wire shapes in use: the nested envelope (`error.code` / `error.message`)
+  // and the data door's flat one (`code` beside a string `error`).
+  const code = payload?.error?.code ?? payload?.code;
+  const message = [payload?.error?.message, payload?.error, payload?.message].find((m) => typeof m === 'string') ?? '';
+  expect(res.status, `${label}: ${text}`).toBe(403);
+  expect(code, `${label}: the body boundary's code: ${text}`).toBe('PERMISSION_DENIED');
+  expect(message, `${label}: the refusal names the metadata API: ${text}`).toContain('GET /api/v1/meta/:type/:name');
+  expect(text.includes(SENTINEL), `${label}: the stored credential reached the answer`).toBe(false);
+  for (const h of storedHashes) expect(text.includes(h), `${label}: a stored hash reached the answer`).toBe(false);
+  expect(familyRowsIn(payload), `${label}: a family row reached the answer`).toEqual([]);
+}
+
+describe('[#21594] ① a sandboxed body may not read the family: every read is refused', () => {
   for (const [role, token] of [['administrator', () => adminToken], ['member', () => memberToken]] as const) {
-    it(`an action body via /actions, invoked by the ${role}: projected, keyed (both tables)`, async () => {
-      for (const action of ['body_reads_family', 'body_reads_history']) {
-        const res = await as(token(), 'POST', `/actions/pin_note/${action}`, { params: {} });
-        expect(res.status, action).toBe(200);
-        expectServedLikeTheDoor(`${action} (${role})`, await readJson(res));
+    it(`an action body via /actions, invoked by the ${role}: find, findOne, count and aggregate on both tables`, async () => {
+      for (const action of ['body_reads_family', 'body_reads_history', 'body_reads_family_one', 'body_counts_family', 'body_aggregates_family']) {
+        await expectBodyReadRefused(`${action} (${role})`, await as(token(), 'POST', `/actions/pin_note/${action}`, { params: {} }));
       }
     });
 
-    it(`an action body reading inside ctx.api.transaction, invoked by the ${role}: projected, keyed`, async () => {
-      const res = await as(token(), 'POST', '/actions/pin_note/body_reads_family_in_transaction', { params: {} });
-      expect(res.status).toBe(200);
-      expectServedLikeTheDoor(`transaction read (${role})`, await readJson(res));
+    it(`an action body reading inside ctx.api.transaction, invoked by the ${role}`, async () => {
+      await expectBodyReadRefused(
+        `transaction read (${role})`,
+        await as(token(), 'POST', '/actions/pin_note/body_reads_family_in_transaction', { params: {} }),
+      );
+    });
+
+    it(`every evaluate and search shape a body's read carries, invoked by the ${role}: the same refusal, never the door's`, async () => {
+      for (const action of [
+        'body_filters_body_column',
+        'body_sorts_body_column',
+        'body_groups_body_column',
+        'body_filters_hash_column',
+        'body_counts_body_column',
+        'body_searches_body_column',
+        'body_searches_default',
+      ]) {
+        await expectBodyReadRefused(`${action} (${role})`, await as(token(), 'POST', `/actions/pin_note/${action}`, { params: {} }));
+      }
     });
   }
 
-  it('a hook body fired by the administrator\'s data-door insert copies only projected content', async () => {
-    const res = await as(adminToken, 'POST', '/data/pin_note', { title: 'pin-hook' });
-    expect(res.status).toBeLessThan(300);
+  it('a hook body fired by a data-door insert is refused the family read, for administrator and member, and copies nothing', async () => {
+    for (const [role, token] of [['administrator', adminToken], ['member', memberToken]] as const) {
+      await expectBodyReadRefused(`hook read (${role})`, await as(token, 'POST', '/data/pin_note', { title: 'pin-hook' }));
+    }
     const engine: any = await kernel.getServiceAsync('objectql');
     const rows: any[] = await engine.find('pin_note', { where: { title: 'pin-hook' }, context: { isSystem: true } });
-    expect(rows).toHaveLength(1);
-    // Judged on what landed in the ordinary record, read back as stored.
-    expect(String(rows[0].observed)).not.toContain(SENTINEL);
-    expectServedLikeTheDoor('hook copy (stored ordinary record)', JSON.parse(rows[0].observed));
+    expect(rows, 'a refused hook let its insert land').toEqual([]);
   });
 
-  it('a hook body fired by a member\'s data-door insert is refused the family read, and copies nothing', async () => {
-    const res = await as(memberToken, 'POST', '/data/pin_note', { title: 'pin-hook' });
-    const payload = await readJson(res);
-    expect(res.status).toBe(403);
-    expect(payload?.error?.code ?? payload?.code).toBe('PERMISSION_DENIED');
-    const engine: any = await kernel.getServiceAsync('objectql');
-    const rows: any[] = await engine.find('pin_note', { where: { title: 'pin-hook' }, context: { isSystem: true } });
-    expect(rows).toHaveLength(1); // the administrator's row only
-  });
-
-  it('an action body authored at runtime through /meta: projected, keyed, for administrator and member', async () => {
+  it('an action body authored at runtime through /meta: refused, for administrator and member', async () => {
     const authored = await as(adminToken, 'PUT', '/meta/action/authored_reads_family', {
       name: 'authored_reads_family',
       label: 'Authored read',
@@ -495,21 +567,22 @@ describe('[#21454] ① a sandboxed body\'s object API (ctx.api.object)', () => {
     });
     expect(authored.status).toBeLessThan(300);
     let res: Response | undefined;
+    // Bound once the door stops answering "not found": the refusal is the bound body's answer.
     const bound = await waitFor(async () => {
       const attempt: Response = await as(adminToken, 'POST', '/actions/pin_note/authored_reads_family', { params: {} });
       res = attempt;
-      return attempt.status < 300;
+      return attempt.status !== 404;
     });
     expect(bound, 'the runtime-authored action never bound').toBe(true);
-    expectServedLikeTheDoor('runtime-authored body (administrator)', await readJson(res as Response));
-
-    const member = await as(memberToken, 'POST', '/actions/pin_note/authored_reads_family', { params: {} });
-    expect(member.status).toBe(200);
-    expectServedLikeTheDoor('runtime-authored body (member)', await readJson(member));
+    await expectBodyReadRefused('runtime-authored body (administrator)', res as Response);
+    await expectBodyReadRefused(
+      'runtime-authored body (member)',
+      await as(memberToken, 'POST', '/actions/pin_note/authored_reads_family', { params: {} }),
+    );
   }, 30_000);
 });
 
-describe('[#21454] ② / ③ an action handler\'s engine handle and scoped API', () => {
+describe('[#21454] ② / ③ an action handler\'s engine handle and scoped API (host code: still served)', () => {
   for (const [role, token] of [['administrator', () => adminToken], ['member', () => memberToken]] as const) {
     it(`ctx.engine.find, invoked by the ${role}: projected, keyed (both tables)`, async () => {
       for (const action of ['handler_engine_reads_family', 'handler_engine_reads_history']) {
@@ -524,67 +597,131 @@ describe('[#21454] ② / ③ an action handler\'s engine handle and scoped API',
       expect(res.status).toBe(200);
       expectServedLikeTheDoor(`handler ctx.api (${role})`, await readJson(res));
     });
+
+    it(`the engine handle's filter on the body column, invoked by the ${role}: the data door's own refusal`, async () => {
+      // The handler path keeps the door's evaluate refusal (`INVALID_FIELD` /
+      // 400), naming the offending column. Across the handler boundary only
+      // `code`, `status` and the MESSAGE are guaranteed, so the column is read
+      // from the message.
+      const res = await as(token(), 'POST', '/actions/pin_note/handler_engine_filters_body', { params: {} });
+      const payload = await readJson(res);
+      const err = payload?.error ?? payload;
+      const text = JSON.stringify(payload ?? null);
+      expect(res.status).toBe(400);
+      expect(err?.code).toBe('INVALID_FIELD');
+      const named = (Array.isArray(err?.fields) && err.fields.includes('metadata'))
+        || String(err?.message ?? '').includes("'metadata'");
+      expect(named, 'the refusal names the body column').toBe(true);
+      expect(text.includes(SENTINEL)).toBe(false);
+      for (const h of storedHashes) expect(text.includes(h)).toBe(false);
+    });
   }
 });
 
-describe('[#21454] the EVALUATE shapes are refused end to end, the door\'s own refusal', () => {
-  /**
-   * Each shape answers the data door's refusal (`INVALID_FIELD` / 400), names
-   * the offending column, and carries no family content. The envelope's precise
-   * `param` / `field` are pinned directly on the door's predicate in the unit
-   * test; across the sandbox boundary only `code`, `status` and the MESSAGE are
-   * guaranteed (`SANDBOX_ERROR_PASSTHROUGH`), so the column is read from the
-   * message, which both the sandboxed-body and the host-handler paths carry.
-   */
-  async function expectRefusedAction(action: string, token: string, column: string): Promise<void> {
-    const res = await as(token, 'POST', `/actions/pin_note/${action}`, { params: {} });
+describe('[#21594] platform readers are outside the boundary (controls)', () => {
+  it('the metadata API — the route the refusal prescribes — answers the same item, projected', async () => {
+    const res = await as(adminToken, 'GET', `/meta/datasource/${DS_NAME}`);
+    const text = await res.text();
+    expect(res.status, text).toBe(200);
+    expect(text).toContain(DS_HOST);
+    expect(text.includes(SENTINEL), 'the metadata API served the stored credential').toBe(false);
+  });
+
+  it('the engine\'s own in-process read still answers the stored form: the refusal is not in the engine', async () => {
+    const engine: any = await kernel.getServiceAsync('objectql');
+    for (const object of ['sys_metadata', 'sys_metadata_history']) {
+      const rows: any[] = await engine.find(object, { where: { type: 'datasource', name: DS_NAME }, context: { isSystem: true } });
+      expect(rows.length, object).toBeGreaterThan(0);
+      expect(rows.some((r) => String(r.metadata ?? '').includes(SENTINEL)), object).toBe(true);
+    }
+  });
+});
+
+/**
+ * [#21594] The subject record. The `/actions` door loads an action's subject
+ * row through the generic data door before it dispatches. A BODY is handed no
+ * family row that way: an action declared on a family table, an object-less
+ * action addressed under one, and an action declared there through the `/meta`
+ * door are each refused with the body boundary's 403 before the body runs. A
+ * caller who cannot read the row is stopped earlier by the door's own subject
+ * load. A host handler's subject record and an ordinary one are unchanged.
+ */
+describe('[#21594] ① an action body is not handed a family row as its subject record', () => {
+  async function historyRowId(): Promise<string> {
+    const engine: any = await kernel.getServiceAsync('objectql');
+    const rows: any[] = await engine.find('sys_metadata_history', { where: { type: 'datasource', name: DS_NAME }, context: { isSystem: true } });
+    expect(rows.length, 'the fixture stored no history row').toBeGreaterThan(0);
+    return rows[0].id;
+  }
+
+  it('administrator: an action declared on a family table, and an object-less action under either table, are refused', async () => {
+    await expectBodyReadRefused(
+      'family-bound action',
+      await as(adminToken, 'POST', `/actions/sys_metadata/family_bound_reads_record/${storedRow.id}`, { params: {} }),
+    );
+    await expectBodyReadRefused(
+      'object-less action under sys_metadata',
+      await as(adminToken, 'POST', `/actions/sys_metadata/object_less_reads_record/${storedRow.id}`, { params: {} }),
+    );
+    await expectBodyReadRefused(
+      'object-less action under sys_metadata_history',
+      await as(adminToken, 'POST', `/actions/sys_metadata_history/object_less_reads_record/${await historyRowId()}`, { params: {} }),
+    );
+  });
+
+  it('an action declared on a family table through the /meta door is refused once bound', async () => {
+    const authored = await as(adminToken, 'PUT', '/meta/action/authored_family_bound_reads_record', {
+      name: 'authored_family_bound_reads_record',
+      label: 'Authored family-bound body',
+      objectName: 'sys_metadata',
+      type: 'script',
+      body: actionBody(RETURN_RECORD),
+    });
+    expect(authored.status).toBeLessThan(300);
+    let res: Response | undefined;
+    const bound = await waitFor(async () => {
+      const attempt: Response = await as(adminToken, 'POST', `/actions/sys_metadata/authored_family_bound_reads_record/${storedRow.id}`, { params: {} });
+      res = attempt;
+      return attempt.status !== 404;
+    });
+    expect(bound, 'the runtime-authored action never bound').toBe(true);
+    await expectBodyReadRefused('runtime-authored family-bound action', res as Response);
+  }, 30_000);
+
+  it('member: the door\'s own subject load stops it first (the row is not readable), and the body never runs', async () => {
+    for (const action of ['family_bound_reads_record', 'object_less_reads_record']) {
+      const res = await as(memberToken, 'POST', `/actions/sys_metadata/${action}/${storedRow.id}`, { params: {} });
+      const payload = await readJson(res);
+      expect(res.status, action).toBe(404);
+      expect(payload?.error?.code ?? payload?.code, action).toBe('RECORD_NOT_FOUND');
+      expect(familyRowsIn(payload), `${action}: a family row reached the answer`).toEqual([]);
+    }
+  });
+
+  it('control: a host handler addressed under a family table is still handed the row the data door serves', async () => {
+    const res = await as(adminToken, 'POST', `/actions/sys_metadata/host_object_less_reads_record/${storedRow.id}`, { params: {} });
+    expect(res.status).toBe(200);
+    expectServedLikeTheDoor('host handler subject record', await readJson(res));
+  });
+
+  it('control: an ordinary subject record is handed to a body as before', async () => {
+    const engine: any = await kernel.getServiceAsync('objectql');
+    const note: any = await engine.insert('pin_note', { title: 'subject-control' }, { context: { isSystem: true } });
+    const res = await as(adminToken, 'POST', `/actions/pin_note/note_reads_record/${note.id}`, { params: {} });
     const payload = await readJson(res);
-    const err = payload?.error ?? payload;
-    const text = JSON.stringify(payload ?? null);
-    expect(res.status, `${action}: refused with 400`).toBe(400);
-    expect(err?.code, `${action}: the data door's INVALID_FIELD`).toBe('INVALID_FIELD');
-    const named = (Array.isArray(err?.fields) && err.fields.includes(column))
-      || String(err?.message ?? '').includes(`'${column}'`);
-    expect(named, `${action}: the refusal names '${column}'`).toBe(true);
-    expect(text.includes(SENTINEL), `${action}: the stored credential reached the answer`).toBe(false);
-    for (const h of storedHashes) expect(text.includes(h), `${action}: a stored hash reached the answer`).toBe(false);
-  }
+    expect(res.status, JSON.stringify(payload)).toBe(200);
+    expect(payload?.data?.record?.title).toBe('subject-control');
+  });
 
-  for (const [role, token] of [['administrator', () => adminToken], ['member', () => memberToken]] as const) {
-    it(`a body's filter / sort / grouping on the body column, invoked by the ${role}`, async () => {
-      await expectRefusedAction('body_filters_body_column', token(), 'metadata');
-      await expectRefusedAction('body_sorts_body_column', token(), 'metadata');
-      await expectRefusedAction('body_groups_body_column', token(), 'metadata');
-    });
-
-    it(`a body's filter on a hash column, and count as an oracle, invoked by the ${role}`, async () => {
-      await expectRefusedAction('body_filters_hash_column', token(), 'checksum');
-      await expectRefusedAction('body_counts_body_column', token(), 'metadata');
-    });
-
-    it(`a body's explicit search of the body column, invoked by the ${role}`, async () => {
-      await expectRefusedAction('body_searches_body_column', token(), 'metadata');
-    });
-
-    it(`the engine handle's filter on the body column, invoked by the ${role}`, async () => {
-      await expectRefusedAction('handler_engine_filters_body', token(), 'metadata');
-    });
-  }
+  it('control: a family-routed call that carries no record hands the body nothing, and runs', async () => {
+    const res = await as(adminToken, 'POST', '/actions/sys_metadata/family_bound_reads_record', { params: {} });
+    const payload = await readJson(res);
+    expect(res.status, JSON.stringify(payload)).toBe(200);
+    expect(familyRowsIn(payload)).toEqual([]);
+  });
 });
 
-describe('[#21454] a DEFAULT search is narrowed to the door\'s served set, not refused', () => {
-  for (const [role, token] of [['administrator', () => adminToken], ['member', () => memberToken]] as const) {
-    it(`a body's default search runs and is served like the door, invoked by the ${role}`, async () => {
-      const res = await as(token(), 'POST', '/actions/pin_note/body_searches_default', { params: {} });
-      expect(res.status).toBe(200);
-      // It ran (not refused) and answered the family served, never the stored
-      // body or hash — the body and hash columns were removed from the scan.
-      expectServedLikeTheDoor(`default search (${role})`, await readJson(res));
-    });
-  }
-});
-
-describe('[#21454] the engine action verb is unreachable from a served body', () => {
+describe('[#21454] the engine action verb is unreachable from a body', () => {
   it('a sandboxed body sees no `execute` on ctx.api.object(...)', async () => {
     const res = await as(adminToken, 'POST', '/actions/pin_note/body_calls_execute', { params: {} });
     expect(res.status).toBe(200);

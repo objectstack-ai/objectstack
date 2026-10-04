@@ -5,8 +5,9 @@
  * reads it serves, through which derived contexts, and that it serves each one
  * exactly once. The composed contexts are pinned end to end, against the data
  * door, in `stored-metadata-reader-contexts.pin.test.ts`; this file holds the
- * routes a body or handler can take around the seam that the composition does
- * not exercise one by one.
+ * routes a handler can take around the seam that the composition does not
+ * exercise one by one. [#21594] A sandboxed body is not served here: its body
+ * layers refuse a family read first (`stored-metadata-body-reads.test.ts`).
  */
 
 import { describe, it, expect } from 'vitest';

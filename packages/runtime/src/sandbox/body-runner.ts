@@ -61,11 +61,12 @@ import {
   resolveRecordTitle,
   resolveRelatedTitleTarget,
 } from '@objectstack/objectql';
-import { refuseStoredMetadataBodyWrites, serveStoredMetadataReadsThrough } from '../stored-metadata-reader-seam.js';
+import { refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import {
   isWildcardHookTarget,
   storedMetadataBodyHookBindingRefusal,
+  storedMetadataBodySubjectRecordRefusal,
   storedMetadataFamilyTableList,
 } from '../stored-metadata-body-boundary.js';
 
@@ -448,6 +449,11 @@ export function actionBodyRunnerFactory(
     const body = parsed.data;
 
     return async function boundActionHandler(actionCtx: any): Promise<unknown> {
+      // [#21594] A body is handed nothing of the stored-metadata family: an
+      // action whose subject record is a family row is refused here, before
+      // the body runs and before its sandbox context is built.
+      const subjectRefusal = actionSubjectRecordRefusal(actionCtx, action);
+      if (subjectRefusal) throw subjectRefusal;
       const sandboxCtx = buildActionSandboxContext(
         actionCtx,
         opts.ql,
@@ -476,6 +482,38 @@ export function actionBodyRunnerFactory(
       }
     };
   };
+}
+
+/**
+ * [#21594] The refusal for an action body about to be handed a row of the
+ * stored-metadata family as its subject record, or `undefined`.
+ *
+ * Both action doors (REST `/actions` and MCP `run_action`) load the subject
+ * record before they dispatch, through the generic data door, and stamp the
+ * routed object and record id into `params` AFTER the caller's own params, so
+ * `params.objectName` is the door's routed object, never the caller's. That
+ * object is the subject: an action declared on a family table is routed under
+ * it, and so is an object-less action a caller addresses under it
+ * (`/actions/<family table>/<action>/<id>`), which no binding-time refusal
+ * could see. Absent a routed object (an engine `execute` call from host code),
+ * the action's declared object stands in.
+ *
+ * Judged here — the action body's own handler, the one point every action
+ * body passes through to run, whichever door bound it — because only here is
+ * the handler known to be a body: the doors dispatch body and host handlers
+ * alike, and a host code handler's subject record is outside the boundary.
+ * A record is "handed" when the call carries a record id or a non-empty
+ * record; a family-routed call with neither hands the body nothing and runs.
+ */
+function actionSubjectRecordRefusal(actionCtx: any, action: { name: string; object?: string }): Error | undefined {
+  const params = actionCtx?.params;
+  const routed = typeof params?.objectName === 'string' && params.objectName.length > 0 ? params.objectName : undefined;
+  const subject = routed ?? action.object;
+  if (typeof subject !== 'string' || !isStoredMetadataBodyObject(subject)) return undefined;
+  const record = actionCtx?.record;
+  const handed = (typeof params?.recordId === 'string' && params.recordId.length > 0)
+    || (record !== null && typeof record === 'object' && Object.keys(record).length > 0);
+  return handed ? storedMetadataBodySubjectRecordRefusal(subject, action.name) : undefined;
 }
 
 /** What {@link judgeJobBody} answers for a `body` that binds, and for one that does not. */
@@ -970,24 +1008,29 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
 }
 
 /**
- * The `ctx.api` a sandboxed body (hook or action) reads and writes through.
+ * The `ctx.api` a sandboxed body (hook, action or job) reads and writes through.
  *
- * [#21454] Served through the stored-metadata reader seam: a read of the
- * stored-metadata-body family answers the generic data door's form (the body
- * projected, the content hash keyed), never the stored row. This is the one
- * place both body faces get their API, so the hook face, the action face and
- * every fallback below are served alike, and a body can copy only what it was
- * served.
+ * For an app-authored body, the stored-metadata family is reached through the
+ * metadata API only, so this API refuses every touch of a family table before
+ * it runs, whatever the body's elevation, with `PERMISSION_DENIED` / 403 and a
+ * prescription naming the metadata API:
  *
- * [#21520] And, layered over that, a body may not WRITE a stored-metadata table
- * at all: every write of one is refused before it runs, whatever the body's
- * elevation. Applied HERE and nowhere else because this is the one place a
- * body gets its API — a host code handler's `ctx.api` is served by the read
- * seam but keeps its writes (deployer code, outside the boundary).
+ * - [#21594] a READ (`find`, `findOne`, `count`, `aggregate`, and every filter,
+ *   sort, grouping or search one can carry): the body is served nothing of the
+ *   family, neither the stored row nor a projection of it, so it can copy
+ *   nothing of it either;
+ * - [#21520] a WRITE (every write verb, and any verb not known to be a read).
+ *
+ * This is the one place every body face gets its API, so the hook face, the
+ * action face, the job face and every fallback below are refused alike.
+ * Applied HERE and nowhere else: a host code handler's `ctx.api` is not a
+ * body's, and is served by the reader-context seam
+ * (`serveStoredMetadataReadsThrough`) with its writes kept (deployer code,
+ * outside the boundary).
  */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
   return refuseStoredMetadataBodyWrites(
-    serveStoredMetadataReadsThrough(buildSandboxApiSource(engineCtx, ql, errLabel), ql),
+    refuseStoredMetadataBodyReads(buildSandboxApiSource(engineCtx, ql, errLabel)),
   );
 }
 

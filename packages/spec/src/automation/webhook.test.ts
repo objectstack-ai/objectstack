@@ -14,7 +14,7 @@ describe('WebhookTriggerType', () => {
     });
   });
 
-  it('should reject undelete / api — removed, no event source (#3196)', () => {
+  it('should reject undelete / api — removed, no event source', () => {
     // `undelete` had no soft-delete/restore producer; `api` had no manual fire
     // path. Removed rather than left as silent no-ops — authoring one now fails
     // loudly instead of registering a webhook that never fires.
@@ -228,7 +228,7 @@ describe('WebhookSchema', () => {
 // every declared webhook before materializing it into `sys_webhook`, and a
 // failure there warns and SKIPS the subscription — so a rejection here is the
 // difference between a webhook that exists and one that does not.
-describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const valid = { name: 'wh_probe', url: 'https://hooks.example/x' };
   const unknownKeyIssue = (value: unknown) => {
     const result = WebhookSchema.safeParse(value);
@@ -290,7 +290,7 @@ describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
    * defect was invisible to an accepts-shaped assertion, so the preservation
    * question gets an assertion over the complete key set, by value.
    */
-  it('[#6362] PRESERVES all seven envelope keys — measured, not assumed', () => {
+  it('PRESERVES all seven envelope keys — measured, not assumed', () => {
     const envelope = {
       _lock: 'full',
       _lockReason: 'Ships with the package.',

@@ -182,6 +182,31 @@ const JOINED_CONTAINER_CHART_REFUSED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
+ * The refusal a `joined` report's block with no `dataset` earns, at
+ * `blocks[i].dataset` (#21702; ADR-0021 single-form, ADR-0049 enforce-or-remove,
+ * the enforce arm). A block is an independent dataset query, and nothing else
+ * feeds it: the container selects nothing (its `dataset` is refused below).
+ * Measured at this repo's `.objectui-sha` pin
+ * `ab187972159583b595facdcae3c73b50f6f312e9`: `DatasetReportRenderer`'s joined
+ * branch hands each block's `dataset` to its table as
+ * `String(block.dataset ?? '')`, and the table's query hook goes idle on an
+ * empty name, so an unbound block draws an empty table and queries nothing; a
+ * report whose blocks ALL lack one fails `isDatasetReport` and falls through to
+ * the pre-9.0 presentation bridge, which queries nothing either.
+ *
+ * The key stays `.optional()` on `JoinedReportBlockSchema` itself: `blocks` is
+ * read only on a `joined` report, so the requirement lives on the arm of
+ * `ReportSchema`'s refinement that reads it. `block` is how the refusal names
+ * the block — by its `name`, or by its `blocks[i]` position when the name is
+ * empty (an empty name is its own issue, and does not stop this one).
+ */
+function joinedBlockDatasetRequired(block: string): string {
+  return `a \`joined\` report draws each block from that block's own \`dataset\`, and ${block} binds none, `
+    + 'so nothing queries it and it draws no rows. Bind the block to a dataset: set its `dataset` to the '
+    + 'dataset whose measures (`values`) and dimensions (`rows`) it shows.';
+}
+
+/**
  * Joined Report Block Schema
  *
  * Represents a single sub-report inside a `type: 'joined'` report. Each block
@@ -279,8 +304,13 @@ export const JoinedReportBlockSchema = lazySchema(() => strictObject({
    * ADR-0021 — the dataset this block binds to (single-form). The block selects
    * the dataset's measures by name; the legacy inline `objectName` + `columns` +
    * `groupings` query was removed in the cutover.
+   *
+   * Every block of a `joined` report binds one: `ReportSchema`'s refinement
+   * refuses a block without it at `blocks[i].dataset` (#21702), because nothing
+   * else would feed the block's query. It stays optional on this shape only
+   * because `blocks` is read on a `joined` report alone.
    */
-  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)').meta({ title: 'Dataset' }),
+  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021); a joined report refuses a block without one').meta({ title: 'Dataset' }),
   /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
   rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)').meta({ title: 'Rows' }),
   /** Dimension names across — matrix blocks pivot rows × columns (ADR-0021 D2). */
@@ -506,6 +536,15 @@ export const ReportSchema = lazySchema(() => strictObject({
     if (!r.blocks || r.blocks.length === 0) {
       ctx.addIssue({ code: 'custom', message: 'a `joined` report needs `blocks`.', path: ['blocks'] });
     }
+    // #21702 — "each block dataset-bound" is enforced here, not only stated: a
+    // block with no `dataset` is refused at its own `dataset` path, by name
+    // (see `joinedBlockDatasetRequired`). Until this arm it parsed, passed
+    // `objectstack validate` and every save door, and drew nothing.
+    r.blocks?.forEach((block, i) => {
+      if (!block || typeof block !== 'object' || block.dataset !== undefined) return;
+      const name = typeof block.name === 'string' && block.name.length > 0 ? `block \`${block.name}\`` : `\`blocks[${i}]\``;
+      ctx.addIssue({ code: 'custom', message: joinedBlockDatasetRequired(name), path: ['blocks', i, 'dataset'] });
+    });
   } else if (!r.dataset || !r.values || r.values.length === 0) {
     ctx.addIssue({
       code: 'custom',

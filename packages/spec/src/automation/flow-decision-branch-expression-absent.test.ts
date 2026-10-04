@@ -60,14 +60,14 @@ const AT_BRANCH_0 = ['nodes', 1, 'config', 'conditions', 0, 'expression'];
  * refused row's message is the ONE judge's, byte for byte.
  */
 const TABLE: Array<{ name: string; branch: Node; refused: boolean; refusedWith?: unknown }> = [
-  { name: 'no `expression` key — the #19961 shape', branch: { label: 'y' }, refused: true, refusedWith: undefined },
+  { name: 'no `expression` key', branch: { label: 'y' }, refused: true, refusedWith: undefined },
   { name: '`expression: null`', branch: { label: 'y', expression: null }, refused: true, refusedWith: null },
   { name: 'the predicate under the edge\'s spelling `condition`', branch: { label: 'y', condition: 'true' }, refused: true, refusedWith: undefined },
-  { name: 'a blank string — the #17493 control', branch: { label: 'y', expression: '   ' }, refused: true, refusedWith: '   ' },
+  { name: 'a blank string — blanks are refused', branch: { label: 'y', expression: '   ' }, refused: true, refusedWith: '   ' },
   { name: 'a real predicate — the accept control', branch: { label: 'y', expression: 'true' }, refused: false },
 ];
 
-describe('FlowSchema.parse refuses a decision branch with no `expression` (#19961)', () => {
+describe('FlowSchema.parse refuses a decision branch with no `expression`', () => {
   it.each(TABLE)('$name', ({ branch, refused, refusedWith }) => {
     const issues = issuesOf(flowWith(decision(branch)));
     if (!refused) {

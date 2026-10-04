@@ -1500,9 +1500,11 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  *
  * [#21454] Served through the stored-metadata reader seam
  * (`stored-metadata-reader-seam.ts`): this context is elevated, and it is the
- * `ctx.api` a host code handler receives as well as an action body, so a read
- * of the stored-metadata-body family answers the generic data door's form
- * (the body projected, the content hash keyed) and never the stored row.
+ * `ctx.api` a host code handler receives, so a read of the stored-metadata-body
+ * family answers the generic data door's form (the body projected, the content
+ * hash keyed) and never the stored row. [#21594] An action BODY's API is built
+ * over this one by the sandbox (`buildSandboxApi`), whose body layers refuse a
+ * family read or write before it reaches this seam.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;

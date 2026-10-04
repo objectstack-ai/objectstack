@@ -171,6 +171,14 @@ function makeSession(opts: {
     for (const r of opts.seed ?? []) rows.set(r.id, r);
     const historyRows: Array<Record<string, unknown>> = [];
     const artifactKeys = new Set((opts.artifacts ?? []).map((a) => `${a.type}|${a.name}`));
+    // [#21694] The ADR-0010 `_lock` gate reads `sys_metadata` on EVERY topology
+    // now, ahead of the probe read this file injects its fault into — and a
+    // failure of the gate's own read is answered fail-closed, `503
+    // SERVICE_UNAVAILABLE` (#5706): that gate's contract, not this re-wrap's.
+    // So `failFindOne` arms only once the lock verdict is in, and the fault
+    // lands on the probe read, the seam this file pins (a gate that is never
+    // reached leaves the fault unarmed, and the case fails loudly).
+    let lockVerdictIn = false;
 
     const engine: any = {
         async findOne(table: string, o: { where: Record<string, unknown> }) {
@@ -179,7 +187,7 @@ function makeSession(opts: {
                 return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
             }
             if (table !== 'sys_metadata') return null;
-            if (opts.failFindOne) opts.failFindOne();
+            if (opts.failFindOne && lockVerdictIn) opts.failFindOne();
             for (const row of rows.values()) if (matchesWhere(row as any, o.where)) return row;
             return null;
         },
@@ -238,6 +246,12 @@ function makeSession(opts: {
         () => new Map(),
         opts.environmentId,
     ) as any;
+    const lockGate = protocol.assertLockAllowsDelete.bind(protocol);
+    protocol.assertLockAllowsDelete = async (args: unknown) => {
+        const verdict = await lockGate(args);
+        lockVerdictIn = true;
+        return verdict;
+    };
     return { protocol, rows, historyRows };
 }
 

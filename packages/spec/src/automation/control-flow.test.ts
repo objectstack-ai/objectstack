@@ -61,7 +61,7 @@ describe('LoopConfigSchema', () => {
     ).toThrow();
   });
 
-  it('emits the xExpression:"template" marker on `collection` through z.toJSONSchema (objectui #2670)', () => {
+  it('emits the xExpression:"template" marker on `collection` through z.toJSONSchema, so the flow designer renders it as a template', () => {
     // The marker rides the same `.meta()` → JSON-Schema channel as
     // `xRef` / `xEnumDeprecated`, telling the flow designer `collection` is an
     // `interpolate()` `{var}` template (not bare CEL).
@@ -77,7 +77,7 @@ describe('LoopConfigSchema', () => {
     );
   });
 
-  it('accepts an inline array collection — the union map.collection declares (#4277)', () => {
+  it('accepts an inline array collection — the union map.collection declares', () => {
     // The executor has always resolved an already-an-array collection (shared
     // logic with `map`); the string-only declaration under-declared what it
     // reads, which the execute-time parse wiring surfaced.
@@ -272,7 +272,7 @@ describe('validateControlFlow', () => {
 
 // ─── [#4001 批 10] unknown keys are rejected, not stripped ──────────────────
 
-describe('[#4001] control-flow strictness — per shape', () => {
+describe('control-flow strictness — an unknown key is refused, per shape', () => {
   it('FlowRegion: `name` and `label` get wrong-layer prescriptions, not renames', () => {
     for (const [key, expected] of [
       ['name', 'A region is not named'],
@@ -438,7 +438,7 @@ describe('TryCatchErrorValueSchema', () => {
     expect(TryCatchErrorValueSchema.parse(both)).toEqual(both);
   });
 
-  it('`code` is an OPEN string, not a closed enum — a third-party or tenant-authored code parses (ADR-0112 D3/D4 + #9106)', () => {
+  it('`code` is an OPEN string, not a closed enum — a third-party or tenant-authored code parses (ADR-0112 D3/D4)', () => {
     // `NodeExecutor` is third-party-registrable and the code vocabulary is
     // `StandardErrorCode` ∪ registered ledger codes ∪ tenant-authored codes,
     // so a closed type would be false the moment anyone registers an executor.
@@ -491,7 +491,7 @@ describe('TryCatchErrorValueSchema', () => {
 // `MAX_REGION_DEPTH` (32) `analyzeRegion`'s own `duplicate node id` line is
 // the only refusal of a within-region duplicate. `flow.test.ts`'s
 // `the seam at MAX_REGION_DEPTH` case pins that hand-off.
-describe('[#4001] validateControlFlow and the key gate meet at the region-slot seam', () => {
+describe('validateControlFlow and the unknown-key gate meet at the region-slot seam', () => {
   const flowWith = (cfg: Record<string, unknown>, type = LOOP_NODE_TYPE) =>
     ({ nodes: [{ ...node('c1', type), config: cfg }] } as never);
 
@@ -540,7 +540,7 @@ describe('[#4001] validateControlFlow and the key gate meet at the region-slot s
     expect(() => validateControlFlow(flowWith({ collection: '{items}', iteratorVariable: 'x' }))).not.toThrow();
   });
 
-  it('nested regions are key-checked at depth, like the structural check (#4389)', () => {
+  it('nested regions are key-checked at depth, like the structural check', () => {
     let message = '';
     try {
       validateControlFlow(flowWith({

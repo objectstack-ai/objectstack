@@ -439,16 +439,22 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             }
         });
 
-        it('should fail-fast with 500 when DB findOne is unavailable (ADR-0005)', async () => {
+        it('should fail-fast when DB findOne is unavailable (ADR-0005)', async () => {
             // ADR-0005 removed the silent in-memory degrade — DB write failures
-            // must surface as a 500 so callers know persistence failed.
-            // The new SysMetadataRepository path does not wrap errors; the raw
-            // DB error propagates directly.
-            mockEngine.findOne.mockRejectedValue(new Error('Connection refused'));
+            // must surface so callers know persistence failed.
+            // [#21694] The first read a save makes is the ADR-0010 `_lock`
+            // gate's, on this kernel as on an environment-bound one, and it
+            // fails CLOSED (#5706): a 503 that carries the driver error on
+            // `cause`, before anything is written.
+            const outage = new Error('Connection refused');
+            mockEngine.findOne.mockRejectedValue(outage);
 
-            await expect(
-                protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
-            ).rejects.toThrow(/Connection refused/);
+            const err: any = await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp })
+                .then(() => null, (e: unknown) => e);
+            expect(err).toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+            expect(err.cause).toBe(outage);
+            expect(mockEngine.insert).not.toHaveBeenCalledWith('sys_metadata', expect.anything(), expect.anything());
         });
 
         it('should fail-fast with 500 when DB insert fails (ADR-0005)', async () => {

@@ -7686,7 +7686,9 @@ export class ObjectStackProtocolImplementation implements
          * Per-type aggregate stats — count of items and the list of
          * packages contributing to each type. Computed in the same
          * sweep so the Studio directory page can render tile counts
-         * and a package filter in one round-trip.
+         * and a package filter in one round-trip. `locked` is the number
+         * of items whose read envelope reports `lock` other than `'none'`
+         * — the same derivation `getMetaItem` publishes (#21694).
          */
         stats: Record<string, { count: number; locked: number; packages: string[] }>;
     }> {
@@ -7818,8 +7820,14 @@ export class ObjectStackProtocolImplementation implements
                 scannedItems += 1;
                 const pkg = (item?._packageId ?? null) as string | null;
                 if (pkg) pkgSet.add(pkg);
-                const lock = item?._lock as string | undefined;
-                if (lock && lock !== 'none') lockedCount += 1;
+                // [#21694] Counted from the envelope's own derivation
+                // ({@link servedLockState}), never from the declared `_lock`
+                // alone: a packaged base the write doors refuse reads locked on
+                // its item envelope, so the per-type tile counts it too. The
+                // derivation reads the registry only — no store read per item.
+                const itemName = typeof item?.name === 'string' ? item.name : '';
+                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName));
+                if (served.lock !== 'none') lockedCount += 1;
                 const diag: MetadataDiagnostics | undefined =
                     item?._diagnostics ?? computeMetadataDiagnostics(t, item);
                 if (!diag) continue;
@@ -15607,14 +15615,17 @@ export class ObjectStackProtocolImplementation implements
      * publishes beside the document — `lock`, `editable`, `deletable` and the
      * rest — for `(type, name)`, whose served document is `document`. The ONE
      * derivation both reads call: {@link getMetaItem} and
-     * {@link getMetaItemLayered}.
+     * {@link getMetaItemLayered} — and [#21694] the per-type `locked` count of
+     * {@link getMetaDiagnostics}, so the directory tile and the item agree.
      *
      * The flags are a promise about the write doors: `editable` says whether a
      * write of this item is refused on lock grounds, `deletable` whether its
      * removal is. Two limbs refuse such a write, so both are asked here, and
      * neither is re-derived:
      *
-     *  - the item's own ADR-0010 `_lock` — `resolveLockState`, unchanged;
+     *  - the item's own ADR-0010 `_lock` — `resolveLockState`, unchanged. Its
+     *    door ({@link lockWriteRefusal} / {@link assertLockAllowsDelete})
+     *    answers on every topology since #21694, as the package limb does;
      *  - the locked packaged base: an item a code package ships, on a type with
      *    no overlay channel — {@link packagedBaseRefusal}, the verdict the
      *    `/meta` doors and the `/automation` doors already share (`NOT_OVERRIDABLE`,
@@ -16395,6 +16406,26 @@ export class ObjectStackProtocolImplementation implements
      * a transaction keep using `assertLockAllowsWrite` unchanged — this is an
      * extraction, not a behaviour change, and `save` / `rollback` still get
      * their row from the same expression they always did.
+     *
+     * ## [#21694] Topology-INDEPENDENT, like the package door
+     *
+     * This gate, and {@link assertLockAllowsDelete} beside it, used to open
+     * with `if (this.environmentId === undefined) return null;`. No ADR
+     * records that carve-out: ADR-0010 §3.3 states the lock table with no
+     * topology column, and the only reason ever written down was the title of
+     * the test that pinned it ("control-plane bootstrap"). That is the
+     * inference #6710 refuted (see {@link MetadataAuthoringChannel}):
+     * `environmentId` is a row-scoping key, and the CLI's host-config
+     * assembler — the showcase's own boot shape — leaves it undefined while it
+     * serves an end-user `PUT /api/v1/meta/*`. So a host-config kernel
+     * admitted every save, publish, rollback and delete of a `_lock`ed item,
+     * while both reads ({@link servedLockState}) reported it locked: the door
+     * looser than the read, on the topology the flagship app boots.
+     *
+     * The gate now answers alike on every kernel, as {@link
+     * packagedBaseRefusal} does. Where it sits relative to that package door
+     * is each caller's ordering, and it is the same on every topology: see the
+     * `saveMetaItem` and `deleteMetaItem` call sites.
      */
     private async lockWriteRefusal(args: {
         type: string;
@@ -16405,7 +16436,6 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        if (this.environmentId === undefined) return null;
         const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null);
         const refusal = evaluateLockForWrite(state.lock);
         if (!refusal) return null;
@@ -16464,7 +16494,10 @@ export class ObjectStackProtocolImplementation implements
         return refusal.err;
     }
 
-    /** Counterpart of {@link assertLockAllowsWrite} for delete. */
+    /**
+     * Counterpart of {@link assertLockAllowsWrite} for delete. [#21694]
+     * Topology-independent for the same reason — see {@link lockWriteRefusal}.
+     */
     private async assertLockAllowsDelete(args: {
         type: string;
         name: string;
@@ -16473,7 +16506,6 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        if (this.environmentId === undefined) return null;
         const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null);
         const refusal = evaluateLockForDelete(state.lock);
         if (!refusal) return null;
@@ -18529,11 +18561,29 @@ export class ObjectStackProtocolImplementation implements
             // {@link packagedBaseRefusal}, rather than a copy that agrees with
             // this one only until either of them moves.
             this.refusePackagedBaseOverride(request);
+        }
 
-            // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
-            // overlay `_lock`) blocks save independent of the L1 type-level
-            // flag. Records the denial in `sys_metadata_audit` before
-            // throwing so refused attempts are visible in compliance reports.
+        // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
+        // overlay `_lock`) blocks save independent of the L1 type-level
+        // flag. Records the denial in `sys_metadata_audit` before
+        // throwing so refused attempts are visible in compliance reports.
+        //
+        // [#21694] On EVERY topology — it used to sit inside the block above,
+        // so a host-config kernel never asked it (see {@link lockWriteRefusal}).
+        // Its rank is unchanged and is the same on every kernel: BELOW the
+        // package door. On an environment kernel that door has thrown above
+        // whenever it refuses, so the condition is always true there; on a
+        // host-config kernel the same door answers at the repository write
+        // (`SysMetadataRepository.assertAllowed`), so a packaged base it will
+        // refuse is left to it. One request, one refusal code, on both kernels
+        // — the `_lock` gate never pre-empts `NOT_OVERRIDABLE` on one topology
+        // only.
+        if (this.packagedBaseRefusal({
+            type: request.type,
+            name: request.name,
+            operation: 'save',
+            ...(request.packageId ? { packageId: request.packageId } : {}),
+        }) === null) {
             const lockErr = await this.assertLockAllowsWrite({
                 type: request.type,
                 name: request.name,
@@ -24650,8 +24700,17 @@ export class ObjectStackProtocolImplementation implements
                 (err as any).status = 403;
                 throw err;
             }
+        }
 
-            // ADR-0010 L3 — lock blocks delete.
+        // ADR-0010 L3 — lock blocks delete. [#21694] On EVERY topology, ranked
+        // below the package removal door exactly as `saveMetaItem` ranks the
+        // save gate below its package door (see the note there): on an
+        // environment kernel that door has thrown above whenever it refuses;
+        // on a host-config kernel a packaged base it refuses keeps the answer
+        // that kernel already gave it — the repository's delete gate when an
+        // overlay row exists, a no-op that leaves the artifact standing when
+        // none does (see {@link packagedBaseRefusal}).
+        if (this.packagedBaseRefusal({ type: request.type, name: request.name, operation: 'delete' }) === null) {
             const lockErr = await this.assertLockAllowsDelete({
                 type: request.type,
                 name: request.name,

@@ -113,7 +113,7 @@ describe('FLOW_PAUSE_CAPABLE_NODE_TYPES — the declared set, and how it was der
   });
 });
 
-describe('a region body refuses a pause-capable node (#15646)', () => {
+describe('a region body refuses a pause-capable node', () => {
   it.each(FLOW_PAUSE_CAPABLE_NODE_TYPES)('refuses a `%s` node in a loop body, anchored on its `type`', (type) => {
     expect(issuesOf(flowWith([loopOver([pausingNode(type)])]))).toEqual([[
       'nodes.1.config.body.nodes.0.type',
@@ -194,7 +194,7 @@ describe('a region body refuses a pause-capable node (#15646)', () => {
   });
 });
 
-describe('a region body refuses an `end` node (#18112, absorbed into #15646)', () => {
+describe('a region body refuses an `end` node', () => {
   it.each([
     ['loop body', loopOver([{ id: 'stop', type: 'end', label: 'Stop' }]), 'nodes.1.config.body.nodes.0.type', "loop 'sweep' body"],
     ['try region', tryCatchOver([{ id: 'stop', type: 'end', label: 'Stop' }], [step('recover')]), 'nodes.1.config.try.nodes.0.type', "try_catch 'guard' try"],

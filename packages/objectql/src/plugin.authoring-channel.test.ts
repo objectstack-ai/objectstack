@@ -188,6 +188,13 @@ describe('#6710 — the authoring channel is threaded from plugin option to prot
     await kernel.use(new ObjectQLPlugin());
     await kernel.bootstrap();
     const protocol = kernel.getService('protocol') as any;
+    // [#21694] …and the storage driver serve.ts registers beside it (its
+    // step 2). The ADR-0010 `_lock` gate now reads `sys_metadata` on every
+    // topology, ahead of the authoring gate as on an environment kernel, and a
+    // read it cannot make is answered fail-closed (503) — so a kernel with no
+    // driver at all would be refused there and never show this gate.
+    const { driver, stores } = makeMemoryDriver();
+    (kernel.getService('objectql') as ObjectQL).registerDriver(driver, true);
 
     expect(
       protocol.environmentId,
@@ -196,6 +203,7 @@ describe('#6710 — the authoring channel is threaded from plugin option to prot
 
     const verdict = await publish(protocol);
     expect(verdict.refused, 'the end-user PUT /api/v1/meta/* surface must meet the gate').toBe(true);
+    expect(flowRows(stores), 'a gate that rejects after persisting is a log line').toEqual([]);
     // Both envelope halves (ADR-0112). Asserting only "it threw" would have
     // been green on the UNFIXED build too: that build reached the engine and
     // threw "No driver available", an Error whose code and status are both
