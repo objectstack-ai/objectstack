@@ -189,7 +189,9 @@ describe('[#20919] connector pull, end to end through a real rest connector', ()
         const second = await service.pullConnectorSource!({ mapping: 'crm_contacts', context: SYSTEM });
         expect(fixture.seen[1].get('since')).toBe('2026-01-02T00:00:00.000Z');
         expect(second.watermark?.from).toBe('2026-01-02T00:00:00.000Z');
-        expect(second.summary.errors, JSON.stringify(second.summary.results)).toBe(0);
+        // The contract declares the runner's tallies, not its per-row results,
+        // so the failure message carries the whole summary as the service sent it.
+        expect(second.summary.errors, JSON.stringify(second.summary)).toBe(0);
         expect({ pulled: second.pulled, created: second.summary.created, updated: second.summary.updated })
             .toEqual({ pulled: 2, created: 1, updated: 1 });
 
