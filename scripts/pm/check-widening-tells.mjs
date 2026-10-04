@@ -2609,6 +2609,371 @@ export function inParameterList(side, index) {
   return open !== null && open.opener === '(' && PARAMETER_LIST_HEAD.test(open.head);
 }
 
+// ---------------------------------------------------------------------------
+// #21465 — the construct that ENCLOSES a T2 member
+// ---------------------------------------------------------------------------
+
+/**
+ * The first closer AHEAD of a position that closes a delimiter opened BEFORE
+ * it — the closing half of whatever construct the position sits in — read
+ * forward over `texts` from `texts[line]` at `col`, as
+ * `{ closer, line, col, tail, unreadable }`.
+ *
+ * ⭐ The mirror of {@link enclosingDelimiters}, walked the other way, and it
+ * exists for the hunk that BEGINS inside a construct: the opener sits above the
+ * hunk, so the walk up shows no frame at all, while the closer sits below the
+ * line and the hunk shows it. PR #21463's `} from './view.zod';` is exactly
+ * that shape. ⛔ Like its mirror it judges no SHAPE: it answers which bracket
+ * closes first and hands back the text after it, and nothing else.
+ *
+ * Its triggers are its mirror's, read forward, and any one of them answers
+ * `unreadable: true` with NO closer — ⛔ never a guess:
+ *
+ *   • a `/` with another `/` left on its line — a possible regex literal;
+ *   • a closer whose type does not match the opener it pops;
+ *   • a string literal that never closes on its line;
+ *   • a `*\/` outside a block comment this walk opened. Read forward, a
+ *     terminator nothing here opened says the START sat inside a comment, and
+ *     unlike the walk up there are no frames to discard and restart from.
+ *
+ * `closer: null` with `unreadable: false` is "the text ends before anything
+ * closes" — no evidence, which every caller reads as "keep the tell firing".
+ * `line` is an index into `texts`, ⛔ not a file line.
+ *
+ * @param {string[]} texts
+ * @param {number} line
+ * @param {number} [col]
+ * @returns {{ closer: string|null, line: number|null, col: number|null, tail: string|null, unreadable: boolean }}
+ */
+export function closerAhead(texts, line, col = 0) {
+  const unread = { closer: null, line: null, col: null, tail: null, unreadable: true };
+  if (!Array.isArray(texts) || typeof line !== 'number' || line < 0) return unread;
+  const stack = [];
+  let inBlockComment = false;
+  for (let j = line; j < texts.length; j += 1) {
+    const s = String(texts[j] ?? '');
+    for (let k = j === line ? col : 0; k < s.length; k += 1) {
+      const ch = s[k];
+      const next = s[k + 1];
+      if (inBlockComment) {
+        if (ch === '*' && next === '/') { inBlockComment = false; k += 1; }
+        continue;
+      }
+      if (ch === '/' && next === '*') { inBlockComment = true; k += 1; continue; }
+      if (ch === '/' && next === '/') break;
+      if (ch === '*' && next === '/') return unread;
+      if (ch === '/') {
+        if (s.indexOf('/', k + 1) !== -1) return unread;
+        continue;
+      }
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const end = endOfStringLiteral(s, k);
+        if (end === -1) return unread;
+        k = end;
+        continue;
+      }
+      if (BRACKET_CLOSERS[ch] !== undefined) { stack.push(ch); continue; }
+      if (ch === ')' || ch === ']' || ch === '}') {
+        if (stack.length === 0) return { closer: ch, line: j, col: k, tail: s.slice(k + 1), unreadable: false };
+        if (BRACKET_CLOSERS[stack[stack.length - 1]] !== ch) return unread;
+        stack.pop();
+      }
+    }
+  }
+  return { closer: null, line: null, col: null, tail: null, unreadable: false };
+}
+
+/**
+ * {@link closerAhead} over one side-line's OWN hunk, from that line to the
+ * hunk's last line — the same bound its mirror reads, in the other direction.
+ * The answer's `line` counts from the side-line, so `0` is the line itself.
+ */
+export function enclosingCloser(side, index) {
+  if (!Array.isArray(side) || typeof index !== 'number' || !side[index]) {
+    return { closer: null, line: null, col: null, tail: null, unreadable: true };
+  }
+  const { hunk } = side[index];
+  const texts = [];
+  for (let j = index; j < side.length && side[j]?.hunk === hunk; j += 1) texts.push(String(side[j]?.text ?? ''));
+  return closerAhead(texts, 0, 0);
+}
+
+/**
+ * Every construct a T2 member line can be READ to sit in, each with the T2
+ * verdict it carries. ⭐ The enumeration the triage ruling pins: its seven named
+ * constructs are the seven keys {@link T2_CONSTRUCT_FIXTURES} carries one fixture
+ * each for, and the two left over are the same facts read off a CLOSER alone,
+ * when the hunk shows no opener — an array whose `as const` the hunk does not
+ * show, and a specifier list whose `import` / `export` keyword sits above it.
+ *
+ * ⭐ Why a `{` and a non-constructor `(` are SILENT, stated as the structural
+ * fact it is rather than as a tolerance: every closed set T2 names keeps its
+ * members directly inside a `[` — `z.enum([…])`, `z.union([…])`,
+ * `z.discriminatedUnion(…, […])`, `[…] as const` — so a bare element whose
+ * innermost open delimiter is a brace or a call's paren is, by construction,
+ * not one of their members. The two constructors whose operand DOES sit
+ * directly in a paren, `z.literal(` and `.or(`, are read as `z.enum` and
+ * `z.union` and keep firing.
+ *
+ * ⛔ `as-const-array` and `array` FIRE. An `as const` array is a closed set by
+ * the doctrine's own wording, and a plain array is left where it was — this
+ * reading moves no row for either. The ONE exception is read off the head blob,
+ * never off the hunk: {@link refusalOnlyReaders}.
+ */
+export const T2_CONSTRUCT_VERDICTS = Object.freeze({
+  'z.enum': 'fires',
+  'z.union': 'fires',
+  'as-const-array': 'fires',
+  array: 'fires',
+  'import-list': 'silent',
+  'export-list': 'silent',
+  'import-or-export-list': 'silent',
+  'argument-list': 'silent',
+  'object-literal': 'silent',
+});
+
+/** `import {` / `import type {` / `import Default, {` — the text left of the brace, and nothing else on it. */
+const IMPORT_LIST_HEAD = /^[ \t]*import(?:[ \t]+type)?(?:[ \t]+[A-Za-z_$][\w$]*[ \t]*,)?[ \t]*$/;
+/** `export {` / `export type {` — ⛔ not `export const X = {`, which is an object literal. */
+const EXPORT_LIST_HEAD = /^[ \t]*export(?:[ \t]+type)?[ \t]*$/;
+/** What follows a specifier list's `}` — and follows no other `}` in TypeScript. */
+const SPECIFIER_LIST_TAIL = /^[ \t]*from[ \t]*['"]/;
+const AS_CONST_TAIL = /^[ \t]*as[ \t]+const\b/;
+/** The constructors whose operand sits DIRECTLY in their paren. */
+const ENUM_CALLEE = /\bz\.(?:enum|literal)[ \t]*$/;
+const UNION_CALLEE = /(?:\bz\.(?:union|discriminatedUnion)|\.or)[ \t]*$/;
+/**
+ * Schema combinators whose operand WIDENS without being a member of anything.
+ * ⛔ Kept firing rather than read as an argument list: T2 caught a schema handed
+ * to one on a line of its own by accident, and this reading does not trade that
+ * accident for a silence. Measured at this change's base: 0 such lines in
+ * `packages/spec/src`.
+ */
+const WIDENING_COMBINATOR_CALLEE = /\.(?:merge|extend)[ \t]*$/;
+/** A call's head: an identifier, a member chain or a call result, with optional type arguments. */
+const CALLEE_HEAD = /(?:[A-Za-z_$][\w$]*|[)\]])[ \t]*(?:<[^<>]*>)?[ \t]*$/;
+/** …⛔ unless the "identifier" is a keyword, whose paren opens no argument list. */
+const NOT_A_CALLEE = /(?:^|[^\w$.])(?:if|for|while|switch|catch|return|typeof|void|await|yield|in|of|case|do|else|delete|throw|instanceof)[ \t]*$/;
+const ENUM_LIST_HEAD = /\bz\.enum\([ \t]*$/;
+const UNION_LIST_HEAD = /\bz\.(?:union\(|discriminatedUnion\(.*,)[ \t]*$/;
+/** `const NAME = [` — the one array head that names a binding, with its `export`. */
+const ARRAY_BINDING_HEAD = /^[ \t]*(export[ \t]+)?const[ \t]+([A-Za-z_$][\w$]*)[ \t]*(?::[^=]*)?=[ \t]*$/;
+
+/**
+ * Which construct ENCLOSES one side-line, as far as its hunk shows it —
+ * `{ construct, evidence, binding, exported, unreadable }`, `construct` a key of
+ * {@link T2_CONSTRUCT_VERDICTS} or `null` when the hunk does not say.
+ *
+ * Two readings, in this order, and both are POSITIVE evidence the hunk carries:
+ *
+ *   1. the innermost opener the hunk SHOWS still open ({@link enclosingDelimiters}),
+ *      named by the text left of it on its own line — and for a `[` alone on
+ *      its line, by the paren around it;
+ *   2. only when the hunk shows no opener at all, the first closer it shows
+ *      AHEAD of the line ({@link enclosingCloser}), named by the text after it.
+ *
+ * ⛔ THIS IS A READER THAT DECLINES ON THE WALK'S FRAMES, the first one since
+ * #19099 put the obligation at {@link enclosingDelimiters}'s definition, and it
+ * discharges both halves of it. It REFUSES when the walk is unreadable — the
+ * answer is `construct: null`, which fires. And these are the triggers, all of
+ * them, in each direction:
+ *
+ *   • walking UP: a `/` with another `/` left on its line (a possible regex
+ *     literal); a closer whose type does not match the opener it pops; a string
+ *     literal that never closes on its line; a `*\/` the walk cannot explain —
+ *     a second leading one, or one after the flag is up. ⛔ The FIRST leading
+ *     `*\/` on a clean walk is no trigger: it says the hunk began inside a
+ *     comment, and the frames its text pushed are discarded.
+ *   • walking DOWN ({@link closerAhead}): the same first three, and ANY `*\/`
+ *     outside a comment the walk opened.
+ *
+ * ⛔ No construct is ever inferred from the hunk header's function-context text
+ * (`@@ … @@ import {`): that is git's guess at the nearest declaration line, not
+ * a fact about the line's enclosing bracket.
+ */
+export function enclosingConstruct(side, index) {
+  const reading = (construct, evidence, extra = {}) =>
+    ({ construct, evidence, binding: null, exported: false, unreadable: false, ...extra });
+  const { frames, unreadable } = enclosingDelimiters(side, index);
+  if (unreadable) return reading(null, null, { unreadable: true });
+  if (frames.length > 0) {
+    const top = frames[frames.length - 1];
+    if (top.opener === '{') {
+      if (IMPORT_LIST_HEAD.test(top.head)) return reading('import-list', 'opener');
+      if (EXPORT_LIST_HEAD.test(top.head)) return reading('export-list', 'opener');
+      return reading('object-literal', 'opener');
+    }
+    if (top.opener === '(') {
+      if (ENUM_CALLEE.test(top.head)) return reading('z.enum', 'opener');
+      if (UNION_CALLEE.test(top.head)) return reading('z.union', 'opener');
+      if (WIDENING_COMBINATOR_CALLEE.test(top.head)) return reading(null, 'opener');
+      if (CALLEE_HEAD.test(top.head) && !NOT_A_CALLEE.test(top.head)) return reading('argument-list', 'opener');
+      return reading(null, 'opener');
+    }
+    const outer = frames.length > 1 ? frames[frames.length - 2] : null;
+    const listHead = /^[ \t]*$/.test(top.head) && outer?.opener === '(' ? `${outer.head}(` : top.head;
+    if (ENUM_LIST_HEAD.test(listHead)) return reading('z.enum', 'opener');
+    if (UNION_LIST_HEAD.test(listHead)) return reading('z.union', 'opener');
+    const declared = ARRAY_BINDING_HEAD.exec(top.head);
+    const close = enclosingCloser(side, index);
+    const asConst = !close.unreadable && close.closer === ']' && AS_CONST_TAIL.test(close.tail ?? '');
+    return reading(asConst ? 'as-const-array' : 'array', 'opener', {
+      binding: declared ? declared[2] : null,
+      exported: Boolean(declared?.[1]),
+    });
+  }
+  const close = enclosingCloser(side, index);
+  if (close.unreadable) return reading(null, null, { unreadable: true });
+  if (close.closer === '}') {
+    return reading(SPECIFIER_LIST_TAIL.test(close.tail ?? '') ? 'import-or-export-list' : 'object-literal', 'closer');
+  }
+  if (close.closer === ']') return reading(AS_CONST_TAIL.test(close.tail ?? '') ? 'as-const-array' : 'array', 'closer');
+  // `)` — the callee sits above the hunk, and `.or(` is a union; or nothing closes.
+  return reading(null, close.closer === null ? null : 'closer');
+}
+
+const escapeForRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Is EVERY reader of the module-private `as const` array `name` a REFUSAL
+ * PREDICATE — so that a member added to it is a value the accept set LOSES?
+ * `{ narrowing, reason, guards }`, read over one file's HEAD BLOB.
+ *
+ * ⭐ The triage ruling's third line, and the one reading in this family that
+ * needs more than the hunk: who READS a set is never in the lines that add to
+ * it. The blob is content-addressed ({@link headBlobSource}), so the reading is
+ * about the diff's own head and never about a worktree's.
+ *
+ * ⛔ DIRECTION IS THE WHOLE QUESTION, and a refusal predicate has two. A set
+ * whose members are REFUSED narrows when it grows; a set whose members are
+ * EXEMPTED from a refusal widens when it grows, and both are "read by a
+ * refusal". Both live in `packages/spec/src`: `SINGLE_SERIES_CHART_TYPES`
+ * (`if (!SET.includes(type)) return;`, then the refusal — members only reach
+ * it) and `VIEW_FILTER_VALUELESS_OPERATORS` (`if (SET.includes(op)) return;`,
+ * then the refusal — members skip it). So the polarity is read, never assumed,
+ * and every condition below is positive evidence; any one missing answers
+ * `narrowing: false`, which leaves T2 firing:
+ *
+ *   ① exactly ONE declaration, `const NAME = [`, with no `export` on it, no
+ *     `export { … NAME … }` and no `export default NAME` anywhere in the file —
+ *     a reader in another module is a reader this file cannot see;
+ *   ② its own closer reads `] as const`;
+ *   ③ at least one GUARD: a line that is exactly
+ *     `if (!NAME.includes(x)) return;` (or `!(NAME as …).includes(x)`) — a
+ *     NEGATED membership test whose consequent is a bare early exit, so only
+ *     MEMBERS reach the rest of the block — where the rest of that block (read
+ *     with {@link closerAhead}, and refused when that walk is unreadable)
+ *     calls `.addIssue(` or `throw`s;
+ *   ④ every OTHER line naming `NAME` — ⛔ counted on every non-comment line,
+ *     inside a string literal or not, so a name this reader mis-lexes is an
+ *     unclassified reader and never an invisible one — is a PROSE render
+ *     (`NAME.join(…)` or `NAME.map(…).join(…)`, a string) sitting either inside
+ *     a guard's members-only region, where it can only feed that refusal's
+ *     message, or inside a `.describe(…)` argument, which is documentation.
+ *
+ * ⚠️ THE RESIDUAL, named so it is weighed rather than discovered: ④ reads a
+ * joined string inside the members-only region as the refusal's own prose. A
+ * region that turned that string back into a DECISION before refusing — a
+ * regex built from it, say — would be a second reader this function cannot
+ * see. Measured at this change's base: one set in `packages/spec/src` meets
+ * ①–④ (`SINGLE_SERIES_CHART_TYPES`), and its region does not.
+ *
+ * @param {string} source — the file's head blob
+ * @param {string} name — the binding the hunk's `[` head names
+ */
+export function refusalOnlyReaders(source, name) {
+  const no = (reason) => ({ narrowing: false, reason, guards: [] });
+  if (typeof source !== 'string' || typeof name !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(name)) {
+    return no('no head blob to read');
+  }
+  const lines = source.split('\n');
+  const id = escapeForRegExp(name);
+  const word = () => new RegExp(`(?<![\\w$])${id}(?![\\w$])`, 'g');
+  const DECLARATION = new RegExp(`^[ \\t]*(export[ \\t]+)?const[ \\t]+${id}(?![\\w$])[^=]*=[ \\t]*\\[`);
+  const declared = [];
+  lines.forEach((s, i) => { if (DECLARATION.test(s)) declared.push(i); });
+  if (declared.length !== 1) return no(`${declared.length} declarations of \`${name}\`, not one`);
+  const at = declared[0];
+  if (DECLARATION.exec(lines[at])[1]) return no(`\`${name}\` is exported`);
+  if (
+    new RegExp(`\\bexport[ \\t]*(?:type[ \\t]*)?\\{[^}]*(?<![\\w$])${id}(?![\\w$])`).test(source) ||
+    new RegExp(`\\bexport[ \\t]+default[ \\t]+${id}(?![\\w$])`).test(source)
+  ) {
+    return no(`\`${name}\` is re-exported`);
+  }
+  const opensAt = lines[at].indexOf('[', lines[at].indexOf('='));
+  const own = closerAhead(lines, at, opensAt + 1);
+  if (own.unreadable || own.closer !== ']' || !AS_CONST_TAIL.test(own.tail ?? '')) {
+    return no(`\`${name}\` is not read as an \`as const\` array`);
+  }
+  const readers = [];
+  lines.forEach((s, i) => {
+    if (COMMENT_LINE.test(s)) return;
+    let first = i === at;
+    for (const m of s.matchAll(word())) {
+      if (first) { first = false; continue; } // the declaration's own name
+      readers.push({ line: i, col: m.index });
+    }
+  });
+  const GUARD = new RegExp(
+    `^[ \\t]*if[ \\t]*\\([ \\t]*![ \\t]*(?:\\([ \\t]*${id}[ \\t]+as[ \\t]+[^()]*\\)|${id})[ \\t]*` +
+      '\\.includes\\([^()]*\\)[ \\t]*\\)[ \\t]*return[ \\t]*;?[ \\t]*(?:\\/\\/.*)?$',
+  );
+  const REFUSAL = /\.addIssue\(|\bthrow\b/;
+  const guards = [];
+  for (const r of readers) {
+    if (!GUARD.test(lines[r.line]) || guards.some((g) => g.line === r.line)) continue;
+    const end = closerAhead(lines, r.line + 1, 0);
+    if (end.unreadable || end.closer !== '}') continue;
+    const region = lines.slice(r.line + 1, end.line + 1);
+    if (!region.some((s) => !COMMENT_LINE.test(s) && REFUSAL.test(s))) continue;
+    guards.push({ line: r.line, until: end.line });
+  }
+  if (guards.length === 0) return no(`no reader of \`${name}\` is a guard that leaves only its members to a refusal`);
+  const describes = [];
+  lines.forEach((s, i) => {
+    if (COMMENT_LINE.test(s)) return;
+    for (const m of s.matchAll(/\.describe\(/g)) {
+      const end = closerAhead(lines, i, m.index + m[0].length);
+      if (!end.unreadable && end.closer === ')') describes.push({ from: { line: i, col: m.index }, to: { line: end.line, col: end.col } });
+    }
+  });
+  const before = (a, b) => a.line < b.line || (a.line === b.line && a.col < b.col);
+  const RENDER = new RegExp(`^${id}[ \\t]*\\.(?:join\\(|map\\(.*\\)[ \\t]*\\.join\\()`);
+  for (const r of readers) {
+    if (guards.some((g) => g.line === r.line)) continue;
+    const renders = RENDER.test(lines[r.line].slice(r.col));
+    const inRegion = guards.some((g) => r.line > g.line && r.line <= g.until);
+    const inDescribe = describes.some((d) => before(d.from, r) && before(r, d.to));
+    if (renders && (inRegion || inDescribe)) continue;
+    return no(`line ${r.line + 1} reads \`${name}\` as neither a refusal guard nor its prose`);
+  }
+  return { narrowing: true, reason: null, guards: guards.map((g) => g.line + 1) };
+}
+
+/**
+ * T2's verdict on one MEMBER line — `fires`, `silent` or `narrowing` — with the
+ * construct reading it rests on. `readSource` is a thunk answering the file's
+ * head blob (or `null`); it is called only for the one reading that needs it.
+ */
+export function t2MemberVerdict(side, index, readSource = null) {
+  const reading = enclosingConstruct(side, index);
+  const verdict = reading.construct === null ? 'fires' : (T2_CONSTRUCT_VERDICTS[reading.construct] ?? 'fires');
+  if (verdict !== 'fires') return { ...reading, verdict };
+  if (
+    (reading.construct === 'as-const-array' || reading.construct === 'array') &&
+    reading.binding !== null &&
+    !reading.exported &&
+    typeof readSource === 'function'
+  ) {
+    const source = readSource();
+    if (typeof source === 'string' && refusalOnlyReaders(source, reading.binding).narrowing) {
+      return { ...reading, verdict: 'narrowing' };
+    }
+  }
+  return { ...reading, verdict: 'fires' };
+}
+
 /** A property NAME at the head of a line, in the four spellings `SCHEMA_PROPERTY` admits. */
 const KEYED_PROPERTY_NAME = /^[ \t]*(?:'([^']+)'|"([^"]+)"|(\[[^\]]+\])|([A-Za-z_$][\w$]*))[ \t]*\??[ \t]*:/;
 
@@ -3941,17 +4306,19 @@ export function changeBlocks(lines) {
  *
  * @param {{ filename?: string, status?: string, patch?: string|null, sha?: string }} file
  * @param {{ repo?: string, licensed?: Set<string>, readSource?: Function,
- *   unresolved?: object[] }} [opts] — `licensed` is the whole diff's
+ *   unresolved?: object[], narrowing?: object[] }} [opts] — `licensed` is the whole diff's
  *   {@link ledgerRowLicences}; omitted, NOTHING is licensed and every row tells,
  *   because an unread licence is not a granted one. `readSource` is #18702's
  *   head-blob reader (defaulted, injectable so the self-test stays offline) and
  *   `unresolved` collects the key lines whose declaring factory could not be
  *   read — a STATED silence this file reports rather than swallows.
+ *   `narrowing` collects the member lines T2 reads as NARROWING (#21465,
+ *   {@link refusalOnlyReaders}) — reported, ⛔ never a row.
  * @returns {{ tell: string, file: string, line: number, text: string, why: string }[]}
  */
 export function tellsInFile(
   file,
-  { repo = THIS_REPO, licensed = null, readSource = headBlobSource, unresolved = null } = {},
+  { repo = THIS_REPO, licensed = null, readSource = headBlobSource, unresolved = null, narrowing = null } = {},
 ) {
   const filename = String(file?.filename ?? '');
   if (filename === '') return [];
@@ -4001,6 +4368,13 @@ export function tellsInFile(
   const localForms = localDeclaringForms(file, lines, onContractSource, readSource, unresolved);
   const addedSurfaces = localForms === null ? surfaces : { ...surfaces, localForms };
   const localRefusal = localForms === null ? null : localForms.refusal;
+  // #21465 — the head blob, read at most once and only if a member line asks
+  // whether its `as const` set is read by nothing but a refusal.
+  let headSource;
+  const headSourceOnce = () => {
+    if (headSource === undefined) headSource = typeof readSource === 'function' ? readSource(file) : null;
+    return headSource;
+  };
   // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
   // ledger table and nowhere else: the same string added to any other file on
   // any other surface still tells, with its own file:line.
@@ -4038,6 +4412,9 @@ export function tellsInFile(
       // deleted PARAMETER was never a key, so it must not buy an added one the
       // right to go unreported.
       if (kind === 'T1' && inParameterList(oldFile, oldAt.get(i))) continue;
+      // #21465 — …and a deleted import specifier, call argument or property
+      // value was never a MEMBER, so it buys no T2 unit for a real one to spend.
+      if (kind === 'T2' && t2MemberVerdict(oldFile, oldAt.get(i)).verdict === 'silent') continue;
       // #17955 — a REMOVED tombstone buys nothing either, the same way a removed
       // parameter does not. Un-retiring a key — dropping `legacy: retiredKey(…)`
       // and putting a live schema back on that spelling — is a real WIDENING,
@@ -4077,6 +4454,13 @@ export function tellsInFile(
     if (BARE_STRING_ELEMENT.test(text) && fragmentOn(newFile, newAt.get(i))) continue;
     const at = { file: filename, line, text: text.trim().slice(0, 160) };
     const kind = memberTellKind(text, addedSurfaces);
+    // #21465 — a bare element is a MEMBER only inside a closed set, and the
+    // construct around it says whether it is in one. Read BEFORE the budget for
+    // #17955's reason: a line that is no member must neither FIRE nor SPEND a
+    // unit a real member in the same block is owed. `narrowing` is decided at
+    // the row, below — a member it is, of a set that loses a value.
+    const member = kind === 'T2' ? t2MemberVerdict(newFile, newAt.get(i), headSourceOnce) : null;
+    if (member?.verdict === 'silent') continue;
     // #17955 — a `retiredKey()` tombstone DECLARES a key unwritable. It is read
     // BEFORE the budget, and that ordering is the whole repair rather than a
     // detail: a tombstone must neither FIRE nor SPEND.
@@ -4212,6 +4596,13 @@ export function tellsInFile(
       CLOSED_SET_OPENER.test(text) &&
       !rewritesExistingOpener(text, removedByHunk.get(hunk)) &&
       !respellsExistingClosedSetBinding(text, removedHere);
+    // #21465 — a member of a module-private `as const` set whose every reader
+    // REFUSES its members: the accept set loses that value. Reported beside the
+    // rows, ⛔ never as one — this file does not judge narrowings.
+    if (onContractSource && !opener && member?.verdict === 'narrowing') {
+      if (Array.isArray(narrowing)) narrowing.push({ tell: 'T2', ...at, binding: member.binding });
+      continue;
+    }
     if (onContractSource && (opener || kind === 'T2')) {
       rows.push({ tell: 'T2', ...at, why: 'a new member of a closed set (z.enum / union / an `as const` array) — the accept set gains a value' });
       continue;
@@ -4278,10 +4669,10 @@ export function unreadFiles(files, { repo = THIS_REPO } = {}) {
  * files by construction, so the reading that clears a tombstone row is the only
  * one in this file whose evidence a single file cannot hold.
  */
-export function wideningTells(files, { repo = THIS_REPO, readSource = headBlobSource, unresolved = null } = {}) {
+export function wideningTells(files, { repo = THIS_REPO, readSource = headBlobSource, unresolved = null, narrowing = null } = {}) {
   const rows = [];
   const licensed = ledgerRowLicences(files, { repo });
-  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed, readSource, unresolved }));
+  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed, readSource, unresolved, narrowing }));
   return rows;
 }
 
@@ -4291,18 +4682,20 @@ export function wideningTells(files, { repo = THIS_REPO, readSource = headBlobSo
  * ⚠️ `unresolved` rides beside `rows` and is NEVER one: a key line whose
  * declaring factory could not be read (#18702) fired nothing and cleared
  * nothing, so it moves no exit code and is reported under its own heading.
+ * `narrowing` (#21465) rides the same way: a member T2 read as a value the
+ * accept set LOSES is not a widening tell, so it moves no exit code either.
  *
  * @param {{ declaration: 'yes'|'no'|null|undefined,
  *           files: object[]|null, repo?: string, readSource?: Function }} input
  * @returns {{ state: 'not-applicable'|'unreadable'|'incomplete'|'refused'|'clean',
- *   rows: object[], gaps: string[], unresolved: object[], text: string|null }}
+ *   rows: object[], gaps: string[], unresolved: object[], narrowing: object[], text: string|null }}
  */
 export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSource = headBlobSource } = {}) {
   // A `yes` is never blocked here, and an unreadable declaration is the
   // sibling's C2 row — issuing a verdict on it from this file would be a second
   // reader of the same limb, which is the drift this family punishes.
   if (declaration !== 'no') {
-    return { state: 'not-applicable', rows: [], gaps: [], unresolved: [], text: null };
+    return { state: 'not-applicable', rows: [], gaps: [], unresolved: [], narrowing: [], text: null };
   }
   if (!Array.isArray(files)) {
     return {
@@ -4310,6 +4703,7 @@ export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSour
       rows: [],
       gaps: [],
       unresolved: [],
+      narrowing: [],
       text:
         'the changed-file listing could not be read, so this diff is UNJUDGED for widening tells. ' +
         '⛔ An unread diff is not a narrow diff.',
@@ -4317,7 +4711,8 @@ export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSour
   }
   const gaps = unreadFiles(files, { repo });
   const unresolved = [];
-  const rows = wideningTells(files, { repo, readSource, unresolved });
+  const narrowing = [];
+  const rows = wideningTells(files, { repo, readSource, unresolved, narrowing });
   if (rows.length > 0) {
     const where = rows.map((r) => `${r.file}:${r.line}`).join(', ');
     return {
@@ -4325,6 +4720,7 @@ export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSour
       rows,
       gaps,
       unresolved,
+      narrowing,
       text: `${REFUSAL_SENTENCE} — ${rows.length} tell(s): ${where}`,
     };
   }
@@ -4334,12 +4730,13 @@ export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSour
       rows,
       gaps,
       unresolved,
+      narrowing,
       text:
         `${gaps.length} file(s) on a tell surface arrived with no patch to read (${gaps.join(', ')}), ` +
         'so this diff is UNJUDGED for widening tells rather than clear of them.',
     };
   }
-  return { state: 'clean', rows: [], gaps: [], unresolved, text: null };
+  return { state: 'clean', rows: [], gaps: [], unresolved, narrowing, text: null };
 }
 
 /** The exit code one verdict maps to — one place, so no caller re-derives it. */
@@ -4474,6 +4871,24 @@ export function unresolvedLines(rows, { cap = 10 } = {}) {
   return lines;
 }
 
+/**
+ * The member lines T2 read as NARROWING (#21465), printed under a heading of
+ * their own — the same three-state honesty `unresolvedLines` keeps: ⛔ not a
+ * tell (nothing refused on them), ⛔ not silence (a reader is told what this
+ * reading concluded and on which set), and no exit code moves.
+ */
+export function narrowingLines(rows, { cap = 10 } = {}) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const lines = [
+    `  narrowing: ${rows.length} member line(s) join a module-private \`as const\` set whose every reader REFUSES `
+      + 'its members, so each is a value the accept set LOSES — T2\'s narrowing reading: no widening tell, '
+      + 'and no exit code moves. A reading of the head blob, not a proof of direction.',
+  ];
+  for (const r of rows.slice(0, cap)) lines.push(`      ${r.file}:${r.line} — \`${r.binding}\` — ${r.text}`);
+  if (rows.length > cap) lines.push(`      … and ${rows.length - cap} more`);
+  return lines;
+}
+
 /** The success sentence itself, counts split. */
 export function cleanVerdictLine(census) {
   const judged = census.judged.length;
@@ -4513,6 +4928,7 @@ export function verdictLines({ declaration, files, board }) {
     out.push(boardProvenanceLine(board));
     out.push(...coverageLines(census));
     out.push(...unresolvedLines(verdict.unresolved));
+    out.push(...narrowingLines(verdict.narrowing));
     out.push(
       '  ⚠️ A tell is not a proof and its absence is not one either — false negatives are the ' +
         'cost the #16349 ruling accepted.',
@@ -4522,6 +4938,7 @@ export function verdictLines({ declaration, files, board }) {
   for (const line of refusalLines(verdict)) err.push(`✗ ${line}`);
   err.push(`check-widening-tells: ${verdict.text}`);
   err.push(...unresolvedLines(verdict.unresolved));
+  err.push(...narrowingLines(verdict.narrowing));
   err.push(boardProvenanceLine(board));
   return { exit: exitForRefusal(verdict), out, err };
 }
