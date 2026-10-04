@@ -444,6 +444,34 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     ],
     note: 'Deliberately NOT `fail-soft-log` like `cel-action-disabled`: the renderers measured here answer a faulting `disabled` with `true`, and on an un-negated enablement leg that `true` greys the control out — SchemaRenderer.tsx:1258-1265 states exactly that asymmetry ("on the negated visibility legs that means SHOWN, here it means GREYED OUT"). The objectui fix `cel-action-disabled` cites is about an EMPTY `disabled: \'\'`, which `hasDeclaredVisibilityGate` / `hasDeclaredPredicate` now treat as no gate, not about a faulting one. ⚠️ Scope consequence worth knowing: the node-gate leg evaluates at PAGE scope, so a row-scoped `record.*` predicate that does not resolve there faults and greys the button out whatever the row says. Same bare-string limit as `cel-action-block-visible-closed`. ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
   },
+  // The S-forms stage of #21464: the `object-form` / `object-master-detail-form`
+  // page blocks took a closed inline form field (`customFields`, and a
+  // section's inline entry) with its own option, and a section shape of their
+  // own, each declaring the form's predicates. Read (not run) at the
+  // `.objectui-sha` pin `2e818d0b51ec`; every file cited below is byte-identical
+  // at objectui `main` `fd060f076`.
+  {
+    id: 'cel-form-block-field-rule',
+    summary: '`object-form` page-block inline field rules and section visibility (an inline field\'s visibleWhen / readonlyWhen / requiredWhen, a section\'s visibleWhen)',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/validate-component-props.ts parses `ComponentPropsMap["object-form" | "object-master-detail-form"]`, the rows that declare these slots. EVALUATOR: console (objectui) form renderer `renderFormField` (components/src/renderers/form/form.tsx:2732-2758) → `resolveFieldRuleState` (core/src/evaluator/fieldRules.ts:435-504) → `evalFieldPredicate` → @objectstack/formula celEngine (interpret), against the live form record + `previous` + the host predicate scope (`current_user`). A section reaches the same evaluator through its divider row: plugin-form `projectSectionDivider` carries the section\'s `visibleWhen` onto the row (ObjectForm.tsx:1716-1720), and a hidden divider hides the fields it claims (form.tsx:1649-1690). A predicate that faults answers the rule\'s fault constant — shown, not read-only, not required (fieldRules.ts:347-349) — and warns once per predicate source: fail-SOFT-LOG, the face `cel-ui` records for the form view\'s own field and section predicates. UI only: no object field declares these predicates, so nothing on the write path reads them',
+    covers: [
+      'ui/component.zod.ts:buildObjectFormRuntimeField.visibleWhen',
+      'ui/component.zod.ts:buildObjectFormRuntimeField.readonlyWhen',
+      'ui/component.zod.ts:buildObjectFormRuntimeField.requiredWhen',
+      'ui/component.zod.ts:buildObjectFormSection.visibleWhen',
+    ],
+    note: 'Separate from `cel-ui`, which classifies the FORM VIEW\'s field and section `visibleWhen` with the same evaluator and the same fault face, because these are a page block\'s own declarations and include `readonlyWhen` / `requiredWhen`, which `cel-ui`\'s visibility summary does not describe; and separate from `cel-field-rule`, whose OBJECT-field rules the server also enforces on write. ⛔ NOT MEASURED HERE: the renderer was read at the pin, not run.',
+  },
+  {
+    id: 'cel-form-block-option-visible',
+    summary: '`object-form` page-block inline option gating (an inline field\'s options[].visibleWhen)',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement: 'console (objectui) form renderer (components/src/renderers/form/form.tsx:2934-2944) and the option widgets SelectField / MultiSelectField / RadioField / CheckboxesField → useCascadingOptions → resolveCascadingOptions → resolveVisibleOptions (core/src/evaluator/optionRules.ts:97-110) → evalFieldPredicate → @objectstack/formula celEngine (interpret), per OPTION against the live form record + the host predicate scope, with fallback TRUE: a faulting predicate leaves the option OFFERED and warns. UI gating only — an inline option binds no object column, so the rule validator that re-checks an OBJECT field\'s option on write (`cel-select-option-visible`) never sees it',
+    covers: ['ui/component.zod.ts:buildObjectFormRuntimeOption.visibleWhen'],
+    note: 'The `cel-action-param-option-visible` shape — the option widgets narrowing a list — on a page block\'s inline field, and a separate row from `cel-form-block-field-rule` because the evaluator path differs. ⛔ NOT MEASURED HERE: the renderer and the widgets were read at the pin, not run.',
+  },
   {
     id: 'cel-flow',
     summary: 'flow / loader branching + filter predicates',
