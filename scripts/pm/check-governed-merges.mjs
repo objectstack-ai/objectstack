@@ -905,8 +905,9 @@
  * re-arm; it opens no second client and wants no second token.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -3532,6 +3533,13 @@ async function runPullMode(args) {
     console.error(`❌  ${target.error}`);
     return EXIT_CANNOT_SWEEP;
   }
+  // #21675: a bare number beside a PM_SWEEP_REPO naming another repository is
+  // refused before the first read — the variable never redirects the answer.
+  const ambiguous = bareTargetRefusal({ raw, target, sweepRepo: process.env.PM_SWEEP_REPO });
+  if (ambiguous !== null) {
+    console.error(ambiguous);
+    return EXIT_CANNOT_SWEEP;
+  }
   const derived = await fetchPullFiles({
     ...apiContext(process.env),
     slug: target.slug,
@@ -3643,6 +3651,166 @@ function reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm }, e
 /** The three ways to ask the register one question. Exactly one per run. */
 const PREDICATE_MODES = ['--test', '--pr', '--branch'];
 
+// ── The argv is CLOSED, per mode (#21675) ───────────────────────────────────
+//
+// Every flag each mode reads, and how it takes its value: `value` consumes the
+// next argument, `list` is `--test`'s path list (every non-flag argument after
+// it), `switch` takes none. A flag the RUNNING mode does not read is a usage
+// refusal on exit 1 — the refusal `label-write.mjs`, `post-stamped.mjs` and
+// `issue-create.mjs` already make — because an ignored flag does not stop the
+// run: it prints a verdict about a question nobody asked, under the same ✅ as
+// a real answer. Measured at filing: `--pr 11590 --repo objectstack-ai/objectui`
+// read objectstack's PR 11590 (7 files) and answered NOT governed for an
+// objectui PR of 18.
+//
+// PER MODE, not one tool-wide list: `--repos objectui` is a real flag of the
+// sweep, and beside `--pr 11590` it was ignored in exactly the same way; so was
+// `--since 7d` beside `--test`, whose value then joined the path list.
+//
+// `--additions`/`--deletions` are listed for `--pr` and `--branch` although
+// neither mode takes them: each refuses them in its own, older words
+// (`refuseSizeFlagsIn` — two readings of one number), so this table lets them
+// through to that refusal rather than replacing it.
+//
+// ⛔ No mode reads a repository from anywhere but its own spelling: `--pr`
+// names one inline (`<owner>/<repo>#<n>`), the sweep narrows by `--repos`.
+// There is no `--repo` here, by ruling — one spelling, the documented one —
+// and the environment's half is `bareTargetRefusal`.
+export const ARGV_MODES = Object.freeze({
+  sweep: Object.freeze({
+    name: 'the sweep',
+    flags: Object.freeze({ '--since': 'value', '--since-ref': 'value', '--repos': 'value', '--repo-root': 'value', '--root': 'value', '--json': 'switch' }),
+    usage: '[--since <7d|36h|ISO date>] [--since-ref [<id>=]<ref>]… [--repos <id>,…] [--repo-root <id>=<path>]… [--root <path>] [--json]',
+  }),
+  '--test': Object.freeze({
+    name: '--test',
+    flags: Object.freeze({ '--test': 'list', '--additions': 'value', '--deletions': 'value', '--root': 'value', '--json': 'switch' }),
+    usage: '--test <path>… [--additions <n> --deletions <n>] [--root <path>] [--json]',
+  }),
+  '--pr': Object.freeze({
+    name: '--pr',
+    flags: Object.freeze({ '--pr': 'value', '--root': 'value', '--json': 'switch', '--additions': 'value', '--deletions': 'value' }),
+    usage: '--pr <n> | --pr <owner>/<repo>#<n>   [--root <path>] [--json]',
+  }),
+  '--branch': Object.freeze({
+    name: '--branch',
+    flags: Object.freeze({ '--branch': 'value', '--root': 'value', '--json': 'switch', '--additions': 'value', '--deletions': 'value' }),
+    usage: '--branch <ref> [--root <path>] [--json]',
+  }),
+});
+
+/** How every prescription below spells this tool. */
+const SELF_COMMAND = 'node scripts/pm/check-governed-merges.mjs';
+
+/** The mode an argv runs in: the predicate flag it carries, or the sweep. Pure. */
+export function argvModeOf(args) {
+  return PREDICATE_MODES.find((m) => args.includes(m)) ?? 'sweep';
+}
+
+/**
+ * The flags in `args` that `mode` does not read, in order. Pure. A token is a
+ * flag when it starts with `-` followed by anything but a digit (a lone `-` and
+ * a negative number are values). A `value` flag consumes the next argument
+ * unless that argument is itself a `--` flag, so `--pr --bogus` still names
+ * `--bogus` rather than swallowing it as a PR number.
+ */
+export function unreadFlagsIn(args, mode) {
+  const flags = ARGV_MODES[mode]?.flags ?? {};
+  const unread = [];
+  for (let i = 0; i < args.length; i++) {
+    const token = String(args[i]);
+    if (!/^-(?:-|\D)/.test(token)) continue; // a value, a --test path, a lone `-`, a negative number
+    if (!Object.hasOwn(flags, token)) {
+      unread.push(token);
+      continue;
+    }
+    if (flags[token] === 'value' && i + 1 < args.length && !String(args[i + 1]).startsWith('--')) i += 1;
+  }
+  return unread;
+}
+
+/**
+ * The words for a run carrying flags its mode does not read, or null when it
+ * carries none. Pure; `main()` prints them on stderr and exits 1 before any git
+ * read, any network read, or any verdict.
+ *
+ * `--repo` gets the prescription the ruling asks for: it is the spelling that
+ * produced the measured wrong answer, and beside a bare `--pr <n>` the fix is
+ * the qualified number, spelled out with the caller's own repository and PR.
+ */
+export function argvRefusal(args, mode = argvModeOf(args)) {
+  const unread = unreadFlagsIn(args, mode);
+  if (unread.length === 0) return null;
+  const spec = ARGV_MODES[mode];
+  const names = unread.map((f) => `\`${f}\``).join(', ');
+  const lines = [
+    `❌  ${names} ${unread.length === 1 ? 'is not a flag' : 'are not flags'} ${spec.name} reads. An unrecognised flag is REFUSED, never ignored:`,
+    '    an ignored flag still lets the run print a verdict, about a question nobody asked, under the same ✅ as a',
+    '    real answer.',
+  ];
+  const repoFlag = unread.find((f) => f === '--repo' || f.startsWith('--repo='));
+  if (repoFlag) {
+    const at = args.indexOf(repoFlag);
+    const value = repoFlag.includes('=') ? repoFlag.slice(repoFlag.indexOf('=') + 1) : args[at + 1];
+    const id = GOVERNED_REPOS.find((r) => r.id === value);
+    const repo = id ? id.slug : typeof value === 'string' && /^[\w.-]+\/[\w.-]+$/.test(value) ? value : '<owner>/<repo>';
+    const prAt = args.indexOf('--pr');
+    const bare = prAt > -1 ? /^#?(\d+)$/.exec(String(args[prAt + 1] ?? '').trim()) : null;
+    if (mode === '--pr' && bare) {
+      lines.push(
+        `    This tool takes no \`--repo\`, and a bare \`--pr ${bare[1]}\` answers THIS checkout's own repository whatever`,
+        '    `--repo` names. Name the repository inside --pr, the one spelling it takes:',
+        `      ${SELF_COMMAND} --pr ${repo}#${bare[1]}`,
+      );
+    } else {
+      lines.push(`    This tool takes no \`--repo\`: \`--pr\` names its repository inline (\`--pr ${repo}#<n>\`), and the sweep narrows by \`--repos <id>,…\`.`);
+    }
+  }
+  for (const f of unread) {
+    const eq = f.indexOf('=');
+    const name = eq > 0 ? f.slice(0, eq) : null;
+    if (name && Object.hasOwn(spec.flags, name) && spec.flags[name] === 'value') {
+      lines.push(`    ${name} takes its value as the NEXT argument — \`${name} ${f.slice(eq + 1)}\`, never \`${f}\`.`);
+    }
+  }
+  lines.push(`    ${spec.name} reads:  ${SELF_COMMAND} ${spec.usage}`);
+  lines.push('    usage — each mode reads its own flags and refuses every other:');
+  for (const m of Object.values(ARGV_MODES)) lines.push(`      ${SELF_COMMAND} ${m.usage}`);
+  lines.push(`      ${SELF_COMMAND} --self-test`);
+  return lines.join('\n');
+}
+
+/**
+ * A bare `--pr <n>` answers THIS checkout's own repository — the slug its
+ * origin parses to, `objectstack-ai/objectstack` wherever this tool lives — and
+ * nothing in the environment moves it. `PM_SWEEP_REPO` is how the board tools
+ * are told which repository they answer, so a seat with it set is a seat that
+ * believes it has said which repository it means; read here ONLY to refuse,
+ * never to change the answer (one spelling: the qualified number). Returns the
+ * refusal words when a bare number meets a `PM_SWEEP_REPO` naming any other
+ * repository, or null. Pure.
+ *
+ * A qualified `<owner>/<repo>#<n>` names its own repository and is answered as
+ * it always was, whatever the environment says.
+ */
+export function bareTargetRefusal({ raw, target, sweepRepo }) {
+  if (!target || target.error) return null;
+  const bare = /^#?(\d+)$/.exec(String(raw ?? '').trim());
+  if (!bare) return null;
+  const named = String(sweepRepo ?? '').trim();
+  if (named === '' || named.toLowerCase() === String(target.slug).toLowerCase()) return null;
+  const spelled = /^[\w.-]+\/[\w.-]+$/.test(named) ? named : '<owner>/<repo>';
+  return [
+    `❌  --pr ${bare[1]} is a bare number, and a bare number answers THIS checkout's own repository (${target.slug}) —`,
+    `    but PM_SWEEP_REPO names ${named}. This tool takes no repository from the environment, so the run is`,
+    '    refused rather than answered about a different PR in a different repository. Name the repository',
+    '    inside --pr, the one spelling it takes:',
+    `      ${SELF_COMMAND} --pr ${spelled}#${target.pull}`,
+    "    or, if this checkout's own PR is the one you mean:",
+    `      ${SELF_COMMAND} --pr ${target.slug}#${target.pull}`,
+  ].join('\n');
+}
+
 async function main() {
   const args = process.argv.slice(2);
   // ⛔ One list per run. Two mode flags would ask the same question about two
@@ -3653,6 +3821,13 @@ async function main() {
       `❌  ${modes.join(' and ')} each name a DIFFERENT file list, and this predicate answers about one. ` +
         `Run them separately.`,
     );
+    return EXIT_CANNOT_SWEEP;
+  }
+  // ⛔ Closed argv (#21675): a flag this mode does not read is refused here,
+  // before any git read, network read or child process — never ignored.
+  const unreadRefusal = argvRefusal(args, modes[0] ?? 'sweep');
+  if (unreadRefusal !== null) {
+    console.error(unreadRefusal);
     return EXIT_CANNOT_SWEEP;
   }
   if (args.includes('--test')) return await runTestMode(args);
