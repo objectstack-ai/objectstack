@@ -816,9 +816,11 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
  *
  * `VALIDATION_ERROR` / 400, the envelope of the name check the door runs on
  * every body (`savedItemNameRefusal`). The message names the hook and its
- * `handler`, prescribes the `body` first (a 4xx message crosses the REST
- * boundary with its TAIL truncated), and only then explains. Runtime words
- * carry no tracker number.
+ * `handler`, prescribes the `body` first, and only then explains: a 4xx
+ * message crosses the REST boundary bounded at 500 characters with its TAIL
+ * truncated, and the whole sentence stays under that bound for any hook and
+ * function name shorter than about 65 characters each. Runtime words carry no
+ * tracker number.
  */
 function runtimeHookWithoutBodyRefusal(
     singularType: string,
@@ -832,10 +834,9 @@ function runtimeHookWithoutBodyRefusal(
     if (typeof hook.handler !== 'string' || hook.handler === '') return undefined;
     const err = new Error(
         `Invalid hook: '${saveName}' names the function '${hook.handler}' in its \`handler\` and carries no \`body\`, `
-        + 'so it can never run. Give it a `body` (sandboxed JS, `{ language: \'js\', source }`, or an expression, '
-        + '`{ language: \'expression\', source }`), which is saved with the hook and runs wherever it is bound. '
-        + 'A hook saved through the metadata API ships with no code package, so it holds no functions: a `handler` '
-        + "name resolves only inside the hook's own package, and this hook has none to resolve it against.",
+        + 'so it can never run. Give it a `body` (sandboxed JS, `{ language: \'js\', source }`, or an expression), '
+        + 'which is stored with the hook. A hook saved through the metadata API ships with no code package, so it '
+        + "holds no functions, and a `handler` name resolves only inside the hook's own package.",
     ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
     err.code = 'VALIDATION_ERROR';
     err.status = 400;

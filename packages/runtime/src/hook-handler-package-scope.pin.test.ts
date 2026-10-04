@@ -234,14 +234,15 @@ describe('a hook handler name resolves inside its own package only — composed 
       events: ['beforeInsert'],
       handler: 'x_stamp',
     });
+    // The `/meta` save door's error body: `{ error: <message>, code }`.
     const refusal: any = await crossHook.json();
-    expect({ status: crossHook.status, code: refusal?.error?.code }, JSON.stringify(refusal))
+    expect({ status: crossHook.status, code: refusal?.code }, JSON.stringify(refusal))
       .toEqual({ status: 400, code: 'VALIDATION_ERROR' });
     // The named subject and the prescription: the hook, the function its
     // `handler` names, and the `body` that would run.
-    expect(refusal.error.message).toContain("'scope_authored_cross'");
-    expect(refusal.error.message).toContain("'x_stamp'");
-    expect(refusal.error.message).toContain('Give it a `body`');
+    expect(refusal.error).toContain("'scope_authored_cross'");
+    expect(refusal.error).toContain("'x_stamp'");
+    expect(refusal.error).toContain('Give it a `body`');
     // Nothing stored: the by-name read finds no row.
     const stored = await asAdmin('GET', '/meta/hook/scope_authored_cross');
     expect(stored.status, await stored.text()).toBe(404);
