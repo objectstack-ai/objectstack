@@ -291,7 +291,9 @@ describe('SqlDriver — SQLite journal mode (#3941)', () => {
 
       await expect(d.connect()).resolves.toBeUndefined();
 
-      expect(attempted).toEqual(['PRAGMA auto_vacuum = INCREMENTAL']);
+      // The first statement is the auto_vacuum READ (#21734); it fails, so not
+      // even the setter is attempted.
+      expect(attempted).toEqual(['PRAGMA auto_vacuum']);
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toMatch(/native better-sqlite3 unavailable/);
     });

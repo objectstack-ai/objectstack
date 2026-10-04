@@ -412,7 +412,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -430,7 +430,8 @@
           "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 164 showcase_* cells (41 rows × 4 verbs at revision 4) are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
           "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200, self-scoped). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref.",
           "clause 5 (guest_portal create-without-read) is UNOBSERVABLE on a stock boot — record it blocked(fixture), never pass or fail. The guest anchor ships unbound (binding guest → showcase_guest_portal is an admin action; the app only ships the capability, permission-sets.ts GuestPortalPermissionSet), a member persona holding the set also holds the baseline's read on showcase_inquiry, and QA run #21056 measured REST anonymous create AND read both answering 401 even with the anchor bound. The only anonymous create lane is the public form (publicFormGrant on the inquiry form view, ADR-0056 Option A), whose grant is create plus read-back of the row it created — a different contract from this clause's",
-          "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403"
+          "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403",
+          "A1 (acceptance[0], every allowed cell succeeds) is a KNOWN FAIL on 17.x until the v18 ADR-0131 C1 business-unit leg lands (#21057, target:v18, gated by #15193): the seeded sys_business_unit rows carry organization_id null, so the showcase_field_ops_delegate × sys_user_position in-subtree create (bu_west_coast under bu_field_ops) answers 403 PERMISSION_DENIED \"outside the delegated subtree\" and the delegate's scope resolves to an empty subtree (the gate fails closed: over-refusal, never exposure). Measured discriminator (#21057 comments 5927366808 and 5979438043): once the organization is stamped on the seeded units, the in-subtree create flips to 201 while the out-of-subtree create (bu_hq_finance) stays 403 — so the cause is the unstamped seed, not the gate. Score A1 FAIL in the run table and read it as known (#21057), not new; do NOT re-derive it, do NOT weaken the clause, do NOT stamp the units to make it pass (that would hide the very gap this entry tracks). It turns green when the v18 C1 leg lands — that flip is the signal the gap closes, and this entry is then removed (ruling: #21057 comment 5980557328, ADR-0131 D3/D14)"
         ]
       },
       "steps": [
@@ -535,6 +536,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056. Counts re-measured from access-matrix.json: 47 rows (41 showcase_* + 6 delegate sys_*), the pin's 164 cells split 87 allow / 77 deny, the same 9 baseline-only cells; showcase_client_liaison joined the variants and the seeded-set list. acceptance[1] names the 405 OBJECT_API_METHOD_NOT_ALLOWED sys_user create/delete cells (sys_user apiMethods). Clause 5 recorded unobservable on a stock boot (knownGaps; steps[5]). automated.ref no longer reads the permission-zoo pin as vouching for the dev boot's delegate cells (#21057). steps[0] mints members invite-first under the invite_only default; a new step names the ownership-floor trap on the delegate's edit/delete probes",
           "ref": "#21060"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-04",
+          "change": "knownGaps records that A1 is a known FAIL on 17.x: #21057 (seeded business units carry no organization, so the field-ops delegate's in-subtree create is refused) is ruled to wait for ADR-0131 C1's business-unit leg in v18 (target:v18, gated by #15193). The clause, the priority and every other item are unchanged; A1 stays a FAIL in the run table and goes green when the v18 leg lands",
+          "ref": "#21747 (maintainer ruling: #21057 comment 5980557328)"
         }
       ]
     },

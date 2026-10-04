@@ -6917,6 +6917,9 @@ export class SqlDriver implements IDataDriver {
     if (this.isSqlite) {
       // Both pragmas below are persistent properties of the FILE, so one
       // connection setting them is enough for every process that follows.
+      // Each is READ first and set only when the file answers differently, so
+      // a connect to a file an earlier boot already configured writes nothing
+      // to it (#21734) — one rule for every connect, read-only boots included.
       // A `false` means the very first statement on this connection failed —
       // in practice a native addon that cannot load — so asking it for another
       // pragma would only repeat the same warning.
@@ -6934,17 +6937,41 @@ export class SqlDriver implements IDataDriver {
    * (run by the lifecycle Reaper, or manually) reclaim that space without a
    * full blocking VACUUM. NOTE: auto_vacuum only changes layout on a *fresh*
    * database or after a one-time full VACUUM, so this benefits new dev DBs;
-   * existing files need a single `VACUUM` to adopt it. Harmless / no-op on
-   * :memory: and on already-incremental databases. Unaffected by the journal
-   * mode: an INCREMENTAL database keeps reclaiming under WAL.
+   * existing files need a single `VACUUM` to adopt it (`os db clean`).
+   * Unaffected by the journal mode: an INCREMENTAL database keeps reclaiming
+   * under WAL.
    *
-   * @returns whether the PRAGMA went through. This is the first statement any
-   * connection runs, so `false` says the connection itself is not answering —
+   * ## Read first, set only when different (#21734)
+   *
+   * The setter is not free on a file that already answers INCREMENTAL: it
+   * runs a write transaction that stamps the header — the file change counter
+   * (bytes 24–27) and the version-valid-for number (bytes 92–95) — although
+   * the mode does not change. So every connect used to leave an
+   * already-incremental file different from how it found it, a read-only
+   * `os migrate duplicates` included. Reading `PRAGMA auto_vacuum` is
+   * byte-neutral (measured on an INCREMENTAL WAL file: md5 unchanged), so the
+   * setter is issued only when the file does not answer INCREMENTAL:
+   *
+   *   - an already-incremental file: the read only — nothing is written;
+   *   - a fresh file and `:memory:`: they answer NONE, get the setter, and come
+   *     out INCREMENTAL exactly as before;
+   *   - a legacy NONE file that holds tables: it gets the same setter it always
+   *     got, which leaves it NONE until a `VACUUM` (this method runs none);
+   *   - a FULL file: it gets the setter and moves to INCREMENTAL, as before.
+   *
+   * A reply this method cannot read counts as "not INCREMENTAL": an unreadable
+   * answer costs the old write, never the mode.
+   *
+   * @returns whether the connection answered. The read is the first statement
+   * any connection runs, so `false` says the connection itself is not answering —
    * not merely that space hygiene is unavailable.
    */
   private async applyAutoVacuumIncremental(): Promise<boolean> {
     try {
-      await this.knex.raw('PRAGMA auto_vacuum = INCREMENTAL');
+      const current = SqlDriver.autoVacuumOf(await this.knex.raw('PRAGMA auto_vacuum'));
+      if (current !== SqlDriver.SQLITE_AUTO_VACUUM_INCREMENTAL) {
+        await this.knex.raw('PRAGMA auto_vacuum = INCREMENTAL');
+      }
       return true;
     } catch (e) {
       // A native better-sqlite3 load failure surfaces HERE first — this PRAGMA
@@ -6976,6 +7003,26 @@ export class SqlDriver implements IDataDriver {
       }
       return false;
     }
+  }
+
+  /** What `PRAGMA auto_vacuum` answers for INCREMENTAL (0 is NONE, 1 is FULL). */
+  private static readonly SQLITE_AUTO_VACUUM_INCREMENTAL = 2;
+
+  /**
+   * The `auto_vacuum` mode a PRAGMA reply carries, as a number.
+   *
+   * Both SQLite dialects answer with rows (`[{ auto_vacuum: 2 }]`) — a reply
+   * shaped any other way yields `null`, which {@link applyAutoVacuumIncremental}
+   * treats as "not INCREMENTAL" and answers with the setter.
+   */
+  private static autoVacuumOf(result: unknown): number | null {
+    const rows: unknown = Array.isArray(result) ? result : (result as { rows?: unknown })?.rows;
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    const value =
+      row && typeof row === 'object' ? (row as { auto_vacuum?: unknown }).auto_vacuum : row;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'bigint') return Number(value);
+    return null;
   }
 
   /**
