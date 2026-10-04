@@ -375,6 +375,7 @@
     "SEMVER_2_0_0_VERSION_PATTERN (const)",
     "STORED_METADATA_BODY_COLUMN (const)",
     "STORED_METADATA_BODY_OBJECTS (const)",
+    "STORED_METADATA_BODY_PRESCRIPTION (const)",
     "STORED_METADATA_TYPE_COLUMN (const)",
     "SandboxConfig (type)",
     "SandboxConfigParsed (type)",
